@@ -1,0 +1,4 @@
+# Local relay data (don't commit)
+data/
+*.db
+*.log

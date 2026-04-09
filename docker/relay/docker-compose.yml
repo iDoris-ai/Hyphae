@@ -1,0 +1,34 @@
+# Local Nostr Relay for Development
+# Usage: cd docker/relay && docker-compose up -d
+
+version: '3.8'
+
+services:
+  strfry:
+    image: dockurr/strfry:latest
+    container_name: agent-speaker-relay
+    restart: unless-stopped
+    ports:
+      - "7777:7777"
+    volumes:
+      - ./data:/app/data
+      - ./strfry.conf:/app/strfry.conf:ro
+    environment:
+      - STRFRY_CONFIG=/app/strfry.conf
+    command: ["relay"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7777/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Optional: WebSocket echo server for testing
+  ws-echo:
+    image: jmalloc/echo-server:latest
+    container_name: ws-echo
+    restart: unless-stopped
+    ports:
+      - "9999:8080"
+    profiles:
+      - test
