@@ -28,9 +28,8 @@ add-agent-cmd:
 # 复制测试文件到构建目录
 copy-tests: sync-nak add-agent-cmd
 	@echo "📝 Copying test files..."
-	@cp agent_test.go $(BUILD_DIR)/nak-src/ 2>/dev/null || true
-	@cp regression_test.go $(BUILD_DIR)/nak-src/ 2>/dev/null || true
-	@cp integration_test.go $(BUILD_DIR)/nak-src/ 2>/dev/null || true
+	@mkdir -p $(BUILD_DIR)/nak-src/test
+	@cp test/*_test.go $(BUILD_DIR)/nak-src/test/ 2>/dev/null || true
 	@mkdir -p $(BUILD_DIR)/nak-src/pkg/compress
 	@cp pkg/compress/zstd_test.go $(BUILD_DIR)/nak-src/pkg/compress/ 2>/dev/null || true
 	@echo "✅ Tests copied"
@@ -80,12 +79,12 @@ test-unit:
 # 回归测试（需要先构建）
 test-regression: copy-tests
 	@echo "🔄 Running regression tests..."
-	@cd $(BUILD_DIR)/nak-src && go test -vet=off -v -run "TestNakEventBasic|TestNakEventComplex|TestNakKeyGenerate|TestNakKeyPublic|TestNakEncodeNpub" . -timeout 30s
+	@cd $(BUILD_DIR)/nak-src && go test -vet=off -v -run "TestNakEventBasic|TestNakEventComplex|TestNakKeyGenerate|TestNakKeyPublic|TestNakEncodeNpub" ./test/... -timeout 30s
 
 # 集成测试（需要先构建）
 test-integration: copy-tests
 	@echo "🔗 Running integration tests..."
-	@cd $(BUILD_DIR)/nak-src && go test -vet=off -v -run "TestFilter|TestMock|TestCompression|TestRelay|TestMultiple|TestTimestamp" . -timeout 60s
+	@cd $(BUILD_DIR)/nak-src && go test -vet=off -v -run "TestFilter|TestMock|TestCompression|TestRelay|TestMultiple|TestTimestamp" ./test/... -timeout 60s
 
 # 快速测试
 test-short:
@@ -96,7 +95,7 @@ test-short:
 test-coverage: copy-tests
 	@echo "📊 Running tests with coverage..."
 	@go test -cover ./pkg/compress/...
-	@cd $(BUILD_DIR)/nak-src && go test -cover -run "TestAgent|TestRegression|TestIntegration" .
+	@cd $(BUILD_DIR)/nak-src && go test -cover -run "TestAgent|TestRegression|TestIntegration" ./test/...
 
 # 性能测试
 bench:
