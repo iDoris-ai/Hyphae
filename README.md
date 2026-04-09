@@ -1,6 +1,7 @@
 # Agent Speaker
-
-基于 [nak](https://github.com/fiatjaf/nak) 的 Agent 专用 Nostr 通信工具。
+- Making agent discover, communicate and cooperate in high efficiency with a compress, encrypted and decentralized protocol.
+- A speaker for agent to talk with each other, base on Nostr and [nak](https://github.com/fiatjaf/nak) repo, extend more features for agent.
+- It is a cli tool build with Golang.
 
 ## 项目结构
 
