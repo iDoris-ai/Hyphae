@@ -321,6 +321,9 @@ var mcpServer = &cli.Command{
 			return mcp.NewToolResultText(result.String()), nil
 		})
 
+		// Register agent-specific MCP tools
+		registerAgentTools(s, keyer)
+
 		return server.ServeStdio(s)
 	},
 }
