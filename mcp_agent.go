@@ -15,6 +15,21 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
+// decompressEventContent checks for a z:zstd tag and decompresses the content
+// if present. Returns the original content on any error so callers always get
+// something displayable.
+func decompressEventContent(ev nostr.Event) string {
+	for _, tag := range ev.Tags {
+		if len(tag) >= 2 && tag[0] == "z" && tag[1] == CompressTag {
+			if decoded, err := decompressText(ev.Content); err == nil {
+				return decoded
+			}
+			return ev.Content // decompression failed — return raw
+		}
+	}
+	return ev.Content
+}
+
 // registerAgentTools adds agent-specific MCP tools to the server.
 // Called from mcp.go's mcpServer action after the base nak tools are registered.
 func registerAgentTools(s *server.MCPServer, keyer nostr.Keyer) {
@@ -122,7 +137,7 @@ func registerAgentTools(s *server.MCPServer, keyer nostr.Keyer) {
 		count := 0
 		for ie := range events {
 			count++
-			content := ie.Content
+			content := decompressEventContent(ie.Event)
 			result.WriteString(fmt.Sprintf("--- Event %d ---\nID: %s\nAuthor: %s\nTime: %s\nContent: %s\n",
 				count, ie.ID, ie.PubKey.Hex(),
 				ie.CreatedAt.Time().Format(time.RFC3339),
@@ -176,7 +191,7 @@ func registerAgentTools(s *server.MCPServer, keyer nostr.Keyer) {
 				ie.CreatedAt.Time().Format("01-02 15:04"),
 				ie.PubKey.Hex()[:12]+"...",
 				recipient,
-				truncate(ie.Content, 100)))
+				truncate(decompressEventContent(ie.Event), 100)))
 		}
 
 		if count == 0 {
@@ -187,7 +202,7 @@ func registerAgentTools(s *server.MCPServer, keyer nostr.Keyer) {
 	})
 
 	s.AddTool(mcp.NewTool("agent_init_identity",
-		mcp.WithDescription("Initialize or show agent identity. Generates a new Nostr keypair and saves it to ~/.agent-speaker/identity.json. If identity already exists, shows the public key."),
+		mcp.WithDescription("Initialize or show agent identity. Generates a new Nostr keypair and saves it to ~/.agent-speaker/identity.json (mode 0600). If identity already exists, shows the public key. WARNING: the private key is stored in plaintext — keep this file private and do not commit it. Future versions will support keychain-backed storage."),
 		mcp.WithBoolean("force", mcp.Description("Force regenerate even if identity exists (default: false)")),
 	), func(ctx context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		force, _ := optional[bool](r, "force")
@@ -235,7 +250,11 @@ func registerAgentTools(s *server.MCPServer, keyer nostr.Keyer) {
 		}
 
 		return mcp.NewToolResultText(fmt.Sprintf(
-			"Agent identity initialized:\n  Public key: %s\n  Saved to: %s\n\nUse this public key for other agents to send you messages.\nSet NOSTR_SECRET_KEY=%s to use this identity for signing.",
+			"Agent identity initialized:\n  Public key: %s\n  Saved to: %s (mode 0600)\n\n"+
+				"Use this public key for other agents to send you messages.\n"+
+				"Set NOSTR_SECRET_KEY=%s to use this identity for signing.\n\n"+
+				"⚠ SECURITY: The private key is stored in plaintext. Keep this file private,\n"+
+				"  do not commit it to version control, and restrict access to trusted users only.",
 			pk, identityFile, secretHex)), nil
 	})
 
