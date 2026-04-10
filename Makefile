@@ -14,6 +14,7 @@ sync-nak:
 	@mkdir -p $(BUILD_DIR)/nak-src
 	@cp -r third_party/nak/* $(BUILD_DIR)/nak-src/
 	@cp agent.go $(BUILD_DIR)/nak-src/
+	@cp mcp_agent.go $(BUILD_DIR)/nak-src/
 	@cp -r pkg $(BUILD_DIR)/nak-src/
 	@echo "✅ Synced"
 
