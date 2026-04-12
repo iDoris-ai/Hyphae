@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"strings"
 	"time"
@@ -10,7 +9,7 @@ import (
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/nip19"
 	"github.com/fatih/color"
-	"github.com/klauspost/compress/zstd"
+	"github.com/jason/agent-speaker/pkg/compress"
 	"github.com/urfave/cli/v3"
 )
 
@@ -155,32 +154,15 @@ var agentMsgCmd = &cli.Command{
 	},
 }
 
-// compressText compresses text using zstd and encodes it as base64.
+// compressText compresses text using pkg/compress
 func compressText(text string) (string, error) {
-	encoder, err := zstd.NewWriter(nil)
-	if err != nil {
-		return "", fmt.Errorf("zstd encoder init: %w", err)
-	}
-	compressed := encoder.EncodeAll([]byte(text), nil)
-	return base64.StdEncoding.EncodeToString(compressed), nil
+	return compress.Compress([]byte(text))
 }
 
-// decompressText reverses compressText: base64-decode then zstd-decompress.
+// decompressText decompresses text using pkg/compress
 func decompressText(encoded string) (string, error) {
-	data, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		return "", fmt.Errorf("base64 decode: %w", err)
-	}
-	decoder, err := zstd.NewReader(nil)
-	if err != nil {
-		return "", fmt.Errorf("zstd decoder init: %w", err)
-	}
-	defer decoder.Close()
-	out, err := decoder.DecodeAll(data, nil)
-	if err != nil {
-		return "", fmt.Errorf("zstd decompress: %w", err)
-	}
-	return string(out), nil
+	data, err := compress.Decompress(encoded)
+	return string(data), err
 }
 
 // agentQueryCmd queries multiple relays in parallel
@@ -200,7 +182,7 @@ var agentQueryCmd = &cli.Command{
 		&cli.StringSliceFlag{
 			Name:  "relay",
 			Usage: "relay URLs to query",
-			Value: []string{"wss://relay.damus.io", "wss://nos.lol", "wss://relay.nostr.band"},
+			Value: []string{"wss://relay.damus.io", "wss://nos.lol", "wss://relay.aastar.io"},
 		},
 		&cli.IntFlag{
 			Name:  "limit",
@@ -394,5 +376,5 @@ func startMiniRelay(ctx context.Context, c *cli.Command) error {
 var defaultRelays = []string{
 	"wss://relay.damus.io",
 	"wss://nos.lol",
-	"wss://relay.nostr.band",
+	"wss://relay.aastar.io",
 }

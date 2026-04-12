@@ -13,11 +13,7 @@ agent-speaker/
 │   └── docs/                 # 研究文档 (4个)
 │
 ├── 📦 第三方依赖
-│   └── third_party/nak/      # nak 完整源码 (41个文件)
-│       ├── main.go           # 程序入口
-│       ├── event.go          # 发布事件
-│       ├── req.go            # 查询事件
-│       └── ...
+│   └── third_party/nak/      # nak git submodule (fiatjaf/nak)
 │
 ├── 🔨 构建系统
 │   ├── Makefile              # 构建脚本
@@ -38,7 +34,7 @@ agent-speaker/
 |------|----------|------|
 | 🌟 业务代码 | `agent.go` | Agent 命令实现 (msg/query/relay/timeline) |
 | 🌟 公共库 | `pkg/compress/` | zstd 压缩模块 |
-| 📦 第三方 | `third_party/nak/` | nak 源码（可同步更新）|
+| 📦 第三方 | `third_party/nak/` | nak git submodule，锁定特定 commit，`make update-nak` 升级 |
 | 🔨 构建 | `Makefile`, `scripts/` | 构建系统 |
 | 📚 文档 | `docs/` | 研究文档 |
 
@@ -85,18 +81,26 @@ make build
     └── 4. go build → bin/agent-speaker
 ```
 
-## 同步 nak 更新
+## 更新 nak
+
+`third_party/nak` 是 [fiatjaf/nak](https://github.com/fiatjaf/nak) 的 git submodule，锁定在某个具体 commit，构建可复现。
 
 ```bash
-# 方式1: 使用脚本
-./scripts/sync-nak.sh
-
-# 方式2: 手动
-cd third_party/nak
-git pull origin master
-cd ../..
+# 拉取最新 nak 并重新构建
+make update-nak   # cd third_party/nak && git pull origin master
 make build
+
+# 提交 submodule 版本变更
+git add third_party/nak
+git commit -m "chore: bump nak to $(git -C third_party/nak rev-parse --short HEAD)"
 ```
+
+> 克隆本仓库后需初始化 submodule：
+> ```bash
+> git clone --recurse-submodules https://github.com/AuraAIHQ/agent-speaker
+> # 或已克隆时：
+> git submodule update --init
+> ```
 
 ## 测试
 

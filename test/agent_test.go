@@ -76,9 +76,9 @@ func TestDefaultRelays(t *testing.T) {
 	assert.NotEmpty(t, defaultRelays, "defaultRelays should not be empty")
 	
 	expectedRelays := []string{
-		"wss://relay.damus.io",
-		"wss://nos.lol",
-		"wss://relay.nostr.band",
+		"wss://relay.aastar.io",
+		"wss://relay.aastar.io",
+		"wss://relay.aastar.io",
 	}
 	
 	assert.Equal(t, expectedRelays, defaultRelays, "Default relays should match expected")
@@ -119,10 +119,18 @@ func TestCompressText(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := compressText(tt.input)
+			compressed, err := compressText(tt.input)
 			assert.NoError(t, err)
-			// For now compressText is a passthrough
-			assert.Equal(t, tt.input, result)
+			
+			// Compressed content should be base64 encoded
+			if tt.input != "" {
+				assert.NotEqual(t, tt.input, compressed)
+			}
+			
+			// Test round-trip
+			decompressed, err := decompressText(compressed)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.input, decompressed)
 		})
 	}
 }

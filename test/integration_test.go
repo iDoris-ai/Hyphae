@@ -32,16 +32,21 @@ func TestCompressionRoundTrip(t *testing.T) {
 	compressed, err := compressText(original)
 	assert.NoError(t, err)
 	
-	// For now, compressText is passthrough
-	assert.Equal(t, original, compressed)
+	// Compressed should be different from original (base64 encoded)
+	assert.NotEqual(t, original, compressed)
+	
+	// Decompress and verify
+	decompressed, err := decompressText(compressed)
+	assert.NoError(t, err)
+	assert.Equal(t, original, decompressed)
 }
 
 // TestRelayURLValidation tests relay URL validation
 func TestRelayURLValidation(t *testing.T) {
 	validURLs := []string{
-		"wss://relay.damus.io",
-		"wss://nos.lol",
-		"wss://relay.nostr.band",
+		"wss://relay.aastar.io",
+		"wss://relay.aastar.io",
+		"wss://relay.aastar.io",
 		"ws://localhost:7777",
 	}
 	

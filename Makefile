@@ -30,7 +30,7 @@ add-agent-cmd:
 copy-tests: sync-nak add-agent-cmd
 	@echo "📝 Copying test files..."
 	@mkdir -p $(BUILD_DIR)/nak-src/test
-	@cp test/*_test.go $(BUILD_DIR)/nak-src/test/ 2>/dev/null || true
+	@cp test/*_test.go $(BUILD_DIR)/nak-src/ 2>/dev/null || true
 	@mkdir -p $(BUILD_DIR)/nak-src/pkg/compress
 	@cp pkg/compress/zstd_test.go $(BUILD_DIR)/nak-src/pkg/compress/ 2>/dev/null || true
 	@echo "✅ Tests copied"

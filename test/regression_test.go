@@ -115,7 +115,7 @@ func TestNakEncodeNpub(t *testing.T) {
 
 // TestNakDecodeNpubRegression tests npub decoding
 func TestNakDecodeNpubRegression(t *testing.T) {
-	npub := "npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w"
+	npub := "npub17csken27ysty9s3vrl2e9t995qlpct2epdnya9gxavxlv3xe6umsrw27qe"
 	output := testCall(t, "nak decode "+npub)
 	
 	// Should output JSON with pubkey
@@ -186,7 +186,7 @@ func TestNakMetadata(t *testing.T) {
 // Integration Tests - NAK + Agent Features
 // ============================================================================
 
-// TestAgentEventWithCompression tests creating an agent event
+// TestAgentEventWithCompression tests creating an agent event with compression
 func TestAgentEventWithCompression(t *testing.T) {
 	testContent := "This is a test message for agent"
 	
@@ -194,8 +194,14 @@ func TestAgentEventWithCompression(t *testing.T) {
 	compressed, err := compressText(testContent)
 	require.NoError(t, err)
 	
-	// Currently it's passthrough, but should work
-	assert.Equal(t, testContent, compressed)
+	// Compressed content should be base64 encoded and different from original
+	assert.NotEqual(t, testContent, compressed)
+	assert.Greater(t, len(compressed), 0)
+	
+	// Test decompression
+	decompressed, err := decompressText(compressed)
+	require.NoError(t, err)
+	assert.Equal(t, testContent, decompressed)
 }
 
 // TestNakAgentEventTags tests agent event tag structure
