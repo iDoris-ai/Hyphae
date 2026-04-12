@@ -26,6 +26,9 @@ func main() {
 			// Messaging
 			agentCmdV2,
 			
+			// Watch for new messages
+			watchCmd,
+			
 			// Message history
 			historyCmd,
 			
