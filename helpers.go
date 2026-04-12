@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
 	"syscall"
+	"time"
 
 	"fiatjaf.com/nostr"
 	"github.com/btcsuite/btcd/btcutil/bech32"
@@ -141,4 +143,32 @@ func normalizeKey(key string) (string, error) {
 		return "", err
 	}
 	return sk.Hex(), nil
+}
+
+// publishToRelays publishes an event to multiple relays
+func publishToRelays(ctx context.Context, event *nostr.Event, relays []string) map[string]error {
+	results := make(map[string]error)
+	for _, url := range relays {
+		relay, err := nostr.RelayConnect(ctx, url, nostr.RelayOptions{})
+		if err != nil {
+			results[url] = err
+			continue
+		}
+		defer relay.Close()
+		
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err = relay.Publish(ctx, *event)
+		cancel()
+		
+		results[url] = err
+	}
+	return results
+}
+
+// truncateString truncates a string to max length
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
 }

@@ -114,9 +114,3 @@ Example: agent-speaker req --kinds 1 --authors <npub> --limit 10`,
 	},
 }
 
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-3] + "..."
-}

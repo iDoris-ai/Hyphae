@@ -12,7 +12,6 @@ import (
 var version = "dev"
 
 func main() {
-	// Set up color output
 	color.NoColor = false
 
 	app := &cli.Command{
@@ -20,10 +19,17 @@ func main() {
 		Usage:   "A nostr-based agent communication CLI",
 		Version: version,
 		Commands: []*cli.Command{
+			// Identity and contact management
+			identityCmd,
+			contactCmd,
+			
+			// Messaging
+			agentCmdV2,
+			
+			// Legacy commands (for advanced users)
 			keyCmd,
 			eventCmd,
 			reqCmd,
-			agentCmd,
 			relayCmd,
 			publishCmd,
 			decodeCmd,
