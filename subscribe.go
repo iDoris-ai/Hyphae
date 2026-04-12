@@ -12,7 +12,7 @@ import (
 
 // SubscriptionManager manages WebSocket subscriptions to relays
 type SubscriptionManager struct {
-	sys       *nostr.System
+	sys       *nostr.Pool
 	relays    []string
 	filter    nostr.Filter
 	handler   func(nostr.Event)
@@ -23,7 +23,7 @@ type SubscriptionManager struct {
 }
 
 // NewSubscriptionManager creates a new subscription manager
-func NewSubscriptionManager(sys *nostr.System, relays []string, filter nostr.Filter, handler func(nostr.Event)) *SubscriptionManager {
+func NewSubscriptionManager(sys *nostr.Pool, relays []string, filter nostr.Filter, handler func(nostr.Event)) *SubscriptionManager {
 	return &SubscriptionManager{
 		sys:     sys,
 		relays:  relays,
@@ -96,7 +96,7 @@ func (sm *SubscriptionManager) IsRunning() bool {
 }
 
 // SubscribeToPeer subscribes to events from a specific peer
-func SubscribeToPeer(ctx context.Context, sys *nostr.System, relays []string, peerPubkey string, handler func(nostr.Event)) (*SubscriptionManager, error) {
+func SubscribeToPeer(ctx context.Context, sys *nostr.Pool, relays []string, peerPubkey string, handler func(nostr.Event)) (*SubscriptionManager, error) {
 	filter := nostr.Filter{
 		Tags: nostr.TagMap{
 			"p": []string{peerPubkey},
@@ -114,7 +114,7 @@ func SubscribeToPeer(ctx context.Context, sys *nostr.System, relays []string, pe
 
 // HeartbeatManager manages periodic heartbeat/status updates
 type HeartbeatManager struct {
-	sys      *nostr.System
+	sys      *nostr.Pool
 	relays   []string
 	interval time.Duration
 	status   string
@@ -124,7 +124,7 @@ type HeartbeatManager struct {
 }
 
 // NewHeartbeatManager creates a new heartbeat manager
-func NewHeartbeatManager(sys *nostr.System, relays []string, interval time.Duration) *HeartbeatManager {
+func NewHeartbeatManager(sys *nostr.Pool, relays []string, interval time.Duration) *HeartbeatManager {
 	return &HeartbeatManager{
 		sys:      sys,
 		relays:   relays,

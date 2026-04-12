@@ -146,7 +146,7 @@ type TaskResult struct {
 
 // TaskEngine manages task delegation
 type TaskEngine struct {
-	sys     *nostr.System
+	sys     *nostr.Pool
 	relays  []string
 	keyer   nostr.Keyer
 	tasks   map[string]*Task
@@ -154,7 +154,7 @@ type TaskEngine struct {
 }
 
 // NewTaskEngine creates a new task engine
-func NewTaskEngine(sys *nostr.System, relays []string, keyer nostr.Keyer) *TaskEngine {
+func NewTaskEngine(sys *nostr.Pool, relays []string, keyer nostr.Keyer) *TaskEngine {
 	return &TaskEngine{
 		sys:    sys,
 		relays: relays,
@@ -401,7 +401,7 @@ var agentDelegateCmd = &cli.Command{
 			Name:  "caps",
 			Usage: "required capabilities",
 		},
-		&cli.Float64Flag{
+		&cli.FloatFlag{
 			Name:  "budget",
 			Usage: "maximum budget",
 			Value: 1000,

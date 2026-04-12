@@ -89,7 +89,7 @@ type BackgroundTask struct {
 
 // BackgroundScheduler manages background tasks
 type BackgroundScheduler struct {
-	sys     *nostr.System
+	sys     *nostr.Pool
 	relays  []string
 	keyer   nostr.Keyer
 	tasks   map[string]*BackgroundTask
@@ -99,7 +99,7 @@ type BackgroundScheduler struct {
 }
 
 // NewBackgroundScheduler creates a new scheduler
-func NewBackgroundScheduler(sys *nostr.System, relays []string, keyer nostr.Keyer) *BackgroundScheduler {
+func NewBackgroundScheduler(sys *nostr.Pool, relays []string, keyer nostr.Keyer) *BackgroundScheduler {
 	return &BackgroundScheduler{
 		sys:    sys,
 		relays: relays,
