@@ -16,6 +16,7 @@ const (
 	AgentVersion = "v1"
 	CompressTag  = "zstd"
 	AgentTag     = "agent"
+	EncryptTag   = "nip44"
 )
 
 func compressText(text string) (string, error) {
@@ -49,7 +50,7 @@ func decompressText(encoded string) (string, error) {
 var agentMsgCmd = &cli.Command{
 	Name:  "msg",
 	Usage: "Send a message to another agent",
-	Description: `Send a message using nicknames instead of keys.
+	Description: `Send a message using nicknames with optional E2E encryption.
 Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 	Flags: []cli.Flag{
 		&cli.StringFlag{
@@ -74,6 +75,12 @@ Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 			Aliases: []string{"r"},
 			Usage:   "Relay URLs",
 			Value:   []string{"wss://relay.aastar.io"},
+		},
+		&cli.BoolFlag{
+			Name:    "encrypt",
+			Aliases: []string{"e"},
+			Usage:   "Enable NIP-44 end-to-end encryption",
+			Value:   true,
 		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
@@ -100,12 +107,27 @@ Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 		senderSK, _ := parseSecretKey(sender.Nsec)
 		recipientPK, _ := parsePublicKey(recipientNpub)
 
-		compressed, _ := compressText(content)
+		// Encrypt if enabled
+		messageContent := content
+		isEncrypted := false
+		if c.Bool("encrypt") {
+			encrypted, err := EncryptMessage(content, senderSK, recipientPK)
+			if err != nil {
+				return fmt.Errorf("failed to encrypt: %w", err)
+			}
+			messageContent = encrypted
+			isEncrypted = true
+		}
+
+		compressed, _ := compressText(messageContent)
 		tags := nostr.Tags{
 			{"p", pubKeyToHex(recipientPK)},
 			{"c", AgentTag},
 			{"z", CompressTag},
 			{"v", AgentVersion},
+		}
+		if isEncrypted {
+			tags = append(tags, nostr.Tag{"e", EncryptTag})
 		}
 
 		event := &nostr.Event{
@@ -127,7 +149,11 @@ Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 			}
 		}
 
-		fmt.Printf("📤 Message from '%s' to '%s'\n", sender.Nickname, c.String("to"))
+		encryptionStatus := "plaintext"
+		if isEncrypted {
+			encryptionStatus = "🔒 NIP-44 encrypted"
+		}
+		fmt.Printf("📤 Message from '%s' to '%s' (%s)\n", sender.Nickname, c.String("to"), encryptionStatus)
 		fmt.Printf("   Published to %d/%d relays\n", success, len(relays))
 		return nil
 	},
@@ -152,6 +178,12 @@ var agentInboxCmd = &cli.Command{
 			Name:    "limit",
 			Value:   10,
 		},
+		&cli.BoolFlag{
+			Name:    "decrypt",
+			Aliases: []string{"d"},
+			Usage:   "Auto-decrypt NIP-44 messages",
+			Value:   true,
+		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
 		ks, err := LoadKeyStore()
@@ -165,6 +197,8 @@ var agentInboxCmd = &cli.Command{
 		}
 
 		recipientPK, _ := parsePublicKey(recipient.Npub)
+		recipientSK, _ := parseSecretKey(recipient.Nsec)
+		
 		filter := nostr.Filter{
 			Kinds: []nostr.Kind{AgentKind},
 			Tags:  nostr.TagMap{"p": []string{pubKeyToHex(recipientPK)}},
@@ -194,6 +228,8 @@ var agentInboxCmd = &cli.Command{
 			return nil
 		}
 
+		autoDecrypt := c.Bool("decrypt")
+
 		for _, evt := range allEvents {
 			senderNpub := encodeNpub(evt.PubKey)
 			senderName := senderNpub[:16] + "..."
@@ -203,7 +239,31 @@ var agentInboxCmd = &cli.Command{
 					break
 				}
 			}
+
+			// Check if encrypted
+			isEncrypted := false
+			for _, tag := range evt.Tags {
+				if len(tag) >= 2 && tag[0] == "e" && tag[1] == EncryptTag {
+					isEncrypted = true
+					break
+				}
+			}
+
 			content, _ := decompressText(evt.Content)
+			
+			// Decrypt if needed
+			if isEncrypted && autoDecrypt {
+				decrypted, err := DecryptMessage(content, recipientSK, evt.PubKey)
+				if err == nil {
+					content = decrypted
+					content = "🔓 " + content
+				} else {
+					content = "🔒 [encrypted - cannot decrypt]"
+				}
+			} else if isEncrypted {
+				content = "🔒 [encrypted message]"
+			}
+
 			fmt.Printf("[%s] %s: %s\n", evt.CreatedAt.Time().Format("15:04"), senderName, truncateString(content, 50))
 		}
 		return nil
