@@ -1,0 +1,66 @@
+package main
+
+import (
+	"context"
+	"encoding/hex"
+	"fmt"
+	"strings"
+
+	"fiatjaf.com/nostr"
+	"github.com/urfave/cli/v3"
+)
+
+var encodeCmd = &cli.Command{
+	Name:  "encode",
+	Usage: "Encode hex to bech32 format",
+	Description: `Encode hex keys to bech32 format (npub, nsec, note, etc.).
+Example: agent-speaker encode npub <hex>`,
+	Arguments: []cli.Argument{
+		&cli.StringArg{
+			Name: "prefix",
+		},
+		&cli.StringArg{
+			Name: "hex",
+		},
+	},
+	Action: func(ctx context.Context, c *cli.Command) error {
+		prefix := c.String("prefix")
+		hexStr := c.String("hex")
+
+		if prefix == "" || hexStr == "" {
+			return fmt.Errorf("usage: encode <prefix> <hex>")
+		}
+
+		data, err := hex.DecodeString(hexStr)
+		if err != nil {
+			return fmt.Errorf("invalid hex: %w", err)
+		}
+
+		var encoded string
+		switch strings.ToLower(prefix) {
+		case "npub":
+			if len(data) != 32 {
+				return fmt.Errorf("invalid public key length: %d", len(data))
+			}
+			var pk nostr.PubKey
+			copy(pk[:], data)
+			encoded = encodeNpub(pk)
+		case "nsec":
+			if len(data) != 32 {
+				return fmt.Errorf("invalid secret key length: %d", len(data))
+			}
+			var sk nostr.SecretKey
+			copy(sk[:], data)
+			encoded = encodeNsec(sk)
+		default:
+			return fmt.Errorf("unsupported prefix: %s", prefix)
+		}
+
+		if encoded == "" {
+			return fmt.Errorf("failed to encode")
+		}
+
+		fmt.Println(encoded)
+		return nil
+	},
+}

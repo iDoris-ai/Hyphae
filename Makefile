@@ -15,6 +15,10 @@ sync-nak:
 	@cp -r third_party/nak/* $(BUILD_DIR)/nak-src/
 	@cp agent.go $(BUILD_DIR)/nak-src/
 	@cp mcp_agent.go $(BUILD_DIR)/nak-src/
+	@cp chat.go $(BUILD_DIR)/nak-src/ 2>/dev/null || true
+	@cp delegate.go $(BUILD_DIR)/nak-src/ 2>/dev/null || true
+	@cp background.go $(BUILD_DIR)/nak-src/ 2>/dev/null || true
+	@cp subscribe.go $(BUILD_DIR)/nak-src/ 2>/dev/null || true
 	@cp -r pkg $(BUILD_DIR)/nak-src/
 	@echo "✅ Synced"
 
@@ -29,10 +33,10 @@ add-agent-cmd:
 # 复制测试文件到构建目录
 copy-tests: sync-nak add-agent-cmd
 	@echo "📝 Copying test files..."
-	@mkdir -p $(BUILD_DIR)/nak-src/test
 	@cp test/*_test.go $(BUILD_DIR)/nak-src/ 2>/dev/null || true
 	@mkdir -p $(BUILD_DIR)/nak-src/pkg/compress
-	@cp pkg/compress/zstd_test.go $(BUILD_DIR)/nak-src/pkg/compress/ 2>/dev/null || true
+	@cp pkg/compress/*.go $(BUILD_DIR)/nak-src/pkg/compress/ 2>/dev/null || true
+	@echo "replace github.com/jason/agent-speaker/pkg/compress => ./pkg/compress" >> $(BUILD_DIR)/nak-src/go.mod
 	@echo "✅ Tests copied"
 
 # 开发构建
