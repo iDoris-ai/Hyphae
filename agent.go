@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"time"
@@ -9,7 +10,7 @@ import (
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/nip19"
 	"github.com/fatih/color"
-	"github.com/jason/agent-speaker/pkg/compress"
+	"github.com/klauspost/compress/zstd"
 	"github.com/urfave/cli/v3"
 )
 
@@ -154,15 +155,32 @@ var agentMsgCmd = &cli.Command{
 	},
 }
 
-// compressText compresses text using pkg/compress
+// compressText compresses text using zstd and encodes as base64
 func compressText(text string) (string, error) {
-	return compress.Compress([]byte(text))
+	encoder, err := zstd.NewWriter(nil)
+	if err != nil {
+		return "", fmt.Errorf("zstd encoder init: %w", err)
+	}
+	compressed := encoder.EncodeAll([]byte(text), nil)
+	return base64.StdEncoding.EncodeToString(compressed), nil
 }
 
-// decompressText decompresses text using pkg/compress
+// decompressText decompresses base64 zstd data
 func decompressText(encoded string) (string, error) {
-	data, err := compress.Decompress(encoded)
-	return string(data), err
+	data, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", fmt.Errorf("base64 decode: %w", err)
+	}
+	decoder, err := zstd.NewReader(nil)
+	if err != nil {
+		return "", fmt.Errorf("zstd decoder init: %w", err)
+	}
+	defer decoder.Close()
+	out, err := decoder.DecodeAll(data, nil)
+	if err != nil {
+		return "", fmt.Errorf("zstd decompress: %w", err)
+	}
+	return string(out), nil
 }
 
 // agentQueryCmd queries multiple relays in parallel
