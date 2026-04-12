@@ -26,6 +26,9 @@ func main() {
 			// Messaging
 			agentCmdV2,
 			
+			// Message history
+			historyCmd,
+			
 			// Legacy commands (for advanced users)
 			keyCmd,
 			eventCmd,

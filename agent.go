@@ -153,8 +153,14 @@ Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 		if isEncrypted {
 			encryptionStatus = "🔒 NIP-44 encrypted"
 		}
+		// Store in local history
+		if success > 0 {
+			StoreOutgoingMessage(event, recipientNpub, content, isEncrypted)
+		}
+
 		fmt.Printf("📤 Message from '%s' to '%s' (%s)\n", sender.Nickname, c.String("to"), encryptionStatus)
 		fmt.Printf("   Published to %d/%d relays\n", success, len(relays))
+		fmt.Printf("   💾 Stored in local history\n")
 		return nil
 	},
 }
@@ -263,6 +269,9 @@ var agentInboxCmd = &cli.Command{
 			} else if isEncrypted {
 				content = "🔒 [encrypted message]"
 			}
+
+			// Store in local history
+			StoreIncomingMessage(&evt, content, isEncrypted)
 
 			fmt.Printf("[%s] %s: %s\n", evt.CreatedAt.Time().Format("15:04"), senderName, truncateString(content, 50))
 		}
