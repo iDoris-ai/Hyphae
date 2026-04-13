@@ -11,6 +11,7 @@ import (
 	"github.com/AuraAIHQ/agent-speaker/internal/identity"
 	"github.com/AuraAIHQ/agent-speaker/internal/messaging"
 	"github.com/AuraAIHQ/agent-speaker/internal/nostr"
+	"github.com/AuraAIHQ/agent-speaker/internal/profile"
 	"github.com/AuraAIHQ/agent-speaker/internal/storage"
 	"github.com/urfave/cli/v3"
 )
@@ -44,6 +45,8 @@ func main() {
 			storage.StorageCmd,
 			// Group Chat
 			group.GroupCmd,
+			// Agent Profile
+			profile.ProfileCmd,
 			// Daemon
 			daemon.DaemonCmd,
 		},

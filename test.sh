@@ -63,6 +63,14 @@ run_test "internal/group" "go test ./internal/group"
 
 echo ""
 echo "========================================="
+echo "AGENT PROFILE UNIT TESTS"
+echo "========================================="
+
+run_test "pkg/types profile" "go test ./pkg/types"
+run_test "internal/profile" "go test ./internal/profile"
+
+echo ""
+echo "========================================="
 echo "E2E TESTS (Requires identities)"
 echo "========================================="
 
@@ -75,6 +83,7 @@ else
     echo "      Run ./test_e2e.sh for full messaging E2E tests"
     echo "      Run ./test_storage_e2e.sh for storage E2E tests"
     echo "      Run ./test_group_e2e.sh for group chat E2E tests"
+    echo "      Run ./test_profile_e2e.sh for agent profile E2E tests"
 fi
 
 echo ""
