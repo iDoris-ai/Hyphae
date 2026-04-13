@@ -7,6 +7,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/AuraAIHQ/agent-speaker/internal/daemon"
+	"github.com/AuraAIHQ/agent-speaker/internal/group"
 	"github.com/AuraAIHQ/agent-speaker/internal/identity"
 	"github.com/AuraAIHQ/agent-speaker/internal/messaging"
 	"github.com/AuraAIHQ/agent-speaker/internal/nostr"
@@ -41,6 +42,8 @@ func main() {
 			messaging.HistoryCmd,
 			// Storage
 			storage.StorageCmd,
+			// Group Chat
+			group.GroupCmd,
 			// Daemon
 			daemon.DaemonCmd,
 		},
