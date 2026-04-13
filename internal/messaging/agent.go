@@ -1,4 +1,4 @@
-package main
+package messaging
 
 import (
 	"context"
@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
+	"github.com/jason/agent-speaker/internal/common"
+	"github.com/jason/agent-speaker/internal/identity"
+	"github.com/jason/agent-speaker/pkg/crypto"
 	"github.com/klauspost/compress/zstd"
 	"github.com/urfave/cli/v3"
 )
@@ -19,7 +22,8 @@ const (
 	EncryptTag   = "encrypted"
 )
 
-func compressText(text string) (string, error) {
+// CompressText compresses text using zstd
+func CompressText(text string) (string, error) {
 	encoder, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest))
 	if err != nil {
 		return "", err
@@ -29,7 +33,8 @@ func compressText(text string) (string, error) {
 	return base64.StdEncoding.EncodeToString(compressed), nil
 }
 
-func decompressText(encoded string) (string, error) {
+// DecompressText decompresses zstd compressed text
+func DecompressText(encoded string) (string, error) {
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return "", err
@@ -46,17 +51,17 @@ func decompressText(encoded string) (string, error) {
 	return string(decompressed), nil
 }
 
-// agentMsgCmd - Send message using nicknames
-var agentMsgCmd = &cli.Command{
+// AgentMsgCmd - Send message using nicknames
+var AgentMsgCmd = &cli.Command{
 	Name:  "msg",
 	Usage: "Send a message to another agent",
 	Description: `Send a message using nicknames with optional E2E encryption.
 Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 	Flags: []cli.Flag{
 		&cli.StringFlag{
-			Name:     "from",
-			Aliases:  []string{"f"},
-			Usage:    "Your nickname (identity)",
+			Name:    "from",
+			Aliases: []string{"f"},
+			Usage:   "Your nickname (identity)",
 		},
 		&cli.StringFlag{
 			Name:     "to",
@@ -89,29 +94,29 @@ Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 			return fmt.Errorf("message content is required")
 		}
 
-		ks, err := LoadKeyStore()
+		ks, err := identity.LoadKeyStore()
 		if err != nil {
 			return err
 		}
 
-		sender, err := ks.GetIdentity(c.String("from"))
+		sender, err := identity.GetIdentity(ks, c.String("from"))
 		if err != nil {
 			return fmt.Errorf("sender not found: %w", err)
 		}
 
-		recipientNpub, err := ks.ResolveRecipient(c.String("to"))
+		recipientNpub, err := identity.ResolveRecipient(ks, c.String("to"))
 		if err != nil {
 			return err
 		}
 
-		senderSK, _ := parseSecretKey(sender.Nsec)
-		recipientPK, _ := parsePublicKey(recipientNpub)
+		senderSK, _ := identity.GetSecretKey(ks, sender.Nickname)
+		recipientPK, _ := common.ParsePublicKey(recipientNpub)
 
 		// Encrypt if enabled
 		messageContent := content
 		isEncrypted := false
 		if c.Bool("encrypt") {
-			encrypted, err := EncryptMessage(content, senderSK, recipientPK)
+			encrypted, err := crypto.EncryptMessage(content, senderSK, recipientPK)
 			if err != nil {
 				return fmt.Errorf("failed to encrypt: %w", err)
 			}
@@ -119,14 +124,14 @@ Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 			isEncrypted = true
 		}
 
-		compressed, _ := compressText(messageContent)
+		compressed, _ := CompressText(messageContent)
 		tags := nostr.Tags{
-			{"p", pubKeyToHex(recipientPK)},
+			{"p", common.PubKeyToHex(recipientPK)},
 			{"c", AgentTag},
 			{"z", CompressTag},
 			{"v", AgentVersion},
 		}
-		// Use "encryption" tag to mark encrypted messages (not "e" which is reserved)
+		// Use "enc" tag to mark encrypted messages
 		if isEncrypted {
 			tags = append(tags, nostr.Tag{"enc", "nip44"})
 		}
@@ -141,7 +146,7 @@ Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 		event.Sign(senderSK)
 
 		relays := c.StringSlice("relay")
-		
+
 		// Publish with detailed error output
 		success := 0
 		for _, url := range relays {
@@ -150,12 +155,12 @@ Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 				fmt.Printf("   ❌ %s: connect failed: %v\n", url, err)
 				continue
 			}
-			
+
 			pubCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			err = relay.Publish(pubCtx, *event)
 			cancel()
 			relay.Close()
-			
+
 			if err != nil {
 				fmt.Printf("   ❌ %s: publish failed: %v\n", url, err)
 			} else {
@@ -168,12 +173,12 @@ Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 		if success > 0 {
 			StoreOutgoingMessage(event, recipientNpub, content, isEncrypted)
 			// Remove from outbox if it was there
-			outbox, _ := LoadOutbox()
-			outbox.Remove(string(event.ID[:]))
+			ob, _ := LoadOutbox()
+			RemoveFromOutbox(ob, string(event.ID[:]))
 		} else {
 			// Add to outbox for retry
-			outbox, _ := LoadOutbox()
-			outbox.Add(event, recipientNpub, relays)
+			ob, _ := LoadOutbox()
+			AddToOutbox(ob, event, recipientNpub, relays)
 			fmt.Println("   📝 Added to outbox for retry")
 		}
 
@@ -183,26 +188,26 @@ Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 		}
 		fmt.Printf("📤 Message from '%s' to '%s' (%s)\n", sender.Nickname, c.String("to"), encryptionStatus)
 		fmt.Printf("   Published to %d/%d relays\n", success, len(relays))
-		
+
 		if success == 0 {
 			fmt.Println("   ⚠️  Warning: Message not published to any relay")
 		} else {
 			fmt.Printf("   💾 Stored in local history\n")
 		}
-		
+
 		return nil
 	},
 }
 
-// agentInboxCmd - Show inbox
-var agentInboxCmd = &cli.Command{
+// AgentInboxCmd - Show inbox
+var AgentInboxCmd = &cli.Command{
 	Name:  "inbox",
 	Usage: "Show your inbox",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
-			Name:     "as",
-			Aliases:  []string{"a"},
-			Usage:    "Your nickname",
+			Name:    "as",
+			Aliases: []string{"a"},
+			Usage:   "Your nickname",
 		},
 		&cli.StringSliceFlag{
 			Name:    "relay",
@@ -210,8 +215,8 @@ var agentInboxCmd = &cli.Command{
 			Value:   []string{"wss://relay.aastar.io"},
 		},
 		&cli.IntFlag{
-			Name:    "limit",
-			Value:   10,
+			Name:  "limit",
+			Value: 10,
 		},
 		&cli.BoolFlag{
 			Name:    "decrypt",
@@ -221,22 +226,22 @@ var agentInboxCmd = &cli.Command{
 		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
-		ks, err := LoadKeyStore()
+		ks, err := identity.LoadKeyStore()
 		if err != nil {
 			return err
 		}
 
-		recipient, err := ks.GetIdentity(c.String("as"))
+		recipient, err := identity.GetIdentity(ks, c.String("as"))
 		if err != nil {
 			return err
 		}
 
-		recipientPK, _ := parsePublicKey(recipient.Npub)
-		recipientSK, _ := parseSecretKey(recipient.Nsec)
-		
+		recipientPK, _ := identity.GetPublicKey(ks, recipient.Nickname)
+		recipientSK, _ := identity.GetSecretKey(ks, recipient.Nickname)
+
 		filter := nostr.Filter{
 			Kinds: []nostr.Kind{AgentKind},
-			Tags:  nostr.TagMap{"p": []string{pubKeyToHex(recipientPK)}},
+			Tags:  nostr.TagMap{"p": []string{common.PubKeyToHex(recipientPK)}},
 			Limit: int(c.Int("limit")),
 		}
 
@@ -267,9 +272,9 @@ var agentInboxCmd = &cli.Command{
 		autoDecrypt := c.Bool("decrypt")
 
 		for _, evt := range allEvents {
-			senderNpub := encodeNpub(evt.PubKey)
+			senderNpub := common.EncodeNpub(evt.PubKey)
 			senderName := senderNpub[:16] + "..."
-			for _, contact := range ks.ListContacts() {
+			for _, contact := range identity.ListContacts(ks) {
 				if contact.Npub == senderNpub {
 					senderName = contact.Nickname
 					break
@@ -285,11 +290,11 @@ var agentInboxCmd = &cli.Command{
 				}
 			}
 
-			content, _ := decompressText(evt.Content)
-			
+			content, _ := DecompressText(evt.Content)
+
 			// Decrypt if needed
 			if isEncrypted && autoDecrypt {
-				decrypted, err := DecryptMessage(content, recipientSK, evt.PubKey)
+				decrypted, err := crypto.DecryptMessage(content, recipientSK, evt.PubKey)
 				if err == nil {
 					content = decrypted
 					content = "🔓 " + content
@@ -303,21 +308,18 @@ var agentInboxCmd = &cli.Command{
 			// Store in local history
 			StoreIncomingMessage(&evt, content, isEncrypted)
 
-			fmt.Printf("[%s] %s: %s\n", evt.CreatedAt.Time().Format("15:04"), senderName, truncateString(content, 50))
+			fmt.Printf("[%s] %s: %s\n", evt.CreatedAt.Time().Format("15:04"), senderName, common.TruncateString(content, 50))
 		}
 		return nil
 	},
 }
 
-// agentCmd - Main agent command
-var agentCmd = &cli.Command{
+// AgentCmd - Main agent command
+var AgentCmd = &cli.Command{
 	Name:  "agent",
 	Usage: "Agent communication",
 	Commands: []*cli.Command{
-		agentMsgCmd,
-		agentInboxCmd,
+		AgentMsgCmd,
+		AgentInboxCmd,
 	},
 }
-
-// Keep backward compatibility
-var agentCmdV2 = agentCmd

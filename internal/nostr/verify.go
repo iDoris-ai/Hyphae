@@ -1,4 +1,4 @@
-package main
+package nostr
 
 import (
 	"context"
@@ -7,10 +7,11 @@ import (
 
 	"fiatjaf.com/nostr"
 	"github.com/fatih/color"
+	"github.com/jason/agent-speaker/internal/common"
 	"github.com/urfave/cli/v3"
 )
 
-var verifyCmd = &cli.Command{
+var VerifyCmd = &cli.Command{
 	Name:  "verify",
 	Usage: "Verify a nostr event signature",
 	Description: `Verify that a nostr event has a valid signature.
@@ -37,7 +38,7 @@ Example: agent-speaker verify '{"id":"...",...}'`,
 			green := color.New(color.FgGreen).SprintFunc()
 			fmt.Printf("%s Signature is VALID\n", green("✅"))
 			fmt.Printf("   Event ID: %s\n", event.ID)
-			fmt.Printf("   Author:   %s\n", encodeNpub(event.PubKey))
+			fmt.Printf("   Author:   %s\n", common.EncodeNpub(event.PubKey))
 		} else {
 			red := color.New(color.FgRed).SprintFunc()
 			fmt.Printf("%s Signature is INVALID\n", red("❌"))

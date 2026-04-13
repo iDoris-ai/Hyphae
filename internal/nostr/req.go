@@ -1,4 +1,4 @@
-package main
+package nostr
 
 import (
 	"context"
@@ -7,10 +7,11 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
+	"github.com/jason/agent-speaker/internal/common"
 	"github.com/urfave/cli/v3"
 )
 
-var reqCmd = &cli.Command{
+var ReqCmd = &cli.Command{
 	Name:    "req",
 	Aliases: []string{"query"},
 	Usage:   "Query events from relays",
@@ -60,7 +61,7 @@ Example: agent-speaker req --kinds 1 --authors <npub> --limit 10`,
 
 		// Parse authors
 		for _, a := range c.StringSlice("authors") {
-			pk, err := parsePublicKey(a)
+			pk, err := common.ParsePublicKey(a)
 			if err == nil {
 				filter.Authors = append(filter.Authors, pk)
 			}
@@ -103,9 +104,9 @@ Example: agent-speaker req --kinds 1 --authors <npub> --limit 10`,
 			} else {
 				fmt.Printf("[%d] Kind %d by %s at %s\n",
 					i+1, evt.Kind,
-					encodeNpub(evt.PubKey)[:20]+"...",
+					common.EncodeNpub(evt.PubKey)[:20]+"...",
 					evt.CreatedAt.Time().Format("2006-01-02 15:04"))
-				fmt.Printf("    %s\n", truncateString(evt.Content, 100))
+				fmt.Printf("    %s\n", common.TruncateString(evt.Content, 100))
 				fmt.Println()
 			}
 		}
@@ -113,4 +114,3 @@ Example: agent-speaker req --kinds 1 --authors <npub> --limit 10`,
 		return nil
 	},
 }
-

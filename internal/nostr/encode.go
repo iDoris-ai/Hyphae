@@ -1,4 +1,4 @@
-package main
+package nostr
 
 import (
 	"context"
@@ -7,20 +7,27 @@ import (
 	"strings"
 
 	"fiatjaf.com/nostr"
+	"github.com/jason/agent-speaker/internal/common"
 	"github.com/urfave/cli/v3"
 )
 
-var encodeCmd = &cli.Command{
+var EncodeCmd = &cli.Command{
 	Name:  "encode",
 	Usage: "Encode hex to bech32 format",
 	Description: `Encode hex keys to bech32 format (npub, nsec, note, etc.).
-Example: agent-speaker encode npub <hex>`,
-	Arguments: []cli.Argument{
-		&cli.StringArg{
-			Name: "prefix",
+Example: agent-speaker encode --prefix npub --hex <hex>`,
+	Flags: []cli.Flag{
+		&cli.StringFlag{
+			Name:     "prefix",
+			Aliases:  []string{"p"},
+			Usage:    "Prefix (npub, nsec)",
+			Required: true,
 		},
-		&cli.StringArg{
-			Name: "hex",
+		&cli.StringFlag{
+			Name:     "hex",
+			Aliases:  []string{"x"},
+			Usage:    "Hex string to encode",
+			Required: true,
 		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
@@ -44,14 +51,14 @@ Example: agent-speaker encode npub <hex>`,
 			}
 			var pk nostr.PubKey
 			copy(pk[:], data)
-			encoded = encodeNpub(pk)
+			encoded = common.EncodeNpub(pk)
 		case "nsec":
 			if len(data) != 32 {
 				return fmt.Errorf("invalid secret key length: %d", len(data))
 			}
 			var sk nostr.SecretKey
 			copy(sk[:], data)
-			encoded = encodeNsec(sk)
+			encoded = common.EncodeNsec(sk)
 		default:
 			return fmt.Errorf("unsupported prefix: %s", prefix)
 		}

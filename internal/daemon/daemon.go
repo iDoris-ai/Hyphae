@@ -1,7 +1,8 @@
-package main
+package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -9,11 +10,17 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
+	"github.com/jason/agent-speaker/internal/common"
+	"github.com/jason/agent-speaker/internal/identity"
+	"github.com/jason/agent-speaker/internal/messaging"
+	"github.com/jason/agent-speaker/internal/notify"
+	"github.com/jason/agent-speaker/pkg/crypto"
+	"github.com/jason/agent-speaker/pkg/types"
 	"github.com/urfave/cli/v3"
 )
 
-// daemonCmd runs the background daemon
-var daemonCmd = &cli.Command{
+// DaemonCmd runs the background daemon
+var DaemonCmd = &cli.Command{
 	Name:  "daemon",
 	Usage: "Run background daemon",
 	Description: `Background daemon that:
@@ -24,9 +31,9 @@ var daemonCmd = &cli.Command{
 Run this in a separate terminal or as a system service.`,
 	Flags: []cli.Flag{
 		&cli.StringFlag{
-			Name:     "identity",
-			Aliases:  []string{"i"},
-			Usage:    "Identity to run daemon for (default: use default identity)",
+			Name:    "identity",
+			Aliases: []string{"i"},
+			Usage:   "Identity to run daemon for (default: use default identity)",
 		},
 		&cli.IntFlag{
 			Name:    "retry-interval",
@@ -48,12 +55,12 @@ Run this in a separate terminal or as a system service.`,
 		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
-		ks, err := LoadKeyStore()
+		ks, err := identity.LoadKeyStore()
 		if err != nil {
 			return fmt.Errorf("failed to load keystore: %w", err)
 		}
 
-		identity, err := ks.GetIdentity(c.String("identity"))
+		myIdentity, err := identity.GetIdentity(ks, c.String("identity"))
 		if err != nil {
 			return err
 		}
@@ -62,11 +69,11 @@ Run this in a separate terminal or as a system service.`,
 		watchInterval := time.Duration(c.Int("watch-interval")) * time.Second
 		useNotify := c.Bool("notify")
 
-		fmt.Printf("🚀 Starting daemon for '%s'\n", identity.Nickname)
+		fmt.Printf("🚀 Starting daemon for '%s'\n", myIdentity.Nickname)
 		fmt.Printf("   Outbox retry interval: %v\n", retryInterval)
 		fmt.Printf("   Inbox watch interval: %v\n", watchInterval)
 		fmt.Printf("   Notifications: %v\n", useNotify)
-		fmt.Println("   Press Ctrl+C to stop\n")
+		fmt.Println("   Press Ctrl+C to stop")
 
 		// Setup signal handling
 		sigChan := make(chan os.Signal, 1)
@@ -82,18 +89,18 @@ Run this in a separate terminal or as a system service.`,
 
 		// Track seen messages for watch
 		seenMessages := make(map[string]bool)
-		loadSeenMessages(seenMessages, identity.Npub)
+		loadSeenMessages(seenMessages, myIdentity.Npub)
 
 		// Run immediately
-		processOutbox(identity)
-		watchInbox(ctx, identity, ks, seenMessages, useNotify)
+		processOutbox(ctx, myIdentity)
+		watchInbox(ctx, myIdentity, ks, seenMessages, useNotify)
 
 		for {
 			select {
 			case <-retryTicker.C:
-				processOutbox(identity)
+				processOutbox(ctx, myIdentity)
 			case <-watchTicker.C:
-				watchInbox(ctx, identity, ks, seenMessages, useNotify)
+				watchInbox(ctx, myIdentity, ks, seenMessages, useNotify)
 			case <-cleanupTicker.C:
 				cleanupOutbox()
 			case <-sigChan:
@@ -107,18 +114,18 @@ Run this in a separate terminal or as a system service.`,
 }
 
 // processOutbox retries failed messages
-func processOutbox(identity *Identity) {
-	outbox, err := LoadOutbox()
+func processOutbox(ctx context.Context, myIdentity *types.Identity) {
+	outbox, err := messaging.LoadOutbox()
 	if err != nil {
 		return
 	}
 
-	pending := outbox.GetPending()
+	pending := messaging.GetPendingOutbox(outbox)
 	if len(pending) == 0 {
 		return
 	}
 
-	fmt.Printf("[%s] 📤 Processing %d pending messages...\n", 
+	fmt.Printf("[%s] 📤 Processing %d pending messages...\n",
 		time.Now().Format("15:04:05"), len(pending))
 
 	successCount := 0
@@ -136,19 +143,25 @@ func processOutbox(identity *Identity) {
 			}
 		}
 
+		// Parse event
+		var event nostr.Event
+		if err := json.Unmarshal([]byte(entry.EventJSON), &event); err != nil {
+			continue
+		}
+
 		// Try to publish
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+
 		success := false
 		for _, url := range entry.Relays {
 			relay, err := nostr.RelayConnect(ctx, url, nostr.RelayOptions{})
 			if err != nil {
 				continue
 			}
-			
-			err = relay.Publish(ctx, *entry.Event)
+
+			err = relay.Publish(ctx, event)
 			relay.Close()
-			
+
 			if err == nil {
 				success = true
 				break
@@ -157,15 +170,15 @@ func processOutbox(identity *Identity) {
 		cancel()
 
 		if success {
-			outbox.UpdateStatus(entry.ID, "sent")
-			outbox.Remove(entry.ID) // Remove sent messages
-			StoreOutgoingMessage(entry.Event, entry.RecipientNpub, entry.Event.Content, true)
+			messaging.UpdateOutboxStatus(outbox, entry.ID, "sent")
+			messaging.RemoveFromOutbox(outbox, entry.ID) // Remove sent messages
+			messaging.StoreOutgoingMessage(&event, entry.RecipientNpub, event.Content, true)
 			successCount++
 			fmt.Printf("   ✅ Sent: %s...\n", entry.ID[:16])
 		} else {
-			outbox.IncrementRetry(entry.ID)
+			messaging.IncrementOutboxRetry(outbox, entry.ID)
 			if entry.RetryCount >= entry.MaxRetries-1 {
-				outbox.UpdateStatus(entry.ID, "failed")
+				messaging.UpdateOutboxStatus(outbox, entry.ID, "failed")
 				fmt.Printf("   ❌ Failed (max retries): %s...\n", entry.ID[:16])
 			}
 			failCount++
@@ -178,13 +191,13 @@ func processOutbox(identity *Identity) {
 }
 
 // watchInbox monitors for new messages
-func watchInbox(ctx context.Context, identity *Identity, ks *KeyStore, seenMessages map[string]bool, useNotify bool) {
-	recipientPK, _ := parsePublicKey(identity.Npub)
-	recipientSK, _ := parseSecretKey(identity.Nsec)
+func watchInbox(ctx context.Context, myIdentity *types.Identity, ks *types.KeyStore, seenMessages map[string]bool, useNotify bool) {
+	recipientPK, _ := identity.GetPublicKey(ks, myIdentity.Nickname)
+	recipientSK, _ := identity.GetSecretKey(ks, myIdentity.Nickname)
 
 	filter := nostr.Filter{
-		Kinds: []nostr.Kind{AgentKind},
-		Tags:  nostr.TagMap{"p": []string{pubKeyToHex(recipientPK)}},
+		Kinds: []nostr.Kind{messaging.AgentKind},
+		Tags:  nostr.TagMap{"p": []string{common.PubKeyToHex(recipientPK)}},
 		Limit: 10,
 	}
 
@@ -205,14 +218,14 @@ func watchInbox(ctx context.Context, identity *Identity, ks *KeyStore, seenMessa
 			if seenMessages[eventID] {
 				continue
 			}
-			
+
 			seenMessages[eventID] = true
 			newCount++
 
 			// Get sender name
-			senderNpub := encodeNpub(evt.PubKey)
+			senderNpub := common.EncodeNpub(evt.PubKey)
 			senderName := senderNpub[:16] + "..."
-			for _, contact := range ks.ListContacts() {
+			for _, contact := range identity.ListContacts(ks) {
 				if contact.Npub == senderNpub {
 					senderName = contact.Nickname
 					break
@@ -220,7 +233,7 @@ func watchInbox(ctx context.Context, identity *Identity, ks *KeyStore, seenMessa
 			}
 
 			// Decrypt if needed
-			content, _ := decompressText(evt.Content)
+			content, _ := messaging.DecompressText(evt.Content)
 			isEncrypted := false
 			for _, tag := range evt.Tags {
 				if len(tag) >= 2 && tag[0] == "enc" && tag[1] == "nip44" {
@@ -228,22 +241,22 @@ func watchInbox(ctx context.Context, identity *Identity, ks *KeyStore, seenMessa
 					break
 				}
 			}
-			
+
 			if isEncrypted {
-				if decrypted, err := DecryptMessage(content, recipientSK, evt.PubKey); err == nil {
+				if decrypted, err := crypto.DecryptMessage(content, recipientSK, evt.PubKey); err == nil {
 					content = decrypted
 				}
 			}
 
 			// Store
-			StoreIncomingMessage(&evt, content, isEncrypted)
+			messaging.StoreIncomingMessage(&evt, content, isEncrypted)
 
 			// Notify
-			fmt.Printf("\n📨 New message from %s: %s\n", senderName, truncateString(content, 40))
-			
+			fmt.Printf("\n📨 New message from %s: %s\n", senderName, common.TruncateString(content, 40))
+
 			if useNotify {
-				DesktopNotification("Agent Speaker - "+senderName, truncateString(content, 100))
-				PlaySound()
+				notify.DesktopNotification("Agent Speaker - "+senderName, common.TruncateString(content, 100))
+				notify.PlaySound()
 			}
 		}
 		timeout.Stop()
@@ -256,16 +269,16 @@ func watchInbox(ctx context.Context, identity *Identity, ks *KeyStore, seenMessa
 }
 
 func cleanupOutbox() {
-	outbox, err := LoadOutbox()
+	outbox, err := messaging.LoadOutbox()
 	if err != nil {
 		return
 	}
 	// Remove entries older than 7 days
-	outbox.Cleanup(7 * 24 * time.Hour)
+	messaging.CleanupOutbox(outbox, 7*24*time.Hour)
 }
 
 func loadSeenMessages(seen map[string]bool, npub string) {
-	ms, err := LoadMessageStore()
+	ms, err := messaging.LoadMessageStore()
 	if err != nil {
 		return
 	}

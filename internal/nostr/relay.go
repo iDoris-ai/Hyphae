@@ -1,4 +1,4 @@
-package main
+package nostr
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-var relayCmd = &cli.Command{
+var RelayCmd = &cli.Command{
 	Name:  "relay",
 	Usage: "Relay information and testing",
 	Commands: []*cli.Command{

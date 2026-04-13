@@ -1,4 +1,4 @@
-package main
+package identity
 
 import (
 	"context"
@@ -10,8 +10,8 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-// identityCmd manages local identities (nicknames)
-var identityCmd = &cli.Command{
+// IdentityCmd manages local identities (nicknames)
+var IdentityCmd = &cli.Command{
 	Name:  "identity",
 	Usage: "Manage local identities",
 	Description: `Create and manage local identities with secure key storage.
@@ -40,13 +40,13 @@ Identities are stored in ~/.agent-speaker/ with 600 permissions.`,
 				}
 
 				nickname := c.String("nickname")
-				identity, err := ks.CreateIdentity(nickname)
+				identity, err := CreateIdentity(ks, nickname)
 				if err != nil {
 					return err
 				}
 
 				if c.Bool("default") {
-					if err := ks.SetDefault(nickname); err != nil {
+					if err := SetDefault(ks, nickname); err != nil {
 						return err
 					}
 				}
@@ -71,7 +71,7 @@ Identities are stored in ~/.agent-speaker/ with 600 permissions.`,
 					return fmt.Errorf("failed to load keystore: %w", err)
 				}
 
-				identities := ks.ListIdentities()
+				identities := ListIdentities(ks)
 				if len(identities) == 0 {
 					fmt.Println("No identities found. Create one with:")
 					fmt.Println("  agent-speaker identity create --nickname <name>")
@@ -113,7 +113,7 @@ Identities are stored in ~/.agent-speaker/ with 600 permissions.`,
 				}
 
 				nickname := c.String("nickname")
-				if err := ks.SetDefault(nickname); err != nil {
+				if err := SetDefault(ks, nickname); err != nil {
 					return err
 				}
 
@@ -126,9 +126,9 @@ Identities are stored in ~/.agent-speaker/ with 600 permissions.`,
 			Usage: "Export identity nsec (be careful!)",
 			Flags: []cli.Flag{
 				&cli.StringFlag{
-					Name:     "nickname",
-					Aliases:  []string{"n"},
-					Usage:    "Nickname to export",
+					Name:    "nickname",
+					Aliases: []string{"n"},
+					Usage:   "Nickname to export",
 				},
 			},
 			Action: func(ctx context.Context, c *cli.Command) error {
@@ -138,7 +138,7 @@ Identities are stored in ~/.agent-speaker/ with 600 permissions.`,
 				}
 
 				nickname := c.String("nickname")
-				identity, err := ks.GetIdentity(nickname)
+				identity, err := GetIdentity(ks, nickname)
 				if err != nil {
 					return err
 				}
@@ -157,8 +157,8 @@ Identities are stored in ~/.agent-speaker/ with 600 permissions.`,
 	},
 }
 
-// contactCmd manages contacts (other people's nicknames)
-var contactCmd = &cli.Command{
+// ContactCmd manages contacts (other people's nicknames)
+var ContactCmd = &cli.Command{
 	Name:  "contact",
 	Usage: "Manage contacts (other users)",
 	Description: `Add and manage contacts using nicknames instead of npubs.
@@ -190,7 +190,7 @@ Contacts are stored locally and mapped to their npubs.`,
 				nickname := c.String("nickname")
 				npub := c.String("npub")
 
-				if err := ks.AddContact(nickname, npub); err != nil {
+				if err := AddContact(ks, nickname, npub); err != nil {
 					return err
 				}
 
@@ -212,7 +212,7 @@ Contacts are stored locally and mapped to their npubs.`,
 					return fmt.Errorf("failed to load keystore: %w", err)
 				}
 
-				contacts := ks.ListContacts()
+				contacts := ListContacts(ks)
 				if len(contacts) == 0 {
 					fmt.Println("No contacts found. Add one with:")
 					fmt.Println("  agent-speaker contact add --nickname <name> --npub <npub>")

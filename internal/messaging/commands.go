@@ -1,4 +1,4 @@
-package main
+package messaging
 
 import (
 	"context"
@@ -7,10 +7,12 @@ import (
 	"text/tabwriter"
 
 	"github.com/urfave/cli/v3"
+	"github.com/jason/agent-speaker/internal/common"
+	"github.com/jason/agent-speaker/internal/identity"
 )
 
-// historyCmd manages message history
-var historyCmd = &cli.Command{
+// HistoryCmd manages message history
+var HistoryCmd = &cli.Command{
 	Name:  "history",
 	Usage: "View message history",
 	Description: `View local message history stored in ~/.agent-speaker/`,
@@ -33,24 +35,24 @@ var historyCmd = &cli.Command{
 				},
 			},
 			Action: func(ctx context.Context, c *cli.Command) error {
-				ks, err := LoadKeyStore()
+				ks, err := identity.LoadKeyStore()
 				if err != nil {
 					return err
 				}
-				
-				myIdentity, _ := ks.GetIdentity("")
-				contact, _ := ks.GetContact(c.String("with"))
-				
+
+				myIdentity, _ := identity.GetIdentity(ks, "")
+				contact, _ := identity.GetContact(ks, c.String("with"))
+
 				ms, _ := LoadMessageStore()
-				messages := ms.GetConversation(myIdentity.Npub, contact.Npub, int(c.Int("limit")))
-				
+				messages := GetConversation(ms, myIdentity.Npub, contact.Npub, int(c.Int("limit")))
+
 				if len(messages) == 0 {
 					fmt.Println("No messages found")
 					return nil
 				}
-				
-				fmt.Printf("📜 Conversation with %s (%d messages)\n\n", c.String("with"))
-				
+
+				fmt.Printf("📜 Conversation with %s (%d messages)\n\n", c.String("with"), len(messages))
+
 				w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 				for i := len(messages) - 1; i >= 0; i-- {
 					msg := messages[i]
@@ -58,25 +60,25 @@ var historyCmd = &cli.Command{
 					if msg.IsIncoming {
 						direction = "←"
 					}
-					
+
 					content := msg.Plaintext
 					if content == "" {
 						content = msg.Content
 					}
-					
+
 					encrypted := ""
 					if msg.IsEncrypted {
 						encrypted = "🔒"
 					}
-					
-					fmt.Fprintf(w, "%s %s\t%s\t%s\n", 
+
+					fmt.Fprintf(w, "%d %s\t%s\t%s\n",
 						msg.CreatedAt,
 						direction,
 						encrypted,
-						truncateString(content, 40))
+						common.TruncateString(content, 40))
 				}
 				w.Flush()
-				
+
 				return nil
 			},
 		},
@@ -88,11 +90,11 @@ var historyCmd = &cli.Command{
 				if err != nil {
 					return err
 				}
-				
+
 				incoming := 0
 				outgoing := 0
 				encrypted := 0
-				
+
 				for _, msg := range ms.Messages {
 					if msg.IsIncoming {
 						incoming++
@@ -103,14 +105,14 @@ var historyCmd = &cli.Command{
 						encrypted++
 					}
 				}
-				
+
 				fmt.Println("📊 Message Statistics")
 				fmt.Println("=====================")
 				fmt.Printf("Total messages: %d\n", len(ms.Messages))
 				fmt.Printf("Incoming:       %d\n", incoming)
 				fmt.Printf("Outgoing:       %d\n", outgoing)
 				fmt.Printf("Encrypted:      %d\n", encrypted)
-				
+
 				return nil
 			},
 		},
@@ -128,18 +130,18 @@ var historyCmd = &cli.Command{
 			Action: func(ctx context.Context, c *cli.Command) error {
 				ms, _ := LoadMessageStore()
 				query := c.String("query")
-				
+
 				results := 0
 				for _, msg := range ms.Messages {
 					if contains(msg.Plaintext, query) || contains(msg.Content, query) {
-						fmt.Printf("[%s] %s...: %s\n", 
+						fmt.Printf("[%s] %d...: %s\n",
 							msg.SenderNpub[:20],
 							msg.CreatedAt,
-							truncateString(msg.Plaintext, 50))
+							common.TruncateString(msg.Plaintext, 50))
 						results++
 					}
 				}
-				
+
 				fmt.Printf("\nFound %d results\n", results)
 				return nil
 			},
@@ -148,10 +150,10 @@ var historyCmd = &cli.Command{
 }
 
 func contains(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && 
-		   (s == substr || len(s) > len(substr) && 
-		    (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
-		     findInString(s, substr)))
+	return len(s) > 0 && len(substr) > 0 &&
+		(s == substr || len(s) > len(substr) &&
+			(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
+				findInString(s, substr)))
 }
 
 func findInString(s, substr string) bool {

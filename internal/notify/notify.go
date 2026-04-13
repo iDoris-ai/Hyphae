@@ -1,4 +1,4 @@
-package main
+package notify
 
 import (
 	"fmt"
@@ -29,7 +29,7 @@ func notifyDarwin(title, message string) error {
 			"-sound", "default")
 		return cmd.Run()
 	}
-	
+
 	// Fallback to osascript
 	script := fmt.Sprintf(`display notification "%s" with title "%s" sound name "default"`,
 		escapeAppleScript(message), escapeAppleScript(title))

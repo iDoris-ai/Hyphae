@@ -1,4 +1,4 @@
-package main
+package nostr
 
 import (
 	"context"
@@ -9,12 +9,15 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-var decodeCmd = &cli.Command{
+var DecodeCmd = &cli.Command{
 	Name:  "decode",
 	Usage: "Decode bech32 encoded keys or IDs",
-	Arguments: []cli.Argument{
-		&cli.StringArg{
-			Name: "input",
+	Flags: []cli.Flag{
+		&cli.StringFlag{
+			Name:     "input",
+			Aliases:  []string{"i"},
+			Usage:    "Bech32 encoded string to decode",
+			Required: true,
 		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
