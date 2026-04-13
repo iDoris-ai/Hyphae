@@ -16,7 +16,7 @@ const (
 	AgentVersion = "v1"
 	CompressTag  = "zstd"
 	AgentTag     = "agent"
-	EncryptTag   = "nip44"
+	EncryptTag   = "encrypted"
 )
 
 func compressText(text string) (string, error) {
@@ -126,8 +126,9 @@ Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 			{"z", CompressTag},
 			{"v", AgentVersion},
 		}
+		// Use "encryption" tag to mark encrypted messages (not "e" which is reserved)
 		if isEncrypted {
-			tags = append(tags, nostr.Tag{"e", EncryptTag})
+			tags = append(tags, nostr.Tag{"enc", "nip44"})
 		}
 
 		event := &nostr.Event{
@@ -140,27 +141,55 @@ Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 		event.Sign(senderSK)
 
 		relays := c.StringSlice("relay")
-		results := publishToRelays(ctx, event, relays)
-
+		
+		// Publish with detailed error output
 		success := 0
-		for _, err := range results {
-			if err == nil {
+		for _, url := range relays {
+			relay, err := nostr.RelayConnect(ctx, url, nostr.RelayOptions{})
+			if err != nil {
+				fmt.Printf("   ❌ %s: connect failed: %v\n", url, err)
+				continue
+			}
+			
+			pubCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			err = relay.Publish(pubCtx, *event)
+			cancel()
+			relay.Close()
+			
+			if err != nil {
+				fmt.Printf("   ❌ %s: publish failed: %v\n", url, err)
+			} else {
+				fmt.Printf("   ✅ %s\n", url)
 				success++
 			}
+		}
+
+		// Store in local history and outbox
+		if success > 0 {
+			StoreOutgoingMessage(event, recipientNpub, content, isEncrypted)
+			// Remove from outbox if it was there
+			outbox, _ := LoadOutbox()
+			outbox.Remove(string(event.ID[:]))
+		} else {
+			// Add to outbox for retry
+			outbox, _ := LoadOutbox()
+			outbox.Add(event, recipientNpub, relays)
+			fmt.Println("   📝 Added to outbox for retry")
 		}
 
 		encryptionStatus := "plaintext"
 		if isEncrypted {
 			encryptionStatus = "🔒 NIP-44 encrypted"
 		}
-		// Store in local history
-		if success > 0 {
-			StoreOutgoingMessage(event, recipientNpub, content, isEncrypted)
-		}
-
 		fmt.Printf("📤 Message from '%s' to '%s' (%s)\n", sender.Nickname, c.String("to"), encryptionStatus)
 		fmt.Printf("   Published to %d/%d relays\n", success, len(relays))
-		fmt.Printf("   💾 Stored in local history\n")
+		
+		if success == 0 {
+			fmt.Println("   ⚠️  Warning: Message not published to any relay")
+		} else {
+			fmt.Printf("   💾 Stored in local history\n")
+		}
+		
 		return nil
 	},
 }
@@ -218,6 +247,7 @@ var agentInboxCmd = &cli.Command{
 		for _, url := range relays {
 			relay, err := nostr.RelayConnect(ctx, url, nostr.RelayOptions{})
 			if err != nil {
+				fmt.Printf("   ⚠️  Failed to connect to %s: %v\n", url, err)
 				continue
 			}
 			defer relay.Close()
@@ -249,7 +279,7 @@ var agentInboxCmd = &cli.Command{
 			// Check if encrypted
 			isEncrypted := false
 			for _, tag := range evt.Tags {
-				if len(tag) >= 2 && tag[0] == "e" && tag[1] == EncryptTag {
+				if len(tag) >= 2 && tag[0] == "enc" && tag[1] == "nip44" {
 					isEncrypted = true
 					break
 				}

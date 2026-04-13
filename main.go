@@ -29,6 +29,9 @@ func main() {
 			// Watch for new messages
 			watchCmd,
 			
+			// Background daemon
+			daemonCmd,
+			
 			// Message history
 			historyCmd,
 			
