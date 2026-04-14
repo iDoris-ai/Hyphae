@@ -18,7 +18,10 @@ var StorageCmd = &cli.Command{
 			Name:  "info",
 			Usage: "Show storage information",
 			Action: func(ctx context.Context, c *cli.Command) error {
-				dbPath := GetDBPath()
+				dbPath, err := GetDBPath()
+				if err != nil {
+					return fmt.Errorf("failed to get database path: %w", err)
+				}
 
 				// Check if database exists
 				info, err := os.Stat(dbPath)
@@ -37,11 +40,12 @@ var StorageCmd = &cli.Command{
 				fmt.Printf("Size:     %d bytes (%.2f KB)\n", info.Size(), float64(info.Size())/1024)
 				fmt.Printf("Mode:     %s\n", info.Mode())
 
-				// Initialize to get stats
+				// Initialize to get stats (open a separate connection)
 				db, err := InitDB()
 				if err != nil {
 					return fmt.Errorf("failed to open database: %w", err)
 				}
+				defer db.Close()
 
 				// Get message count
 				var count int
@@ -77,7 +81,13 @@ var StorageCmd = &cli.Command{
 			Action: func(ctx context.Context, c *cli.Command) error {
 				fmt.Println("🔄 Migrating from JSON backup...")
 
-				if err := MigrateFromJSON(); err != nil {
+				db, err := InitDB()
+				if err != nil {
+					return fmt.Errorf("failed to open database: %w", err)
+				}
+				defer db.Close()
+
+				if err := MigrateFromJSON(db); err != nil {
 					return fmt.Errorf("migration failed: %w", err)
 				}
 

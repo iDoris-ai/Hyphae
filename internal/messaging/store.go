@@ -10,39 +10,44 @@ import (
 )
 
 var (
-	store     *storage.MessageStore
-	storeOnce sync.Once
-	storeErr  error
+	store    *storage.MessageStore
+	storeMu  sync.Mutex
+	storeErr error
 )
 
 // InitStorage initializes the SQLite storage
 func InitStorage() error {
-	storeOnce.Do(func() {
-		// Initialize database
-		db, err := storage.InitDB()
-		if err != nil {
-			storeErr = err
-			return
-		}
+	storeMu.Lock()
+	defer storeMu.Unlock()
 
-		// Migrate from JSON if needed
-		if err := storage.MigrateFromJSON(); err != nil {
-			storeErr = err
-			return
-		}
+	if store != nil {
+		return nil
+	}
+	if storeErr != nil {
+		return storeErr
+	}
 
-		store = storage.NewMessageStore(db)
-	})
+	// Initialize database
+	db, err := storage.InitDB()
+	if err != nil {
+		storeErr = err
+		return err
+	}
 
-	return storeErr
+	// Migrate from JSON if needed
+	if err := storage.MigrateFromJSON(db); err != nil {
+		storeErr = err
+		return err
+	}
+
+	store = storage.NewMessageStore(db)
+	return nil
 }
 
 // GetStore returns the message store instance
 func GetStore() (*storage.MessageStore, error) {
-	if store == nil {
-		if err := InitStorage(); err != nil {
-			return nil, err
-		}
+	if err := InitStorage(); err != nil {
+		return nil, err
 	}
 	return store, nil
 }
@@ -57,48 +62,33 @@ func LoadMessageStore() (*types.MessageStore, error) {
 }
 
 // GetConversation returns messages between two users
-func GetConversation(ms *types.MessageStore, user1Npub, user2Npub string, limit int) []types.StoredMessage {
+func GetConversation(ms *types.MessageStore, user1Npub, user2Npub string, limit int) ([]types.StoredMessage, error) {
 	s, err := GetStore()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
-	messages, err := s.GetConversation(user1Npub, user2Npub, limit)
-	if err != nil {
-		return nil
-	}
-
-	return messages
+	return s.GetConversation(user1Npub, user2Npub, limit)
 }
 
 // GetInbox returns messages for a user
-func GetInbox(ms *types.MessageStore, userNpub string, limit int) []types.StoredMessage {
+func GetInbox(ms *types.MessageStore, userNpub string, limit int) ([]types.StoredMessage, error) {
 	s, err := GetStore()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
-	messages, err := s.GetInbox(userNpub, limit)
-	if err != nil {
-		return nil
-	}
-
-	return messages
+	return s.GetInbox(userNpub, limit)
 }
 
-// GetUnreadCount returns unread message count (simplified - counts all received)
-func GetUnreadCount(ms *types.MessageStore, userNpub string) int {
+// GetReceivedCount returns the total received message count for a user
+func GetReceivedCount(ms *types.MessageStore, userNpub string) (int, error) {
 	s, err := GetStore()
 	if err != nil {
-		return 0
+		return 0, err
 	}
 
-	messages, err := s.GetInbox(userNpub, 10000)
-	if err != nil {
-		return 0
-	}
-
-	return len(messages)
+	return s.GetReceivedCount(userNpub)
 }
 
 // StoreOutgoingMessage stores a sent message

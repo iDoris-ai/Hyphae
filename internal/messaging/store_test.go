@@ -1,29 +1,43 @@
 package messaging
 
 import (
-	"os"
 	"testing"
 
 	"fiatjaf.com/nostr"
+	"github.com/AuraAIHQ/agent-speaker/internal/storage"
 	"github.com/AuraAIHQ/agent-speaker/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func setupTempMessageStore(t *testing.T) {
+func resetStore(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
+
+	// Close and clear global DB
+	if storage.DB != nil {
+		_ = storage.CloseDB()
+		storage.DB = nil
+	}
+
+	// Reset package-level globals (sync.Once replaced with mutex, so this is safe)
+	storeMu.Lock()
+	store = nil
+	storeErr = nil
+	storeMu.Unlock()
+
+	require.NoError(t, InitStorage())
 }
 
 func TestLoadMessageStore_New(t *testing.T) {
-	setupTempMessageStore(t)
+	resetStore(t)
 	ms, err := LoadMessageStore()
 	require.NoError(t, err)
 	assert.Empty(t, ms.Messages)
 }
 
 func TestAddAndLoadMessage(t *testing.T) {
-	setupTempMessageStore(t)
+	resetStore(t)
 	ms, err := LoadMessageStore()
 	require.NoError(t, err)
 
@@ -40,61 +54,86 @@ func TestAddAndLoadMessage(t *testing.T) {
 	err = AddMessage(ms, msg)
 	require.NoError(t, err)
 
-	ms2, err := LoadMessageStore()
+	s, err := GetStore()
 	require.NoError(t, err)
-	assert.Len(t, ms2.Messages, 1)
-	assert.Equal(t, "Hello", ms2.Messages[0].Content)
-	assert.NotZero(t, ms2.Messages[0].ReceivedAt)
+	loaded, err := s.GetMessage("msg1")
+	require.NoError(t, err)
+	require.NotNil(t, loaded)
+	assert.Equal(t, "Hello", loaded.Content)
+	assert.NotZero(t, loaded.ReceivedAt)
 }
 
 func TestGetConversation(t *testing.T) {
-	ms := &types.MessageStore{
-		Messages: []types.StoredMessage{
-			{ID: "1", SenderNpub: "npub1alice", RecipientNpub: "npub1bob", Content: "Hi", CreatedAt: 3000},
-			{ID: "2", SenderNpub: "npub1bob", RecipientNpub: "npub1alice", Content: "Hey", CreatedAt: 2000},
-			{ID: "3", SenderNpub: "npub1alice", RecipientNpub: "npub1jack", Content: "Yo", CreatedAt: 1000},
-		},
+	resetStore(t)
+	ms, _ := LoadMessageStore()
+
+	msgs := []types.StoredMessage{
+		{ID: "1", SenderNpub: "npub1alice", RecipientNpub: "npub1bob", Content: "Hi", CreatedAt: 3000},
+		{ID: "2", SenderNpub: "npub1bob", RecipientNpub: "npub1alice", Content: "Hey", CreatedAt: 2000},
+		{ID: "3", SenderNpub: "npub1alice", RecipientNpub: "npub1jack", Content: "Yo", CreatedAt: 1000},
+	}
+	for _, m := range msgs {
+		require.NoError(t, AddMessage(ms, m))
 	}
 
-	conv := GetConversation(ms, "npub1alice", "npub1bob", 10)
+	conv, err := GetConversation(ms, "npub1alice", "npub1bob", 10)
+	require.NoError(t, err)
 	require.Len(t, conv, 2)
 	assert.Equal(t, "Hi", conv[0].Content) // newest first
 	assert.Equal(t, "Hey", conv[1].Content)
 
-	convLimited := GetConversation(ms, "npub1alice", "npub1bob", 1)
+	convLimited, err := GetConversation(ms, "npub1alice", "npub1bob", 1)
+	require.NoError(t, err)
 	require.Len(t, convLimited, 1)
 	assert.Equal(t, "Hi", convLimited[0].Content)
 }
 
 func TestGetInbox(t *testing.T) {
-	ms := &types.MessageStore{
-		Messages: []types.StoredMessage{
-			{ID: "1", SenderNpub: "npub1alice", RecipientNpub: "npub1bob", Content: "Hi", CreatedAt: 3000},
-			{ID: "2", SenderNpub: "npub1jack", RecipientNpub: "npub1bob", Content: "Hey", CreatedAt: 2000},
-			{ID: "3", SenderNpub: "npub1bob", RecipientNpub: "npub1alice", Content: "Yo", CreatedAt: 1000},
-		},
+	resetStore(t)
+	ms, _ := LoadMessageStore()
+
+	msgs := []types.StoredMessage{
+		{ID: "1", SenderNpub: "npub1alice", RecipientNpub: "npub1bob", Content: "Hi", CreatedAt: 3000},
+		{ID: "2", SenderNpub: "npub1jack", RecipientNpub: "npub1bob", Content: "Hey", CreatedAt: 2000},
+		{ID: "3", SenderNpub: "npub1bob", RecipientNpub: "npub1alice", Content: "Yo", CreatedAt: 1000},
+	}
+	for _, m := range msgs {
+		require.NoError(t, AddMessage(ms, m))
 	}
 
-	inbox := GetInbox(ms, "npub1bob", 10)
+	inbox, err := GetInbox(ms, "npub1bob", 10)
+	require.NoError(t, err)
 	require.Len(t, inbox, 2)
 	assert.Equal(t, "Hi", inbox[0].Content)
 	assert.Equal(t, "Hey", inbox[1].Content)
 }
 
-func TestGetUnreadCount(t *testing.T) {
-	ms := &types.MessageStore{
-		Messages: []types.StoredMessage{
-			{SenderNpub: "npub1alice", RecipientNpub: "npub1bob"},
-			{SenderNpub: "npub1jack", RecipientNpub: "npub1bob"},
-			{SenderNpub: "npub1bob", RecipientNpub: "npub1alice"},
-		},
+func TestGetReceivedCount(t *testing.T) {
+	resetStore(t)
+	ms, _ := LoadMessageStore()
+
+	msgs := []types.StoredMessage{
+		{ID: "1", SenderNpub: "npub1alice", RecipientNpub: "npub1bob"},
+		{ID: "2", SenderNpub: "npub1jack", RecipientNpub: "npub1bob"},
+		{ID: "3", SenderNpub: "npub1bob", RecipientNpub: "npub1alice"},
 	}
-	assert.Equal(t, 2, GetUnreadCount(ms, "npub1bob"))
-	assert.Equal(t, 1, GetUnreadCount(ms, "npub1alice"))
+	for _, m := range msgs {
+		m.CreatedAt = 1000
+		m.ReceivedAt = 1000
+		require.NoError(t, AddMessage(ms, m))
+	}
+
+	count, err := GetReceivedCount(ms, "npub1bob")
+	require.NoError(t, err)
+	assert.Equal(t, 2, count)
+
+	count, err = GetReceivedCount(ms, "npub1alice")
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
 }
 
 func TestStoreOutgoingMessage(t *testing.T) {
-	setupTempMessageStore(t)
+	resetStore(t)
 	event := &nostr.Event{
 		Kind:    30078,
 		Content: "compressed content",
@@ -105,14 +144,17 @@ func TestStoreOutgoingMessage(t *testing.T) {
 	err := StoreOutgoingMessage(event, "npub1bob", "plaintext", true)
 	require.NoError(t, err)
 
-	ms, _ := LoadMessageStore()
-	require.Len(t, ms.Messages, 1)
-	assert.False(t, ms.Messages[0].IsIncoming)
-	assert.True(t, ms.Messages[0].IsEncrypted)
+	s, err := GetStore()
+	require.NoError(t, err)
+	msg, err := s.GetMessage(string(event.ID[:]))
+	require.NoError(t, err)
+	require.NotNil(t, msg)
+	assert.False(t, msg.IsIncoming)
+	assert.True(t, msg.IsEncrypted)
 }
 
 func TestStoreIncomingMessage(t *testing.T) {
-	setupTempMessageStore(t)
+	resetStore(t)
 	event := &nostr.Event{
 		Kind:    30078,
 		Content: "compressed content",
@@ -124,8 +166,11 @@ func TestStoreIncomingMessage(t *testing.T) {
 	err := StoreIncomingMessage(event, "plaintext", false)
 	require.NoError(t, err)
 
-	ms, _ := LoadMessageStore()
-	require.Len(t, ms.Messages, 1)
-	assert.True(t, ms.Messages[0].IsIncoming)
-	assert.False(t, ms.Messages[0].IsEncrypted)
+	s, err := GetStore()
+	require.NoError(t, err)
+	msg, err := s.GetMessage(string(event.ID[:]))
+	require.NoError(t, err)
+	require.NotNil(t, msg)
+	assert.True(t, msg.IsIncoming)
+	assert.False(t, msg.IsEncrypted)
 }

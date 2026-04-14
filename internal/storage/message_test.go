@@ -1,18 +1,17 @@
 package storage
 
 import (
-	"os"
 	"testing"
 
 	"fiatjaf.com/nostr"
-	"github.com/jason/agent-speaker/pkg/types"
+	"github.com/AuraAIHQ/agent-speaker/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func setupTestDB(t *testing.T) (*MessageStore, func()) {
 	tempDir := t.TempDir()
-	os.Setenv("HOME", tempDir)
+	t.Setenv("HOME", tempDir)
 
 	db, err := InitDB()
 	require.NoError(t, err)
@@ -21,8 +20,6 @@ func setupTestDB(t *testing.T) (*MessageStore, func()) {
 
 	cleanup := func() {
 		db.Close()
-		os.RemoveAll(tempDir)
-		os.Unsetenv("HOME")
 	}
 
 	return store, cleanup

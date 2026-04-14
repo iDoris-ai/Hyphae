@@ -2,11 +2,14 @@ package storage
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
-	"github.com/jason/agent-speaker/internal/identity"
+	"github.com/AuraAIHQ/agent-speaker/internal/identity"
+	"github.com/AuraAIHQ/agent-speaker/pkg/types"
 	_ "modernc.org/sqlite"
 )
 
@@ -14,14 +17,20 @@ import (
 var DB *sql.DB
 
 // GetDBPath returns the path to the SQLite database
-func GetDBPath() string {
-	path, _ := identity.EnsureKeyStore()
-	return filepath.Join(path, "messages.db")
+func GetDBPath() (string, error) {
+	path, err := identity.EnsureKeyStore()
+	if err != nil {
+		return "", fmt.Errorf("failed to ensure keystore directory: %w", err)
+	}
+	return filepath.Join(path, "messages.db"), nil
 }
 
 // InitDB initializes the SQLite database
 func InitDB() (*sql.DB, error) {
-	dbPath := GetDBPath()
+	dbPath, err := GetDBPath()
+	if err != nil {
+		return nil, err
+	}
 
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -30,16 +39,29 @@ func InitDB() (*sql.DB, error) {
 
 	// Test connection
 	if err := db.Ping(); err != nil {
+		_ = db.Close()
 		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
+
+	// Enable WAL mode for better concurrency
+	if _, err := db.Exec("PRAGMA journal_mode = WAL"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("failed to enable WAL mode: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA synchronous = NORMAL"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("failed to set synchronous mode: %w", err)
 	}
 
 	// Enable foreign keys
 	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		_ = db.Close()
 		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
 	}
 
 	// Run migrations
 	if err := migrate(db); err != nil {
+		_ = db.Close()
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
 
@@ -96,7 +118,7 @@ func migrate(db *sql.DB) error {
 }
 
 // MigrateFromJSON migrates existing JSON data to SQLite
-func MigrateFromJSON() error {
+func MigrateFromJSON(db *sql.DB) error {
 	jsonPath := filepath.Join(identity.GetKeyStorePath(), "messages.json")
 
 	// Check if JSON file exists
@@ -115,8 +137,38 @@ func MigrateFromJSON() error {
 		return nil
 	}
 
-	// TODO: Parse JSON and insert into SQLite
-	// For now, just rename the file as backup
+	// Parse JSON
+	var ms types.MessageStore
+	if err := json.Unmarshal(data, &ms); err != nil {
+		return fmt.Errorf("failed to parse JSON file: %w", err)
+	}
+
+	// Insert messages into SQLite within a transaction
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin migration transaction: %w", err)
+	}
+
+	store := NewMessageStore(tx)
+	for _, msg := range ms.Messages {
+		// Set defaults for legacy messages that may be missing fields
+		if msg.ReceivedAt == 0 {
+			msg.ReceivedAt = time.Now().Unix()
+		}
+		if msg.ID == "" {
+			msg.ID = fmt.Sprintf("legacy-%d", msg.CreatedAt)
+		}
+		if err := store.StoreMessage(&msg); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("failed to store migrated message %s: %w", msg.ID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit migration transaction: %w", err)
+	}
+
+	// Rename the file as backup after successful migration
 	backupPath := jsonPath + ".backup"
 	if err := os.Rename(jsonPath, backupPath); err != nil {
 		return fmt.Errorf("failed to backup JSON file: %w", err)

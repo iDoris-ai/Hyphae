@@ -3,20 +3,27 @@ package storage
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"fiatjaf.com/nostr"
-	"github.com/jason/agent-speaker/internal/common"
-	"github.com/jason/agent-speaker/pkg/types"
+	"github.com/AuraAIHQ/agent-speaker/internal/common"
+	"github.com/AuraAIHQ/agent-speaker/pkg/types"
 )
+
+type sqlExecutor interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
 
 // MessageStore provides database operations for messages
 type MessageStore struct {
-	db *sql.DB
+	db sqlExecutor
 }
 
 // NewMessageStore creates a new message store
-func NewMessageStore(db *sql.DB) *MessageStore {
+func NewMessageStore(db sqlExecutor) *MessageStore {
 	return &MessageStore{db: db}
 }
 
@@ -29,6 +36,11 @@ func (s *MessageStore) StoreMessage(msg *types.StoredMessage) error {
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
+	receivedAt := msg.ReceivedAt
+	if receivedAt == 0 {
+		receivedAt = time.Now().Unix()
+	}
+
 	_, err := s.db.Exec(query,
 		msg.ID,
 		msg.ID, // event_id same as id for now
@@ -37,7 +49,7 @@ func (s *MessageStore) StoreMessage(msg *types.StoredMessage) error {
 		msg.Content,
 		msg.Plaintext,
 		msg.CreatedAt,
-		time.Now().Unix(), // received_at
+		receivedAt,
 		msg.IsEncrypted,
 		msg.IsIncoming,
 		msg.Relay,
@@ -124,6 +136,19 @@ func (s *MessageStore) GetInbox(userNpub string, limit int) ([]types.StoredMessa
 	return s.scanMessages(rows)
 }
 
+// GetReceivedCount returns the total received message count for a user
+func (s *MessageStore) GetReceivedCount(userNpub string) (int, error) {
+	var count int
+	err := s.db.QueryRow(
+		"SELECT COUNT(*) FROM messages WHERE recipient_npub = ?",
+		userNpub,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count received messages: %w", err)
+	}
+	return count, nil
+}
+
 // GetSent retrieves messages sent by a user
 func (s *MessageStore) GetSent(userNpub string, limit int) ([]types.StoredMessage, error) {
 	query := `
@@ -144,15 +169,16 @@ func (s *MessageStore) GetSent(userNpub string, limit int) ([]types.StoredMessag
 	return s.scanMessages(rows)
 }
 
-// SearchMessages searches messages by content
+// SearchMessages searches messages by content (case-insensitive)
 func (s *MessageStore) SearchMessages(userNpub, query string, limit int) ([]types.StoredMessage, error) {
-	searchQuery := `%` + query + `%`
+	// Application-level lowercasing for better Unicode support than SQLite's LOWER()
+	searchQuery := "%" + strings.ToLower(query) + "%"
 	sqlQuery := `
 		SELECT id, sender_npub, recipient_npub, content, plaintext,
 		       created_at, received_at, is_encrypted, is_incoming, relay
 		FROM messages
 		WHERE (sender_npub = ? OR recipient_npub = ?)
-		  AND (plaintext LIKE ? OR content LIKE ?)
+		  AND (LOWER(plaintext) LIKE ? OR LOWER(content) LIKE ?)
 		ORDER BY created_at DESC
 		LIMIT ?
 	`
@@ -170,48 +196,27 @@ func (s *MessageStore) SearchMessages(userNpub, query string, limit int) ([]type
 func (s *MessageStore) GetStats(userNpub string) (map[string]int, error) {
 	stats := make(map[string]int)
 
-	// Total messages
-	var total int
-	err := s.db.QueryRow(
-		"SELECT COUNT(*) FROM messages WHERE sender_npub = ? OR recipient_npub = ?",
-		userNpub, userNpub,
-	).Scan(&total)
+	query := `
+		SELECT
+			COUNT(*) AS total,
+			SUM(CASE WHEN recipient_npub = ? THEN 1 ELSE 0 END) AS incoming,
+			SUM(CASE WHEN sender_npub = ? THEN 1 ELSE 0 END) AS outgoing,
+			SUM(CASE WHEN is_encrypted = 1 THEN 1 ELSE 0 END) AS encrypted
+		FROM messages
+		WHERE sender_npub = ? OR recipient_npub = ?
+	`
+
+	var total, incoming, outgoing, encrypted int
+	err := s.db.QueryRow(query, userNpub, userNpub, userNpub, userNpub).Scan(
+		&total, &incoming, &outgoing, &encrypted,
+	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get stats: %w", err)
 	}
+
 	stats["total"] = total
-
-	// Incoming
-	var incoming int
-	err = s.db.QueryRow(
-		"SELECT COUNT(*) FROM messages WHERE recipient_npub = ?",
-		userNpub,
-	).Scan(&incoming)
-	if err != nil {
-		return nil, err
-	}
 	stats["incoming"] = incoming
-
-	// Outgoing
-	var outgoing int
-	err = s.db.QueryRow(
-		"SELECT COUNT(*) FROM messages WHERE sender_npub = ?",
-		userNpub,
-	).Scan(&outgoing)
-	if err != nil {
-		return nil, err
-	}
 	stats["outgoing"] = outgoing
-
-	// Encrypted
-	var encrypted int
-	err = s.db.QueryRow(
-		"SELECT COUNT(*) FROM messages WHERE (sender_npub = ? OR recipient_npub = ?) AND is_encrypted = 1",
-		userNpub, userNpub,
-	).Scan(&encrypted)
-	if err != nil {
-		return nil, err
-	}
 	stats["encrypted"] = encrypted
 
 	return stats, nil
