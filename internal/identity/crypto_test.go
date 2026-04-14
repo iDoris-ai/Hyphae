@@ -40,7 +40,9 @@ func TestCreateAndVerifyVerification(t *testing.T) {
 	assert.NotEmpty(t, saltB64)
 	assert.NotEmpty(t, verificationB64)
 
-	key, err := deriveMasterKey(password, mustDecodeB64(saltB64))
+	saltBytes, err := mustDecodeB64(saltB64)
+	require.NoError(t, err)
+	key, err := deriveMasterKey(password, saltBytes)
 	require.NoError(t, err)
 	assert.True(t, verifyMasterKey(verificationB64, key))
 

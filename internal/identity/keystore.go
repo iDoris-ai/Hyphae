@@ -378,7 +378,11 @@ func ChangePassword(ks *types.KeyStore, oldPassword, newPassword string) error {
 		return fmt.Errorf("failed to setup new encryption: %w", err)
 	}
 
-	newKey, err := deriveMasterKey(newPassword, mustDecodeB64(saltB64))
+	saltBytes, err := base64.StdEncoding.DecodeString(saltB64)
+	if err != nil {
+		return fmt.Errorf("invalid salt: %w", err)
+	}
+	newKey, err := deriveMasterKey(newPassword, saltBytes)
 	if err != nil {
 		return err
 	}
@@ -399,7 +403,10 @@ func ChangePassword(ks *types.KeyStore, oldPassword, newPassword string) error {
 	return SaveKeyStore(ks)
 }
 
-func mustDecodeB64(s string) []byte {
-	b, _ := base64.StdEncoding.DecodeString(s)
-	return b
+func mustDecodeB64(s string) ([]byte, error) {
+	b, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		return nil, fmt.Errorf("invalid base64: %w", err)
+	}
+	return b, nil
 }

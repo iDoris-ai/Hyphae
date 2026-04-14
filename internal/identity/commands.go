@@ -231,7 +231,11 @@ Identities are stored in ~/.agent-speaker/ with 600 permissions.`,
 					if err != nil {
 						return fmt.Errorf("failed to setup encryption: %w", err)
 					}
-					key, err := deriveMasterKey(pw, mustDecodeB64(saltB64))
+					saltBytes, err := mustDecodeB64(saltB64)
+					if err != nil {
+						return fmt.Errorf("failed to decode salt: %w", err)
+					}
+					key, err := deriveMasterKey(pw, saltBytes)
 					if err != nil {
 						return err
 					}

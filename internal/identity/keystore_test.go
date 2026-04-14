@@ -145,7 +145,9 @@ func TestEncryptUnencryptedKeystore(t *testing.T) {
 	pw := "newpass"
 	saltB64, verificationB64, err := createVerification(pw)
 	require.NoError(t, err)
-	key, err := deriveMasterKey(pw, mustDecodeB64(saltB64))
+	saltBytes, err := mustDecodeB64(saltB64)
+	require.NoError(t, err)
+	key, err := deriveMasterKey(pw, saltBytes)
 	require.NoError(t, err)
 	for _, identity := range ks.Identities {
 		encrypted, err := encryptWithKey(identity.Nsec, key)

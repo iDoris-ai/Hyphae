@@ -15,14 +15,20 @@ import (
 )
 
 // GetMessageStorePath returns the path to message store
-func GetMessageStorePath() string {
-	path, _ := identity.EnsureKeyStore()
-	return filepath.Join(path, "messages.json")
+func GetMessageStorePath() (string, error) {
+	path, err := identity.EnsureKeyStore()
+	if err != nil {
+		return "", fmt.Errorf("failed to ensure keystore: %w", err)
+	}
+	return filepath.Join(path, "messages.json"), nil
 }
 
 // LoadMessageStore loads messages from disk
 func LoadMessageStore() (*types.MessageStore, error) {
-	file := GetMessageStorePath()
+	file, err := GetMessageStorePath()
+	if err != nil {
+		return nil, err
+	}
 
 	ms := &types.MessageStore{
 		Messages: make([]types.StoredMessage, 0),
@@ -45,7 +51,10 @@ func LoadMessageStore() (*types.MessageStore, error) {
 
 // SaveMessageStore saves messages to disk
 func SaveMessageStore(ms *types.MessageStore) error {
-	file := GetMessageStorePath()
+	file, err := GetMessageStorePath()
+	if err != nil {
+		return err
+	}
 
 	data, err := json.MarshalIndent(ms, "", "  ")
 	if err != nil {
