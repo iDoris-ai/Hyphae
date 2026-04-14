@@ -8,19 +8,25 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
-	"github.com/jason/agent-speaker/internal/identity"
-	"github.com/jason/agent-speaker/pkg/types"
+	"github.com/AuraAIHQ/agent-speaker/internal/identity"
+	"github.com/AuraAIHQ/agent-speaker/pkg/types"
 )
 
 // GetOutboxPath returns the path to outbox file
-func GetOutboxPath() string {
-	path, _ := identity.EnsureKeyStore()
-	return filepath.Join(path, "outbox.json")
+func GetOutboxPath() (string, error) {
+	path, err := identity.EnsureKeyStore()
+	if err != nil {
+		return "", fmt.Errorf("failed to ensure keystore: %w", err)
+	}
+	return filepath.Join(path, "outbox.json"), nil
 }
 
 // LoadOutbox loads outbox from disk
 func LoadOutbox() (*types.Outbox, error) {
-	file := GetOutboxPath()
+	file, err := GetOutboxPath()
+	if err != nil {
+		return nil, err
+	}
 
 	ob := &types.Outbox{
 		Entries: make([]types.OutboxEntry, 0),
@@ -43,7 +49,10 @@ func LoadOutbox() (*types.Outbox, error) {
 
 // SaveOutbox saves outbox to disk
 func SaveOutbox(ob *types.Outbox) error {
-	file := GetOutboxPath()
+	file, err := GetOutboxPath()
+	if err != nil {
+		return err
+	}
 
 	data, err := json.MarshalIndent(ob, "", "  ")
 	if err != nil {

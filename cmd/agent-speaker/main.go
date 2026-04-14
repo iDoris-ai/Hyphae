@@ -6,10 +6,10 @@ import (
 	"os"
 
 	"github.com/fatih/color"
-	"github.com/jason/agent-speaker/internal/daemon"
-	"github.com/jason/agent-speaker/internal/identity"
-	"github.com/jason/agent-speaker/internal/messaging"
-	"github.com/jason/agent-speaker/internal/nostr"
+	"github.com/AuraAIHQ/agent-speaker/internal/daemon"
+	"github.com/AuraAIHQ/agent-speaker/internal/identity"
+	"github.com/AuraAIHQ/agent-speaker/internal/messaging"
+	"github.com/AuraAIHQ/agent-speaker/internal/nostr"
 	"github.com/urfave/cli/v3"
 )
 

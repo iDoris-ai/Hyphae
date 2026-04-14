@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,8 +9,8 @@ import (
 	"syscall"
 
 	"fiatjaf.com/nostr"
-	"github.com/jason/agent-speaker/internal/common"
-	"github.com/jason/agent-speaker/pkg/types"
+	"github.com/AuraAIHQ/agent-speaker/internal/common"
+	"github.com/AuraAIHQ/agent-speaker/pkg/types"
 	"golang.org/x/term"
 )
 
@@ -42,6 +43,24 @@ func EnsureKeyStore() (string, error) {
 	}
 
 	return path, nil
+}
+
+// LoadAndUnlockKeyStore loads the keystore and prompts for password if encrypted
+func LoadAndUnlockKeyStore() (*types.KeyStore, error) {
+	ks, err := LoadKeyStore()
+	if err != nil {
+		return nil, err
+	}
+	if ks.Encrypted && ks.MasterKey == nil {
+		pw, err := PromptPassword("Keystore password: ")
+		if err != nil {
+			return nil, fmt.Errorf("failed to read password: %w", err)
+		}
+		if err := UnlockKeyStore(ks, pw); err != nil {
+			return nil, fmt.Errorf("failed to unlock keystore: %w", err)
+		}
+	}
+	return ks, nil
 }
 
 // LoadKeyStore loads the keystore from disk
@@ -91,8 +110,32 @@ func SaveKeyStore(ks *types.KeyStore) error {
 	return nil
 }
 
-// CreateIdentity creates a new identity with the given nickname
+// UnlockKeyStore verifies the password and sets the master key on the keystore
+func UnlockKeyStore(ks *types.KeyStore, password string) error {
+	if !ks.Encrypted {
+		return nil
+	}
+	return unlockKeyStore(ks, password)
+}
+
+// requireMasterKey ensures the keystore is unlocked if encrypted
+func requireMasterKey(ks *types.KeyStore) error {
+	if !ks.Encrypted {
+		return nil
+	}
+	if ks.MasterKey == nil {
+		return fmt.Errorf("keystore is locked; please unlock with password first")
+	}
+	return nil
+}
+
+// CreateIdentity creates a new identity with the given nickname (unencrypted, for backward compatibility)
 func CreateIdentity(ks *types.KeyStore, nickname string) (*types.Identity, error) {
+	return CreateIdentityWithPassword(ks, nickname, "")
+}
+
+// CreateIdentityWithPassword creates a new identity with optional password encryption
+func CreateIdentityWithPassword(ks *types.KeyStore, nickname, password string) (*types.Identity, error) {
 	if _, exists := ks.Identities[nickname]; exists {
 		return nil, fmt.Errorf("identity '%s' already exists", nickname)
 	}
@@ -101,10 +144,39 @@ func CreateIdentity(ks *types.KeyStore, nickname string) (*types.Identity, error
 	sk := nostr.Generate()
 	pk := sk.Public()
 
+	nsec := common.EncodeNsec(sk)
+
+	// Handle encryption
+	if password != "" {
+		if !ks.Encrypted {
+			// First encrypted identity: setup keystore encryption
+			saltB64, verificationB64, err := createVerification(password)
+			if err != nil {
+				return nil, fmt.Errorf("failed to setup encryption: %w", err)
+			}
+			ks.Encrypted = true
+			ks.Salt = saltB64
+			ks.Verification = verificationB64
+		}
+
+		if err := requireMasterKey(ks); err != nil {
+			// Unlock with the provided password
+			if err := UnlockKeyStore(ks, password); err != nil {
+				return nil, fmt.Errorf("failed to unlock keystore: %w", err)
+			}
+		}
+
+		encryptedNsec, err := encryptWithKey(nsec, *ks.MasterKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encrypt nsec: %w", err)
+		}
+		nsec = encryptedNsec
+	}
+
 	identity := &types.Identity{
 		Nickname: nickname,
 		Npub:     common.EncodeNpub(pk),
-		Nsec:     common.EncodeNsec(sk),
+		Nsec:     nsec,
 		Created:  int64(nostr.Now()),
 	}
 
@@ -139,7 +211,19 @@ func GetSecretKey(ks *types.KeyStore, nickname string) (nostr.SecretKey, error) 
 		return nostr.SecretKey{}, err
 	}
 
-	return common.ParseSecretKey(identity.Nsec)
+	nsec := identity.Nsec
+	if ks.Encrypted {
+		if err := requireMasterKey(ks); err != nil {
+			return nostr.SecretKey{}, err
+		}
+		decrypted, err := decryptWithKey(nsec, *ks.MasterKey)
+		if err != nil {
+			return nostr.SecretKey{}, fmt.Errorf("failed to decrypt nsec: %w", err)
+		}
+		nsec = decrypted
+	}
+
+	return common.ParseSecretKey(nsec)
 }
 
 // GetPublicKey gets the public key for an identity
@@ -231,7 +315,7 @@ func ListContacts(ks *types.KeyStore) []*types.Contact {
 	return list
 }
 
-// PromptPassword securely prompts for password (for future encryption)
+// PromptPassword securely prompts for password
 func PromptPassword(prompt string) (string, error) {
 	if prompt == "" {
 		prompt = "Password: "
@@ -245,4 +329,77 @@ func PromptPassword(prompt string) (string, error) {
 	}
 
 	return string(bytePassword), nil
+}
+
+// PromptPasswordWithConfirm prompts for a new password twice and confirms they match
+func PromptPasswordWithConfirm() (string, error) {
+	pw1, err := PromptPassword("Enter password: ")
+	if err != nil {
+		return "", err
+	}
+	if pw1 == "" {
+		return "", fmt.Errorf("password cannot be empty")
+	}
+
+	pw2, err := PromptPassword("Confirm password: ")
+	if err != nil {
+		return "", err
+	}
+	if pw1 != pw2 {
+		return "", fmt.Errorf("passwords do not match")
+	}
+
+	return pw1, nil
+}
+
+// ChangePassword changes the keystore password and re-encrypts all nsecs
+func ChangePassword(ks *types.KeyStore, oldPassword, newPassword string) error {
+	if !ks.Encrypted {
+		return fmt.Errorf("keystore is not encrypted")
+	}
+
+	if err := UnlockKeyStore(ks, oldPassword); err != nil {
+		return fmt.Errorf("failed to unlock keystore: %w", err)
+	}
+
+	// Decrypt all nsecs with old key
+	decryptedNsecs := make(map[string]string)
+	for nickname, identity := range ks.Identities {
+		nsec, err := decryptWithKey(identity.Nsec, *ks.MasterKey)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt nsec for %s: %w", nickname, err)
+		}
+		decryptedNsecs[nickname] = nsec
+	}
+
+	// Create new encryption parameters
+	saltB64, verificationB64, err := createVerification(newPassword)
+	if err != nil {
+		return fmt.Errorf("failed to setup new encryption: %w", err)
+	}
+
+	newKey, err := deriveMasterKey(newPassword, mustDecodeB64(saltB64))
+	if err != nil {
+		return err
+	}
+
+	// Re-encrypt all nsecs with new key
+	for nickname, nsec := range decryptedNsecs {
+		encrypted, err := encryptWithKey(nsec, newKey)
+		if err != nil {
+			return fmt.Errorf("failed to encrypt nsec for %s: %w", nickname, err)
+		}
+		ks.Identities[nickname].Nsec = encrypted
+	}
+
+	ks.Salt = saltB64
+	ks.Verification = verificationB64
+	ks.MasterKey = &newKey
+
+	return SaveKeyStore(ks)
+}
+
+func mustDecodeB64(s string) []byte {
+	b, _ := base64.StdEncoding.DecodeString(s)
+	return b
 }

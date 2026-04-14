@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
-	"github.com/jason/agent-speaker/internal/common"
-	"github.com/jason/agent-speaker/internal/identity"
-	"github.com/jason/agent-speaker/pkg/types"
+	"github.com/AuraAIHQ/agent-speaker/internal/common"
+	"github.com/AuraAIHQ/agent-speaker/internal/identity"
+	"github.com/AuraAIHQ/agent-speaker/pkg/types"
 )
 
 // GetMessageStorePath returns the path to message store

@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
-	"github.com/jason/agent-speaker/internal/common"
-	"github.com/jason/agent-speaker/internal/identity"
-	"github.com/jason/agent-speaker/pkg/crypto"
+	"github.com/AuraAIHQ/agent-speaker/internal/common"
+	"github.com/AuraAIHQ/agent-speaker/internal/identity"
+	"github.com/AuraAIHQ/agent-speaker/pkg/crypto"
 	"github.com/klauspost/compress/zstd"
 	"github.com/urfave/cli/v3"
 )

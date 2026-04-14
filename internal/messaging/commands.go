@@ -7,8 +7,8 @@ import (
 	"text/tabwriter"
 
 	"github.com/urfave/cli/v3"
-	"github.com/jason/agent-speaker/internal/common"
-	"github.com/jason/agent-speaker/internal/identity"
+	"github.com/AuraAIHQ/agent-speaker/internal/common"
+	"github.com/AuraAIHQ/agent-speaker/internal/identity"
 )
 
 // HistoryCmd manages message history

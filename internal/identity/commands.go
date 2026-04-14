@@ -6,6 +6,7 @@ import (
 	"os"
 	"text/tabwriter"
 
+	"github.com/AuraAIHQ/agent-speaker/pkg/types"
 	"github.com/fatih/color"
 	"github.com/urfave/cli/v3"
 )
@@ -32,6 +33,15 @@ Identities are stored in ~/.agent-speaker/ with 600 permissions.`,
 					Aliases: []string{"d"},
 					Usage:   "Set as default identity",
 				},
+				&cli.StringFlag{
+					Name:    "password",
+					Aliases: []string{"p"},
+					Usage:   "Password to encrypt keystore (recommended)",
+				},
+				&cli.BoolFlag{
+					Name:  "password-prompt",
+					Usage: "Prompt for password interactively",
+				},
 			},
 			Action: func(ctx context.Context, c *cli.Command) error {
 				ks, err := LoadKeyStore()
@@ -40,9 +50,38 @@ Identities are stored in ~/.agent-speaker/ with 600 permissions.`,
 				}
 
 				nickname := c.String("nickname")
-				identity, err := CreateIdentity(ks, nickname)
-				if err != nil {
-					return err
+				var identity interface{}
+
+				if ks.Encrypted {
+					// Must unlock existing keystore first
+					pw, err := PromptPassword("Keystore password: ")
+					if err != nil {
+						return fmt.Errorf("failed to read password: %w", err)
+					}
+					if err := UnlockKeyStore(ks, pw); err != nil {
+						return fmt.Errorf("failed to unlock keystore: %w", err)
+					}
+					identity, err = CreateIdentityWithPassword(ks, nickname, "")
+					if err != nil {
+						return err
+					}
+				} else if c.String("password") != "" || c.Bool("password-prompt") {
+					pw := c.String("password")
+					if pw == "" {
+						pw, err = PromptPasswordWithConfirm()
+						if err != nil {
+							return fmt.Errorf("failed to set password: %w", err)
+						}
+					}
+					identity, err = CreateIdentityWithPassword(ks, nickname, pw)
+					if err != nil {
+						return err
+					}
+				} else {
+					identity, err = CreateIdentity(ks, nickname)
+					if err != nil {
+						return err
+					}
 				}
 
 				if c.Bool("default") {
@@ -53,10 +92,15 @@ Identities are stored in ~/.agent-speaker/ with 600 permissions.`,
 
 				green := color.New(color.FgGreen).SprintFunc()
 				yellow := color.New(color.FgYellow).SprintFunc()
+				cyan := color.New(color.FgCyan).SprintFunc()
 
+				id := identity.(*types.Identity)
 				fmt.Printf("✅ Created identity '%s'\n", green(nickname))
-				fmt.Printf("   Npub: %s\n", yellow(identity.Npub))
+				fmt.Printf("   Npub: %s\n", yellow(id.Npub))
 				fmt.Printf("   Nsec: %s (stored securely)\n", yellow("[hidden]"))
+				if ks.Encrypted {
+					fmt.Printf("   Encryption: %s\n", cyan("AES-256-GCM + scrypt"))
+				}
 				fmt.Printf("\n🔐 Keys stored in ~/.agent-speaker/ (permissions: 600)\n")
 
 				return nil
@@ -80,7 +124,7 @@ Identities are stored in ~/.agent-speaker/ with 600 permissions.`,
 
 				fmt.Println("👤 Identities:")
 				w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-				fmt.Fprintln(w, "NICKNAME\tNPUB\tDEFAULT")
+				fmt.Fprintln(w, "NICKNAME\tNPUB\tDEFAULT\tENCRYPTED")
 
 				for _, identity := range identities {
 					defaultMark := ""
@@ -88,7 +132,11 @@ Identities are stored in ~/.agent-speaker/ with 600 permissions.`,
 						defaultMark = "✓"
 					}
 					npubShort := identity.Npub[:20] + "..."
-					fmt.Fprintf(w, "%s\t%s\t%s\n", identity.Nickname, npubShort, defaultMark)
+					encryptedMark := ""
+					if ks.Encrypted {
+						encryptedMark = "🔐"
+					}
+					fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", identity.Nickname, npubShort, defaultMark, encryptedMark)
 				}
 				w.Flush()
 
@@ -132,7 +180,7 @@ Identities are stored in ~/.agent-speaker/ with 600 permissions.`,
 				},
 			},
 			Action: func(ctx context.Context, c *cli.Command) error {
-				ks, err := LoadKeyStore()
+				ks, err := LoadAndUnlockKeyStore()
 				if err != nil {
 					return fmt.Errorf("failed to load keystore: %w", err)
 				}
@@ -143,14 +191,80 @@ Identities are stored in ~/.agent-speaker/ with 600 permissions.`,
 					return err
 				}
 
+				nsec := identity.Nsec
+				if ks.Encrypted {
+					dnsec, err := decryptWithKey(identity.Nsec, *ks.MasterKey)
+					if err != nil {
+						return fmt.Errorf("failed to decrypt nsec: %w", err)
+					}
+					nsec = dnsec
+				}
+
 				red := color.New(color.FgRed).SprintFunc()
 				fmt.Println(red("⚠️  WARNING: You are about to expose your private key!"))
 				fmt.Println(red("   Never share this with anyone or store it insecurely."))
 				fmt.Println()
 				fmt.Printf("Identity: %s\n", identity.Nickname)
 				fmt.Printf("Npub:     %s\n", identity.Npub)
-				fmt.Printf("Nsec:     %s\n", identity.Nsec)
+				fmt.Printf("Nsec:     %s\n", nsec)
 
+				return nil
+			},
+		},
+		{
+			Name:  "change-password",
+			Usage: "Change keystore password",
+			Action: func(ctx context.Context, c *cli.Command) error {
+				ks, err := LoadKeyStore()
+				if err != nil {
+					return fmt.Errorf("failed to load keystore: %w", err)
+				}
+
+				if !ks.Encrypted {
+					// Encrypt an unencrypted keystore
+					pw, err := PromptPasswordWithConfirm()
+					if err != nil {
+						return fmt.Errorf("failed to set password: %w", err)
+					}
+					// Encrypt all existing nsecs
+					saltB64, verificationB64, err := createVerification(pw)
+					if err != nil {
+						return fmt.Errorf("failed to setup encryption: %w", err)
+					}
+					key, err := deriveMasterKey(pw, mustDecodeB64(saltB64))
+					if err != nil {
+						return err
+					}
+					for nickname, identity := range ks.Identities {
+						encrypted, err := encryptWithKey(identity.Nsec, key)
+						if err != nil {
+							return fmt.Errorf("failed to encrypt nsec for %s: %w", nickname, err)
+						}
+						identity.Nsec = encrypted
+					}
+					ks.Encrypted = true
+					ks.Salt = saltB64
+					ks.Verification = verificationB64
+					ks.MasterKey = &key
+					if err := SaveKeyStore(ks); err != nil {
+						return err
+					}
+					fmt.Println("✅ Keystore encrypted successfully")
+					return nil
+				}
+
+				oldPw, err := PromptPassword("Current password: ")
+				if err != nil {
+					return fmt.Errorf("failed to read password: %w", err)
+				}
+				newPw, err := PromptPasswordWithConfirm()
+				if err != nil {
+					return fmt.Errorf("failed to set new password: %w", err)
+				}
+				if err := ChangePassword(ks, oldPw, newPw); err != nil {
+					return fmt.Errorf("failed to change password: %w", err)
+				}
+				fmt.Println("✅ Password changed successfully")
 				return nil
 			},
 		},

@@ -1,10 +1,9 @@
-module github.com/jason/agent-speaker
+module github.com/AuraAIHQ/agent-speaker
 
 go 1.25.0
 
 require (
 	fiatjaf.com/nostr v0.0.0-20260402062956-72a5be58d755
-	github.com/btcsuite/btcd/btcec/v2 v2.3.6
 	github.com/btcsuite/btcd/btcutil v1.1.5
 	github.com/fatih/color v1.16.0
 	github.com/gorilla/websocket v1.5.3
@@ -17,6 +16,7 @@ require (
 
 require (
 	github.com/ImVexed/fasturl v0.0.0-20230304231329-4e41488060f3 // indirect
+	github.com/btcsuite/btcd/btcec/v2 v2.3.6 // indirect
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0 // indirect
 	github.com/coder/websocket v1.8.14 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect

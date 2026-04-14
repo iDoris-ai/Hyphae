@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
-	"github.com/jason/agent-speaker/internal/common"
-	"github.com/jason/agent-speaker/internal/identity"
-	"github.com/jason/agent-speaker/internal/messaging"
-	"github.com/jason/agent-speaker/internal/notify"
-	"github.com/jason/agent-speaker/pkg/crypto"
-	"github.com/jason/agent-speaker/pkg/types"
+	"github.com/AuraAIHQ/agent-speaker/internal/common"
+	"github.com/AuraAIHQ/agent-speaker/internal/identity"
+	"github.com/AuraAIHQ/agent-speaker/internal/messaging"
+	"github.com/AuraAIHQ/agent-speaker/internal/notify"
+	"github.com/AuraAIHQ/agent-speaker/pkg/crypto"
+	"github.com/AuraAIHQ/agent-speaker/pkg/types"
 	"github.com/urfave/cli/v3"
 )
 
@@ -53,9 +53,15 @@ Run this in a separate terminal or as a system service.`,
 			Usage:   "Send desktop notifications for new messages",
 			Value:   true,
 		},
+		&cli.BoolFlag{
+			Name:    "auto-reply",
+			Aliases: []string{"a"},
+			Usage:   "Automatically reply to incoming messages",
+			Value:   false,
+		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
-		ks, err := identity.LoadKeyStore()
+		ks, err := identity.LoadAndUnlockKeyStore()
 		if err != nil {
 			return fmt.Errorf("failed to load keystore: %w", err)
 		}
@@ -68,11 +74,13 @@ Run this in a separate terminal or as a system service.`,
 		retryInterval := time.Duration(c.Int("retry-interval")) * time.Second
 		watchInterval := time.Duration(c.Int("watch-interval")) * time.Second
 		useNotify := c.Bool("notify")
+		autoReply := c.Bool("auto-reply")
 
 		fmt.Printf("🚀 Starting daemon for '%s'\n", myIdentity.Nickname)
 		fmt.Printf("   Outbox retry interval: %v\n", retryInterval)
 		fmt.Printf("   Inbox watch interval: %v\n", watchInterval)
 		fmt.Printf("   Notifications: %v\n", useNotify)
+		fmt.Printf("   Auto-reply: %v\n", autoReply)
 		fmt.Println("   Press Ctrl+C to stop")
 
 		// Setup signal handling
@@ -93,14 +101,14 @@ Run this in a separate terminal or as a system service.`,
 
 		// Run immediately
 		processOutbox(ctx, myIdentity)
-		watchInbox(ctx, myIdentity, ks, seenMessages, useNotify)
+		watchInbox(ctx, myIdentity, ks, seenMessages, useNotify, autoReply)
 
 		for {
 			select {
 			case <-retryTicker.C:
 				processOutbox(ctx, myIdentity)
 			case <-watchTicker.C:
-				watchInbox(ctx, myIdentity, ks, seenMessages, useNotify)
+				watchInbox(ctx, myIdentity, ks, seenMessages, useNotify, autoReply)
 			case <-cleanupTicker.C:
 				cleanupOutbox()
 			case <-sigChan:
@@ -117,6 +125,7 @@ Run this in a separate terminal or as a system service.`,
 func processOutbox(ctx context.Context, myIdentity *types.Identity) {
 	outbox, err := messaging.LoadOutbox()
 	if err != nil {
+		fmt.Printf("[%s] ⚠️  Failed to load outbox: %v\n", time.Now().Format("15:04:05"), err)
 		return
 	}
 
@@ -146,6 +155,7 @@ func processOutbox(ctx context.Context, myIdentity *types.Identity) {
 		// Parse event
 		var event nostr.Event
 		if err := json.Unmarshal([]byte(entry.EventJSON), &event); err != nil {
+			fmt.Printf("   ⚠️  Failed to parse event %s...: %v\n", entry.ID[:16], err)
 			continue
 		}
 
@@ -191,9 +201,17 @@ func processOutbox(ctx context.Context, myIdentity *types.Identity) {
 }
 
 // watchInbox monitors for new messages
-func watchInbox(ctx context.Context, myIdentity *types.Identity, ks *types.KeyStore, seenMessages map[string]bool, useNotify bool) {
-	recipientPK, _ := identity.GetPublicKey(ks, myIdentity.Nickname)
-	recipientSK, _ := identity.GetSecretKey(ks, myIdentity.Nickname)
+func watchInbox(ctx context.Context, myIdentity *types.Identity, ks *types.KeyStore, seenMessages map[string]bool, useNotify bool, autoReply bool) {
+	recipientPK, err := identity.GetPublicKey(ks, myIdentity.Nickname)
+	if err != nil {
+		fmt.Printf("[%s] ⚠️  Failed to get public key: %v\n", time.Now().Format("15:04:05"), err)
+		return
+	}
+	recipientSK, err := identity.GetSecretKey(ks, myIdentity.Nickname)
+	if err != nil {
+		fmt.Printf("[%s] ⚠️  Failed to get secret key: %v\n", time.Now().Format("15:04:05"), err)
+		return
+	}
 
 	filter := nostr.Filter{
 		Kinds: []nostr.Kind{messaging.AgentKind},
@@ -258,6 +276,11 @@ func watchInbox(ctx context.Context, myIdentity *types.Identity, ks *types.KeySt
 				notify.DesktopNotification("Agent Speaker - "+senderName, common.TruncateString(content, 100))
 				notify.PlaySound()
 			}
+
+			// Auto-reply
+			if autoReply && !isAutoReplyMessage(content) {
+				go sendAutoReply(ctx, myIdentity, ks, senderNpub, content)
+			}
 		}
 		timeout.Stop()
 		relay.Close()
@@ -287,4 +310,70 @@ func loadSeenMessages(seen map[string]bool, npub string) {
 			seen[msg.ID] = true
 		}
 	}
+}
+
+func isAutoReplyMessage(content string) bool {
+	return len(content) > 0 && (content[:1] == "[" && len(content) > 13 && content[:13] == "[auto-reply] ")
+}
+
+func sendAutoReply(ctx context.Context, myIdentity *types.Identity, ks *types.KeyStore, toNpub string, originalContent string) {
+	mySK, err := identity.GetSecretKey(ks, myIdentity.Nickname)
+	if err != nil {
+		return
+	}
+
+	toPK, err := common.ParsePublicKey(toNpub)
+	if err != nil {
+		return
+	}
+
+	replyText := fmt.Sprintf("[auto-reply] %s received your message: %s", myIdentity.Nickname, common.TruncateString(originalContent, 30))
+
+	var messageContent string
+	encrypted, err := crypto.EncryptMessage(replyText, mySK, toPK)
+	if err == nil {
+		messageContent = encrypted
+	} else {
+		messageContent = replyText
+	}
+
+	compressed, _ := messaging.CompressText(messageContent)
+	tags := nostr.Tags{
+		{"p", common.PubKeyToHex(toPK)},
+		{"c", messaging.AgentTag},
+		{"z", messaging.CompressTag},
+		{"v", messaging.AgentVersion},
+	}
+	if err == nil {
+		tags = append(tags, nostr.Tag{"enc", "nip44"})
+	}
+
+	event := &nostr.Event{
+		CreatedAt: nostr.Now(),
+		Kind:      messaging.AgentKind,
+		Tags:      tags,
+		Content:   compressed,
+		PubKey:    mySK.Public(),
+	}
+	event.Sign(mySK)
+
+	relays := []string{"wss://relay.aastar.io"}
+	success := false
+	for _, url := range relays {
+		relay, err := nostr.RelayConnect(ctx, url, nostr.RelayOptions{})
+		if err != nil {
+			continue
+		}
+		pubCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err = relay.Publish(pubCtx, *event)
+		cancel()
+		relay.Close()
+		if err == nil {
+			success = true
+			break
+		}
+	}
+
+	messaging.StoreOutgoingMessage(event, toNpub, replyText, success)
+	fmt.Printf("🤖 Auto-replied to %s\n", toNpub[:20]+"...")
 }

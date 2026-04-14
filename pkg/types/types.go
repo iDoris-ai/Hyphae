@@ -48,6 +48,13 @@ type KeyStore struct {
 	DefaultIdentity string               `json:"default_identity"`
 	Identities      map[string]*Identity `json:"identities"`
 	Contacts        map[string]*Contact  `json:"contacts"`
+	Encrypted       bool                 `json:"encrypted"`
+	Salt            string               `json:"salt,omitempty"`
+	Verification    string               `json:"verification,omitempty"`
+	PasswordHint    string               `json:"password_hint,omitempty"`
+
+	// MasterKey is a transient field (not serialized) set after password verification
+	MasterKey *[32]byte `json:"-"`
 }
 
 // MessageStore 存储消息历史
