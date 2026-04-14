@@ -1,4 +1,4 @@
-package main
+package nostr
 
 import (
 	"context"
@@ -6,10 +6,11 @@ import (
 
 	"fiatjaf.com/nostr"
 	"github.com/fatih/color"
+	"github.com/AuraAIHQ/agent-speaker/internal/common"
 	"github.com/urfave/cli/v3"
 )
 
-var keyCmd = &cli.Command{
+var KeyCmd = &cli.Command{
 	Name:  "key",
 	Usage: "Key management commands",
 	Commands: []*cli.Command{
@@ -20,8 +21,8 @@ var keyCmd = &cli.Command{
 				sk := nostr.Generate()
 				pk := sk.Public()
 
-				nsec := encodeNsec(sk)
-				npub := encodeNpub(pk)
+				nsec := common.EncodeNsec(sk)
+				npub := common.EncodeNpub(pk)
 
 				green := color.New(color.FgGreen).SprintFunc()
 				yellow := color.New(color.FgYellow).SprintFunc()
@@ -52,7 +53,7 @@ var keyCmd = &cli.Command{
 			},
 			Action: func(ctx context.Context, c *cli.Command) error {
 				secKeyStr := c.String("sec")
-				secKey, err := parseSecretKey(secKeyStr)
+				secKey, err := common.ParseSecretKey(secKeyStr)
 				if err != nil {
 					return fmt.Errorf("invalid secret key: %w", err)
 				}
@@ -60,7 +61,7 @@ var keyCmd = &cli.Command{
 				pubKey := secKey.Public()
 
 				fmt.Printf("Public key (hex):  %s\n", pubKey.Hex())
-				fmt.Printf("Public key (npub): %s\n", encodeNpub(pubKey))
+				fmt.Printf("Public key (npub): %s\n", common.EncodeNpub(pubKey))
 
 				return nil
 			},

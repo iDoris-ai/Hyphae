@@ -1,44 +1,20 @@
-package main
+// Package common 提供共享的加密和编码工具
+package common
 
 import (
 	"encoding/hex"
 	"fmt"
-	"os"
 	"strings"
-	"syscall"
 
 	"fiatjaf.com/nostr"
 	"github.com/btcsuite/btcd/btcutil/bech32"
-	"golang.org/x/term"
 )
 
-// readSecretKey prompts for a secret key securely
-func readSecretKey(prompt string) (string, error) {
-	if prompt == "" {
-		prompt = "Secret key (nsec or hex): "
-	}
-	fmt.Fprint(os.Stderr, prompt)
-
-	bytePassword, err := term.ReadPassword(int(syscall.Stdin))
-	fmt.Fprintln(os.Stderr)
-	if err != nil {
-		return "", err
-	}
-
-	secKey := strings.TrimSpace(string(bytePassword))
-	if secKey == "" {
-		return "", fmt.Errorf("secret key is required")
-	}
-
-	return secKey, nil
-}
-
-// parseSecretKey parses nsec or hex secret key
-func parseSecretKey(key string) (nostr.SecretKey, error) {
+// ParseSecretKey 解析 nsec 或 hex 私钥
+func ParseSecretKey(key string) (nostr.SecretKey, error) {
 	key = strings.TrimSpace(key)
 
 	if strings.HasPrefix(key, "nsec1") {
-		// Decode bech32 nsec
 		hrp, data, err := bech32.Decode(key)
 		if err != nil {
 			return nostr.SecretKey{}, fmt.Errorf("invalid nsec: %w", err)
@@ -46,7 +22,6 @@ func parseSecretKey(key string) (nostr.SecretKey, error) {
 		if hrp != "nsec" {
 			return nostr.SecretKey{}, fmt.Errorf("invalid nsec prefix: %s", hrp)
 		}
-		// Convert 5-bit to 8-bit
 		converted, err := bech32.ConvertBits(data, 5, 8, false)
 		if err != nil {
 			return nostr.SecretKey{}, fmt.Errorf("failed to convert bits: %w", err)
@@ -59,7 +34,6 @@ func parseSecretKey(key string) (nostr.SecretKey, error) {
 		return sk, nil
 	}
 
-	// Assume hex
 	sk, err := nostr.SecretKeyFromHex(key)
 	if err != nil {
 		return nostr.SecretKey{}, fmt.Errorf("invalid hex key: %w", err)
@@ -67,12 +41,11 @@ func parseSecretKey(key string) (nostr.SecretKey, error) {
 	return sk, nil
 }
 
-// parsePublicKey parses npub or hex public key
-func parsePublicKey(key string) (nostr.PubKey, error) {
+// ParsePublicKey 解析 npub 或 hex 公钥
+func ParsePublicKey(key string) (nostr.PubKey, error) {
 	key = strings.TrimSpace(key)
 
 	if strings.HasPrefix(key, "npub1") {
-		// Decode bech32 npub
 		hrp, data, err := bech32.Decode(key)
 		if err != nil {
 			return nostr.PubKey{}, fmt.Errorf("invalid npub: %w", err)
@@ -80,7 +53,6 @@ func parsePublicKey(key string) (nostr.PubKey, error) {
 		if hrp != "npub" {
 			return nostr.PubKey{}, fmt.Errorf("invalid npub prefix: %s", hrp)
 		}
-		// Convert 5-bit to 8-bit
 		converted, err := bech32.ConvertBits(data, 5, 8, false)
 		if err != nil {
 			return nostr.PubKey{}, fmt.Errorf("failed to convert bits: %w", err)
@@ -93,7 +65,6 @@ func parsePublicKey(key string) (nostr.PubKey, error) {
 		return pk, nil
 	}
 
-	// Assume hex
 	pk, err := nostr.PubKeyFromHex(key)
 	if err != nil {
 		return nostr.PubKey{}, fmt.Errorf("invalid hex key: %w", err)
@@ -101,14 +72,13 @@ func parsePublicKey(key string) (nostr.PubKey, error) {
 	return pk, nil
 }
 
-// pubKeyToHex converts PubKey to hex string
-func pubKeyToHex(pk nostr.PubKey) string {
+// PubKeyToHex 将公钥转为 hex
+func PubKeyToHex(pk nostr.PubKey) string {
 	return hex.EncodeToString(pk[:])
 }
 
-// encodeNpub encodes PubKey to npub
-func encodeNpub(pk nostr.PubKey) string {
-	// Convert 8-bit to 5-bit
+// EncodeNpub 编码公钥为 npub
+func EncodeNpub(pk nostr.PubKey) string {
 	data, err := bech32.ConvertBits(pk[:], 8, 5, true)
 	if err != nil {
 		return ""
@@ -120,9 +90,8 @@ func encodeNpub(pk nostr.PubKey) string {
 	return encoded
 }
 
-// encodeNsec encodes SecretKey to nsec
-func encodeNsec(sk nostr.SecretKey) string {
-	// Convert 8-bit to 5-bit
+// EncodeNsec 编码私钥为 nsec
+func EncodeNsec(sk nostr.SecretKey) string {
 	data, err := bech32.ConvertBits(sk[:], 8, 5, true)
 	if err != nil {
 		return ""
@@ -132,13 +101,4 @@ func encodeNsec(sk nostr.SecretKey) string {
 		return ""
 	}
 	return encoded
-}
-
-// normalizeKey is kept for compatibility
-func normalizeKey(key string) (string, error) {
-	sk, err := parseSecretKey(key)
-	if err != nil {
-		return "", err
-	}
-	return sk.Hex(), nil
 }

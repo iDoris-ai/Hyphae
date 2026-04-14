@@ -1,4 +1,4 @@
-package main
+package nostr
 
 import (
 	"context"
@@ -8,10 +8,11 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
+	"github.com/AuraAIHQ/agent-speaker/internal/common"
 	"github.com/urfave/cli/v3"
 )
 
-var eventCmd = &cli.Command{
+var EventCmd = &cli.Command{
 	Name:  "event",
 	Usage: "Create and publish nostr events",
 	Description: `Create and publish nostr events to relays.
@@ -29,9 +30,9 @@ Example: agent-speaker event --kind 1 --content "Hello world!"`,
 			Usage:   "Event content",
 		},
 		&cli.StringFlag{
-			Name:     "sec",
-			Aliases:  []string{"s"},
-			Usage:    "Secret key (will prompt if not provided)",
+			Name:    "sec",
+			Aliases: []string{"s"},
+			Usage:   "Secret key (will prompt if not provided)",
 		},
 		&cli.StringSliceFlag{
 			Name:    "tag",
@@ -54,13 +55,13 @@ Example: agent-speaker event --kind 1 --content "Hello world!"`,
 		secKeyStr := c.String("sec")
 		if secKeyStr == "" {
 			var err error
-			secKeyStr, err = readSecretKey("")
+			secKeyStr, err = common.ReadSecretKey("")
 			if err != nil {
 				return err
 			}
 		}
 
-		secKey, err := parseSecretKey(secKeyStr)
+		secKey, err := common.ParseSecretKey(secKeyStr)
 		if err != nil {
 			return fmt.Errorf("invalid secret key: %w", err)
 		}
@@ -99,7 +100,7 @@ Example: agent-speaker event --kind 1 --content "Hello world!"`,
 		relays := c.StringSlice("relay")
 		fmt.Printf("Publishing Kind %d event to %d relay(s)...\n", event.Kind, len(relays))
 
-		results := publishToRelays(ctx, event, relays)
+		results := common.PublishToRelays(ctx, event, relays)
 		success := 0
 		for relay, err := range results {
 			if err != nil {

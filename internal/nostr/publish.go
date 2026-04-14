@@ -1,4 +1,4 @@
-package main
+package nostr
 
 import (
 	"context"
@@ -6,10 +6,11 @@ import (
 	"fmt"
 
 	"fiatjaf.com/nostr"
+	"github.com/AuraAIHQ/agent-speaker/internal/common"
 	"github.com/urfave/cli/v3"
 )
 
-var publishCmd = &cli.Command{
+var PublishCmd = &cli.Command{
 	Name:  "publish",
 	Usage: "Publish a JSON event",
 	Description: `Publish a nostr event from JSON.
@@ -45,7 +46,7 @@ Example: agent-speaker publish '{"kind":1,"content":"Hello"}'`,
 		}
 
 		secKeyStr := c.String("sec")
-		secKey, err := parseSecretKey(secKeyStr)
+		secKey, err := common.ParseSecretKey(secKeyStr)
 		if err != nil {
 			return fmt.Errorf("invalid secret key: %w", err)
 		}
@@ -55,7 +56,7 @@ Example: agent-speaker publish '{"kind":1,"content":"Hello"}'`,
 		event.Sign(secKey)
 
 		relays := c.StringSlice("relay")
-		results := publishToRelays(ctx, &event, relays)
+		results := common.PublishToRelays(ctx, &event, relays)
 
 		success := 0
 		for relay, err := range results {

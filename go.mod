@@ -1,4 +1,4 @@
-module github.com/jason/agent-speaker
+module github.com/AuraAIHQ/agent-speaker
 
 go 1.25.0
 
@@ -10,6 +10,7 @@ require (
 	github.com/klauspost/compress v1.18.0
 	github.com/stretchr/testify v1.10.0
 	github.com/urfave/cli/v3 v3.0.0-beta1
+	golang.org/x/crypto v0.50.0
 	golang.org/x/term v0.42.0
 )
 
