@@ -1,180 +1,168 @@
 package messaging
 
 import (
-	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
-	"sort"
-	"time"
+	"sync"
 
 	"fiatjaf.com/nostr"
-	"github.com/AuraAIHQ/agent-speaker/internal/common"
 	"github.com/AuraAIHQ/agent-speaker/internal/identity"
+	"github.com/AuraAIHQ/agent-speaker/internal/storage"
 	"github.com/AuraAIHQ/agent-speaker/pkg/types"
 )
 
-// GetMessageStorePath returns the path to message store
-func GetMessageStorePath() (string, error) {
-	path, err := identity.EnsureKeyStore()
-	if err != nil {
-		return "", fmt.Errorf("failed to ensure keystore: %w", err)
+var (
+	store    *storage.MessageStore
+	storeMu  sync.Mutex
+	storeErr error
+)
+
+// InitStorage initializes the SQLite storage
+func InitStorage() error {
+	storeMu.Lock()
+	defer storeMu.Unlock()
+
+	if store != nil {
+		return nil
 	}
-	return filepath.Join(path, "messages.json"), nil
+	if storeErr != nil {
+		return storeErr
+	}
+
+	// Initialize database
+	db, err := storage.InitDB()
+	if err != nil {
+		storeErr = err
+		return err
+	}
+
+	// Migrate from JSON if needed
+	if err := storage.MigrateFromJSON(db); err != nil {
+		storeErr = err
+		return err
+	}
+
+	store = storage.NewMessageStore(db)
+	return nil
 }
 
-// LoadMessageStore loads messages from disk
+// GetStore returns the message store instance
+func GetStore() (*storage.MessageStore, error) {
+	if err := InitStorage(); err != nil {
+		return nil, err
+	}
+	return store, nil
+}
+
+// LoadMessageStore loads messages from database (compatibility function)
 func LoadMessageStore() (*types.MessageStore, error) {
-	file, err := GetMessageStorePath()
-	if err != nil {
-		return nil, err
-	}
-
-	ms := &types.MessageStore{
+	// For compatibility with old code, return an empty struct
+	// All operations now go through SQLite
+	return &types.MessageStore{
 		Messages: make([]types.StoredMessage, 0),
-	}
-
-	data, err := os.ReadFile(file)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return ms, nil
-		}
-		return nil, err
-	}
-
-	if err := json.Unmarshal(data, ms); err != nil {
-		return nil, fmt.Errorf("failed to parse message store: %w", err)
-	}
-
-	return ms, nil
-}
-
-// SaveMessageStore saves messages to disk
-func SaveMessageStore(ms *types.MessageStore) error {
-	file, err := GetMessageStorePath()
-	if err != nil {
-		return err
-	}
-
-	data, err := json.MarshalIndent(ms, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(file, data, 0600)
-}
-
-// AddMessage adds a message to store
-func AddMessage(ms *types.MessageStore, msg types.StoredMessage) error {
-	msg.ReceivedAt = time.Now().Unix()
-	ms.Messages = append(ms.Messages, msg)
-	return SaveMessageStore(ms)
+	}, nil
 }
 
 // GetConversation returns messages between two users
-func GetConversation(ms *types.MessageStore, user1Npub, user2Npub string, limit int) []types.StoredMessage {
-	var result []types.StoredMessage
-
-	for _, msg := range ms.Messages {
-		if (msg.SenderNpub == user1Npub && msg.RecipientNpub == user2Npub) ||
-			(msg.SenderNpub == user2Npub && msg.RecipientNpub == user1Npub) {
-			result = append(result, msg)
-		}
+func GetConversation(ms *types.MessageStore, user1Npub, user2Npub string, limit int) ([]types.StoredMessage, error) {
+	s, err := GetStore()
+	if err != nil {
+		return nil, err
 	}
 
-	// Sort by time (newest first)
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].CreatedAt > result[j].CreatedAt
-	})
-
-	if limit > 0 && len(result) > limit {
-		result = result[:limit]
-	}
-
-	return result
+	return s.GetConversation(user1Npub, user2Npub, limit)
 }
 
 // GetInbox returns messages for a user
-func GetInbox(ms *types.MessageStore, userNpub string, limit int) []types.StoredMessage {
-	var result []types.StoredMessage
-
-	for _, msg := range ms.Messages {
-		if msg.RecipientNpub == userNpub {
-			result = append(result, msg)
-		}
+func GetInbox(ms *types.MessageStore, userNpub string, limit int) ([]types.StoredMessage, error) {
+	s, err := GetStore()
+	if err != nil {
+		return nil, err
 	}
 
-	// Sort by time (newest first)
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].CreatedAt > result[j].CreatedAt
-	})
-
-	if limit > 0 && len(result) > limit {
-		result = result[:limit]
-	}
-
-	return result
+	return s.GetInbox(userNpub, limit)
 }
 
-// GetUnreadCount returns unread message count
-func GetUnreadCount(ms *types.MessageStore, userNpub string) int {
-	count := 0
-	for _, msg := range ms.Messages {
-		if msg.RecipientNpub == userNpub {
-			count++
-		}
+// GetReceivedCount returns the total received message count for a user
+func GetReceivedCount(ms *types.MessageStore, userNpub string) (int, error) {
+	s, err := GetStore()
+	if err != nil {
+		return 0, err
 	}
-	return count
+
+	return s.GetReceivedCount(userNpub)
 }
 
 // StoreOutgoingMessage stores a sent message
 func StoreOutgoingMessage(event *nostr.Event, recipientNpub string, plaintext string, isEncrypted bool) error {
-	ms, err := LoadMessageStore()
+	s, err := GetStore()
 	if err != nil {
 		return err
 	}
 
-	msg := types.StoredMessage{
-		ID:            string(event.ID[:]),
-		SenderNpub:    common.EncodeNpub(event.PubKey),
-		RecipientNpub: recipientNpub,
-		Content:       event.Content,
-		Plaintext:     plaintext,
-		CreatedAt:     int64(event.CreatedAt),
-		IsEncrypted:   isEncrypted,
-		IsIncoming:    false,
-	}
-
-	return AddMessage(ms, msg)
+	return s.StoreOutgoingMessage(event, recipientNpub, plaintext, isEncrypted)
 }
 
 // StoreIncomingMessage stores a received message
 func StoreIncomingMessage(event *nostr.Event, plaintext string, isEncrypted bool) error {
-	ms, err := LoadMessageStore()
+	s, err := GetStore()
 	if err != nil {
 		return err
 	}
 
-	// Get recipient from p tag
-	recipientNpub := ""
-	for _, tag := range event.Tags {
-		if len(tag) >= 2 && tag[0] == "p" {
-			pk, _ := common.ParsePublicKey(tag[1])
-			recipientNpub = common.EncodeNpub(pk)
-			break
-		}
+	return s.StoreIncomingMessage(event, plaintext, isEncrypted)
+}
+
+// GetStats returns message statistics
+func GetStats() (map[string]int, error) {
+	// Get current identity
+	ks, err := identity.LoadKeyStore()
+	if err != nil {
+		return nil, err
 	}
 
-	msg := types.StoredMessage{
-		ID:            string(event.ID[:]),
-		SenderNpub:    common.EncodeNpub(event.PubKey),
-		RecipientNpub: recipientNpub,
-		Content:       event.Content,
-		Plaintext:     plaintext,
-		CreatedAt:     int64(event.CreatedAt),
-		IsEncrypted:   isEncrypted,
-		IsIncoming:    true,
+	myIdentity, err := identity.GetIdentity(ks, "")
+	if err != nil {
+		return nil, err
 	}
 
-	return AddMessage(ms, msg)
+	s, err := GetStore()
+	if err != nil {
+		return nil, err
+	}
+
+	return s.GetStats(myIdentity.Npub)
+}
+
+// SearchMessages searches messages
+func SearchMessages(query string) ([]types.StoredMessage, error) {
+	ks, err := identity.LoadKeyStore()
+	if err != nil {
+		return nil, err
+	}
+
+	myIdentity, err := identity.GetIdentity(ks, "")
+	if err != nil {
+		return nil, err
+	}
+
+	s, err := GetStore()
+	if err != nil {
+		return nil, err
+	}
+
+	return s.SearchMessages(myIdentity.Npub, query, 100)
+}
+
+// AddMessage adds a message (legacy compatibility)
+func AddMessage(ms *types.MessageStore, msg types.StoredMessage) error {
+	s, err := GetStore()
+	if err != nil {
+		return err
+	}
+
+	return s.StoreMessage(&msg)
+}
+
+// SaveMessageStore is now a no-op (data saved immediately in SQLite)
+func SaveMessageStore(ms *types.MessageStore) error {
+	return nil
 }

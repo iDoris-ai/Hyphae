@@ -10,6 +10,7 @@ import (
 	"github.com/AuraAIHQ/agent-speaker/internal/identity"
 	"github.com/AuraAIHQ/agent-speaker/internal/messaging"
 	"github.com/AuraAIHQ/agent-speaker/internal/nostr"
+	"github.com/AuraAIHQ/agent-speaker/internal/storage"
 	"github.com/urfave/cli/v3"
 )
 
@@ -38,6 +39,8 @@ func main() {
 			// Messaging
 			messaging.AgentCmd,
 			messaging.HistoryCmd,
+			// Storage
+			storage.StorageCmd,
 			// Daemon
 			daemon.DaemonCmd,
 		},
