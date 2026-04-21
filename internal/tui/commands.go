@@ -23,28 +23,14 @@ Example: agent-speaker chat --with bob`,
 		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
-		contactName := c.String("with")
-
-		// Create chat model
-		model, err := NewChatModel(contactName)
-		if err != nil {
-			return fmt.Errorf("failed to start chat: %w", err)
-		}
-
-		// Run the TUI
-		p := tea.NewProgram(model, tea.WithAltScreen())
-		if _, err := p.Run(); err != nil {
-			return fmt.Errorf("error running chat: %w", err)
-		}
-
-		return nil
+		return runChat(c.String("with"))
 	},
 }
 
 // TUICmd provides TUI-related commands
 var TUICmd = &cli.Command{
-	Name:  "tui",
-	Usage: "TUI-based interface",
+	Name:        "tui",
+	Usage:       "TUI-based interface",
 	Description: `Interactive terminal user interface commands`,
 	Commands: []*cli.Command{
 		ChatCmd,
@@ -52,10 +38,10 @@ var TUICmd = &cli.Command{
 	},
 }
 
-// ContactsCmd shows contacts in TUI
+// ContactsCmd shows contacts in TUI and optionally launches a chat on selection
 var ContactsCmd = &cli.Command{
-	Name:  "contacts",
-	Usage: "Show contacts in TUI",
+	Name:        "contacts",
+	Usage:       "Show contacts in TUI",
 	Description: `Interactive contact list with TUI`,
 	Action: func(ctx context.Context, c *cli.Command) error {
 		model, err := NewContactsModel()
@@ -64,10 +50,29 @@ var ContactsCmd = &cli.Command{
 		}
 
 		p := tea.NewProgram(model, tea.WithAltScreen())
-		if _, err := p.Run(); err != nil {
+		finalModel, err := p.Run()
+		if err != nil {
 			return fmt.Errorf("error running contacts TUI: %w", err)
 		}
 
+		if cm, ok := finalModel.(*ContactsModel); ok && cm.selected != "" {
+			return runChat(cm.selected)
+		}
 		return nil
 	},
+}
+
+// runChat starts the chat TUI for a given contact and closes the DB when done.
+func runChat(contactName string) error {
+	model, err := NewChatModel(contactName)
+	if err != nil {
+		return fmt.Errorf("failed to start chat: %w", err)
+	}
+	defer model.Close() //nolint:errcheck
+
+	p := tea.NewProgram(model, tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		return fmt.Errorf("error running chat: %w", err)
+	}
+	return nil
 }

@@ -60,7 +60,10 @@ func (m *ContactsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "enter":
-			// Selection would launch chat
+			offset := len(m.identities)
+			if m.cursor >= offset && m.cursor < offset+len(m.contacts) {
+				m.selected = m.contacts[m.cursor-offset].Nickname
+			}
 			return m, tea.Quit
 		}
 
@@ -98,7 +101,7 @@ func (m *ContactsModel) View() string {
 		line := fmt.Sprintf("%s %s (%s...)",
 			cursor,
 			id.Nickname,
-			id.Npub[:16],
+			safeTruncate(id.Npub, 16),
 		)
 
 		if m.cursor == i {
@@ -126,7 +129,7 @@ func (m *ContactsModel) View() string {
 		line := fmt.Sprintf("%s %s (%s...)",
 			cursor,
 			contact.Nickname,
-			contact.Npub[:16],
+			safeTruncate(contact.Npub, 16),
 		)
 
 		if m.cursor == idx {
