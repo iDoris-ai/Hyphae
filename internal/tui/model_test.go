@@ -24,10 +24,11 @@ func setupTestEnv(t *testing.T) func() {
 	ks, err := identity.LoadKeyStore()
 	require.NoError(t, err)
 
+	// HOME points to a fresh t.TempDir, so the keystore is always empty
+	// and CreateIdentity must succeed. A failure here means the test
+	// harness is broken and downstream assertions would be misleading.
 	_, err = identity.CreateIdentity(ks, "testuser")
-	if err != nil {
-		// Identity might already exist
-	}
+	require.NoError(t, err)
 
 	return func() {
 		storage.CloseDB()

@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"log"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/urfave/cli/v3"
@@ -21,9 +22,14 @@ Example: agent-speaker chat --with bob`,
 			Usage:    "Contact nickname to chat with",
 			Required: true,
 		},
+		&cli.StringSliceFlag{
+			Name:    "relay",
+			Aliases: []string{"r"},
+			Usage:   "Relay URL(s) to publish to (repeatable). Default: " + defaultRelay,
+		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
-		return runChat(c.String("with"))
+		return runChat(c.String("with"), c.StringSlice("relay"))
 	},
 }
 
@@ -43,6 +49,13 @@ var ContactsCmd = &cli.Command{
 	Name:        "contacts",
 	Usage:       "Show contacts in TUI",
 	Description: `Interactive contact list with TUI`,
+	Flags: []cli.Flag{
+		&cli.StringSliceFlag{
+			Name:    "relay",
+			Aliases: []string{"r"},
+			Usage:   "Relay URL(s) for the chat launched on selection",
+		},
+	},
 	Action: func(ctx context.Context, c *cli.Command) error {
 		model, err := NewContactsModel()
 		if err != nil {
@@ -56,19 +69,24 @@ var ContactsCmd = &cli.Command{
 		}
 
 		if cm, ok := finalModel.(*ContactsModel); ok && cm.selected != "" {
-			return runChat(cm.selected)
+			return runChat(cm.selected, c.StringSlice("relay"))
 		}
 		return nil
 	},
 }
 
 // runChat starts the chat TUI for a given contact and closes the DB when done.
-func runChat(contactName string) error {
-	model, err := NewChatModel(contactName)
+// relays may be nil/empty — NewChatModel will substitute the default.
+func runChat(contactName string, relays []string) error {
+	model, err := NewChatModel(contactName, relays...)
 	if err != nil {
 		return fmt.Errorf("failed to start chat: %w", err)
 	}
-	defer model.Close() //nolint:errcheck
+	defer func() {
+		if err := model.Close(); err != nil {
+			log.Printf("tui: chat DB close failed: %v", err)
+		}
+	}()
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {

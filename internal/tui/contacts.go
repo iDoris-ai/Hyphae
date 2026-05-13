@@ -16,6 +16,7 @@ type ContactsModel struct {
 	identities []*types.Identity
 	cursor     int
 	selected   string
+	notice     string // transient message shown below the help line
 	width      int
 	height     int
 	err        error
@@ -63,8 +64,11 @@ func (m *ContactsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			offset := len(m.identities)
 			if m.cursor >= offset && m.cursor < offset+len(m.contacts) {
 				m.selected = m.contacts[m.cursor-offset].Nickname
+				return m, tea.Quit
 			}
-			return m, tea.Quit
+			// Identity row selected — can't chat with yourself. Stay in
+			// the list with a hint instead of quitting silently.
+			m.notice = "Pick a contact to chat with — you can't chat with your own identity."
 		}
 
 	case tea.WindowSizeMsg:
@@ -151,6 +155,11 @@ func (m *ContactsModel) View() string {
 	b.WriteString("\n")
 	help := helpStyle.Render("↑/↓: navigate • enter: select • q/esc: quit")
 	b.WriteString(help)
+
+	if m.notice != "" {
+		b.WriteString("\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(m.notice))
+	}
 
 	return b.String()
 }
