@@ -21,11 +21,11 @@ cd build
 cp ../go.mod ./go.mod
 
 # 确保能引用 pkg/compress
-mkdir -p github.com/jason/agent-speaker
-cp -r ../pkg github.com/jason/agent-speaker/
+mkdir -p github.com/AuraAIHQ/agent-speaker
+cp -r ../pkg github.com/AuraAIHQ/agent-speaker/
 
 # 修改 import
-go mod edit -replace github.com/jason/agent-speaker/pkg/compress=./pkg/compress
+go mod edit -replace github.com/AuraAIHQ/agent-speaker/pkg/compress=./pkg/compress
 
 # 下载依赖
 go mod tidy 2>/dev/null || true
@@ -36,7 +36,7 @@ if ! grep -q "agentCmd" main.go; then
 fi
 
 # 修改 agent.go 的 import
-sed -i '' 's|github.com/fiatjaf/nak/pkg/compress|github.com/jason/agent-speaker/pkg/compress|g' agent.go
+sed -i '' 's|github.com/fiatjaf/nak/pkg/compress|github.com/AuraAIHQ/agent-speaker/pkg/compress|g' agent.go
 
 # 构建
 go build -o ../bin/agent-speaker .

@@ -47,7 +47,14 @@ func LoadOutbox() (*types.Outbox, error) {
 	return ob, nil
 }
 
-// SaveOutbox saves outbox to disk
+// SaveOutbox saves outbox to disk atomically.
+//
+// The write path is: marshal → open sibling temp file → write → fsync →
+// close → rename. POSIX guarantees rename() within the same directory is
+// atomic, so a crash at any point leaves either the old complete file or
+// the new complete file on disk — never a half-written outbox.json that
+// would deserialize as "everything still pending" and cause duplicate
+// sends after restart.
 func SaveOutbox(ob *types.Outbox) error {
 	file, err := GetOutboxPath()
 	if err != nil {
@@ -59,7 +66,30 @@ func SaveOutbox(ob *types.Outbox) error {
 		return err
 	}
 
-	return os.WriteFile(file, data, 0600)
+	tmp := file + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return fmt.Errorf("open temp outbox: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf("write temp outbox: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf("fsync temp outbox: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("close temp outbox: %w", err)
+	}
+	if err := os.Rename(tmp, file); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("rename outbox: %w", err)
+	}
+	return nil
 }
 
 // AddToOutbox adds a message to outbox
