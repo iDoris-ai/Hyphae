@@ -222,6 +222,37 @@ func (s *MessageStore) GetStats(userNpub string) (map[string]int, error) {
 	return stats, nil
 }
 
+// GetRecentIncomingEventIDs returns up to `limit` recent Nostr event IDs that
+// have been stored as incoming for the given recipient npub, newest first.
+// Used by the daemon to prime its in-memory dedup set on startup so that a
+// restart does not re-process events the relay still echoes back.
+func (s *MessageStore) GetRecentIncomingEventIDs(npub string, limit int) ([]string, error) {
+	query := `
+		SELECT event_id FROM messages
+		WHERE recipient_npub = ? AND is_incoming = 1
+		ORDER BY created_at DESC
+		LIMIT ?
+	`
+	rows, err := s.db.Query(query, npub, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query recent event ids: %w", err)
+	}
+	defer rows.Close()
+
+	ids := make([]string, 0, limit)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan event id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows: %w", err)
+	}
+	return ids, nil
+}
+
 // DeleteMessage deletes a message by ID
 func (s *MessageStore) DeleteMessage(id string) error {
 	_, err := s.db.Exec("DELETE FROM messages WHERE id = ?", id)

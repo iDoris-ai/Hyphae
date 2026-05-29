@@ -8,9 +8,10 @@
 ```
 agent-speaker/
 ├── 🌟 我们的代码
-│   ├── agent.go              # Agent 核心功能 (唯一业务代码)
-│   ├── pkg/compress/zstd.go  # zstd 压缩模块
-│   └── docs/                 # 研究文档 (4个)
+│   ├── cmd/agent-speaker/    # 程序入口
+│   ├── internal/             # 内部包 (nostr, identity, messaging, group, profile, daemon...)
+│   ├── pkg/                  # 公共库 (compress, crypto, types)
+│   └── docs/                 # 研究文档
 │
 ├── 📦 第三方依赖
 │   └── third_party/nak/      # nak git submodule (fiatjaf/nak)
@@ -32,43 +33,114 @@ agent-speaker/
 
 | 类型 | 文件/目录 | 说明 |
 |------|----------|------|
-| 🌟 业务代码 | `agent.go` | Agent 命令实现 (msg/query/relay/timeline) |
-| 🌟 公共库 | `pkg/compress/` | zstd 压缩模块 |
-| 📦 第三方 | `third_party/nak/` | nak git submodule，锁定特定 commit，`make update-nak` 升级 |
+| 🌟 业务代码 | `internal/` | Agent 命令实现 (msg, group, profile, daemon, TUI) |
+| 🌟 公共库 | `pkg/` | zstd 压缩、加密、类型定义 |
+| 📦 第三方 | `third_party/nak/` | nak git submodule |
 | 🔨 构建 | `Makefile`, `scripts/` | 构建系统 |
 | 📚 文档 | `docs/` | 研究文档 |
-
-**原则：根目录只保留配置文件和唯一业务代码 (agent.go)**
 
 ## 快速开始
 
 ```bash
 # 构建
-make build
+./build.sh
 
 # 运行
-./bin/agent-speaker agent --help
+./bin/agent-speaker --help
 
-# 生成密钥
-./bin/agent-speaker key generate
+# 创建身份
+./bin/agent-speaker identity create --nickname alice --default
 
 # 发送消息
-./bin/agent-speaker agent msg --sec <secret> --to <pubkey> "Hello"
+./bin/agent-speaker agent msg --from alice --to bob --content "Hello" --relay wss://relay.aastar.io
 ```
 
-## 命令
+## 核心功能
+
+### 1. 点对点消息 (Agent Messaging)
 
 ```bash
-# Agent 命令
-./bin/agent-speaker agent msg       # 发送压缩消息
-./bin/agent-speaker agent query     # 批量查询
-./bin/agent-speaker agent timeline  # 查看时间线
-./bin/agent-speaker agent relay     # 管理本地 relay
+# 发送加密消息
+./bin/agent-speaker agent msg --from alice --to bob --content "Secret message" --encrypt=true
 
-# 基础命令（nak 原生）
-./bin/agent-speaker key generate    # 生成密钥
-./bin/agent-speaker event           # 发布事件
-./bin/agent-speaker req             # 查询事件
+# 查看收件箱
+./bin/agent-speaker history inbox
+
+# 查看与某人的对话
+./bin/agent-speaker history conversation --with bob
+```
+
+### 2. 群聊 (Group Chat)
+
+```bash
+# 创建群组（默认包含创建者）
+./bin/agent-speaker group create --name "Dev Team" --members bob,jack
+
+# 列出群组
+./bin/agent-speaker group list
+
+# 添加成员
+./bin/agent-speaker group add-member --name "Dev Team" --user charlie
+
+# 离开群组
+./bin/agent-speaker group leave --name "Dev Team"
+```
+
+> **注意**：当前群聊 TUI 尚未完全实现。群聊消息需通过 `agent msg` 分别发送给各成员，relay 会广播给所有订阅者。
+
+### 3. Agent 资料 (Agent Profile) — v0.25.0+
+
+```bash
+# 发布资料到 relay
+./bin/agent-speaker profile publish --as alice \
+  --name "Alice the SEO Expert" \
+  --description "I help websites rank better" \
+  --capability "seo:Search engine optimization" \
+  --rate "audit:page:50" \
+  --availability available
+
+# 从 relay 发现他人资料
+./bin/agent-speaker profile discover --npub <npub> --relay wss://relay.aastar.io
+
+# 搜索本地缓存的资料
+./bin/agent-speaker profile search --query "seo"
+```
+
+### 4. 后台守护进程 & 自动回复 (Daemon & Auto-reply)
+
+```bash
+# 启动后台守护进程（重试 outbox、监听新消息）
+./bin/agent-speaker daemon --identity bob
+
+# 启动自动回复模式
+./bin/agent-speaker daemon --identity bob --auto-reply --notify=false
+```
+
+开启 `--auto-reply` 后，daemon 会在收到新消息时自动回复发送者：
+
+```
+[auto-reply] bob received your message: <original>
+```
+
+自动回复消息带有 `[auto-reply]` 前缀，不会被再次自动回复，避免循环。
+
+#### 多人自动回复测试示例
+
+```bash
+# 终端 1：启动 bob 的自动回复 daemon
+./bin/agent-speaker daemon --identity bob --auto-reply --notify=false
+
+# 终端 2：启动 jack 的自动回复 daemon
+./bin/agent-speaker daemon --identity jack --auto-reply --notify=false
+
+# 终端 3（你扮演 alice）：创建群聊并发送消息
+./bin/agent-speaker group create --name "Test Group" --members bob,jack
+./bin/agent-speaker agent msg --from alice --to bob --content "Hey team!"
+./bin/agent-speaker agent msg --from alice --to jack --content "Hey team!"
+
+# 然后查看 alice 的收件箱
+./bin/agent-speaker history inbox
+# 你应该能看到 bob 和 jack 的自动回复
 ```
 
 ## 构建流程

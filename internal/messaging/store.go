@@ -166,3 +166,14 @@ func AddMessage(ms *types.MessageStore, msg types.StoredMessage) error {
 func SaveMessageStore(ms *types.MessageStore) error {
 	return nil
 }
+
+// RecentIncomingEventIDs returns Nostr event IDs for the most recent `limit`
+// incoming messages stored for `npub`. Pass-through to the SQLite store.
+// Used by the daemon to prime its in-memory dedup set on startup.
+func RecentIncomingEventIDs(npub string, limit int) ([]string, error) {
+	s, err := GetStore()
+	if err != nil {
+		return nil, err
+	}
+	return s.GetRecentIncomingEventIDs(npub, limit)
+}

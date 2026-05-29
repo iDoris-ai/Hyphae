@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -18,6 +19,47 @@ import (
 	"github.com/AuraAIHQ/agent-speaker/pkg/types"
 	"github.com/urfave/cli/v3"
 )
+
+const (
+	defaultRelay     = "wss://relay.aastar.io"
+	maxSeenMessages  = 10000
+	relayDialTimeout = 5 * time.Second
+	subscribeWindow  = 3 * time.Second
+)
+
+// seenSet is a bounded set of recently-seen event IDs with FIFO eviction.
+// When the underlying map exceeds maxSeenMessages, the oldest 10% are evicted.
+// This bounds memory while keeping recent dedup cheap.
+type seenSet struct {
+	seen  map[string]bool
+	order []string
+}
+
+func newSeenSet() *seenSet {
+	return &seenSet{
+		seen:  make(map[string]bool, maxSeenMessages),
+		order: make([]string, 0, maxSeenMessages),
+	}
+}
+
+func (s *seenSet) Has(id string) bool {
+	return s.seen[id]
+}
+
+func (s *seenSet) Add(id string) {
+	if s.seen[id] {
+		return
+	}
+	s.seen[id] = true
+	s.order = append(s.order, id)
+	if len(s.order) > maxSeenMessages {
+		evictN := maxSeenMessages / 10
+		for i := 0; i < evictN; i++ {
+			delete(s.seen, s.order[i])
+		}
+		s.order = s.order[evictN:]
+	}
+}
 
 // DaemonCmd runs the background daemon
 var DaemonCmd = &cli.Command{
@@ -35,9 +77,14 @@ Run this in a separate terminal or as a system service.`,
 			Aliases: []string{"i"},
 			Usage:   "Identity to run daemon for (default: use default identity)",
 		},
+		&cli.StringSliceFlag{
+			Name:    "relay",
+			Aliases: []string{"r"},
+			Usage:   "Relay URL(s) to watch and publish auto-replies through (repeatable). Default: " + defaultRelay,
+		},
 		&cli.IntFlag{
 			Name:    "retry-interval",
-			Aliases: []string{"r"},
+			Aliases: []string{"R"},
 			Usage:   "Outbox retry interval (seconds)",
 			Value:   60,
 		},
@@ -71,12 +118,17 @@ Run this in a separate terminal or as a system service.`,
 			return err
 		}
 
+		relays := c.StringSlice("relay")
+		if len(relays) == 0 {
+			relays = []string{defaultRelay}
+		}
 		retryInterval := time.Duration(c.Int("retry-interval")) * time.Second
 		watchInterval := time.Duration(c.Int("watch-interval")) * time.Second
 		useNotify := c.Bool("notify")
 		autoReply := c.Bool("auto-reply")
 
 		fmt.Printf("🚀 Starting daemon for '%s'\n", myIdentity.Nickname)
+		fmt.Printf("   Relays: %v\n", relays)
 		fmt.Printf("   Outbox retry interval: %v\n", retryInterval)
 		fmt.Printf("   Inbox watch interval: %v\n", watchInterval)
 		fmt.Printf("   Notifications: %v\n", useNotify)
@@ -95,20 +147,27 @@ Run this in a separate terminal or as a system service.`,
 		defer watchTicker.Stop()
 		defer cleanupTicker.Stop()
 
-		// Track seen messages for watch
-		seenMessages := make(map[string]bool)
-		loadSeenMessages(seenMessages, myIdentity.Npub)
+		// Track seen messages for this watch session. Bounded size to avoid
+		// unbounded growth on long-running daemons. Cross-restart dedup is
+		// handled by `since` below (filter only fetches events newer than
+		// daemon start) plus storage.MessageStore's INSERT OR REPLACE guard.
+		seen := newSeenSet()
+		preloadRecentSeen(seen, myIdentity.Npub)
+
+		// Only fetch events strictly newer than daemon start, so a restart
+		// does not re-pull every historical event the relay still holds.
+		since := nostr.Now()
 
 		// Run immediately
-		processOutbox(ctx, myIdentity)
-		watchInbox(ctx, myIdentity, ks, seenMessages, useNotify, autoReply)
+		processOutbox(ctx, myIdentity, relays)
+		watchInbox(ctx, myIdentity, ks, seen, since, relays, useNotify, autoReply)
 
 		for {
 			select {
 			case <-retryTicker.C:
-				processOutbox(ctx, myIdentity)
+				processOutbox(ctx, myIdentity, relays)
 			case <-watchTicker.C:
-				watchInbox(ctx, myIdentity, ks, seenMessages, useNotify, autoReply)
+				watchInbox(ctx, myIdentity, ks, seen, since, relays, useNotify, autoReply)
 			case <-cleanupTicker.C:
 				cleanupOutbox()
 			case <-sigChan:
@@ -121,8 +180,13 @@ Run this in a separate terminal or as a system service.`,
 	},
 }
 
-// processOutbox retries failed messages
-func processOutbox(ctx context.Context, myIdentity *types.Identity) {
+// processOutbox retries failed messages. Each relay attempt gets its own
+// timeout so a slow relay does not starve the rest.
+//
+// Note on persistence: messaging.UpdateOutboxStatus, IncrementOutboxRetry,
+// and RemoveFromOutbox all call SaveOutbox internally, so a daemon crash
+// after a successful publish does not double-send.
+func processOutbox(ctx context.Context, myIdentity *types.Identity, relays []string) {
 	outbox, err := messaging.LoadOutbox()
 	if err != nil {
 		fmt.Printf("[%s] ⚠️  Failed to load outbox: %v\n", time.Now().Format("15:04:05"), err)
@@ -155,41 +219,54 @@ func processOutbox(ctx context.Context, myIdentity *types.Identity) {
 		// Parse event
 		var event nostr.Event
 		if err := json.Unmarshal([]byte(entry.EventJSON), &event); err != nil {
-			fmt.Printf("   ⚠️  Failed to parse event %s...: %v\n", entry.ID[:16], err)
+			fmt.Printf("   ⚠️  Failed to parse event %s...: %v\n", safePrefix(entry.ID, 16), err)
 			continue
 		}
 
-		// Try to publish
-		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-
+		// Per-relay timeout so one slow relay does not eat the whole budget
+		// for the rest of the targets.
 		success := false
-		for _, url := range entry.Relays {
-			relay, err := nostr.RelayConnect(ctx, url, nostr.RelayOptions{})
+		targets := entry.Relays
+		if len(targets) == 0 {
+			targets = relays
+		}
+		for _, url := range targets {
+			relayCtx, cancel := context.WithTimeout(ctx, relayDialTimeout)
+			relay, err := nostr.RelayConnect(relayCtx, url, nostr.RelayOptions{})
 			if err != nil {
+				cancel()
 				continue
 			}
-
-			err = relay.Publish(ctx, event)
+			pubErr := relay.Publish(relayCtx, event)
 			relay.Close()
-
-			if err == nil {
+			cancel()
+			if pubErr == nil {
 				success = true
 				break
 			}
 		}
-		cancel()
 
 		if success {
-			messaging.UpdateOutboxStatus(outbox, entry.ID, "sent")
-			messaging.RemoveFromOutbox(outbox, entry.ID) // Remove sent messages
-			messaging.StoreOutgoingMessage(&event, entry.RecipientNpub, event.Content, true)
+			if err := messaging.UpdateOutboxStatus(outbox, entry.ID, "sent"); err != nil {
+				fmt.Printf("   ⚠️  Update outbox status: %v\n", err)
+			}
+			if err := messaging.RemoveFromOutbox(outbox, entry.ID); err != nil {
+				fmt.Printf("   ⚠️  Remove from outbox: %v\n", err)
+			}
+			if err := messaging.StoreOutgoingMessage(&event, entry.RecipientNpub, event.Content, true); err != nil {
+				fmt.Printf("   ⚠️  Store outgoing message: %v\n", err)
+			}
 			successCount++
-			fmt.Printf("   ✅ Sent: %s...\n", entry.ID[:16])
+			fmt.Printf("   ✅ Sent: %s...\n", safePrefix(entry.ID, 16))
 		} else {
-			messaging.IncrementOutboxRetry(outbox, entry.ID)
+			if err := messaging.IncrementOutboxRetry(outbox, entry.ID); err != nil {
+				fmt.Printf("   ⚠️  Increment retry: %v\n", err)
+			}
 			if entry.RetryCount >= entry.MaxRetries-1 {
-				messaging.UpdateOutboxStatus(outbox, entry.ID, "failed")
-				fmt.Printf("   ❌ Failed (max retries): %s...\n", entry.ID[:16])
+				if err := messaging.UpdateOutboxStatus(outbox, entry.ID, "failed"); err != nil {
+					fmt.Printf("   ⚠️  Mark failed: %v\n", err)
+				}
+				fmt.Printf("   ❌ Failed (max retries): %s...\n", safePrefix(entry.ID, 16))
 			}
 			failCount++
 		}
@@ -200,8 +277,17 @@ func processOutbox(ctx context.Context, myIdentity *types.Identity) {
 	}
 }
 
-// watchInbox monitors for new messages
-func watchInbox(ctx context.Context, myIdentity *types.Identity, ks *types.KeyStore, seenMessages map[string]bool, useNotify bool, autoReply bool) {
+// watchInbox monitors for new messages.
+func watchInbox(
+	ctx context.Context,
+	myIdentity *types.Identity,
+	ks *types.KeyStore,
+	seen *seenSet,
+	since nostr.Timestamp,
+	relays []string,
+	useNotify bool,
+	autoReply bool,
+) {
 	recipientPK, err := identity.GetPublicKey(ks, myIdentity.Nickname)
 	if err != nil {
 		fmt.Printf("[%s] ⚠️  Failed to get public key: %v\n", time.Now().Format("15:04:05"), err)
@@ -217,78 +303,110 @@ func watchInbox(ctx context.Context, myIdentity *types.Identity, ks *types.KeySt
 		Kinds: []nostr.Kind{messaging.AgentKind},
 		Tags:  nostr.TagMap{"p": []string{common.PubKeyToHex(recipientPK)}},
 		Limit: 10,
+		Since: since,
 	}
 
-	relays := []string{"wss://relay.aastar.io"}
 	newCount := 0
 
 	for _, url := range relays {
-		relay, err := nostr.RelayConnect(ctx, url, nostr.RelayOptions{})
-		if err != nil {
-			continue
-		}
-
-		sub, _ := relay.Subscribe(ctx, filter, nostr.SubscriptionOptions{})
-		timeout := time.AfterFunc(3*time.Second, func() { sub.Unsub() })
-
-		for evt := range sub.Events {
-			eventID := string(evt.ID[:])
-			if seenMessages[eventID] {
-				continue
-			}
-
-			seenMessages[eventID] = true
-			newCount++
-
-			// Get sender name
-			senderNpub := common.EncodeNpub(evt.PubKey)
-			senderName := senderNpub[:16] + "..."
-			for _, contact := range identity.ListContacts(ks) {
-				if contact.Npub == senderNpub {
-					senderName = contact.Nickname
-					break
-				}
-			}
-
-			// Decrypt if needed
-			content, _ := messaging.DecompressText(evt.Content)
-			isEncrypted := false
-			for _, tag := range evt.Tags {
-				if len(tag) >= 2 && tag[0] == "enc" && tag[1] == "nip44" {
-					isEncrypted = true
-					break
-				}
-			}
-
-			if isEncrypted {
-				if decrypted, err := crypto.DecryptMessage(content, recipientSK, evt.PubKey); err == nil {
-					content = decrypted
-				}
-			}
-
-			// Store
-			messaging.StoreIncomingMessage(&evt, content, isEncrypted)
-
-			// Notify
-			fmt.Printf("\n📨 New message from %s: %s\n", senderName, common.TruncateString(content, 40))
-
-			if useNotify {
-				notify.DesktopNotification("Agent Speaker - "+senderName, common.TruncateString(content, 100))
-				notify.PlaySound()
-			}
-
-			// Auto-reply
-			if autoReply && !isAutoReplyMessage(content) {
-				go sendAutoReply(ctx, myIdentity, ks, senderNpub, content)
-			}
-		}
-		timeout.Stop()
-		relay.Close()
+		newCount += watchOneRelay(ctx, url, filter, ks, recipientSK, seen, useNotify, autoReply, myIdentity, relays)
 	}
 
 	if newCount == 0 {
 		fmt.Printf("[%s] Watching... (no new messages)\r", time.Now().Format("15:04:05"))
 	}
+}
+
+// watchOneRelay polls a single relay and returns the count of newly-processed
+// events. Subscribe errors are reported and the relay is skipped (returns 0)
+// instead of panicking on a nil sub.
+func watchOneRelay(
+	ctx context.Context,
+	url string,
+	filter nostr.Filter,
+	ks *types.KeyStore,
+	recipientSK nostr.SecretKey,
+	seen *seenSet,
+	useNotify bool,
+	autoReply bool,
+	myIdentity *types.Identity,
+	relays []string,
+) int {
+	relayCtx, cancel := context.WithTimeout(ctx, relayDialTimeout)
+	defer cancel()
+
+	relay, err := nostr.RelayConnect(relayCtx, url, nostr.RelayOptions{})
+	if err != nil {
+		return 0
+	}
+	defer relay.Close()
+
+	sub, err := relay.Subscribe(ctx, filter, nostr.SubscriptionOptions{})
+	if err != nil {
+		fmt.Printf("[%s] ⚠️  Subscribe %s failed: %v\n", time.Now().Format("15:04:05"), url, err)
+		return 0
+	}
+	timeout := time.AfterFunc(subscribeWindow, func() { sub.Unsub() })
+	defer timeout.Stop()
+
+	newCount := 0
+	for evt := range sub.Events {
+		eventID := string(evt.ID[:])
+		if seen.Has(eventID) {
+			continue
+		}
+		seen.Add(eventID)
+		newCount++
+
+		// Resolve sender display name
+		senderNpub := common.EncodeNpub(evt.PubKey)
+		senderName := safePrefix(senderNpub, 16) + "..."
+		for _, contact := range identity.ListContacts(ks) {
+			if contact.Npub == senderNpub {
+				senderName = contact.Nickname
+				break
+			}
+		}
+
+		// Decompress, then decrypt if needed. Track decrypt success so we
+		// can refuse to auto-reply against unrecognised ciphertext (which
+		// would otherwise bypass the [auto-reply] guard and storm).
+		content, _ := messaging.DecompressText(evt.Content)
+		isEncrypted := false
+		for _, tag := range evt.Tags {
+			if len(tag) >= 2 && tag[0] == "enc" && tag[1] == "nip44" {
+				isEncrypted = true
+				break
+			}
+		}
+
+		decryptedOK := !isEncrypted
+		if isEncrypted {
+			if decrypted, derr := crypto.DecryptMessage(content, recipientSK, evt.PubKey); derr == nil {
+				content = decrypted
+				decryptedOK = true
+			}
+		}
+
+		if err := messaging.StoreIncomingMessage(&evt, content, isEncrypted); err != nil {
+			fmt.Printf("   ⚠️  Store incoming message: %v\n", err)
+		}
+
+		fmt.Printf("\n📨 New message from %s: %s\n", senderName, common.TruncateString(content, 40))
+
+		if useNotify {
+			notify.DesktopNotification("Agent Speaker - "+senderName, common.TruncateString(content, 100))
+			notify.PlaySound()
+		}
+
+		// Only auto-reply on messages we actually understood. Otherwise we
+		// would be replying to opaque ciphertext, and our reply would in
+		// turn fail the prefix check on the other side, creating a storm.
+		if autoReply && decryptedOK && !isAutoReplyMessage(content) {
+			go sendAutoReply(ctx, myIdentity, ks, senderNpub, content, relays)
+		}
+	}
+	return newCount
 }
 
 func cleanupOutbox() {
@@ -297,26 +415,50 @@ func cleanupOutbox() {
 		return
 	}
 	// Remove entries older than 7 days
-	messaging.CleanupOutbox(outbox, 7*24*time.Hour)
+	if err := messaging.CleanupOutbox(outbox, 7*24*time.Hour); err != nil {
+		fmt.Printf("   ⚠️  Cleanup outbox: %v\n", err)
+	}
 }
 
-func loadSeenMessages(seen map[string]bool, npub string) {
-	ms, err := messaging.LoadMessageStore()
+// preloadRecentSeen primes the in-memory dedup set with recent event IDs
+// already stored in SQLite. Without this, a daemon restart would re-process
+// the most recent N events the relay still holds (Limit:10 per watch tick),
+// even though we have records of them.
+//
+// Note: the previous implementation used messaging.LoadMessageStore which is
+// a compatibility shim that returns an empty slice — so it was a no-op. We
+// now query SQLite directly via messaging.RecentIncomingEventIDs.
+func preloadRecentSeen(seen *seenSet, npub string) {
+	ids, err := messaging.RecentIncomingEventIDs(npub, maxSeenMessages)
 	if err != nil {
+		// Non-fatal — worst case we re-notify recent messages once.
+		fmt.Printf("[%s] ⚠️  preload seen: %v\n", time.Now().Format("15:04:05"), err)
 		return
 	}
-	for _, msg := range ms.Messages {
-		if msg.RecipientNpub == npub {
-			seen[msg.ID] = true
-		}
+	for _, id := range ids {
+		seen.Add(id)
 	}
 }
 
+// isAutoReplyMessage returns true for our own auto-reply convention.
+//
+// Uses strings.HasPrefix so we cannot match opaque ciphertext or random
+// base64 that happens to start with "[". The trailing space is intentional:
+// a user message of exactly "[auto-reply]" (no space) is NOT one of ours.
 func isAutoReplyMessage(content string) bool {
-	return len(content) > 0 && (content[:1] == "[" && len(content) > 13 && content[:13] == "[auto-reply] ")
+	return strings.HasPrefix(content, "[auto-reply] ")
 }
 
-func sendAutoReply(ctx context.Context, myIdentity *types.Identity, ks *types.KeyStore, toNpub string, originalContent string) {
+// safePrefix returns s[:n] when len(s) >= n, otherwise s. Avoids the panic
+// the previous code would hit if an event ID came back shorter than expected.
+func safePrefix(s string, n int) string {
+	if len(s) < n {
+		return s
+	}
+	return s[:n]
+}
+
+func sendAutoReply(ctx context.Context, myIdentity *types.Identity, ks *types.KeyStore, toNpub string, originalContent string, relays []string) {
 	mySK, err := identity.GetSecretKey(ks, myIdentity.Nickname)
 	if err != nil {
 		return
@@ -330,8 +472,8 @@ func sendAutoReply(ctx context.Context, myIdentity *types.Identity, ks *types.Ke
 	replyText := fmt.Sprintf("[auto-reply] %s received your message: %s", myIdentity.Nickname, common.TruncateString(originalContent, 30))
 
 	var messageContent string
-	encrypted, err := crypto.EncryptMessage(replyText, mySK, toPK)
-	if err == nil {
+	encrypted, encErr := crypto.EncryptMessage(replyText, mySK, toPK)
+	if encErr == nil {
 		messageContent = encrypted
 	} else {
 		messageContent = replyText
@@ -344,7 +486,7 @@ func sendAutoReply(ctx context.Context, myIdentity *types.Identity, ks *types.Ke
 		{"z", messaging.CompressTag},
 		{"v", messaging.AgentVersion},
 	}
-	if err == nil {
+	if encErr == nil {
 		tags = append(tags, nostr.Tag{"enc", "nip44"})
 	}
 
@@ -357,23 +499,28 @@ func sendAutoReply(ctx context.Context, myIdentity *types.Identity, ks *types.Ke
 	}
 	event.Sign(mySK)
 
-	relays := []string{"wss://relay.aastar.io"}
+	if len(relays) == 0 {
+		relays = []string{defaultRelay}
+	}
 	success := false
 	for _, url := range relays {
-		relay, err := nostr.RelayConnect(ctx, url, nostr.RelayOptions{})
+		relayCtx, cancel := context.WithTimeout(ctx, relayDialTimeout)
+		relay, err := nostr.RelayConnect(relayCtx, url, nostr.RelayOptions{})
 		if err != nil {
+			cancel()
 			continue
 		}
-		pubCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		err = relay.Publish(pubCtx, *event)
-		cancel()
+		err = relay.Publish(relayCtx, *event)
 		relay.Close()
+		cancel()
 		if err == nil {
 			success = true
 			break
 		}
 	}
 
-	messaging.StoreOutgoingMessage(event, toNpub, replyText, success)
-	fmt.Printf("🤖 Auto-replied to %s\n", toNpub[:20]+"...")
+	if err := messaging.StoreOutgoingMessage(event, toNpub, replyText, success); err != nil {
+		fmt.Printf("   ⚠️  Store auto-reply: %v\n", err)
+	}
+	fmt.Printf("🤖 Auto-replied to %s\n", safePrefix(toNpub, 20)+"...")
 }
