@@ -7,9 +7,11 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/AuraAIHQ/agent-speaker/internal/daemon"
+	"github.com/AuraAIHQ/agent-speaker/internal/group"
 	"github.com/AuraAIHQ/agent-speaker/internal/identity"
 	"github.com/AuraAIHQ/agent-speaker/internal/messaging"
 	"github.com/AuraAIHQ/agent-speaker/internal/nostr"
+	"github.com/AuraAIHQ/agent-speaker/internal/profile"
 	"github.com/AuraAIHQ/agent-speaker/internal/storage"
 	"github.com/urfave/cli/v3"
 )
@@ -41,6 +43,10 @@ func main() {
 			messaging.HistoryCmd,
 			// Storage
 			storage.StorageCmd,
+			// Group Chat
+			group.GroupCmd,
+			// Agent Profile
+			profile.ProfileCmd,
 			// Daemon
 			daemon.DaemonCmd,
 		},

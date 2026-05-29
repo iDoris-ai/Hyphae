@@ -109,8 +109,14 @@ Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 			return err
 		}
 
-		senderSK, _ := identity.GetSecretKey(ks, sender.Nickname)
-		recipientPK, _ := common.ParsePublicKey(recipientNpub)
+		senderSK, err := identity.GetSecretKey(ks, sender.Nickname)
+		if err != nil {
+			return fmt.Errorf("failed to load sender key (is the keystore unlocked?): %w", err)
+		}
+		recipientPK, err := common.ParsePublicKey(recipientNpub)
+		if err != nil {
+			return fmt.Errorf("invalid recipient npub: %w", err)
+		}
 
 		// Encrypt if enabled
 		messageContent := content
