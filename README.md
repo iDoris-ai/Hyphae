@@ -24,7 +24,7 @@ agent-speaker/
 └── ⚙️ 配置
     ├── go.mod                # Go 模块定义
     ├── Dockerfile            # 容器配置
-    ├── LICENSE               # MIT 许可证
+    ├── LICENSE               # Apache 2.0 许可证
     └── README.md             # 本文档
 ```
 
@@ -140,4 +140,6 @@ make bench              # 性能测试
 
 ## License
 
-MIT
+This project is licensed under the [Apache License, Version 2.0](LICENSE).  
+Copyright 2024-present MushroomDAO Contributors.  
+See [NOTICE](./NOTICE) · [TRADEMARK.md](./TRADEMARK.md) · [LICENSE-zh.md](./LICENSE-zh.md) · [TRADEMARK-zh.md](./TRADEMARK-zh.md) for details.

@@ -25,3 +25,6 @@ Thumbs.db
 *.tmp
 *.bak
 .env
+
+# Local AI assistant config (contains absolute paths to user's machine)
+CLAUDE.md
