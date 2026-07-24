@@ -1,6 +1,7 @@
 package group
 
 import (
+	"crypto/rand"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -351,7 +352,18 @@ func (g *DB) GetGroupMessages(groupID string, limit int) ([]*types.GroupMessage,
 	return messages, nil
 }
 
-// generateGroupID generates a unique group ID
+// generateGroupID generates a unique group ID. A nanosecond timestamp alone
+// isn't collision-proof under concurrent CreateGroup calls from the same
+// creator (observed during PR #18 review: 30 concurrent calls produced 2
+// collisions), so a random suffix is appended -- crypto/rand.Read on the
+// package-level Reader is effectively infallible on every platform this
+// project targets, but this still falls back to the timestamp-only ID
+// rather than erroring, keeping generateGroupID itself infallible for its
+// callers.
 func generateGroupID(name, creator string) string {
-	return fmt.Sprintf("group_%s_%d", creator[:8], time.Now().UnixNano())
+	suffix := make([]byte, 4)
+	if _, err := rand.Read(suffix); err != nil {
+		return fmt.Sprintf("group_%s_%d", creator[:8], time.Now().UnixNano())
+	}
+	return fmt.Sprintf("group_%s_%d_%x", creator[:8], time.Now().UnixNano(), suffix)
 }

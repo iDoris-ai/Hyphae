@@ -7,8 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func ratingPtr(v float64) *float64 { return &v }
-func intPtr(v int) *int            { return &v }
+func floatPtr(v float64) *float64 { return &v }
 
 func structuredProfile() *types.AgentProfile {
 	return &types.AgentProfile{
@@ -24,7 +23,7 @@ func structuredProfile() *types.AgentProfile {
 				{Service: "audit", Price: 200},
 			},
 		},
-		Rating:       ratingPtr(4.8),
+		Rating:       floatPtr(4.8),
 		Availability: types.AvailabilityAvailable,
 	}
 }
@@ -33,8 +32,8 @@ func TestDiscoverFilterIsZero(t *testing.T) {
 	assert.True(t, DiscoverFilter{}.IsZero())
 	assert.False(t, DiscoverFilter{Capability: "seo"}.IsZero())
 	assert.False(t, DiscoverFilter{OnlineOnly: true}.IsZero())
-	assert.False(t, DiscoverFilter{PriceMin: intPtr(1)}.IsZero())
-	assert.False(t, DiscoverFilter{RatingMin: ratingPtr(1)}.IsZero())
+	assert.False(t, DiscoverFilter{PriceMin: floatPtr(1)}.IsZero())
+	assert.False(t, DiscoverFilter{RatingMin: floatPtr(1)}.IsZero())
 }
 
 // TestDiscoverFilterMatches_NoFilterMatchesEverything covers acceptance
@@ -78,11 +77,11 @@ func TestDiscoverFilterMatches_PriceRange(t *testing.T) {
 		f    DiscoverFilter
 		want bool
 	}{
-		{"within range", DiscoverFilter{PriceMin: intPtr(100), PriceMax: intPtr(300)}, true},
-		{"below range", DiscoverFilter{PriceMin: intPtr(250)}, false},
-		{"above range", DiscoverFilter{PriceMax: intPtr(150)}, false},
-		{"min only, satisfied", DiscoverFilter{PriceMin: intPtr(200)}, true},
-		{"max only, satisfied", DiscoverFilter{PriceMax: intPtr(200)}, true},
+		{"within range", DiscoverFilter{PriceMin: floatPtr(100), PriceMax: floatPtr(300)}, true},
+		{"below range", DiscoverFilter{PriceMin: floatPtr(250)}, false},
+		{"above range", DiscoverFilter{PriceMax: floatPtr(150)}, false},
+		{"min only, satisfied", DiscoverFilter{PriceMin: floatPtr(200)}, true},
+		{"max only, satisfied", DiscoverFilter{PriceMax: floatPtr(200)}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -91,14 +90,16 @@ func TestDiscoverFilterMatches_PriceRange(t *testing.T) {
 	}
 
 	simple := &types.AgentProfile{Name: "Simple Agent", Mode: types.ModeSimple}
-	assert.False(t, DiscoverFilter{PriceMin: intPtr(0)}.Matches(simple), "no rate sheet must not match a price filter")
+	assert.False(t, DiscoverFilter{PriceMin: floatPtr(0)}.Matches(simple), "no rate sheet must not match a price filter")
 }
 
-// TestDiscoverFilterMatches_PriceIsNotTruncatedToInt covers a Codex review
-// finding: comparing rate.Price (float64) against int bounds must not
-// truncate the price first, or a fractional price could wrongly satisfy a
-// boundary it doesn't actually meet.
-func TestDiscoverFilterMatches_PriceIsNotTruncatedToInt(t *testing.T) {
+// TestDiscoverFilterMatches_FractionalPriceBounds covers fractional prices
+// on both sides of the comparison: PriceMin/PriceMax are now *float64 (the
+// CLI flags are cli.FloatFlag, not cli.IntFlag), matching RateEntry.Price's
+// own float64 type, so a boundary like --price-max 100.99 can be expressed
+// and compared exactly instead of only ever being able to pass a whole
+// integer bound against a fractional price.
+func TestDiscoverFilterMatches_FractionalPriceBounds(t *testing.T) {
 	profile := &types.AgentProfile{
 		Name: "Fractional Price Bot",
 		Mode: types.ModeStructured,
@@ -107,10 +108,11 @@ func TestDiscoverFilterMatches_PriceIsNotTruncatedToInt(t *testing.T) {
 		},
 	}
 
-	assert.False(t, DiscoverFilter{PriceMax: intPtr(100)}.Matches(profile),
-		"100.99 truncated to int(100) would wrongly satisfy price-max 100")
-	assert.True(t, DiscoverFilter{PriceMax: intPtr(101)}.Matches(profile))
-	assert.True(t, DiscoverFilter{PriceMin: intPtr(100)}.Matches(profile))
+	assert.False(t, DiscoverFilter{PriceMax: floatPtr(100)}.Matches(profile))
+	assert.False(t, DiscoverFilter{PriceMax: floatPtr(100.98)}.Matches(profile))
+	assert.True(t, DiscoverFilter{PriceMax: floatPtr(100.99)}.Matches(profile), "an exact fractional boundary must match")
+	assert.True(t, DiscoverFilter{PriceMax: floatPtr(101)}.Matches(profile))
+	assert.True(t, DiscoverFilter{PriceMin: floatPtr(100)}.Matches(profile))
 }
 
 // TestDiscoverFilterMatches_MalformedProfileGatedByMode covers a Codex
@@ -125,12 +127,12 @@ func TestDiscoverFilterMatches_MalformedProfileGatedByMode(t *testing.T) {
 		Mode:         types.ModeSimple,
 		Capabilities: []types.Capability{{Name: "seo"}},
 		RateSheet:    &types.RateSheet{Rates: []types.RateEntry{{Service: "audit", Price: 200}}},
-		Rating:       ratingPtr(5.0),
+		Rating:       floatPtr(5.0),
 	}
 
 	assert.False(t, DiscoverFilter{Capability: "seo"}.Matches(malformedSimple))
-	assert.False(t, DiscoverFilter{PriceMin: intPtr(0)}.Matches(malformedSimple))
-	assert.False(t, DiscoverFilter{RatingMin: ratingPtr(0)}.Matches(malformedSimple))
+	assert.False(t, DiscoverFilter{PriceMin: floatPtr(0)}.Matches(malformedSimple))
+	assert.False(t, DiscoverFilter{RatingMin: floatPtr(0)}.Matches(malformedSimple))
 	// OnlineOnly isn't a structured-only filter -- Availability applies
 	// regardless of mode, so it should still evaluate normally.
 	malformedSimple.Availability = types.AvailabilityAvailable
@@ -140,11 +142,11 @@ func TestDiscoverFilterMatches_MalformedProfileGatedByMode(t *testing.T) {
 func TestDiscoverFilterMatches_RatingMin(t *testing.T) {
 	structured := structuredProfile() // rating 4.8
 
-	assert.True(t, DiscoverFilter{RatingMin: ratingPtr(4.5)}.Matches(structured))
-	assert.False(t, DiscoverFilter{RatingMin: ratingPtr(4.9)}.Matches(structured))
+	assert.True(t, DiscoverFilter{RatingMin: floatPtr(4.5)}.Matches(structured))
+	assert.False(t, DiscoverFilter{RatingMin: floatPtr(4.9)}.Matches(structured))
 
 	noRating := &types.AgentProfile{Name: "No Rating Agent", Mode: types.ModeStructured}
-	assert.False(t, DiscoverFilter{RatingMin: ratingPtr(0)}.Matches(noRating), "unset rating must not match a rating-min filter, even rating-min 0")
+	assert.False(t, DiscoverFilter{RatingMin: floatPtr(0)}.Matches(noRating), "unset rating must not match a rating-min filter, even rating-min 0")
 }
 
 func TestDiscoverFilterMatches_OnlineOnly(t *testing.T) {
@@ -165,16 +167,16 @@ func TestDiscoverFilterMatches_Combined(t *testing.T) {
 
 	allSatisfied := DiscoverFilter{
 		Capability: "seo",
-		PriceMin:   intPtr(100),
-		PriceMax:   intPtr(300),
-		RatingMin:  ratingPtr(4.0),
+		PriceMin:   floatPtr(100),
+		PriceMax:   floatPtr(300),
+		RatingMin:  floatPtr(4.0),
 		OnlineOnly: true,
 	}
 	assert.True(t, allSatisfied.Matches(structured))
 
 	oneUnsatisfied := DiscoverFilter{
 		Capability: "seo",
-		RatingMin:  ratingPtr(4.9), // structured's rating is 4.8, fails this one
+		RatingMin:  floatPtr(4.9), // structured's rating is 4.8, fails this one
 		OnlineOnly: true,
 	}
 	assert.False(t, oneUnsatisfied.Matches(structured))

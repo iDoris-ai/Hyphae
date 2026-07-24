@@ -3,6 +3,7 @@ package group
 import (
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/AuraAIHQ/agent-speaker/pkg/types"
@@ -391,4 +392,49 @@ func TestGroupMembersTableMigrationIsIdempotent(t *testing.T) {
 	// again against the same underlying *sql.DB must not error.
 	require.NoError(t, db.migrate())
 	require.NoError(t, db.migrate())
+}
+
+// TestGenerateGroupID_ConcurrentSameCreatorNoCollisions is the regression
+// test for the pre-existing generateGroupID collision risk recorded in
+// specs/m1.5/README.md's known-issues section: 30 concurrent CreateGroup
+// calls from the same creator (originally reproduced during PR #18 review,
+// 2 collisions out of 9 runs) used to occasionally produce a duplicate ID,
+// tripping the groups.id UNIQUE constraint. Now that generateGroupID
+// appends a random suffix, none of the 30 concurrent creates should fail or
+// collide.
+func TestGenerateGroupID_ConcurrentSameCreatorNoCollisions(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	// Serialize the connection pool: this test's concern is generateGroupID's
+	// collision behavior under concurrent callers, not the shared DB's
+	// separate, pre-existing SQLITE_BUSY-under-contention behavior (the
+	// production code doesn't set SetMaxOpenConns(1) for this DB the way
+	// internal/audit does for its own hash-chain DB -- out of scope here).
+	db.db.SetMaxOpenConns(1)
+
+	const n = 30
+	ids := make([]string, n)
+	errs := make([]error, n)
+
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := range n {
+		go func(i int) {
+			defer wg.Done()
+			group, err := db.CreateGroup(fmt.Sprintf("Group %d", i), "", "npub1samecreator", []string{"npub1samecreator"}, nil)
+			errs[i] = err
+			if group != nil {
+				ids[i] = group.ID
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	seen := make(map[string]bool, n)
+	for i := range n {
+		require.NoError(t, errs[i])
+		require.False(t, seen[ids[i]], "duplicate group ID generated: %s", ids[i])
+		seen[ids[i]] = true
+	}
 }

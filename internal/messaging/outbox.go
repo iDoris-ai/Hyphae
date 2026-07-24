@@ -2,6 +2,7 @@ package messaging
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -94,7 +95,13 @@ func SaveOutbox(ob *types.Outbox) error {
 	return nil
 }
 
-// AddToOutbox adds a message to outbox
+// AddToOutbox adds a message to outbox. entry.ID is hex-encoded rather than
+// the raw event.ID bytes: a Go string holding arbitrary binary content gets
+// silently and irreversibly mangled by json.Marshal the moment it's first
+// written (any byte sequence that isn't valid UTF-8 becomes U+FFFD), which
+// is exactly what happened to 9 of 13 real historical entries found during
+// task 8's outbox-diagnostics work (see specs/m1.5/README.md). Hex-encoding
+// keeps the stored ID both round-trip-safe through JSON and human-readable.
 func AddToOutbox(ob *types.Outbox, event *nostr.Event, recipientNpub string, relays []string) error {
 	eventJSON, err := json.Marshal(event)
 	if err != nil {
@@ -102,7 +109,7 @@ func AddToOutbox(ob *types.Outbox, event *nostr.Event, recipientNpub string, rel
 	}
 
 	entry := types.OutboxEntry{
-		ID:            string(event.ID[:]),
+		ID:            hex.EncodeToString(event.ID[:]),
 		EventJSON:     string(eventJSON),
 		RecipientNpub: recipientNpub,
 		Relays:        relays,
