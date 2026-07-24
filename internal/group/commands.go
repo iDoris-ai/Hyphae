@@ -6,8 +6,9 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/fatih/color"
+	"github.com/AuraAIHQ/agent-speaker/internal/audit"
 	"github.com/AuraAIHQ/agent-speaker/internal/identity"
+	"github.com/fatih/color"
 	"github.com/urfave/cli/v3"
 )
 
@@ -99,6 +100,12 @@ var GroupCreateCmd = &cli.Command{
 		)
 		if err != nil {
 			return err
+		}
+
+		if err := audit.LogAction(myIdentity.Nickname, audit.ActionGroupCreated, map[string]any{
+			"group_id": group.ID, "name": group.Name, "members": len(group.Members),
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "⚠️  audit log failed: %v\n", err)
 		}
 
 		green := color.New(color.FgGreen).SprintFunc()
@@ -224,6 +231,12 @@ var GroupAddCmd = &cli.Command{
 			return err
 		}
 
+		if err := audit.LogAction(myIdentity.Nickname, audit.ActionGroupMemberAdded, map[string]any{
+			"group_id": groupID, "group_name": c.String("name"), "member": npub,
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "⚠️  audit log failed: %v\n", err)
+		}
+
 		fmt.Printf("✅ Added %s to group '%s'\n", c.String("user"), c.String("name"))
 		return nil
 	},
@@ -301,6 +314,12 @@ var GroupLeaveCmd = &cli.Command{
 
 		if err := db.RemoveMember(groupID, myIdentity.Npub); err != nil {
 			return err
+		}
+
+		if err := audit.LogAction(myIdentity.Nickname, audit.ActionGroupMemberRemoved, map[string]any{
+			"group_id": groupID, "group_name": c.String("name"), "member": myIdentity.Npub, "self_initiated": true,
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "⚠️  audit log failed: %v\n", err)
 		}
 
 		fmt.Printf("👋 You left group '%s'\n", c.String("name"))

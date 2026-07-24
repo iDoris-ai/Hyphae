@@ -6,6 +6,7 @@ import (
 	"os"
 	"text/tabwriter"
 
+	"github.com/AuraAIHQ/agent-speaker/internal/audit"
 	"github.com/AuraAIHQ/agent-speaker/internal/common"
 	"github.com/AuraAIHQ/agent-speaker/pkg/types"
 	"github.com/fatih/color"
@@ -96,6 +97,9 @@ Identities are stored in ~/.agent-speaker/ with 600 permissions.`,
 				cyan := color.New(color.FgCyan).SprintFunc()
 
 				id := identity.(*types.Identity)
+				if err := audit.LogAction(nickname, audit.ActionIdentityCreated, map[string]any{"npub": id.Npub}); err != nil {
+					fmt.Fprintf(os.Stderr, "⚠️  audit log failed: %v\n", err)
+				}
 				fmt.Printf("✅ Created identity '%s'\n", green(nickname))
 				fmt.Printf("   Npub: %s\n", yellow(id.Npub))
 				fmt.Printf("   Nsec: %s (stored securely)\n", yellow("[hidden]"))
@@ -334,6 +338,14 @@ Contacts are stored locally and mapped to their npubs.`,
 
 				if err := AddContact(ks, nickname, npub); err != nil {
 					return err
+				}
+
+				actor := ks.DefaultIdentity
+				if actor == "" {
+					actor = "unknown"
+				}
+				if err := audit.LogAction(actor, audit.ActionContactAdded, map[string]any{"nickname": nickname, "npub": npub}); err != nil {
+					fmt.Fprintf(os.Stderr, "⚠️  audit log failed: %v\n", err)
 				}
 
 				green := color.New(color.FgGreen).SprintFunc()

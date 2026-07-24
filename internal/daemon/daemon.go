@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
+	"github.com/AuraAIHQ/agent-speaker/internal/audit"
 	"github.com/AuraAIHQ/agent-speaker/internal/common"
 	"github.com/AuraAIHQ/agent-speaker/internal/identity"
 	"github.com/AuraAIHQ/agent-speaker/internal/messaging"
@@ -521,6 +522,11 @@ func sendAutoReply(ctx context.Context, myIdentity *types.Identity, ks *types.Ke
 
 	if err := messaging.StoreOutgoingMessage(event, toNpub, replyText, success); err != nil {
 		fmt.Printf("   ⚠️  Store auto-reply: %v\n", err)
+	}
+	if err := audit.LogAction(myIdentity.Nickname, audit.ActionAutoReplySent, map[string]any{
+		"to": toNpub, "published": success, "event_id": event.ID.Hex(),
+	}); err != nil {
+		fmt.Printf("   ⚠️  audit log failed: %v\n", err)
 	}
 	fmt.Printf("🤖 Auto-replied to %s\n", safePrefix(toNpub, 20)+"...")
 }
