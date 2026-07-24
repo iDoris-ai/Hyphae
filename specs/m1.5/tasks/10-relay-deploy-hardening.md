@@ -59,3 +59,16 @@ Codex（沙箱本身网络受限、无法访问真实 GitHub 网络，但用本�
 - **Low**：`check_git` 原来的写法是 `command -v git` 通过就直接假定 `git --version` 一定成功，如果 `git --version` 本身失败（理论上极小概率，比如二进制损坏）还是会打印"✅ git: "（版本号为空）。修复：改成先把 `git --version` 的输出和退出码都存下来，只有真正成功才打印 ✅，否则报"❌ git: found in PATH, but 'git --version' failed"。
 
 三个修复都是纯诊断逻辑的加固，没有改变 `local`/`tunnel` 模式，也没有改变 `check` 命令的整体行为契约（合法输入下的输出不变）。修复后重新跑了全部 5 条验收标准 + 新增的非法端口边界用例（`abc`/`70000`/`0`），行为符合预期。
+
+### Codex review 第二轮（confirmation-only）
+
+针对第一轮的三个修复做确认性 review（不是从头全量重审）：非法端口用例、正常端口用例、IPv6 fallback 的 `||` 短路逻辑、`check_git` 新写法的 bash 正确性都独立验证通过，没有发现新问题。开 PR #23。
+
+### 仓库后台 review bot（PK Review）
+
+**Verdict: APPROVE**，附带 2 个新发现的非阻塞 Low 级别边界 case（本次 Codex 两轮都没覆盖到）：
+
+1. `check_port` 的范围校验对超出 bash 64 位整数范围的纯数字字符串（比如 27 个 9）会失效——两个 `[ "$port" -lt/-gt ... ]` 比较本身会因为整数溢出报 `integer expression expected` 错误，`||` 链条判定失败，脚本继续走到 `port_in_use`、最终误报"✅ free"。跟 round 1 修的那个 bug 是同一类别（"非法端口被误报为空闲"），只是触发方式不同（数字但超范围，不是非数字/普通超范围）。bot 自己也确认了科学计数法、hex 样式字符串、全角 Unicode 数字、前导零等其他输入形态都不会绕过校验，只有这个整数溢出的情况是真的。
+2. `check_relay_repo` 的 `git ls-remote --exit-code` 没有显式超时，针对一个真正 blackhole（丢包不拒绝连接）的地址，只受 OS 自己的 TCP connect 超时约束（常见 60-120 秒以上），不是脚本控制的——对于一个标榜"快速诊断"的工具，这种网络场景下可能会静默卡很久。
+
+两个都判定为 Low、不阻塞合并（bot 原话："not blocking"），已记录到 `specs/m1.5/README.md` 的"跑 loop 过程中发现的、不属于当前任务范围的问题"一节，留给以后有需要时处理，本任务不追加修复。PR #23 已 merge。
