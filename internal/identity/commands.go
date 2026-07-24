@@ -6,6 +6,7 @@ import (
 	"os"
 	"text/tabwriter"
 
+	"github.com/AuraAIHQ/agent-speaker/internal/common"
 	"github.com/AuraAIHQ/agent-speaker/pkg/types"
 	"github.com/fatih/color"
 	"github.com/urfave/cli/v3"
@@ -110,35 +111,58 @@ Identities are stored in ~/.agent-speaker/ with 600 permissions.`,
 			Name:  "list",
 			Usage: "List all identities",
 			Action: func(ctx context.Context, c *cli.Command) error {
+				jsonMode := common.JSONMode(c)
+
 				ks, err := LoadKeyStore()
 				if err != nil {
 					return fmt.Errorf("failed to load keystore: %w", err)
 				}
 
 				identities := ListIdentities(ks)
-				if len(identities) == 0 {
-					fmt.Println("No identities found. Create one with:")
-					fmt.Println("  agent-speaker identity create --nickname <name>")
-					return nil
+
+				// Never serialize types.Identity directly for --json: it carries Nsec.
+				// Build a redacted view with only what human mode already prints.
+				type identityEntry struct {
+					Nickname  string `json:"nickname"`
+					Npub      string `json:"npub"`
+					Default   bool   `json:"default"`
+					Encrypted bool   `json:"encrypted"`
 				}
-
-				fmt.Println("👤 Identities:")
-				w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-				fmt.Fprintln(w, "NICKNAME\tNPUB\tDEFAULT\tENCRYPTED")
-
+				entries := make([]identityEntry, 0, len(identities))
 				for _, identity := range identities {
-					defaultMark := ""
-					if identity.Nickname == ks.DefaultIdentity {
-						defaultMark = "✓"
-					}
-					npubShort := identity.Npub[:20] + "..."
-					encryptedMark := ""
-					if ks.Encrypted {
-						encryptedMark = "🔐"
-					}
-					fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", identity.Nickname, npubShort, defaultMark, encryptedMark)
+					entries = append(entries, identityEntry{
+						Nickname:  identity.Nickname,
+						Npub:      identity.Npub,
+						Default:   identity.Nickname == ks.DefaultIdentity,
+						Encrypted: ks.Encrypted,
+					})
 				}
-				w.Flush()
+
+				common.Emit(jsonMode, entries, func() {
+					if len(identities) == 0 {
+						fmt.Println("No identities found. Create one with:")
+						fmt.Println("  agent-speaker identity create --nickname <name>")
+						return
+					}
+
+					fmt.Println("👤 Identities:")
+					w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+					fmt.Fprintln(w, "NICKNAME\tNPUB\tDEFAULT\tENCRYPTED")
+
+					for _, e := range entries {
+						defaultMark := ""
+						if e.Default {
+							defaultMark = "✓"
+						}
+						npubShort := e.Npub[:20] + "..."
+						encryptedMark := ""
+						if e.Encrypted {
+							encryptedMark = "🔐"
+						}
+						fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", e.Nickname, npubShort, defaultMark, encryptedMark)
+					}
+					w.Flush()
+				})
 
 				return nil
 			},

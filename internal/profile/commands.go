@@ -348,12 +348,13 @@ var profileDiscoverCmd = &cli.Command{
 		relays := c.StringSlice("relay")
 		limit := int(c.Int("limit"))
 		timeoutSec := time.Duration(c.Int("timeout")) * time.Second
+		jsonMode := common.JSONMode(c)
 
 		var authors []nostr.PubKey
 		if npub != "" {
 			pk, err := common.ParsePublicKey(npub)
 			if err != nil {
-				return fmt.Errorf("invalid npub: %w", err)
+				return common.NewExitError(common.ErrCodeUser, fmt.Errorf("invalid npub: %w", err))
 			}
 			authors = append(authors, pk)
 		}
@@ -366,18 +367,26 @@ var profileDiscoverCmd = &cli.Command{
 		}
 		defer db.Close()
 
-		found := 0
+		type discovered struct {
+			Npub    string              `json:"npub"`
+			Profile *types.AgentProfile `json:"profile"`
+		}
+		found := make([]discovered, 0)
 		for _, url := range relays {
 			relay, err := nostr.RelayConnect(ctx, url, nostr.RelayOptions{})
 			if err != nil {
-				fmt.Printf("   ⚠️  Failed to connect to %s: %v\n", url, err)
+				if !jsonMode {
+					fmt.Printf("   ⚠️  Failed to connect to %s: %v\n", url, err)
+				}
 				continue
 			}
 
 			sub, err := relay.Subscribe(ctx, filter, nostr.SubscriptionOptions{})
 			if err != nil {
 				relay.Close()
-				fmt.Printf("   ⚠️  Failed to subscribe on %s: %v\n", url, err)
+				if !jsonMode {
+					fmt.Printf("   ⚠️  Failed to subscribe on %s: %v\n", url, err)
+				}
 				continue
 			}
 
@@ -390,19 +399,23 @@ var profileDiscoverCmd = &cli.Command{
 
 				evtNpub := common.EncodeNpub(evt.PubKey)
 				if err := db.StoreProfile(evtNpub, profile); err == nil {
-					found++
-					fmt.Printf("   ✅ Found: %s (%s)\n", profile.Name, evtNpub[:20]+"...")
+					found = append(found, discovered{Npub: evtNpub, Profile: profile})
+					if !jsonMode {
+						fmt.Printf("   ✅ Found: %s (%s)\n", profile.Name, evtNpub[:20]+"...")
+					}
 				}
 			}
 			timeout.Stop()
 			relay.Close()
 		}
 
-		if found == 0 {
-			fmt.Println("No profiles found on relays.")
-		} else {
-			fmt.Printf("\n🎉 Discovered %d profile(s)\n", found)
-		}
+		common.Emit(jsonMode, found, func() {
+			if len(found) == 0 {
+				fmt.Println("No profiles found on relays.")
+			} else {
+				fmt.Printf("\n🎉 Discovered %d profile(s)\n", len(found))
+			}
+		})
 
 		return nil
 	},
