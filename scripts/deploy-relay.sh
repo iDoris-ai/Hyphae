@@ -62,8 +62,11 @@ port_in_use() {
   else
     # The fd opened here is local to this subshell, so there's nothing to
     # close afterwards -- the subshell's own exit closes it. Success means
-    # something accepted the connection, i.e. the port is in use.
-    (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null
+    # something accepted the connection, i.e. the port is in use. Probe
+    # both loopback families since an IPv6-only listener wouldn't answer
+    # on 127.0.0.1.
+    (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null \
+      || (exec 3<>"/dev/tcp/::1/$port") 2>/dev/null
   fi
 }
 
@@ -96,16 +99,25 @@ check_go() {
 }
 
 check_git() {
-  if command -v git >/dev/null 2>&1; then
-    echo "✅ git: $(git --version | awk '{print $3}')"
-  else
+  if ! command -v git >/dev/null 2>&1; then
     echo "❌ git: not found in PATH"
+    return 1
+  fi
+  local ver
+  if ver="$(git --version)"; then
+    echo "✅ git: $(echo "$ver" | awk '{print $3}')"
+  else
+    echo "❌ git: found in PATH, but 'git --version' failed"
     return 1
   fi
 }
 
 check_port() {
   local port="$1"
+  if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+    echo "❌ port $port: not a valid port number (must be 1-65535)"
+    return 1
+  fi
   if port_in_use "$port"; then
     echo "❌ port $port: already in use -- stop whatever's listening on it, or pass a different port"
     return 1

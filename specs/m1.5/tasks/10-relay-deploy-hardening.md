@@ -49,3 +49,13 @@
 - `RELAY_REPO` 可达性检测用 `git ls-remote --exit-code`（真实网络请求，跟脚本本来就要做的 `git clone` 用同一套凭证/网络路径，比单纯 ping 域名更准确）。
 - Go 版本检查只比较本地 `go version` 输出与脚本自己文档化的 `MIN_GO_VERSION="1.22"`（脚本头部注释里本来就写的 "Go 1.22+"），没有去抓 khatru/未来 fork 仓库的 `go.mod` 里声明的版本——抓远程 `go.mod` 意味着这个检查项的成功与否又依赖下面单独检查的"仓库是否可达"，等于把两个独立检查项耦合在一起；而且 khatru 的 example 子目录本身构建时会自然验证 Go 版本兼容性（构建失败会直接报错），这里的 `check` 只是防止走到那一步才发现版本太老，用脚本自己的最低要求做本地快速判断就足够。
 - 验收标准 4 的回归测试中意外发现一个**跟本任务改动无关的 pre-existing 问题**：khatru 上游仓库现在的 `examples/` 目录下已经没有 `basic` 子目录了（改名/拆分成 `basic-badger`/`basic-sqlite3` 等），导致 `local`/`tunnel` 模式在 `git clone` 成功后，`EXAMPLE_DIR` 存在性检查这一步必然失败。用 `git stash` 切回本任务改动之前的 `main` 复现了完全相同的失败，确认这是任务 10 之前就存在的问题，不是本次改动引入的回归——已记录到 `specs/m1.5/README.md` 的"跑 loop 过程中发现的、不属于当前任务范围的问题"一节，不在本任务修复（任务范围只覆盖 `check` 子命令）。
+
+### Codex review 第一轮
+
+Codex（沙箱本身网络受限、无法访问真实 GitHub 网络，但用本地能跑的命令做了充分验证，并且独立确认了 `sort -V` 版本比较、`git diff` 只改了预期的两处、以及 `EXAMPLE_DIR` 这个 pre-existing 问题）发现并确认了 3 个真实问题，已全部修复：
+
+- **Medium（真实 bug）**：`check_port` 对非法端口号（比如 `check abc`、`check 70000`、`check 0`）会误报"✅ free"——因为 `lsof -iTCP:abc` 这种非法调用本身失败，`port_in_use` 把"lsof 调用失败"和"端口没被占用"混为一谈，返回值都是非 0，`check_port` 只看返回值就直接判定"空闲"。修复：`check_port` 先用 `[[ "$port" =~ ^[0-9]+$ ]]` + 数值范围（1-65535）校验，非法值直接报"不是合法端口号"并计入失败项，不再走到 `port_in_use`。
+- **Low**：`port_in_use` 的 `/dev/tcp` fallback 只探测 `127.0.0.1`，如果监听方只绑定 IPv6（`::1`）会被漏检。修复：fallback 改成先探测 `127.0.0.1` 再探测 `::1`（`||` 短路，任一成功即视为端口被占用）。
+- **Low**：`check_git` 原来的写法是 `command -v git` 通过就直接假定 `git --version` 一定成功，如果 `git --version` 本身失败（理论上极小概率，比如二进制损坏）还是会打印"✅ git: "（版本号为空）。修复：改成先把 `git --version` 的输出和退出码都存下来，只有真正成功才打印 ✅，否则报"❌ git: found in PATH, but 'git --version' failed"。
+
+三个修复都是纯诊断逻辑的加固，没有改变 `local`/`tunnel` 模式，也没有改变 `check` 命令的整体行为契约（合法输入下的输出不变）。修复后重新跑了全部 5 条验收标准 + 新增的非法端口边界用例（`abc`/`70000`/`0`），行为符合预期。
