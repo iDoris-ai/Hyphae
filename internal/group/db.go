@@ -114,6 +114,12 @@ func (g *DB) migrate() error {
 // CreateGroup creates a new group. roles maps member npub -> types.Role; a
 // member with no entry (or a nil map) defaults to types.RoleHuman.
 func (g *DB) CreateGroup(name, description, creator string, members []string, roles map[string]types.Role) (*types.Group, error) {
+	for member, role := range roles {
+		if role != "" && !role.IsValid() {
+			return nil, fmt.Errorf("invalid role %q for member %q: must be %q or %q", role, member, types.RoleHuman, types.RoleAgent)
+		}
+	}
+
 	id := generateGroupID(name, creator)
 	now := time.Now().Unix()
 
@@ -259,6 +265,8 @@ func (g *DB) GetGroupsForUser(npub string) ([]*types.Group, error) {
 func (g *DB) AddMember(groupID, npub string, role types.Role) error {
 	if role == "" {
 		role = types.RoleHuman
+	} else if !role.IsValid() {
+		return fmt.Errorf("invalid role %q: must be %q or %q", role, types.RoleHuman, types.RoleAgent)
 	}
 	_, err := g.db.Exec(
 		"INSERT OR IGNORE INTO group_members (group_id, npub, joined_at, role) VALUES (?, ?, ?, ?)",

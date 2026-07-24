@@ -256,6 +256,10 @@ func AddContact(ks *types.KeyStore, nickname, npub string) error {
 // Agent. See pkg/types.Role — this is a label, not an access-control
 // mechanism.
 func AddContactWithRole(ks *types.KeyStore, nickname, npub string, role types.Role) error {
+	if !role.IsValid() {
+		return fmt.Errorf("invalid role %q: must be %q or %q", role, types.RoleHuman, types.RoleAgent)
+	}
+
 	if _, exists := ks.Contacts[nickname]; exists {
 		return fmt.Errorf("contact '%s' already exists", nickname)
 	}

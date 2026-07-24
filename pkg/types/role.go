@@ -20,3 +20,13 @@ func (r Role) String() string {
 	}
 	return string(r)
 }
+
+// IsValid reports whether r is an explicitly recognized role. The zero value
+// ("") is deliberately NOT valid here -- that's the legacy/deserialization
+// default handled by String(), not something callers should be able to pass
+// in on purpose. Use this to validate role values at write boundaries
+// (contact/group-member creation), independent of any single CLI command's
+// own flag validation.
+func (r Role) IsValid() bool {
+	return r == RoleHuman || r == RoleAgent
+}

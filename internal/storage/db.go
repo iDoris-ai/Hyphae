@@ -43,6 +43,15 @@ func InitDB() (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
+	// Every command-line invocation calls InitDB() and re-runs migrate()
+	// (CREATE TABLE IF NOT EXISTS / ALTER TABLE ADD COLUMN), so concurrent
+	// processes can race on the same DDL. busy_timeout makes SQLite retry
+	// for a bit instead of immediately failing with "database is locked".
+	if _, err := db.Exec("PRAGMA busy_timeout = 5000"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("failed to set busy timeout: %w", err)
+	}
+
 	// Enable WAL mode for better concurrency
 	if _, err := db.Exec("PRAGMA journal_mode = WAL"); err != nil {
 		_ = db.Close()

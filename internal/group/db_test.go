@@ -349,6 +349,36 @@ func TestAddMemberWithRole(t *testing.T) {
 	assert.Equal(t, types.RoleHuman, byNpub["npub1empty-role"], "empty role passed to AddMember should default to human")
 }
 
+// TestAddMemberRejectsInvalidRole and TestCreateGroupRejectsInvalidRole cover
+// the defense-in-depth validation added at the group DB boundary (Codex
+// review finding): only the CLI validated --role before this, so any other
+// caller of these exported methods could persist an arbitrary role string.
+func TestAddMemberRejectsInvalidRole(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	group, err := db.CreateGroup("Invalid Role Test", "", "npub1creator", []string{"npub1creator"}, nil)
+	require.NoError(t, err)
+
+	err = db.AddMember(group.ID, "npub1bogus", types.Role("bogus"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid role")
+
+	members, err := db.GetGroupMembers(group.ID)
+	require.NoError(t, err)
+	assert.NotContains(t, members, "npub1bogus", "a rejected AddMember call must not persist the member")
+}
+
+func TestCreateGroupRejectsInvalidRole(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	roles := map[string]types.Role{"npub1bad": types.Role("bogus")}
+	_, err := db.CreateGroup("Invalid Role Create Test", "", "npub1creator", []string{"npub1creator", "npub1bad"}, roles)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid role")
+}
+
 // TestGroupMembersTableMigrationIsIdempotent covers the ALTER TABLE ADD
 // COLUMN path added for the role field: migrate() must be safe to run
 // against a database that already has the column (e.g. NewDB() called twice

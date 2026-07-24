@@ -171,7 +171,10 @@ var GroupListCmd = &cli.Command{
 			}
 
 			memberSummary := fmt.Sprintf("%d", len(g.Members))
-			if withRoles, rErr := db.GetGroupMembersWithRoles(g.ID); rErr == nil {
+			withRoles, rErr := db.GetGroupMembersWithRoles(g.ID)
+			if rErr != nil {
+				fmt.Fprintf(os.Stderr, "⚠️  could not load member roles for group '%s': %v\n", g.Name, rErr)
+			} else {
 				agents := 0
 				for _, m := range withRoles {
 					if m.Role == types.RoleAgent {
