@@ -384,6 +384,26 @@ var profileDiscoverCmd = &cli.Command{
 			Usage: "Timeout in seconds",
 			Value: 5,
 		},
+		&cli.StringFlag{
+			Name:  "capability",
+			Usage: "Only show profiles with this capability (structured-mode profiles only)",
+		},
+		&cli.IntFlag{
+			Name:  "price-min",
+			Usage: "Only show profiles with a rate at or above this price (structured-mode profiles only)",
+		},
+		&cli.IntFlag{
+			Name:  "price-max",
+			Usage: "Only show profiles with a rate at or below this price (structured-mode profiles only)",
+		},
+		&cli.FloatFlag{
+			Name:  "rating-min",
+			Usage: "Only show profiles with a rating at or above this value",
+		},
+		&cli.BoolFlag{
+			Name:  "online-only",
+			Usage: "Only show profiles with availability=available",
+		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
 		npub := c.String("npub")
@@ -391,6 +411,22 @@ var profileDiscoverCmd = &cli.Command{
 		limit := int(c.Int("limit"))
 		timeoutSec := time.Duration(c.Int("timeout")) * time.Second
 		jsonMode := common.JSONMode(c)
+
+		var discoverFilter DiscoverFilter
+		discoverFilter.Capability = c.String("capability")
+		if c.IsSet("price-min") {
+			v := int(c.Int("price-min"))
+			discoverFilter.PriceMin = &v
+		}
+		if c.IsSet("price-max") {
+			v := int(c.Int("price-max"))
+			discoverFilter.PriceMax = &v
+		}
+		if c.IsSet("rating-min") {
+			v := c.Float("rating-min")
+			discoverFilter.RatingMin = &v
+		}
+		discoverFilter.OnlineOnly = c.Bool("online-only")
 
 		var authors []nostr.PubKey
 		if npub != "" {
@@ -440,7 +476,8 @@ var profileDiscoverCmd = &cli.Command{
 				}
 
 				evtNpub := common.EncodeNpub(evt.PubKey)
-				if err := db.StoreProfile(evtNpub, profile); err == nil {
+				storeErr := db.StoreProfile(evtNpub, profile)
+				if storeErr == nil && discoverFilter.Matches(profile) {
 					found = append(found, discovered{Npub: evtNpub, Profile: profile})
 					if !jsonMode {
 						fmt.Printf("   ✅ Found: %s (%s)\n", profile.Name, evtNpub[:20]+"...")
@@ -551,6 +588,9 @@ func printProfile(npub string, profile *types.AgentProfile) {
 	}
 	if profile.Version != "" {
 		fmt.Printf("   Version: %s\n", profile.Version)
+	}
+	if profile.Rating != nil {
+		fmt.Printf("   Rating: %.1f\n", *profile.Rating)
 	}
 
 	if len(profile.Capabilities) > 0 {
