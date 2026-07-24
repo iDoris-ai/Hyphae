@@ -145,70 +145,48 @@ agent-speaker/
 
 ## 构建流程
 
-```
-make build
-    ├── 1. sync-nak: 复制 third_party/nak → build/nak-src/
-    ├── 2. copy agent.go → build/nak-src/
-    ├── 3. add-agent-cmd: 修改 main.go 注册 agentCmd
-    └── 4. go build → bin/agent-speaker
-```
-
-## 更新 nak
-
-`third_party/nak` 是 [fiatjaf/nak](https://github.com/fiatjaf/nak) 的 git submodule，锁定在某个具体 commit，构建可复现。
-
 ```bash
-# 拉取最新 nak 并重新构建
-make update-nak   # cd third_party/nak && git pull origin master
-make build
-
-# 提交 submodule 版本变更
-git add third_party/nak
-git commit -m "chore: bump nak to $(git -C third_party/nak rev-parse --short HEAD)"
+./build.sh           # go build ./cmd/agent-speaker → bin/agent-speaker
+./build.sh install   # 同时 install 到 $GOPATH/bin
 ```
 
-> 克隆本仓库后需初始化 submodule：
-> ```bash
-> git clone --recurse-submodules https://github.com/AuraAIHQ/agent-speaker
-> # 或已克隆时：
-> git submodule update --init
-> ```
+> ⚠️ `Makefile` 里的 `build`/`dev-build`/`test-all` 等目标是重构前（`internal/`+`pkg/` 布局之前）的遗留脚本，依赖的根目录文件（`agent.go` 等）和 `test/` 目录早已不存在，会直接报错。不要用它们，用上面 `./build.sh` 即可。详见 `CLAUDE.md` 的 Build & Development Commands 一节。
+
+`third_party/nak` 是 [fiatjaf/nak](https://github.com/fiatjaf/nak) 的 git submodule，是本项目最早的基座，现在**已不再被任何代码 import**（`internal/nostr/` 是独立实现）。克隆本仓库不需要初始化这个 submodule；只有想参考/更新 vendored 副本时才需要 `git submodule update --init` + `make update-nak`。
 
 ## 测试
 
 ```bash
-# 运行所有测试
-make test-all
+go test ./...       # 所有单元测试（每个包自带 *_test.go）
+./test.sh            # 构建 + 跑单元测试 + CLI 冒烟检查
 
-# 单独运行各类测试
-make test-unit          # 单元测试 (pkg/compress)
-make test-regression    # nak 回归测试
-make test-integration   # 集成测试
-make test-short         # 快速测试模式
-make bench              # 性能测试
+# E2E（需要真实 relay + Alice/Bob/Charlie 身份，见 docs/05-acceptance-test-guide.md）
+./test_e2e.sh
+./test_group_e2e.sh
+./test_storage_e2e.sh
+./test_profile_e2e.sh
+./test_tui_e2e.sh
 ```
-
-### 测试覆盖
-
-- ✅ **单元测试**: zstd 压缩/解压 (12 个测试用例)
-- ✅ **Agent 测试**: 命令注册、常量、flag 配置 (8 个测试用例)
-- ✅ **回归测试**: nak 原始功能 (Event, Key, Filter, Metadata 等)
-- ✅ **集成测试**: Filter 构造、Mock Relay、时间戳处理
 
 ## 添加新功能
 
-1. 编辑 `agent.go` 添加新命令
+1. 在对应的 `internal/<pkg>/commands.go` 里添加新命令（或新建 `internal/<pkg>/`，参照现有包结构）
 2. 如需公共库，放入 `pkg/`
-3. 添加对应的测试到 `*_test.go`
-4. 运行 `make test-all` 验证
+3. 添加对应的测试到同目录 `*_test.go`
+4. 运行 `go test ./...` 验证
 5. 提交代码
 
 ## 文档
 
-- [01-nostr-cli-tools-research.md](docs/01-nostr-cli-tools-research.md)
-- [02-architecture-design.md](docs/02-architecture-design.md)
-- [03-development-plan.md](docs/03-development-plan.md)
-- [04-quick-start.md](docs/04-quick-start.md)
+- [`CLAUDE.md`](CLAUDE.md) — 面向 Claude Code 的仓库导航（构建/测试命令、架构总览）
+- [`docs/protocol-v2.md`](docs/protocol-v2.md) — V2 架构决策（L1/L2/L3 协议栈、relay 选型、里程碑总表）
+- [`docs/milestones/roadmap-v2.md`](docs/milestones/roadmap-v2.md) — V2 详细任务清单（按里程碑拆分的子任务）
+- [`docs/TODO.md`](docs/TODO.md) — 不依赖 V2 重构、可独立推进的短期任务
+- [`docs/buzz-comparison-analysis.md`](docs/buzz-comparison-analysis.md) — 与 Buzz（block/buzz）的架构对比与借鉴分析
+- [`docs/USER_MANUAL.md`](docs/USER_MANUAL.md) — 用户手册
+- [`QUICK_MANUAL_TEST.md`](QUICK_MANUAL_TEST.md) — 双人/三人协作手动测试指南（含 Profile/TUI）
+- [`docs/05-acceptance-test-guide.md`](docs/05-acceptance-test-guide.md) — Alice/Bob/Charlie 验收测试约定
+- [`docs/archive/`](docs/archive/) — 已被取代的历史文档（strfry 部署方案、旧重构记录等），仅供追溯，不要按其操作
 
 ## License
 
