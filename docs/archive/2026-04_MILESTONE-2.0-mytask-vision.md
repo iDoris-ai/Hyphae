@@ -1,3 +1,5 @@
+> **[已归档 2026-07-24]** 这是 2026-04-13 提出的一个替代性 "V2" 方案，把 agent-speaker 定位为链上任务市场 **MyTask**（TaskEscrowV2/JuryContract/MySBT/x402）的通信层。2026-05-13 正式锁定的架构是 [`../protocol-v2.md`](../protocol-v2.md)（去中心化 Nostr relay 网络 + AAstar Point + Mycelium Protocol 生态），与本文件描述的 MyTask 方向不同，本文件未被采纳，仅作历史记录保留。
+
 # Agent-Speaker Milestone 2.0 Roadmap
 
 > **定位声明**: agent-speaker 不是独立的任务市场，而是 MyTask 生态的 **底层通信与发现层 (Communication & Discovery Layer)**。它负责链下人与人的连接、意图解析、能力匹配和协商通信，最终通过 MyTask SDK/Contracts 完成链上契约与结算。

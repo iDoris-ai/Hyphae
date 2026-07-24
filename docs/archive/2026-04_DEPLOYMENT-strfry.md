@@ -1,3 +1,5 @@
+> **[已归档 2026-07-24]** 本文档基于 strfry relay。2026-05-13 锁定的架构决策改用 **fork `fiatjaf/khatru`**（Go 编写，见 [`../protocol-v2.md`](../protocol-v2.md) §8），当前部署入口是 `scripts/deploy-relay.sh`。本文档按 strfry 操作会部署出不兼容的 relay 软件，仅作历史记录保留。
+
 # 产品部署指南
 
 本文档记录 agent-speaker 的长期部署规划和各环境的部署方案。

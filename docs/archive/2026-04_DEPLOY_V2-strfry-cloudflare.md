@@ -1,3 +1,5 @@
+> **[已归档 2026-07-24]** 尽管文件名带 "V2"，本文档实际写于 `protocol-v2.md` 锁定架构（2026-05-13）之前，基于 strfry + Cloudflare Tunnel。真正的 V2 relay 软件选型是 **fork `fiatjaf/khatru`**（见 [`../protocol-v2.md`](../protocol-v2.md) §8），当前部署入口是 `scripts/deploy-relay.sh`。本文档按此操作会部署出不兼容的 relay 软件，仅作历史记录保留。
+
 # Agent-Speaker V2 部署指南
 
 > 部署 Cloudflare Relay + 配置客户端，实现人对人沟通和 Agent 自主沟通
@@ -132,7 +134,7 @@ curl https://relay.yourdomain.com
 
 ```bash
 # 1. 克隆代码
-git clone https://github.com/AuraAIHQ/agent-speaker.git
+git clone https://github.com/iDoris-ai/agent-speaker.git
 cd agent-speaker
 
 # 2. 构建
@@ -501,8 +503,8 @@ docker-compose up -d
 
 ## 📞 获取帮助
 
-- GitHub Issues: https://github.com/AuraAIHQ/agent-speaker/issues
-- 文档: https://github.com/AuraAIHQ/agent-speaker/tree/main/docs
+- GitHub Issues: https://github.com/iDoris-ai/agent-speaker/issues
+- 文档: https://github.com/iDoris-ai/agent-speaker/tree/main/docs
 - Nostr 协议: https://nostr.com
 
 ---
