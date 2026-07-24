@@ -57,7 +57,17 @@ func TestAgentProfileValidateByMode(t *testing.T) {
 			name:    "tagged mode with no tags is rejected",
 			profile: &AgentProfile{Name: "Alice", Mode: ModeTagged},
 			wantErr: true,
-			errMsg:  `mode "tagged" requires at least one tag`,
+			errMsg:  `mode "tagged" requires at least one non-blank tag`,
+		},
+		{
+			// Codex review round 3: the CLI's --tags flag is pre-cleaned via
+			// cleanTags, but --json-file input reaches Validate directly, so
+			// blank/whitespace-only tags must be rejected here too, not just
+			// an empty slice.
+			name:    "tagged mode with only blank/whitespace tags is rejected",
+			profile: &AgentProfile{Name: "Alice", Mode: ModeTagged, Tags: []string{"", "   "}},
+			wantErr: true,
+			errMsg:  `mode "tagged" requires at least one non-blank tag`,
 		},
 		{
 			name: "tagged mode with capabilities is rejected",

@@ -4,6 +4,7 @@ package types
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // AgentProfile represents an agent's public profile published on nostr
@@ -129,8 +130,8 @@ func (p *AgentProfile) Validate() error {
 		if hasStructuredFields {
 			return fmt.Errorf("mode %q only supports 'name' and 'tags', but structured fields are set", ModeTagged)
 		}
-		if len(p.Tags) == 0 {
-			return fmt.Errorf("mode %q requires at least one tag (use %q if you don't have any yet)", ModeTagged, ModeSimple)
+		if !hasNonBlankTag(p.Tags) {
+			return fmt.Errorf("mode %q requires at least one non-blank tag (use %q if you don't have any yet)", ModeTagged, ModeSimple)
 		}
 	}
 
@@ -146,6 +147,19 @@ func (p *AgentProfile) Validate() error {
 	}
 
 	return nil
+}
+
+// hasNonBlankTag reports whether tags contains at least one entry that isn't
+// empty or all-whitespace. The CLI's own --tags flag is pre-cleaned via
+// cleanTags before it ever reaches Validate, but --json-file input skips
+// that entirely, so {"tags": [" "]} must not count as "has a tag".
+func hasNonBlankTag(tags []string) bool {
+	for _, t := range tags {
+		if strings.TrimSpace(t) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // ToJSON serializes the profile to JSON

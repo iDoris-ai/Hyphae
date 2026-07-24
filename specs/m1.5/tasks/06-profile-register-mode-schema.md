@@ -90,3 +90,7 @@ Codex 提了 2 个 Medium + 2 个"流程性"意见，处理如下：
 
 5. **Medium（已修复）——`mode=tagged` 没有强制要求至少一个 tag**：一个 `--mode tagged` 但没传 `--tags`（或 `--json-file` 传 `mode:"tagged"` 不带 `tags`）的 profile，跟 `simple` 模式没有任何区别，等于白选了 tagged——违背了 tagged 模式存在的意义。在 CLI 层（`--tags` 清洗后为空就报错，提示改用 `--mode simple`）和 `Validate()` 里（`ModeTagged` 分支追加 `len(p.Tags) == 0` 检查，覆盖 `--json-file` 路径）都补上了这个约束，加了一个测试用例。
 6. **Low（不修，记录理由）——JSON-file 手工传入非 nil 但空的 slice（比如 simple 模式塞一个 `"tags": []`）能绕过基于 `len(...) > 0` 的检查**：确实技术上能过 `Validate()`，但 `Tags`/`Capabilities` 都带 `json:"...,omitempty"`，Go 的 `encoding/json` 对 slice 的 `omitempty` 判定就是看 `len == 0`（不看 nil 与否）——所以就算 `Validate()` 放行了这种输入，重新 `Marshal` 发布出去的 JSON 里这些空 slice 字段本来就会被省略，实际发布到 relay 上的内容仍然完全符合 schema。也就是说这个漏洞只存在于"内存里的 `AgentProfile` 结构"层面，不会真正体现在协议输出里，投入产出比不划算，先不修。
+
+### Codex review（Tier 1）第三轮
+
+针对第 5 点修复的一次聚焦复查：CLI 层没问题（`--tags` 先过 `cleanTags`——trim + 去掉空字符串——再判断是否为空），但 `Validate()` 里当时只检查了 `len(p.Tags) == 0`，`--json-file` 传 `"tags": ["", "   "]` 这种"有元素但都是空白"的输入能绕过去，跟 CLI 侧的语义不一致。补了 `hasNonBlankTag`（trim 后至少一个非空才算数）替换掉 `Validate()` 里原来的 `len() == 0` 判断，加了一个专门测试用例（`["", "   "]` 应该被拒绝）。
