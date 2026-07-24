@@ -192,37 +192,34 @@ var outboxRetryCmd = &cli.Command{
 		}
 
 		// `list` displays IDs hex-encoded (see hexOutboxID) since the raw
-		// stored ID is arbitrary bytes, not printable text. Accept that same
-		// hex form here -- falling back to a literal match lets a caller
-		// that already has the raw ID (e.g. scripting against LoadOutbox
-		// directly) still use it as-is.
+		// stored ID is arbitrary bytes, not printable text. Try that hex
+		// form first; only fall back to a literal match (for a caller that
+		// already has the raw ID, e.g. scripting against LoadOutbox
+		// directly) if nothing matches the decoded bytes -- a value that
+		// happens to be valid hex but was meant literally must still be
+		// reachable.
 		id := c.String("id")
-		rawID := id
-		if decoded, decErr := hex.DecodeString(id); decErr == nil {
-			rawID = string(decoded)
-		}
-
-		var match *types.OutboxEntry
-		dupes := 0
-		for i := range ob.Entries {
-			if ob.Entries[i].ID == rawID {
-				if match == nil {
-					match = &ob.Entries[i]
-				}
-				dupes++
-			}
-		}
-		if match == nil {
+		matches := findOutboxMatches(ob.Entries, id)
+		if len(matches) == 0 {
 			return common.NewExitError(common.ErrCodeUser, fmt.Errorf("no outbox entry with id %q", id))
 		}
-		if dupes > 1 {
-			fmt.Printf("⚠️  %d entries share this ID (pre-existing outbox data issue, see specs/m1.5/README.md) -- retrying the first one only\n", dupes)
+		if len(matches) > 1 {
+			// AttemptSend's RemoveFromOutbox removes every entry sharing an
+			// ID, not just the one retried -- with duplicates, a successful
+			// send would silently delete the OTHER (still-unsent) entries
+			// too. Refuse rather than risk that; `list` is how to see and
+			// understand this pre-existing data issue.
+			return common.NewExitError(common.ErrCodeUser, fmt.Errorf(
+				"%d entries share id %q (pre-existing outbox data issue, see specs/m1.5/README.md) -- refusing to retry, since a successful send would remove all of them, not just one; use `storage outbox list` to inspect", len(matches), id))
 		}
 
 		timeout := time.Duration(c.Int("timeout")) * time.Second
-		result, err := AttemptSend(ctx, ob, *match, c.StringSlice("relay"), timeout)
-		if err != nil {
+		result, err := AttemptSend(ctx, ob, matches[0], c.StringSlice("relay"), timeout)
+		if !result.Attempted {
 			return fmt.Errorf("retry failed: %w", err)
+		}
+		if err != nil {
+			fmt.Printf("⚠️  %v\n", err)
 		}
 
 		switch {
@@ -235,6 +232,29 @@ var outboxRetryCmd = &cli.Command{
 		}
 		return nil
 	},
+}
+
+// findOutboxMatches resolves a user-supplied ID to outbox entries. It tries
+// hex-decoding first (matching what `list` displays); if that yields no
+// matches, it falls back to treating id as the literal stored value, so a
+// literal that happens to also be valid hex isn't silently unreachable.
+func findOutboxMatches(entries []types.OutboxEntry, id string) []types.OutboxEntry {
+	if decoded, err := hex.DecodeString(id); err == nil {
+		if matches := matchOutboxID(entries, string(decoded)); len(matches) > 0 {
+			return matches
+		}
+	}
+	return matchOutboxID(entries, id)
+}
+
+func matchOutboxID(entries []types.OutboxEntry, id string) []types.OutboxEntry {
+	var matches []types.OutboxEntry
+	for _, e := range entries {
+		if e.ID == id {
+			matches = append(matches, e)
+		}
+	}
+	return matches
 }
 
 // isFailedOrStuck reports whether an outbox entry should be treated as

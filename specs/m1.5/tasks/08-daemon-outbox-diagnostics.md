@@ -57,3 +57,13 @@ agent-speaker storage outbox retry --id <id>          # 手动触发单条重试
 - `list --failed-only` 正确只挑出那 1 条真正"卡死"的记录（8 条冻结在 0 重试的记录因为 retry_count 没有超过阈值，不会被 `--min-failures` 判定为可清理——这是第 1 条 bug 的直接后果，已经在上面记录，不在本任务修）。
 - 用 `echo "n" | storage outbox clear --failed` 验证了不传 `--yes` 时确认提示正常工作，且没有误删真实数据（`diff` 校验前后 `outbox.json` 完全一致）。
 - 用隔离的临时 `HOME`（不碰真实数据）搭配本地 `scripts/minirelay.go` 完整验证了 `retry --id` 的成功路径（relay 恢复后重试成功、条目正确从 outbox 移除）和失败路径（relay 不可达时重试失败、retry_count 正确递增、不影响其他条目），以及 `clear --failed --yes` 正确清除、`--min-failures` 阈值正确生效。
+
+### Codex review（Tier 1）第一轮
+
+Codex 提了 1 个 High + 2 个 Medium，都已修复：
+
+1. **High（已修复）——重复 ID 的记录，成功重试后会把"兄弟"记录一起删掉**：`AttemptSend` 成功路径调的是 `RemoveFromOutbox(ob, entry.ID)`，这个函数按 ID 过滤，会删掉**所有**匹配这个 ID 的记录，不只是被重试的那一条。原来 `retry --id` 只是打印一句"检测到 N 条共享这个 ID，只重试第一条"的警告然后继续——但如果这次重试恰好发的是第一条并且成功了，`RemoveFromOutbox` 会把其余几条**从未真正发送过的**记录也一起从 outbox 里删掉，属于静默数据丢失。修复：`retry --id` 检测到多条记录共享同一个 ID 时**直接拒绝执行**，不再"选第一条继续"，报错提示用 `storage outbox list` 去看清楚情况——这类"记录之间根本无法通过 ID 区分"的场景，没有安全的自动化处理方式，交给人工判断。加了 `TestOutboxRetryCmd_DuplicateIDRefusesToRetry` 覆盖。
+2. **Medium（已修复）——`AttemptSend` 重构后，成功/失败路径都变成"一步出错就提前返回，跳过后续步骤"，而原来 `daemon.go` 内联的逻辑是三步独立执行、互不影响**：比如原来即使 `UpdateOutboxStatus` 报错，也照样会继续尝试 `RemoveFromOutbox` 和 `StoreOutgoingMessage`；重构后第一步出错就直接 return，后两步完全不会执行。同样的问题也存在于失败路径（`IncrementOutboxRetry` 出错就会跳过"是否该标记为 failed"的判断）。修复：`SendResult` 加了 `Attempted` 字段（区分"完全没走到 relay 拨号这一步"，比如事件解析失败，跟"已经尝试过发送/更新，只是某个记账步骤报错了"），三步全部改回独立执行、用 `errors.Join` 收集所有报错但不提前退出；调用方（`daemon.go` 的 `processOutbox`、`outbox retry` 命令）改成先看 `Attempted`/`Sent`/`MarkedFailed` 判断真实结果，`err` 只作为附加警告打印，不再当成"这次尝试失败了"的信号。
+3. **Medium（已修复）——`retry --id` 传一个恰好是合法 hex 但其实是字面量字符串的 ID 时，永远匹配不到**：原来的逻辑是"hex 解码成功就只用解码结果去匹配，不会再退回去试字面量"，导致 `--json-file`/脚本场景下如果调用方传的是未经 hex 编码的原始字符串 ID（哪怕这个字符串碰巧是合法 hex），会被误当成 hex 输入、解码成一堆不相关的字节、永远匹配不到。修复：改成`findOutboxMatches`——先按 hex 解码后的字节去匹配，只有解码结果**一条都没匹配上**时，才退回去试字面量匹配。补了 `TestFindOutboxMatches_HexFirstThenLiteralFallback`。
+4. **确认无误（不修）——diff 里带了任务 7 的 README 状态更新**：这是本分支的第一个 commit，按已经确定的"折进下一个任务分支的第一个 commit"约定（详见 `LOOP_PLAYBOOK.md`），不是范围蔓延。
+5. **未修（记录，不属于本任务范围）——`outbox.json` 读-改-写没有跨进程锁**：`clear`/`retry` 和 daemon 的自动重试循环都是"读整个文件 → 改内存 → 原子 rename 写回"，如果两个进程真的同时操作会有"后写的覆盖先写的"这类丢更新风险。这是 outbox.json 这个存储设计从一开始就有的架构限制（`SaveOutbox` 的原子 rename 保证的是"不会读到写了一半的文件"，不保证"两个并发写者不会互相覆盖"），任务 8 的 spec 明确要求不改变存储格式/机制，加跨进程锁属于更大的架构改动，不在本任务范围内。

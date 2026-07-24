@@ -3,6 +3,7 @@ package messaging
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -163,6 +164,7 @@ func RemoveFromOutbox(ob *types.Outbox, id string) error {
 
 // SendResult describes the outcome of a single AttemptSend call.
 type SendResult struct {
+	Attempted    bool // false only when the entry never got as far as dialing a relay (e.g. unparseable EventJSON)
 	Sent         bool // true if the event was successfully published
 	MarkedFailed bool // true if this attempt exhausted retries and the entry was marked "failed"
 }
@@ -181,6 +183,13 @@ type SendResult struct {
 // want backoff (the daemon's ticker) must check that themselves before
 // calling; a manual retry is expected to bypass backoff by design (that's
 // the whole point of "don't wait for the daemon's 60s cycle").
+//
+// The returned error is informational, not a verdict on whether the send
+// itself succeeded -- check Sent/MarkedFailed for that. It surfaces
+// bookkeeping failures (status update/remove/history-store) that happen
+// alongside a send attempt whose own outcome is already reflected in the
+// result; callers should log it but must not treat a non-nil error as "the
+// send failed" when Result.Attempted is true.
 func AttemptSend(ctx context.Context, ob *types.Outbox, entry types.OutboxEntry, defaultRelays []string, dialTimeout time.Duration) (SendResult, error) {
 	var event nostr.Event
 	if err := json.Unmarshal([]byte(entry.EventJSON), &event); err != nil {
@@ -209,30 +218,40 @@ func AttemptSend(ctx context.Context, ob *types.Outbox, entry types.OutboxEntry,
 		}
 	}
 
+	result := SendResult{Attempted: true, Sent: sent}
+	var errs []error
+
 	if sent {
+		// Each of these three is attempted independently, matching the
+		// pre-refactor daemon.go behavior exactly: an error updating status
+		// must not skip removing the entry or storing the outgoing message,
+		// since those are the parts that actually matter once the event has
+		// already been published. Errors are collected, not fatal.
 		if err := UpdateOutboxStatus(ob, entry.ID, "sent"); err != nil {
-			return SendResult{Sent: true}, fmt.Errorf("update outbox status: %w", err)
+			errs = append(errs, fmt.Errorf("update outbox status: %w", err))
 		}
 		if err := RemoveFromOutbox(ob, entry.ID); err != nil {
-			return SendResult{Sent: true}, fmt.Errorf("remove from outbox: %w", err)
+			errs = append(errs, fmt.Errorf("remove from outbox: %w", err))
 		}
 		if err := StoreOutgoingMessage(&event, entry.RecipientNpub, event.Content, true); err != nil {
-			return SendResult{Sent: true}, fmt.Errorf("store outgoing message: %w", err)
+			errs = append(errs, fmt.Errorf("store outgoing message: %w", err))
 		}
-		return SendResult{Sent: true}, nil
+		return result, errors.Join(errs...)
 	}
 
+	// Same independent-attempt shape on the failure side: a failure to
+	// persist the incremented retry count must not skip the "did retries
+	// just get exhausted" check below.
 	if err := IncrementOutboxRetry(ob, entry.ID); err != nil {
-		return SendResult{}, fmt.Errorf("increment retry: %w", err)
+		errs = append(errs, fmt.Errorf("increment retry: %w", err))
 	}
-	result := SendResult{}
 	if entry.RetryCount >= entry.MaxRetries-1 {
 		if err := UpdateOutboxStatus(ob, entry.ID, "failed"); err != nil {
-			return result, fmt.Errorf("mark failed: %w", err)
+			errs = append(errs, fmt.Errorf("mark failed: %w", err))
 		}
 		result.MarkedFailed = true
 	}
-	return result, nil
+	return result, errors.Join(errs...)
 }
 
 // CleanupOutbox removes old sent entries

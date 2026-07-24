@@ -170,6 +170,52 @@ func TestOutboxRetryCmd_UnknownIDErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "does-not-exist")
 }
 
+// TestOutboxRetryCmd_DuplicateIDRefusesToRetry covers a real bug found in
+// Codex review: AttemptSend's RemoveFromOutbox removes every entry sharing
+// an ID, not just the one retried, so retrying one of several colliding
+// entries could silently delete unrelated, still-unsent siblings on
+// success. Refusing outright is safer than guessing which one "the first"
+// is, since the whole point of duplicate IDs (see specs/m1.5/README.md) is
+// that they're indistinguishable by ID alone.
+func TestOutboxRetryCmd_DuplicateIDRefusesToRetry(t *testing.T) {
+	setupTempOutbox(t)
+	ob := &types.Outbox{Entries: []types.OutboxEntry{
+		{ID: "dup", Status: "pending", RetryCount: 0, MaxRetries: 10},
+		{ID: "dup", Status: "pending", RetryCount: 0, MaxRetries: 10},
+	}}
+	require.NoError(t, SaveOutbox(ob))
+
+	err := outboxRetryCmd.Run(context.Background(), []string{"retry", "--id", hexOutboxID("dup")})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "2 entries share id")
+
+	ob2, err := LoadOutbox()
+	require.NoError(t, err)
+	assert.Len(t, ob2.Entries, 2, "refusing to retry must not touch either entry")
+}
+
+// TestFindOutboxMatches_HexFirstThenLiteralFallback covers a Codex review
+// finding: a value that happens to be valid hex but was meant literally
+// must still be reachable, not permanently shadowed by the hex-decode path.
+func TestFindOutboxMatches_HexFirstThenLiteralFallback(t *testing.T) {
+	entries := []types.OutboxEntry{
+		{ID: "\xde\xad\xbe\xef", Status: "pending"}, // the bytes "deadbeef" decodes to
+		{ID: "deadbeef", Status: "pending"},         // the literal string itself
+	}
+
+	// "deadbeef" is valid hex, so it must match the entry whose ID is the
+	// *decoded* bytes first (matching what `list` displays for that entry).
+	hexMatches := findOutboxMatches(entries[:1], "deadbeef")
+	require.Len(t, hexMatches, 1)
+	assert.Equal(t, "\xde\xad\xbe\xef", hexMatches[0].ID)
+
+	// With only the literal entry present, the same input must still find
+	// it via the literal fallback (decoded bytes match nothing).
+	literalMatches := findOutboxMatches(entries[1:], "deadbeef")
+	require.Len(t, literalMatches, 1)
+	assert.Equal(t, "deadbeef", literalMatches[0].ID)
+}
+
 func TestIsFailedOrStuck(t *testing.T) {
 	assert.True(t, isFailedOrStuck(types.OutboxEntry{Status: "failed"}))
 	assert.True(t, isFailedOrStuck(types.OutboxEntry{Status: "pending", RetryCount: 10, MaxRetries: 10}))

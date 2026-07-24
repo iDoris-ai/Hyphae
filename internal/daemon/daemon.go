@@ -217,9 +217,18 @@ func processOutbox(ctx context.Context, myIdentity *types.Identity, relays []str
 		}
 
 		result, err := messaging.AttemptSend(ctx, outbox, entry, relays, relayDialTimeout)
-		if err != nil {
+		if !result.Attempted {
+			// Never got as far as dialing a relay (e.g. unparseable
+			// EventJSON) -- skip without counting as a send failure, same
+			// as the original inline "continue" on a parse error.
 			fmt.Printf("   ⚠️  %s...: %v\n", safePrefix(entry.ID, 16), err)
 			continue
+		}
+		if err != nil {
+			// A bookkeeping error (status update/remove/history-store)
+			// alongside an already-known Sent/MarkedFailed outcome --
+			// surfaced, but doesn't change how this attempt is counted.
+			fmt.Printf("   ⚠️  %s...: %v\n", safePrefix(entry.ID, 16), err)
 		}
 
 		if result.Sent {

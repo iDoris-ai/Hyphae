@@ -136,6 +136,7 @@ func TestAttemptSend_ParseError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parse event")
 	assert.False(t, result.Sent)
+	assert.False(t, result.Attempted, "a parse failure never got as far as dialing a relay")
 
 	// A parse failure must not mutate the entry at all -- it never got far
 	// enough to touch retry count or status.
@@ -163,6 +164,7 @@ func TestAttemptSend_RelayUnreachable_IncrementsRetry(t *testing.T) {
 
 	result, err := AttemptSend(context.Background(), ob, entry, []string{"ws://127.0.0.1:1"}, 200*time.Millisecond)
 	require.NoError(t, err)
+	assert.True(t, result.Attempted)
 	assert.False(t, result.Sent)
 	assert.False(t, result.MarkedFailed, "far from MaxRetries yet")
 
@@ -191,6 +193,7 @@ func TestAttemptSend_RelayUnreachable_MarksFailedAtMaxRetries(t *testing.T) {
 
 	result, err := AttemptSend(context.Background(), ob, entry, []string{"ws://127.0.0.1:1"}, 200*time.Millisecond)
 	require.NoError(t, err)
+	assert.True(t, result.Attempted)
 	assert.False(t, result.Sent)
 	assert.True(t, result.MarkedFailed)
 
