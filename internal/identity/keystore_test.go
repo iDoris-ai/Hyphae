@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"encoding/json"
 	"os"
 	"testing"
 
@@ -213,4 +214,79 @@ func TestResolveRecipient(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "totally-unknown-name")
 	})
+}
+
+func TestAddContactDefaultsToHumanRole(t *testing.T) {
+	setupTempKeyStore(t)
+	ks := &types.KeyStore{
+		Identities: make(map[string]*types.Identity),
+		Contacts:   make(map[string]*types.Contact),
+	}
+
+	other, err := CreateIdentity(ks, "bob")
+	require.NoError(t, err)
+
+	require.NoError(t, AddContact(ks, "bobby", other.Npub))
+	contact, err := GetContact(ks, "bobby")
+	require.NoError(t, err)
+	assert.Equal(t, types.RoleHuman, contact.Role)
+}
+
+func TestAddContactWithRole(t *testing.T) {
+	setupTempKeyStore(t)
+	ks := &types.KeyStore{
+		Identities: make(map[string]*types.Identity),
+		Contacts:   make(map[string]*types.Contact),
+	}
+
+	other, err := CreateIdentity(ks, "worker-bot")
+	require.NoError(t, err)
+
+	require.NoError(t, AddContactWithRole(ks, "bot1", other.Npub, types.RoleAgent))
+	contact, err := GetContact(ks, "bot1")
+	require.NoError(t, err)
+	assert.Equal(t, types.RoleAgent, contact.Role)
+}
+
+// TestAddContactWithRoleRejectsInvalidRole covers the defense-in-depth
+// validation added at this internal boundary (Codex review finding on
+// specs/m1.5/tasks/05-member-role-model.md): the CLI's own --role flag
+// validation isn't the only thing standing between an arbitrary string and
+// the keystore, so AddContactWithRole must reject invalid values itself too.
+func TestAddContactWithRoleRejectsInvalidRole(t *testing.T) {
+	setupTempKeyStore(t)
+	ks := &types.KeyStore{
+		Identities: make(map[string]*types.Identity),
+		Contacts:   make(map[string]*types.Contact),
+	}
+
+	other, err := CreateIdentity(ks, "worker-bot")
+	require.NoError(t, err)
+
+	err = AddContactWithRole(ks, "bot1", other.Npub, types.Role("bogus"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid role")
+
+	_, getErr := GetContact(ks, "bot1")
+	assert.Error(t, getErr, "a rejected AddContactWithRole call must not persist a partial contact")
+}
+
+// TestLegacyContactWithoutRoleFieldDefaultsToHuman covers the backward-
+// compatibility requirement from specs/m1.5/tasks/05-member-role-model.md:
+// a keystore.json saved before the Role field existed must still deserialize
+// (and behave) as a human contact, not error out or leave Role in some
+// unexpected state.
+func TestLegacyContactWithoutRoleFieldDefaultsToHuman(t *testing.T) {
+	legacyJSON := `{
+		"nickname": "old-contact",
+		"npub": "npub1qqu3pa35gzz3pxpw4gry22399kf8nqu7tu4exv38ge7pnr8nwxeqfmme3y",
+		"added_at": 1700000000
+	}`
+
+	var contact types.Contact
+	require.NoError(t, json.Unmarshal([]byte(legacyJSON), &contact))
+
+	assert.Equal(t, types.Role(""), contact.Role, "zero value for a legacy record with no role key")
+	assert.Equal(t, "human", contact.Role.String(), "Role.String() must treat the zero value as human")
+	assert.NotEqual(t, types.RoleAgent, contact.Role, "a legacy contact must never be mistaken for an agent")
 }

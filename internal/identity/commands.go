@@ -326,6 +326,11 @@ Contacts are stored locally and mapped to their npubs.`,
 					Usage:    "Contact's npub",
 					Required: true,
 				},
+				&cli.StringFlag{
+					Name:  "role",
+					Usage: "Contact's role: human or agent (default human)",
+					Value: string(types.RoleHuman),
+				},
 			},
 			Action: func(ctx context.Context, c *cli.Command) error {
 				ks, err := LoadKeyStore()
@@ -336,7 +341,12 @@ Contacts are stored locally and mapped to their npubs.`,
 				nickname := c.String("nickname")
 				npub := c.String("npub")
 
-				if err := AddContact(ks, nickname, npub); err != nil {
+				role := types.Role(c.String("role"))
+				if role != types.RoleHuman && role != types.RoleAgent {
+					return common.NewExitError(common.ErrCodeUser, fmt.Errorf("invalid --role %q: must be %q or %q", role, types.RoleHuman, types.RoleAgent))
+				}
+
+				if err := AddContactWithRole(ks, nickname, npub, role); err != nil {
 					return err
 				}
 
@@ -375,11 +385,11 @@ Contacts are stored locally and mapped to their npubs.`,
 
 				fmt.Println("📇 Contacts:")
 				w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-				fmt.Fprintln(w, "NICKNAME\tNPUB")
+				fmt.Fprintln(w, "NICKNAME\tNPUB\tROLE")
 
 				for _, contact := range contacts {
 					npubShort := contact.Npub[:20] + "..."
-					fmt.Fprintf(w, "%s\t%s\n", contact.Nickname, npubShort)
+					fmt.Fprintf(w, "%s\t%s\t%s\n", contact.Nickname, npubShort, contact.Role.String())
 				}
 				w.Flush()
 

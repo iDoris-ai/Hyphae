@@ -14,11 +14,12 @@ type Group struct {
 
 // GroupMember represents a group's member with metadata
 type GroupMember struct {
-	GroupID   string `json:"group_id"`
-	Npub      string `json:"npub"`
-	Nickname  string `json:"nickname,omitempty"`
-	JoinedAt  int64  `json:"joined_at"`
-	IsAdmin   bool   `json:"is_admin"`
+	GroupID  string `json:"group_id"`
+	Npub     string `json:"npub"`
+	Nickname string `json:"nickname,omitempty"`
+	JoinedAt int64  `json:"joined_at"`
+	IsAdmin  bool   `json:"is_admin"`
+	Role     Role   `json:"role,omitempty"`
 }
 
 // GroupMessage represents a message in a group
