@@ -17,7 +17,7 @@
 | # | 任务 | 文件 | depends_on | 规模 | status |
 |---|---|---|---|---|---|
 | 1 | 修复强制 ANSI 颜色输出 | [`tasks/01-fix-forced-ansi-color.md`](tasks/01-fix-forced-ansi-color.md) | — | XS | done ([#13](https://github.com/iDoris-ai/agent-speaker/pull/13)) |
-| 2 | CLI 全局 `--json` 输出模式 | [`tasks/02-json-output-mode.md`](tasks/02-json-output-mode.md) | 1 | M | ready |
+| 2 | CLI 全局 `--json` 输出模式 | [`tasks/02-json-output-mode.md`](tasks/02-json-output-mode.md) | 1 | M | done ([#14](https://github.com/iDoris-ai/agent-speaker/pull/14)) |
 | 3 | 修复 `history conversation` 与 `agent msg` 联系人解析不一致 | [`tasks/03-history-contact-resolution-fix.md`](tasks/03-history-contact-resolution-fix.md) | — | S | ready |
 | 4 | 审计哈希链（`audit_log` 表） | [`tasks/04-audit-log-hash-chain.md`](tasks/04-audit-log-hash-chain.md) | — | M | ready |
 | 5 | 成员角色模型（Human/Agent） | [`tasks/05-member-role-model.md`](tasks/05-member-role-model.md) | — | M | ready |

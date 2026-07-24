@@ -43,7 +43,13 @@ go test ./...
 
 **第一轮：自我挑战 review。** 把这一步当成一个跟实现者不同立场的人在读代码：重新读一遍任务 spec 的验收标准，逐条对照 diff 检查有没有漏掉；专门找一遍边界情况、错误处理、并发/竞态、安全问题（尤其涉及 keystore/加密/审计链的任务）。发现问题就地修，改完重新跑 Step 3。
 
-**第二轮：Codex review。** 遵循全局 CLAUDE.md 里定义的 Code Review Workflow 第一层——用 `/codex:rescue` 把这次的 diff（`git diff main`）交给 Codex，要求严格审查（正确性、竞态、安全、错误处理、性能）。Codex 提出的问题，能修的当场修；有分歧或明确决定不修的，在 PR 描述里写清楚原因（不要静默忽略）。改完重新跑 Step 3。
+**第二轮：Codex review（Tier 1），配额用尽时自动降级 Tier 2/3。** 遵循全局 CLAUDE.md 里定义的 Code Review Workflow：
+
+- **Tier 1（优先）**：用 `/codex:rescue` 把这次的 diff（`git diff main`）交给 Codex，要求严格审查（正确性、竞态、安全、错误处理、性能）。
+- **Tier 2（Codex 配额/额度耗尽或不可用时降级）**：Codex 是**服务端**跑在这个 repo 之外的账号额度上的，跟 loop 的执行节奏无关——一旦报 quota/rate-limit/usage-limit 错误，不是"再等一会就好"，按 CLAUDE.md 的定义直接切 gh Copilot：先正常走 Step 4.5 把这一轮的改动提交、push、开 PR（Copilot 只能 review 服务端上的 PR，不能 review 本地 diff），然后 `gh pr edit <num> --add-reviewer copilot`，用跟 Step 5 一样的等待节奏（`ScheduleWakeup`，不要紧密轮询）检查 `gh pr view <num> --json reviews,comments`；Copilot 提的问题按 Step 4 自我 review 同样的严格程度处理，修完 push 后 `gh pr comment <num> --body "@copilot please review again"` 重新申请。跟本仓库自己的后台 review bot（Step 5）不冲突——两者可以对同一个 PR 各自留 review，真正决定能不能 merge 的还是本仓库 bot 的 `reviewDecision`。
+- **Tier 3（Copilot 也不可用）**：自己以本地模型身份严格 review，态度跟对 Codex/Copilot 一样挑剔（竞态、安全、错误处理、边界情况），在 PR 描述里明确标注"local-model review（Tier 3）"，方便以后 Codex/Copilot 恢复了重新走一遍。
+
+无论走哪一层，Codex/Copilot/本地 review 提出的问题，能修的当场修；有分歧或明确决定不修的，在 PR 描述里写清楚原因（不要静默忽略）。改完重新跑 Step 3。**在 PR 描述和对应 spec 文件的实现笔记里写清楚这一轮实际用的是哪一层**，别让人以为一直是 Tier 1。
 
 两轮都过了，才进入 Step 4.5。
 
