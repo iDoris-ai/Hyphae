@@ -2,6 +2,7 @@ package messaging
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"testing"
@@ -50,8 +51,39 @@ func TestAddToOutbox(t *testing.T) {
 	ob2, err := LoadOutbox()
 	require.NoError(t, err)
 	assert.Len(t, ob2.Entries, 1)
-	assert.Equal(t, string(event.ID[:]), ob2.Entries[0].ID)
+	assert.Equal(t, hex.EncodeToString(event.ID[:]), ob2.Entries[0].ID,
+		"AddToOutbox must store the ID hex-encoded, not as raw bytes (see specs/m1.5/README.md's UTF-8-corruption known issue)")
 	assert.Equal(t, "pending", ob2.Entries[0].Status)
+}
+
+// TestAddToOutbox_IDRoundTripsThroughJSONWithoutCorruption is the
+// regression test for the specific failure this fix targets: a raw 32-byte
+// event.ID stored as a Go string gets silently mangled by json.Marshal the
+// moment any of its bytes aren't valid UTF-8 (replaced with U+FFFD), so the
+// ID read back from disk stops matching the original event.ID entirely.
+// Hex-encoding first means SaveOutbox is marshaling plain ASCII, which
+// round-trips through JSON exactly.
+func TestAddToOutbox_IDRoundTripsThroughJSONWithoutCorruption(t *testing.T) {
+	setupTempOutbox(t)
+	ob, err := LoadOutbox()
+	require.NoError(t, err)
+
+	event := &nostr.Event{Kind: 1, Content: "test"}
+	// A byte sequence that is not valid UTF-8 on its own (0xFF is never a
+	// valid UTF-8 leading byte) -- exactly the shape of ID that used to get
+	// mangled by json.Marshal before this fix.
+	event.ID = [32]byte{0xff, 0xfe, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+		0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d}
+
+	require.NoError(t, AddToOutbox(ob, event, "npub1test", nil))
+
+	ob2, err := LoadOutbox()
+	require.NoError(t, err)
+	require.Len(t, ob2.Entries, 1)
+
+	decoded, err := hex.DecodeString(ob2.Entries[0].ID)
+	require.NoError(t, err, "the stored ID must still be valid hex after a JSON round-trip")
+	assert.Equal(t, event.ID[:], decoded, "decoding the stored ID must reproduce the exact original event.ID bytes")
 }
 
 func TestGetPendingOutbox(t *testing.T) {

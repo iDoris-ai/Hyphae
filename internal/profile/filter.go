@@ -8,8 +8,8 @@ import "github.com/AuraAIHQ/agent-speaker/pkg/types"
 // pre-existing discover behavior with no filter flags.
 type DiscoverFilter struct {
 	Capability string
-	PriceMin   *int
-	PriceMax   *int
+	PriceMin   *float64
+	PriceMax   *float64
 	RatingMin  *float64
 	OnlineOnly bool
 }
@@ -52,19 +52,17 @@ func (f DiscoverFilter) Matches(profile *types.AgentProfile) bool {
 
 // matchesPriceRange reports whether profile has at least one rate entry
 // whose price falls within [min, max] (either bound may be nil, meaning
-// unbounded on that side). Comparisons stay in float64 -- converting
-// rate.Price to int before comparing would truncate fractional prices
-// (e.g. 100.99 would wrongly satisfy --price-max 100). A profile with no
-// rate sheet never matches a price filter.
-func matchesPriceRange(profile *types.AgentProfile, min, max *int) bool {
+// unbounded on that side). A profile with no rate sheet never matches a
+// price filter.
+func matchesPriceRange(profile *types.AgentProfile, min, max *float64) bool {
 	if profile.RateSheet == nil {
 		return false
 	}
 	for _, rate := range profile.RateSheet.Rates {
-		if min != nil && rate.Price < float64(*min) {
+		if min != nil && rate.Price < *min {
 			continue
 		}
-		if max != nil && rate.Price > float64(*max) {
+		if max != nil && rate.Price > *max {
 			continue
 		}
 		return true

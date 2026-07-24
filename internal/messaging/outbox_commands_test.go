@@ -185,7 +185,7 @@ func TestOutboxRetryCmd_DuplicateIDRefusesToRetry(t *testing.T) {
 	}}
 	require.NoError(t, SaveOutbox(ob))
 
-	err := outboxRetryCmd.Run(context.Background(), []string{"retry", "--id", hexOutboxID("dup")})
+	err := outboxRetryCmd.Run(context.Background(), []string{"retry", "--id", displayOutboxID("dup")})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "2 entries share id")
 
