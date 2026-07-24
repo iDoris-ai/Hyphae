@@ -8,6 +8,12 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+// relayInfoURLArg receives the "info" subcommand's positional "relay_url"
+// argument. See the identical verifyEventArg pattern + comment in
+// verify.go: a single-value Argument in this urfave/cli version is only
+// populated via Destination.
+var relayInfoURLArg string
+
 var RelayCmd = &cli.Command{
 	Name:  "relay",
 	Usage: "Relay information and testing",
@@ -17,11 +23,13 @@ var RelayCmd = &cli.Command{
 			Usage: "Get relay connection info",
 			Arguments: []cli.Argument{
 				&cli.StringArg{
-					Name: "relay_url",
+					Name:        "relay_url",
+					Max:         1,
+					Destination: &relayInfoURLArg,
 				},
 			},
 			Action: func(ctx context.Context, c *cli.Command) error {
-				relayURL := c.String("relay_url")
+				relayURL := relayInfoURLArg
 				if relayURL == "" {
 					relayURL = "wss://relay.aastar.io"
 				}
