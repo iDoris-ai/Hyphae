@@ -145,7 +145,11 @@ var profilePublishCmd = &cli.Command{
 				if structuredOnlySet {
 					return fmt.Errorf("--mode tagged only supports --name and --tags; remove --description/--capability/--availability/--rate/--currency, or use --mode structured")
 				}
-				profile = &types.AgentProfile{Name: name, Mode: types.ModeTagged, Tags: cleanTags(c.StringSlice("tags"))}
+				tags := cleanTags(c.StringSlice("tags"))
+				if len(tags) == 0 {
+					return fmt.Errorf("--mode tagged requires at least one --tags value (use --mode simple if you don't have any yet)")
+				}
+				profile = &types.AgentProfile{Name: name, Mode: types.ModeTagged, Tags: tags}
 
 			default: // structured
 				profile = &types.AgentProfile{

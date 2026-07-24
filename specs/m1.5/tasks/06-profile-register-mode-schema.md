@@ -83,3 +83,10 @@ Codex 提了 2 个 Medium + 2 个"流程性"意见，处理如下：
 2. **Medium（不修，记录分歧）——simple/tagged 发布的 JSON 里仍然带 `updated_at`**：`AgentProfile.UpdatedAt` 没有 `omitempty` 且发布前一定会被设成当前时间，所以就算加上 `omitempty` 也不会消失（它从来不是零值）。这个字段是发布时间戳这类元数据，不是"结构化 vs 简单"这个 mode 概念要区分的东西——simple/tagged 的 schema 例子里没写 `updated_at` 更多是"这是 mode 特有字段的示意图"而不是"完整 wire format 定义"（对比：structured 例子本身也用 `...` 省略了很多字段）。保留 `updated_at` 是有意决定，不是遗漏。
 3. **"不相关改动"（不修，记录理由）——diff 里带了 `specs/m1.5/README.md`（task 5 状态 + generateGroupID 遗留问题）和 `LOOP_PLAYBOOK.md`（protected branch 说明）的改动**：这是本分支的第一个 commit，按 `LOOP_PLAYBOOK.md` 已经写明的约定（"可以合并进下一个任务的第一个 commit"）故意bundle 进来的，为的是避免每个任务之间都单独开一个纯文档的小 PR（参考任务 4→5 之间产生的 PR #17 那次开销）。不是范围蔓延，是既定流程的一部分。
 4. **确认无误——"default `--mode structured` 输出现在多了 `"mode":"structured"` 字段，跟改动前不是 byte-for-byte 一致"**：这是任务本身设计里明确要求的（"structured（现状 + mode 字段）"——spec 原文就是要求给 structured 也加上 mode 字段），不是本任务引入的意外副作用。现有的回归测试（`TestProfileToEvent`/`TestEventToProfile` 等)验证的是具体字段的值而不是"不能出现新字段"，这些测试全部通过；acceptance criteria 2 的"行为完全不变"指的是 CLI 调用方式和已有字段的语义不变，不是要求 JSON 里不能新增字段（那样任务本身就做不成）。
+
+### Codex review（Tier 1）第二轮
+
+确认第一轮修复到位、上面 4 点分歧站得住脚，同时发现 2 个新问题：
+
+5. **Medium（已修复）——`mode=tagged` 没有强制要求至少一个 tag**：一个 `--mode tagged` 但没传 `--tags`（或 `--json-file` 传 `mode:"tagged"` 不带 `tags`）的 profile，跟 `simple` 模式没有任何区别，等于白选了 tagged——违背了 tagged 模式存在的意义。在 CLI 层（`--tags` 清洗后为空就报错，提示改用 `--mode simple`）和 `Validate()` 里（`ModeTagged` 分支追加 `len(p.Tags) == 0` 检查，覆盖 `--json-file` 路径）都补上了这个约束，加了一个测试用例。
+6. **Low（不修，记录理由）——JSON-file 手工传入非 nil 但空的 slice（比如 simple 模式塞一个 `"tags": []`）能绕过基于 `len(...) > 0` 的检查**：确实技术上能过 `Validate()`，但 `Tags`/`Capabilities` 都带 `json:"...,omitempty"`，Go 的 `encoding/json` 对 slice 的 `omitempty` 判定就是看 `len == 0`（不看 nil 与否）——所以就算 `Validate()` 放行了这种输入，重新 `Marshal` 发布出去的 JSON 里这些空 slice 字段本来就会被省略，实际发布到 relay 上的内容仍然完全符合 schema。也就是说这个漏洞只存在于"内存里的 `AgentProfile` 结构"层面，不会真正体现在协议输出里，投入产出比不划算，先不修。

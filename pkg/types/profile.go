@@ -129,6 +129,9 @@ func (p *AgentProfile) Validate() error {
 		if hasStructuredFields {
 			return fmt.Errorf("mode %q only supports 'name' and 'tags', but structured fields are set", ModeTagged)
 		}
+		if len(p.Tags) == 0 {
+			return fmt.Errorf("mode %q requires at least one tag (use %q if you don't have any yet)", ModeTagged, ModeSimple)
+		}
 	}
 
 	validAvailability := map[string]bool{

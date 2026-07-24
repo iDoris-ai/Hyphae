@@ -51,6 +51,15 @@ func TestAgentProfileValidateByMode(t *testing.T) {
 			profile: &AgentProfile{Name: "Alice", Mode: ModeTagged, Tags: []string{"dev", "go"}},
 		},
 		{
+			// Codex review round 2 on task 06: tagged mode with zero tags is
+			// indistinguishable from simple mode, defeating the point of
+			// picking "tagged" -- require at least one.
+			name:    "tagged mode with no tags is rejected",
+			profile: &AgentProfile{Name: "Alice", Mode: ModeTagged},
+			wantErr: true,
+			errMsg:  `mode "tagged" requires at least one tag`,
+		},
+		{
 			name: "tagged mode with capabilities is rejected",
 			profile: &AgentProfile{Name: "Alice", Mode: ModeTagged, Tags: []string{"dev"},
 				Capabilities: []Capability{{Name: "seo"}}},
