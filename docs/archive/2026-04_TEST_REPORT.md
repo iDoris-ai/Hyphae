@@ -1,3 +1,5 @@
+> **[已归档 2026-07-24]** 描述的是 `make test-all` 把测试文件复制进 `build/nak-src/` 的旧构建流程，引用的 `agent_test.go`/`regression_test.go`/`integration_test.go` 等根目录测试文件早已不存在（现在测试文件与代码同目录，如 `internal/<pkg>/*_test.go`）。当前测试方式见 `CLAUDE.md` 的 Testing 一节。仅作历史记录保留。
+
 # 测试报告
 
 ## 测试统计

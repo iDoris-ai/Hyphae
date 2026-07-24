@@ -1,3 +1,5 @@
+> **[已归档 2026-07-24]** 2026-04-12 针对当时 relay.aastar.io（strfry）的一次性人工测试快照，早已过期。当前测试方式见 `../FULL_TEST_GUIDE.md` 和 `test_e2e.sh` 等脚本。仅作历史记录保留。
+
 # Live Test Results - relay.aastar.io
 
 **Date:** 2026-04-12  

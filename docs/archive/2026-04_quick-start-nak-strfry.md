@@ -1,3 +1,5 @@
+> **[已归档 2026-07-24]** 面向直接用 `nak` CLI + strfry 的早期快速开始指南。当前 agent-speaker 已是独立 CLI（`nak` 已不再被任何代码依赖，见 `CLAUDE.md` "nak Integration"），relay 也改用 khatru。当前快速开始见 `../USER_MANUAL.md` 和主仓库 `README.md`。仅作历史记录保留。
+
 # 快速开始
 
 ## 安装

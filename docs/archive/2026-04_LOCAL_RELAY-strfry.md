@@ -1,3 +1,5 @@
+> **[已归档 2026-07-24]** 本文档基于 strfry relay。2026-05-13 锁定的架构决策改用 **fork `fiatjaf/khatru`**（见 [`../protocol-v2.md`](../protocol-v2.md) §8），当前部署入口是 `scripts/deploy-relay.sh`。仅作历史记录保留。
+
 # 本地 Relay 部署（无 Docker）
 
 本文档介绍如何在本地运行 strfry relay，**无需 Docker**。

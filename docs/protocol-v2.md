@@ -342,17 +342,17 @@ Profile 字段分三类：
 
 ## 9. Milestone 修订（取代 `03-development-plan.md`）
 
-| Milestone | 内容 | 周期 |
-|-----------|------|------|
-| **M1** | TUI 聊天 + 群聊收尾（合并 #4 #5 #9） | 1-2 周 |
-| **M1.5** | Relay 自部署 + 花名册 + register/discover | 2-3 周 |
-| **M2** | L3 应用行为协议 JSON schema 标准化 | 2 周 |
-| **M2.5** | 跨 relay 接力 + 漂流瓶 + AAstar Point 支付 | 3-4 周 |
-| **M3** | 指令型自主任务（RFP / 协商 / 状态机） | 2-3 周 |
-| **M4** | 长期背景任务（调度 / 触发 / 智能匹配） | 2-3 周 |
-| **M5** | 加密 / 信誉 / 真支付集成完善 | 1-2 周 |
+| Milestone | 内容 | 周期 | 状态（2026-07-24） |
+|-----------|------|------|---|
+| **M1** | TUI 聊天 + 群聊收尾（合并 #4 #5 #9） | 1-2 周 | ✅ 已完成（PR #4/#5/#9 均已合并） |
+| **M1.5** | Relay 自部署 + 花名册 + register/discover | 2-3 周 | 🔄 进行中（`scripts/deploy-relay.sh` khatru skeleton 已落地，`AuraAIHQ/relay-khatru` 仓库尚未创建） |
+| **M2** | L3 应用行为协议 JSON schema 标准化 | 2 周 | ⏳ 未开始 |
+| **M2.5** | 跨 relay 接力 + 漂流瓶 + AAstar Point 支付 | 3-4 周 | ⏳ 未开始 |
+| **M3** | 指令型自主任务（RFP / 协商 / 状态机） | 2-3 周 | ⏳ 未开始 |
+| **M4** | 长期背景任务（调度 / 触发 / 智能匹配） | 2-3 周 | ⏳ 未开始 |
+| **M5** | 加密 / 信誉 / 真支付集成完善 | 1-2 周 | ⏳ 未开始 |
 
-详细任务清单见 [`milestones/roadmap-v2.md`](milestones/roadmap-v2.md)。
+详细任务清单（含每个里程碑的子任务拆分、涉及的包/架构改动、借鉴 Buzz 的落点）见 [`milestones/roadmap-v2.md`](milestones/roadmap-v2.md)。
 
 ---
 
@@ -362,7 +362,7 @@ Profile 字段分三类：
 |---|------|---------|
 | D1 | 邀请券是否上链 (ERC-721)？ | 倾向"是"，但 M2.5 先用内部表 |
 | D2 | 漂流瓶向量算法？ | 倾向轻量本地模型（sentence-transformers ONNX）|
-| D3 | Relay 软件 fork 仓库放哪？ | `github.com/AuraAIHQ/relay-khatru`? |
+| D3 | Relay 软件 fork 仓库放哪？ | `github.com/iDoris-ai/relay-khatru`? |
 | D4 | 花名册查询是否要 NIP-42 auth？ | 倾向"公开模式不需要"，"私密模式需要" |
 | D5 | 1对1 通道协议格式？ | 倾向直接复用 WebSocket + L2 事件 |
 
@@ -377,9 +377,30 @@ Profile 字段分三类：
 
 ---
 
-## 12. 相关文档
+## 12. 借鉴 Buzz（block/buzz）调研的落地事项（2026-07-24）
 
-- [`milestones/roadmap-v2.md`](milestones/roadmap-v2.md) — 详细任务清单
+> 完整调研与"借/不借"理由见 [`buzz-comparison-analysis.md`](buzz-comparison-analysis.md)。
+> **结论重申**：Buzz 是 Block 出品的中心化托管团队协作平台（Postgres+Redis+S3+多租户），我们是无中心自部署 Agent 对等网络（fork khatru + SQLite），**架构方向不变**——以下只是把它已验证可行的具体协议/机制设计，映射进我们自己的里程碑，不是照搬它的技术栈。
+
+| 里程碑 | 借鉴事项 | 参考对象（Buzz） |
+|---|---|---|
+| **M1.5**（relay 自部署 + 花名册 + register/discover） | 花名册 / group 成员模型显式引入角色（至少 Human / Agent-Bot），为"Agent 是一等成员"打基础，而不是笼统的联系人列表 | `buzz-db` 的 `Owner/Admin/Member/Guest/Bot` membership 角色 |
+| **M2**（L3 行为协议 JSON schema 标准化） | 在 `register`/`tip`/`drifting-bottle` 等 behavior schema 里预留一个 owner-attestation 授权字段（对接 AirAccount，而非泛化 pubkey），让 Agent 用自己的 key 签名、同时携带 owner 的授权证明；现在预留字段，避免 M2.5/M5 实现时要推翻协议重来 | NIP-OA（Owner Attestation）：`["auth", "<owner-pubkey-hex>", "<conditions>", "<sig-hex>"]`，事件作者仍是 agent 自己的 key，`auth` 只是授权证据不是身份覆盖 |
+| **M2.5**（跨 relay 接力 + 漂流瓶 + AAstar Point 支付） | 邻居 relay 的成员发现 / 隧道传输，技术选型参考对象定为 Go 生态的 `libp2p-go`/`gossipsub`（不引入 Rust/iroh 依赖，保持技术栈一致） | `buzz-relay-mesh`：iroh QUIC + scuttlebutt gossip 做成员发现 |
+| **M3**（指令型自主任务：RFP / 协商 / 状态机） | Workflow/触发器 schema 以 Buzz 的极简设计为蓝本：4 类触发器（message/reaction/schedule/webhook）+ 有限动作集 + 单遍模板变量解析 + 条件求值超时保护，避免自研过度复杂的 DSL | `buzz-workflow`：`WorkflowDef/TriggerDef/ActionDef` + `evalexpr` 条件求值 |
+| **M3**（同上） | 设计 approval / 挂起-恢复机制时，提前规划"挂起状态可持久化、可恢复执行"，不要等做完才发现漏了这一步 | Buzz 自己的 `request_approval` action 目前只返回 `Suspended` 但不持久化 token、不能恢复执行（官方已知缺陷 `WF-08`），是一个现成的"反面案例" |
+| **M4**（长期背景任务：调度 / 触发 / 智能匹配） | 同 M3，Agent 活动展示优先用"动词-宾语-结果"三元组渲染（而不是原始事件 JSON 转储），方便人类监督者一眼判断是否需要介入 | `VISION_ACTIVITY.md` 的 12 类渲染分级设计 |
+| **M5**（加密 / 信誉 / 真支付集成完善） | `tip` 行为落地时补充针对性的资金安全测试（双花/重放/伪造授权 tag 等场景），用 Go 的 property-based test（如 `gopter`）即可，不需要上 TLA+/Tamarin 全套 | Buzz 用 TLA+/Tamarin + 运行时 conformance checker 做多租户隔离与鉴权协议证明（我们风险敞口和资源量级都不匹配，量力而行） |
+| 跨里程碑（低成本，独立于 V2 重构） | CLI 统一 `--json` 输出模式、`audit_log` 哈希链等短期工程改进 | `buzz-cli` 的 JSON in/JSON out 接口、`buzz-audit` 的 SHA-256 append-only chain —— 详见 [`TODO.md`](TODO.md) |
+
+**明确不借鉴**（已在对比报告中论证，此处仅重申结论，避免团队日后重复讨论）：Postgres+Redis+S3+多租户后端、27-crate 级别的微服务拆分、TLA+/Tamarin 全套形式化验证、完整 Git 托管后端、Flutter 移动客户端、"新功能=新 kind+新 NIP 草案"的协议膨胀模式。理由见 `buzz-comparison-analysis.md` §7。
+
+---
+
+## 13. 相关文档
+
+- [`milestones/roadmap-v2.md`](milestones/roadmap-v2.md) — 详细任务清单（注：仍是旧版 M1-M5/周计划结构，尚未同步本文件 §9 的 M1.5/M2.5 拆分，读者以本文件的里程碑表为准）
+- [`buzz-comparison-analysis.md`](buzz-comparison-analysis.md) — Buzz（block/buzz）架构对比与借鉴分析（2026-07-24）
 - [`02-architecture-design.md`](02-architecture-design.md) — V1 原始架构（仍有效，作历史记录）
 - [`agent-protocol-design.md`](agent-protocol-design.md) — Agent 行为协议初稿
 - [`agent-protocols-summary.md`](agent-protocols-summary.md) — MCP / A2A / ACP 对比
