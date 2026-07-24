@@ -184,6 +184,7 @@ go test ./...       # 所有单元测试（每个包自带 *_test.go）
 - [`docs/TODO.md`](docs/TODO.md) — 不依赖 V2 重构、可独立推进的短期任务
 - [`docs/buzz-comparison-analysis.md`](docs/buzz-comparison-analysis.md) — 与 Buzz（block/buzz）的架构对比与借鉴分析
 - [`docs/USER_MANUAL.md`](docs/USER_MANUAL.md) — 用户手册
+- [`docs/M1.5_TEST_GUIDE.md`](docs/M1.5_TEST_GUIDE.md) — M1.5 新功能（花名册 register/discover、成员角色、审计日志、outbox 诊断、relay 自检）3 个核心场景手动测试指南
 - [`QUICK_MANUAL_TEST.md`](QUICK_MANUAL_TEST.md) — 双人/三人协作手动测试指南（含 Profile/TUI）
 - [`docs/05-acceptance-test-guide.md`](docs/05-acceptance-test-guide.md) — Alice/Bob/Charlie 验收测试约定
 - [`docs/archive/`](docs/archive/) — 已被取代的历史文档（strfry 部署方案、旧重构记录等），仅供追溯，不要按其操作
