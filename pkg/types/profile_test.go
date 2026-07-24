@@ -103,6 +103,15 @@ func TestAgentProfileValidateByMode(t *testing.T) {
 			errMsg:  `mode "tagged" only supports 'name' and 'tags'`,
 		},
 		{
+			// Task 07 adds Rating to AgentProfile for discover filtering; it's
+			// a structured-only field like Availability/Version/RateSheet.
+			name: "tagged mode with rating set is rejected",
+			profile: &AgentProfile{Name: "Alice", Mode: ModeTagged, Tags: []string{"dev"},
+				Rating: func() *float64 { v := 4.5; return &v }()},
+			wantErr: true,
+			errMsg:  `mode "tagged" only supports 'name' and 'tags'`,
+		},
+		{
 			name:    "tagged mode with an empty but non-nil RateSheet is rejected",
 			profile: &AgentProfile{Name: "Alice", Mode: ModeTagged, Tags: []string{"dev"}, RateSheet: &RateSheet{Currency: "USD"}},
 			wantErr: true,
