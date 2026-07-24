@@ -94,6 +94,49 @@ func TestDiscoverFilterMatches_PriceRange(t *testing.T) {
 	assert.False(t, DiscoverFilter{PriceMin: intPtr(0)}.Matches(simple), "no rate sheet must not match a price filter")
 }
 
+// TestDiscoverFilterMatches_PriceIsNotTruncatedToInt covers a Codex review
+// finding: comparing rate.Price (float64) against int bounds must not
+// truncate the price first, or a fractional price could wrongly satisfy a
+// boundary it doesn't actually meet.
+func TestDiscoverFilterMatches_PriceIsNotTruncatedToInt(t *testing.T) {
+	profile := &types.AgentProfile{
+		Name: "Fractional Price Bot",
+		Mode: types.ModeStructured,
+		RateSheet: &types.RateSheet{
+			Rates: []types.RateEntry{{Service: "audit", Price: 100.99}},
+		},
+	}
+
+	assert.False(t, DiscoverFilter{PriceMax: intPtr(100)}.Matches(profile),
+		"100.99 truncated to int(100) would wrongly satisfy price-max 100")
+	assert.True(t, DiscoverFilter{PriceMax: intPtr(101)}.Matches(profile))
+	assert.True(t, DiscoverFilter{PriceMin: intPtr(100)}.Matches(profile))
+}
+
+// TestDiscoverFilterMatches_MalformedProfileGatedByMode covers a Codex
+// review finding: relay data isn't trusted to have gone through our own
+// Validate(), so a profile declaring mode=simple/tagged but still carrying
+// capabilities/rate_sheet/rating (a malformed or adversarial event) must be
+// excluded from structured-only filters based on its declared Mode, not
+// merely because the fields happen to be present.
+func TestDiscoverFilterMatches_MalformedProfileGatedByMode(t *testing.T) {
+	malformedSimple := &types.AgentProfile{
+		Name:         "Malformed Simple",
+		Mode:         types.ModeSimple,
+		Capabilities: []types.Capability{{Name: "seo"}},
+		RateSheet:    &types.RateSheet{Rates: []types.RateEntry{{Service: "audit", Price: 200}}},
+		Rating:       ratingPtr(5.0),
+	}
+
+	assert.False(t, DiscoverFilter{Capability: "seo"}.Matches(malformedSimple))
+	assert.False(t, DiscoverFilter{PriceMin: intPtr(0)}.Matches(malformedSimple))
+	assert.False(t, DiscoverFilter{RatingMin: ratingPtr(0)}.Matches(malformedSimple))
+	// OnlineOnly isn't a structured-only filter -- Availability applies
+	// regardless of mode, so it should still evaluate normally.
+	malformedSimple.Availability = types.AvailabilityAvailable
+	assert.True(t, DiscoverFilter{OnlineOnly: true}.Matches(malformedSimple))
+}
+
 func TestDiscoverFilterMatches_RatingMin(t *testing.T) {
 	structured := structuredProfile() // rating 4.8
 

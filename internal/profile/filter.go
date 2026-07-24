@@ -20,10 +20,21 @@ func (f DiscoverFilter) IsZero() bool {
 }
 
 // Matches reports whether profile satisfies every constraint set on f.
-// simple/tagged-mode profiles carry no capabilities, rate sheet, or rating,
-// so a --capability/--price-*/--rating-min filter simply excludes them --
-// that's not an error, it's the documented behavior for those modes.
+// Capability/price/rating are structured-only fields (per
+// specs/m1.5/tasks/07-profile-discover-filters.md's design: "Capability 只对
+// structured 模式的 profile 生效") -- a non-structured profile is excluded
+// from those filters based on its declared Mode, not merely on whether it
+// happens to carry the field. Relay data isn't trusted to have gone through
+// our own Validate(): a malformed/adversarial event could declare
+// mode:"simple" while still carrying capabilities/rate_sheet/rating, and
+// checking Mode explicitly (instead of only checking field presence) keeps
+// that from being treated as a structured match.
 func (f DiscoverFilter) Matches(profile *types.AgentProfile) bool {
+	wantsStructuredFilter := f.Capability != "" || f.PriceMin != nil || f.PriceMax != nil || f.RatingMin != nil
+	if wantsStructuredFilter && profile.Mode.Effective() != types.ModeStructured {
+		return false
+	}
+
 	if f.Capability != "" && !profile.HasCapability(f.Capability) {
 		return false
 	}
@@ -41,19 +52,19 @@ func (f DiscoverFilter) Matches(profile *types.AgentProfile) bool {
 
 // matchesPriceRange reports whether profile has at least one rate entry
 // whose price falls within [min, max] (either bound may be nil, meaning
-// unbounded on that side). A profile with no rate sheet (simple/tagged
-// mode, or a structured profile that just didn't set any rates) never
-// matches a price filter.
+// unbounded on that side). Comparisons stay in float64 -- converting
+// rate.Price to int before comparing would truncate fractional prices
+// (e.g. 100.99 would wrongly satisfy --price-max 100). A profile with no
+// rate sheet never matches a price filter.
 func matchesPriceRange(profile *types.AgentProfile, min, max *int) bool {
 	if profile.RateSheet == nil {
 		return false
 	}
 	for _, rate := range profile.RateSheet.Rates {
-		price := int(rate.Price)
-		if min != nil && price < *min {
+		if min != nil && rate.Price < float64(*min) {
 			continue
 		}
-		if max != nil && price > *max {
+		if max != nil && rate.Price > float64(*max) {
 			continue
 		}
 		return true
