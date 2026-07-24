@@ -21,8 +21,8 @@
 | 3 | 修复 `history conversation` 与 `agent msg` 联系人解析不一致 | [`tasks/03-history-contact-resolution-fix.md`](tasks/03-history-contact-resolution-fix.md) | — | S | done ([#15](https://github.com/iDoris-ai/agent-speaker/pull/15)) |
 | 4 | 审计哈希链（`audit_log` 表） | [`tasks/04-audit-log-hash-chain.md`](tasks/04-audit-log-hash-chain.md) | — | M | done ([#16](https://github.com/iDoris-ai/agent-speaker/pull/16)) |
 | 5 | 成员角色模型（Human/Agent） | [`tasks/05-member-role-model.md`](tasks/05-member-role-model.md) | — | M | done ([#18](https://github.com/iDoris-ai/agent-speaker/pull/18)) |
-| 6 | Profile register 三模式 schema | [`tasks/06-profile-register-mode-schema.md`](tasks/06-profile-register-mode-schema.md) | — | M | ready |
-| 7 | Profile discover 过滤条件扩展 | [`tasks/07-profile-discover-filters.md`](tasks/07-profile-discover-filters.md) | 6 | S | blocked |
+| 6 | Profile register 三模式 schema | [`tasks/06-profile-register-mode-schema.md`](tasks/06-profile-register-mode-schema.md) | — | M | done ([#19](https://github.com/iDoris-ai/agent-speaker/pull/19)) |
+| 7 | Profile discover 过滤条件扩展 | [`tasks/07-profile-discover-filters.md`](tasks/07-profile-discover-filters.md) | 6 | S | ready |
 | 8 | daemon outbox 诊断/清理命令 | [`tasks/08-daemon-outbox-diagnostics.md`](tasks/08-daemon-outbox-diagnostics.md) | — | S | ready |
 | 9 | `internal/nostr` + `internal/daemon` 单元测试补齐 | [`tasks/09-nostr-daemon-test-coverage.md`](tasks/09-nostr-daemon-test-coverage.md) | — | M | ready |
 | 10 | relay 部署脚本加固（为切换 `relay-khatru` fork 做准备） | [`tasks/10-relay-deploy-hardening.md`](tasks/10-relay-deploy-hardening.md) | — | S | ready |

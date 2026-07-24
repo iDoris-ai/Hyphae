@@ -17,8 +17,14 @@ type AgentProfile struct {
 	Availability string       `json:"availability,omitempty"`
 	RateSheet    *RateSheet   `json:"rate_sheet,omitempty"`
 	Contact      *ContactInfo `json:"contact,omitempty"`
-	Version      string       `json:"version,omitempty"`
-	UpdatedAt    int64        `json:"updated_at"`
+	// Rating is a self-declared score (structured mode only, e.g. "how I'd
+	// rate my own reliability"), not a computed/third-party reputation
+	// score -- there's no reputation system to compute one from yet (see
+	// docs/protocol-v2.md's CityRep discussion for where that's headed).
+	// A pointer distinguishes "no rating set" from "rated 0".
+	Rating    *float64 `json:"rating,omitempty"`
+	Version   string   `json:"version,omitempty"`
+	UpdatedAt int64    `json:"updated_at"`
 }
 
 // ProfileMode marks how much of a profile's structure was published: simple
@@ -120,7 +126,7 @@ func (p *AgentProfile) Validate() error {
 	// specs/m1.5/tasks/06-profile-register-mode-schema.md are exhaustive,
 	// not illustrative, so partial structured data must be rejected too.
 	hasStructuredFields := p.Description != "" || p.Availability != "" || p.Version != "" ||
-		len(p.Capabilities) > 0 || p.RateSheet != nil || p.Contact != nil
+		len(p.Capabilities) > 0 || p.RateSheet != nil || p.Contact != nil || p.Rating != nil
 	switch p.Mode.Effective() {
 	case ModeSimple:
 		if len(p.Tags) > 0 || hasStructuredFields {
