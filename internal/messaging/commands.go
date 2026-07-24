@@ -50,7 +50,7 @@ var HistoryCmd = &cli.Command{
 					return err
 				}
 
-				contact, err := identity.GetContact(ks, c.String("with"))
+				recipientNpub, err := identity.ResolveRecipient(ks, c.String("with"))
 				if err != nil {
 					return err
 				}
@@ -60,7 +60,7 @@ var HistoryCmd = &cli.Command{
 					return err
 				}
 
-				messages, err := store.GetConversation(myIdentity.Npub, contact.Npub, int(c.Int("limit")))
+				messages, err := store.GetConversation(myIdentity.Npub, recipientNpub, int(c.Int("limit")))
 				if err != nil {
 					return err
 				}
