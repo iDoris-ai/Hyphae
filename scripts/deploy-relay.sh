@@ -55,6 +55,40 @@ version_ge() {
   [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" = "$2" ]
 }
 
+RELAY_REPO_CHECK_TIMEOUT_SECS="${RELAY_REPO_CHECK_TIMEOUT_SECS:-10}"
+
+# run_with_timeout SECS CMD...: runs CMD, killing it and returning 124 (same
+# convention as GNU coreutils' timeout(1)) if it hasn't finished within SECS.
+# macOS doesn't ship `timeout` by default (only Linux distros with coreutils
+# typically do), so this prefers the real timeout/gtimeout binary when
+# present and falls back to a plain bash polling loop otherwise -- no
+# external dependency required on either platform.
+run_with_timeout() {
+  local secs="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$secs" "$@"
+    return $?
+  fi
+  if command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$secs" "$@"
+    return $?
+  fi
+  "$@" &
+  local cmd_pid=$!
+  local waited=0
+  while kill -0 "$cmd_pid" 2>/dev/null; do
+    if [ "$waited" -ge "$secs" ]; then
+      kill "$cmd_pid" 2>/dev/null
+      wait "$cmd_pid" 2>/dev/null
+      return 124
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  wait "$cmd_pid"
+}
+
 port_in_use() {
   local port="$1"
   if command -v lsof >/dev/null 2>&1; then
@@ -114,7 +148,16 @@ check_git() {
 
 check_port() {
   local port="$1"
-  if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+  # The length check must run before the -lt/-gt arithmetic comparisons: an
+  # all-digit string longer than 5 characters is already >65535 (the max
+  # valid port has 5 digits), and bash's arithmetic comparison overflows on
+  # very long digit strings ("integer expression expected" on stderr, exit
+  # status 2) -- since 2 is still just "non-zero" to the `||` chain, that
+  # error was previously indistinguishable from "not the invalid case" and
+  # fell through to port_in_use, which then misreported the bogus value as
+  # free (the same failure class the earlier non-numeric/out-of-range fix
+  # targeted, just triggered by integer overflow instead).
+  if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "${#port}" -gt 5 ] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
     echo "❌ port $port: not a valid port number (must be 1-65535)"
     return 1
   fi
@@ -127,8 +170,14 @@ check_port() {
 }
 
 check_relay_repo() {
-  if git ls-remote --exit-code "$RELAY_REPO" >/dev/null 2>&1; then
+  local status
+  run_with_timeout "$RELAY_REPO_CHECK_TIMEOUT_SECS" git ls-remote --exit-code "$RELAY_REPO" >/dev/null 2>&1
+  status=$?
+  if [ "$status" -eq 0 ]; then
     echo "✅ RELAY_REPO reachable: $RELAY_REPO"
+  elif [ "$status" -eq 124 ]; then
+    echo "❌ RELAY_REPO unreachable: $RELAY_REPO (timed out after ${RELAY_REPO_CHECK_TIMEOUT_SECS}s -- host may be blackholing the connection rather than refusing it)"
+    return 1
   else
     echo "❌ RELAY_REPO unreachable: $RELAY_REPO (check the URL, network, or auth)"
     return 1

@@ -388,11 +388,11 @@ var profileDiscoverCmd = &cli.Command{
 			Name:  "capability",
 			Usage: "Only show profiles with this capability (structured-mode profiles only)",
 		},
-		&cli.IntFlag{
+		&cli.FloatFlag{
 			Name:  "price-min",
 			Usage: "Only show profiles with a rate at or above this price (structured-mode profiles only)",
 		},
-		&cli.IntFlag{
+		&cli.FloatFlag{
 			Name:  "price-max",
 			Usage: "Only show profiles with a rate at or below this price (structured-mode profiles only)",
 		},
@@ -415,11 +415,11 @@ var profileDiscoverCmd = &cli.Command{
 		var discoverFilter DiscoverFilter
 		discoverFilter.Capability = c.String("capability")
 		if c.IsSet("price-min") {
-			v := int(c.Int("price-min"))
+			v := c.Float("price-min")
 			discoverFilter.PriceMin = &v
 		}
 		if c.IsSet("price-max") {
-			v := int(c.Int("price-max"))
+			v := c.Float("price-max")
 			discoverFilter.PriceMax = &v
 		}
 		if c.IsSet("rating-min") {

@@ -86,7 +86,7 @@ var outboxListCmd = &cli.Command{
 			// Not truncated, unlike RECIPIENT below: this is the value
 			// `retry --id`/`clear` need, and a truncated-then-copy-pasted ID
 			// would never match anything.
-			id := hexOutboxID(e.ID)
+			id := displayOutboxID(e.ID)
 			if idCount[e.ID] > 1 {
 				id += " ⚠️dup"
 			}
@@ -234,10 +234,14 @@ var outboxRetryCmd = &cli.Command{
 	},
 }
 
-// findOutboxMatches resolves a user-supplied ID to outbox entries. It tries
-// hex-decoding first (matching what `list` displays); if that yields no
-// matches, it falls back to treating id as the literal stored value, so a
-// literal that happens to also be valid hex isn't silently unreachable.
+// findOutboxMatches resolves a user-supplied ID (copy-pasted from `list`,
+// which always displays hex per displayOutboxID) to outbox entries. It
+// tries hex-decoding first, matching against legacy entries that still
+// store the raw event.ID bytes directly; if that yields nothing, it falls
+// back to a literal match, which is what succeeds for entries written by
+// AddToOutbox's current hex-encoded-storage behavior (the pasted hex string
+// IS the stored value for those, so decoding it first and comparing the
+// decoded bytes against a hex-string entry.ID would never match).
 func findOutboxMatches(entries []types.OutboxEntry, id string) []types.OutboxEntry {
 	if decoded, err := hex.DecodeString(id); err == nil {
 		if matches := matchOutboxID(entries, string(decoded)); len(matches) > 0 {
@@ -275,11 +279,20 @@ func truncateOutboxField(s string, n int) string {
 	return s[:n] + "..."
 }
 
-// hexOutboxID renders an outbox entry ID (raw bytes -- AddToOutbox stores
-// event.ID[:] directly as a Go string, not hex-encoded) as a readable hex
-// string for display. This is purely a presentation choice for `list`;
-// the entry's actual ID field, used for lookups, is untouched.
-func hexOutboxID(id string) string {
+// displayOutboxID renders an outbox entry ID as readable hex for `list`.
+// AddToOutbox now stores IDs already hex-encoded, but entries written by an
+// older binary (before that fix) may still be on disk holding the raw
+// event.ID bytes directly -- hex-encoding those too keeps `list`'s output
+// readable either way, without double-encoding an ID that's already hex.
+// A 64-character string that's valid hex is assumed to already be encoded:
+// a raw 32-byte Nostr event ID happening to consist entirely of ASCII hex
+// digit bytes by chance is astronomically unlikely.
+func displayOutboxID(id string) string {
+	if len(id) == 64 {
+		if _, err := hex.DecodeString(id); err == nil {
+			return id
+		}
+	}
 	return hex.EncodeToString([]byte(id))
 }
 

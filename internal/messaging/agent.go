@@ -3,6 +3,7 @@ package messaging
 import (
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"time"
@@ -151,7 +152,9 @@ Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 			Content:   compressed,
 			PubKey:    senderSK.Public(),
 		}
-		event.Sign(senderSK)
+		if err := event.Sign(senderSK); err != nil {
+			return fmt.Errorf("failed to sign event: %w", err)
+		}
 
 		relays := c.StringSlice("relay")
 		jsonMode := common.JSONMode(c)
@@ -202,9 +205,11 @@ Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 			}); err != nil {
 				fmt.Fprintf(os.Stderr, "⚠️  audit log failed: %v\n", err)
 			}
-			// Remove from outbox if it was there
+			// Remove from outbox if it was there. AddToOutbox stores IDs
+			// hex-encoded (see its doc comment), so the lookup key here
+			// must match that encoding, not the raw event.ID bytes.
 			ob, _ := LoadOutbox()
-			RemoveFromOutbox(ob, string(event.ID[:]))
+			RemoveFromOutbox(ob, hex.EncodeToString(event.ID[:]))
 		} else {
 			// Add to outbox for retry
 			ob, _ := LoadOutbox()
