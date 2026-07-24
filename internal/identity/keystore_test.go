@@ -170,3 +170,47 @@ func TestEncryptUnencryptedKeystore(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEqual(t, [32]byte{}, sk)
 }
+
+func TestResolveRecipient(t *testing.T) {
+	setupTempKeyStore(t)
+	ks := &types.KeyStore{
+		Identities: make(map[string]*types.Identity),
+		Contacts:   make(map[string]*types.Contact),
+	}
+
+	self, err := CreateIdentity(ks, "alice")
+	require.NoError(t, err)
+
+	other, err := CreateIdentity(ks, "bob")
+	require.NoError(t, err)
+
+	err = AddContact(ks, "bobby", other.Npub)
+	require.NoError(t, err)
+
+	t.Run("resolves via contact nickname", func(t *testing.T) {
+		npub, err := ResolveRecipient(ks, "bobby")
+		require.NoError(t, err)
+		assert.Equal(t, other.Npub, npub)
+	})
+
+	t.Run("resolves via identity nickname, not just contacts", func(t *testing.T) {
+		// "bob" is an identity (e.g. a second local persona), not a contact —
+		// this is the exact case that used to work for `agent msg --to` but
+		// not `history conversation --with` before they shared ResolveRecipient.
+		npub, err := ResolveRecipient(ks, "bob")
+		require.NoError(t, err)
+		assert.Equal(t, other.Npub, npub)
+	})
+
+	t.Run("resolves a raw npub not in contacts or identities", func(t *testing.T) {
+		npub, err := ResolveRecipient(ks, self.Npub)
+		require.NoError(t, err)
+		assert.Equal(t, self.Npub, npub)
+	})
+
+	t.Run("unknown name errors clearly", func(t *testing.T) {
+		_, err := ResolveRecipient(ks, "totally-unknown-name")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "totally-unknown-name")
+	})
+}

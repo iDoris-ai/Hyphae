@@ -43,4 +43,6 @@ func ResolveRecipient(mgr *identity.Manager, target string) (npub string, err er
 
 ## 实现笔记
 
-（留空）
+- `identity.ResolveRecipient` 已经存在（`agent msg --to` 一直在用），解析顺序是 contact 昵称 → identity 昵称 → 合法 npub → 报错。本任务没有改这个函数本身的逻辑，只是把 `history conversation --with` 从直接调 `identity.GetContact` 换成调 `identity.ResolveRecipient`——2 行改动。`ResolveRecipient` 本身之前一次单元测试都没有（尽管 `agent msg` 一直依赖它），顺手在 `internal/identity/keystore_test.go` 补了 `TestResolveRecipient`（4 个子测试：contact 昵称/identity 昵称/裸 npub/未知名字报错），覆盖了两个命令共用的这条解析路径。
+- Live 复现了原始场景：`bob` 只是一个本地 identity、不在 alice 的 contact 列表里，`agent msg --to bob` 一直能发；`history conversation --with bob` 之前会报 `contact 'bob' not found`，现在正确返回对话记录。未知名字的负向场景也验证过，报错信息清晰。
+- **本任务的 Codex review 遇到 Codex 账号配额耗尽**（`usage-limit` 错误，官方提示要到 2026-07-29 才恢复），按 `LOOP_PLAYBOOK.md` 更新后的降级策略切到 **Tier 2（gh Copilot）**做第二轮 review，不是 Codex。
