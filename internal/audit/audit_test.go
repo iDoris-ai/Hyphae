@@ -3,7 +3,9 @@ package audit
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 )
 
 func setupTestAudit(t *testing.T) {
@@ -198,5 +200,75 @@ func TestListRespectsLimit(t *testing.T) {
 	// Most recent first.
 	if entries[0].Seq != 10 {
 		t.Errorf("expected first entry seq=10 (most recent), got %d", entries[0].Seq)
+	}
+}
+
+// TestLogActionConcurrentCallsDoNotCorruptOrHang exercises the documented
+// "single-writer" concurrency limitation for real: LogAction does a
+// read-then-insert inside one transaction with no busy_timeout configured
+// until this task's second Codex/self-review pass added one. Verifies that
+// under real concurrent callers (as would happen in the daemon watching
+// several relays at once), every call either succeeds or fails cleanly, the
+// chain stays internally consistent (no corruption, no hang), and — now that
+// busy_timeout is set — most calls actually succeed rather than being
+// dropped immediately on SQLITE_BUSY.
+func TestLogActionConcurrentCallsDoNotCorruptOrHang(t *testing.T) {
+	setupTestAudit(t)
+
+	const n = 50
+	errCh := make(chan error, n)
+	done := make(chan struct{})
+	go func() {
+		var wg sync.WaitGroup
+		for i := 0; i < n; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				errCh <- LogAction("alice", ActionMessageSent, map[string]any{"n": i})
+			}(i)
+		}
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("concurrent LogAction calls did not complete within 10s (hang / deadlock)")
+	}
+	close(errCh)
+
+	var succeeded, failed int
+	for err := range errCh {
+		if err == nil {
+			succeeded++
+		} else {
+			failed++
+		}
+	}
+	t.Logf("concurrent LogAction: %d succeeded, %d failed (out of %d)", succeeded, failed, n)
+
+	// Whatever subset actually got committed, the chain itself must still be
+	// internally consistent — no seq collision, no broken hash link.
+	ok, brokenAt, err := VerifyChain()
+	if err != nil {
+		t.Fatalf("VerifyChain failed: %v", err)
+	}
+	if !ok {
+		t.Fatalf("chain corrupted by concurrent writers, broken at seq %d", brokenAt)
+	}
+
+	entries, err := List(0)
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	if len(entries) != succeeded {
+		t.Errorf("chain has %d entries but %d LogAction calls reported success — mismatch", len(entries), succeeded)
+	}
+
+	// With busy_timeout set, SQLite waits for the lock instead of failing
+	// immediately, so almost everything should get through in 10s of wall time.
+	if succeeded < n*8/10 {
+		t.Errorf("expected busy_timeout to let most concurrent writes through, only %d/%d succeeded", succeeded, n)
 	}
 }

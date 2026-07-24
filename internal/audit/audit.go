@@ -111,9 +111,27 @@ func getDB() (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("audit: failed to open db: %w", err)
 	}
+	// database/sql pools connections; PRAGMA busy_timeout only affects the one
+	// connection it's run on, and Go would happily open a second connection
+	// for a concurrent caller instead of queueing it behind the first. That
+	// second connection has no busy_timeout, so it gets an immediate
+	// SQLITE_BUSY instead of waiting — under real concurrent LogAction calls
+	// (e.g. the daemon handling several relays at once) that meant most
+	// writes were dropped rather than delayed. Capping the pool at a single
+	// connection makes Go itself serialize callers (they block waiting for
+	// the one connection to free up) instead of relying on SQLite-side
+	// locking across multiple connections.
+	conn.SetMaxOpenConns(1)
 	if _, err := conn.Exec("PRAGMA journal_mode = WAL"); err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("audit: failed to enable WAL mode: %w", err)
+	}
+	// Belt-and-suspenders alongside SetMaxOpenConns(1): if a future change
+	// raises the pool size, callers still wait instead of failing outright.
+	// 5s comfortably covers LogAction's single short read+insert transaction.
+	if _, err := conn.Exec("PRAGMA busy_timeout = 5000"); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("audit: failed to set busy_timeout: %w", err)
 	}
 	if _, err := conn.Exec(schemaSQL); err != nil {
 		_ = conn.Close()
