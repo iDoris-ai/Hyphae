@@ -13,8 +13,8 @@ import (
 
 // HistoryCmd manages message history
 var HistoryCmd = &cli.Command{
-	Name:  "history",
-	Usage: "View message history",
+	Name:        "history",
+	Usage:       "View message history",
 	Description: `View local message history stored in SQLite database`,
 	Commands: []*cli.Command{
 		{
@@ -116,12 +116,14 @@ var HistoryCmd = &cli.Command{
 					return err
 				}
 
-				fmt.Println("📊 Message Statistics")
-				fmt.Println("=====================")
-				fmt.Printf("Total messages: %d\n", stats["total"])
-				fmt.Printf("Incoming:       %d\n", stats["incoming"])
-				fmt.Printf("Outgoing:       %d\n", stats["outgoing"])
-				fmt.Printf("Encrypted:      %d\n", stats["encrypted"])
+				common.Emit(common.JSONMode(c), stats, func() {
+					fmt.Println("📊 Message Statistics")
+					fmt.Println("=====================")
+					fmt.Printf("Total messages: %d\n", stats["total"])
+					fmt.Printf("Incoming:       %d\n", stats["incoming"])
+					fmt.Printf("Outgoing:       %d\n", stats["outgoing"])
+					fmt.Printf("Encrypted:      %d\n", stats["encrypted"])
+				})
 
 				return nil
 			},
