@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 
+	"github.com/AuraAIHQ/agent-speaker/internal/common"
 	"github.com/AuraAIHQ/agent-speaker/internal/daemon"
 	"github.com/AuraAIHQ/agent-speaker/internal/group"
 	"github.com/AuraAIHQ/agent-speaker/internal/identity"
@@ -23,6 +23,15 @@ func main() {
 		Name:    "agent-speaker",
 		Usage:   "A nostr-based agent communication CLI",
 		Version: version,
+		Flags: []cli.Flag{
+			// Local defaults to false in urfave/cli v3.0.0-beta1, which means
+			// this flag is already inherited by every subcommand (see
+			// TestPersistentFlag in the vendored library) — no extra opt-in needed.
+			&cli.BoolFlag{
+				Name:  "json",
+				Usage: "Machine-readable output: stdout is a JSON envelope, stderr is a JSON error, exit code is semantic (also settable via AGENT_SPEAKER_OUTPUT=json)",
+			},
+		},
 		Commands: []*cli.Command{
 			// Nostr base commands
 			nostr.KeyCmd,
@@ -53,7 +62,12 @@ func main() {
 	}
 
 	if err := app.Run(context.Background(), os.Args); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		// Scan raw argv rather than trusting any *cli.Command flag state: the
+		// failure may have happened before the relevant subcommand's flags
+		// were even fully parsed (e.g. a missing required flag), so there's
+		// no reliable c.Bool("json") in scope at this point. See
+		// JSONModeFromArgs's doc comment for why a value latched earlier via
+		// a Before hook doesn't work here.
+		os.Exit(common.EmitError(common.JSONModeFromArgs(os.Args), err))
 	}
 }

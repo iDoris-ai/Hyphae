@@ -91,7 +91,7 @@ Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 	Action: func(ctx context.Context, c *cli.Command) error {
 		content := c.String("content")
 		if content == "" {
-			return fmt.Errorf("message content is required")
+			return common.NewExitError(common.ErrCodeUser, fmt.Errorf("message content is required"))
 		}
 
 		ks, err := identity.LoadKeyStore()
@@ -101,21 +101,21 @@ Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 
 		sender, err := identity.GetIdentity(ks, c.String("from"))
 		if err != nil {
-			return fmt.Errorf("sender not found: %w", err)
+			return common.NewExitError(common.ErrCodeUser, fmt.Errorf("sender not found: %w", err))
 		}
 
 		recipientNpub, err := identity.ResolveRecipient(ks, c.String("to"))
 		if err != nil {
-			return err
+			return common.NewExitError(common.ErrCodeUser, err)
 		}
 
 		senderSK, err := identity.GetSecretKey(ks, sender.Nickname)
 		if err != nil {
-			return fmt.Errorf("failed to load sender key (is the keystore unlocked?): %w", err)
+			return common.NewExitError(common.ErrCodeAuth, fmt.Errorf("failed to load sender key (is the keystore unlocked?): %w", err))
 		}
 		recipientPK, err := common.ParsePublicKey(recipientNpub)
 		if err != nil {
-			return fmt.Errorf("invalid recipient npub: %w", err)
+			return common.NewExitError(common.ErrCodeUser, fmt.Errorf("invalid recipient npub: %w", err))
 		}
 
 		// Encrypt if enabled
@@ -152,13 +152,23 @@ Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 		event.Sign(senderSK)
 
 		relays := c.StringSlice("relay")
+		jsonMode := common.JSONMode(c)
 
 		// Publish with detailed error output
+		type relayResult struct {
+			URL   string `json:"url"`
+			OK    bool   `json:"ok"`
+			Error string `json:"error,omitempty"`
+		}
+		results := make([]relayResult, 0, len(relays))
 		success := 0
 		for _, url := range relays {
 			relay, err := nostr.RelayConnect(ctx, url, nostr.RelayOptions{})
 			if err != nil {
-				fmt.Printf("   ❌ %s: connect failed: %v\n", url, err)
+				if !jsonMode {
+					fmt.Printf("   ❌ %s: connect failed: %v\n", url, err)
+				}
+				results = append(results, relayResult{URL: url, OK: false, Error: fmt.Sprintf("connect failed: %v", err)})
 				continue
 			}
 
@@ -168,14 +178,21 @@ Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 			relay.Close()
 
 			if err != nil {
-				fmt.Printf("   ❌ %s: publish failed: %v\n", url, err)
+				if !jsonMode {
+					fmt.Printf("   ❌ %s: publish failed: %v\n", url, err)
+				}
+				results = append(results, relayResult{URL: url, OK: false, Error: fmt.Sprintf("publish failed: %v", err)})
 			} else {
-				fmt.Printf("   ✅ %s\n", url)
+				if !jsonMode {
+					fmt.Printf("   ✅ %s\n", url)
+				}
+				results = append(results, relayResult{URL: url, OK: true})
 				success++
 			}
 		}
 
 		// Store in local history and outbox
+		queuedForRetry := false
 		if success > 0 {
 			StoreOutgoingMessage(event, recipientNpub, content, isEncrypted)
 			// Remove from outbox if it was there
@@ -185,21 +202,36 @@ Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 			// Add to outbox for retry
 			ob, _ := LoadOutbox()
 			AddToOutbox(ob, event, recipientNpub, relays)
-			fmt.Println("   📝 Added to outbox for retry")
+			queuedForRetry = true
+			if !jsonMode {
+				fmt.Println("   📝 Added to outbox for retry")
+			}
 		}
 
-		encryptionStatus := "plaintext"
-		if isEncrypted {
-			encryptionStatus = "🔒 NIP-44 encrypted"
-		}
-		fmt.Printf("📤 Message from '%s' to '%s' (%s)\n", sender.Nickname, c.String("to"), encryptionStatus)
-		fmt.Printf("   Published to %d/%d relays\n", success, len(relays))
+		isEncryptedFinal := isEncrypted
+		common.Emit(jsonMode, map[string]any{
+			"from":             sender.Nickname,
+			"to":               c.String("to"),
+			"encrypted":        isEncryptedFinal,
+			"event_id":         event.ID.Hex(),
+			"relays":           results,
+			"published_to":     success,
+			"relay_count":      len(relays),
+			"queued_for_retry": queuedForRetry,
+		}, func() {
+			encryptionStatus := "plaintext"
+			if isEncryptedFinal {
+				encryptionStatus = "🔒 NIP-44 encrypted"
+			}
+			fmt.Printf("📤 Message from '%s' to '%s' (%s)\n", sender.Nickname, c.String("to"), encryptionStatus)
+			fmt.Printf("   Published to %d/%d relays\n", success, len(relays))
 
-		if success == 0 {
-			fmt.Println("   ⚠️  Warning: Message not published to any relay")
-		} else {
-			fmt.Printf("   💾 Stored in local history\n")
-		}
+			if success == 0 {
+				fmt.Println("   ⚠️  Warning: Message not published to any relay")
+			} else {
+				fmt.Printf("   💾 Stored in local history\n")
+			}
+		})
 
 		return nil
 	},
@@ -239,11 +271,19 @@ var AgentInboxCmd = &cli.Command{
 
 		recipient, err := identity.GetIdentity(ks, c.String("as"))
 		if err != nil {
-			return err
+			return common.NewExitError(common.ErrCodeUser, err)
 		}
 
-		recipientPK, _ := identity.GetPublicKey(ks, recipient.Nickname)
-		recipientSK, _ := identity.GetSecretKey(ks, recipient.Nickname)
+		autoDecrypt := c.Bool("decrypt")
+
+		recipientPK, err := identity.GetPublicKey(ks, recipient.Nickname)
+		if err != nil {
+			return common.NewExitError(common.ErrCodeOther, fmt.Errorf("failed to load recipient public key: %w", err))
+		}
+		recipientSK, err := identity.GetSecretKey(ks, recipient.Nickname)
+		if err != nil && autoDecrypt {
+			return common.NewExitError(common.ErrCodeAuth, fmt.Errorf("failed to load recipient key (is the keystore unlocked?): %w", err))
+		}
 
 		filter := nostr.Filter{
 			Kinds: []nostr.Kind{AgentKind},
@@ -252,13 +292,18 @@ var AgentInboxCmd = &cli.Command{
 		}
 
 		relays := c.StringSlice("relay")
-		fmt.Printf("📬 Inbox for '%s'\n\n", recipient.Nickname)
+		jsonMode := common.JSONMode(c)
+		if !jsonMode {
+			fmt.Printf("📬 Inbox for '%s'\n\n", recipient.Nickname)
+		}
 
 		allEvents := make([]nostr.Event, 0)
 		for _, url := range relays {
 			relay, err := nostr.RelayConnect(ctx, url, nostr.RelayOptions{})
 			if err != nil {
-				fmt.Printf("   ⚠️  Failed to connect to %s: %v\n", url, err)
+				if !jsonMode {
+					fmt.Printf("   ⚠️  Failed to connect to %s: %v\n", url, err)
+				}
 				continue
 			}
 			defer relay.Close()
@@ -271,11 +316,20 @@ var AgentInboxCmd = &cli.Command{
 		}
 
 		if len(allEvents) == 0 {
-			fmt.Println("   Empty")
+			common.Emit(jsonMode, []any{}, func() {
+				fmt.Println("   Empty")
+			})
 			return nil
 		}
 
-		autoDecrypt := c.Bool("decrypt")
+		type inboxEntry struct {
+			Time      string `json:"time"`
+			From      string `json:"from"`
+			Content   string `json:"content"`
+			Encrypted bool   `json:"encrypted"`
+			Decrypted bool   `json:"decrypted"`
+		}
+		entries := make([]inboxEntry, 0, len(allEvents))
 
 		for _, evt := range allEvents {
 			senderNpub := common.EncodeNpub(evt.PubKey)
@@ -297,25 +351,45 @@ var AgentInboxCmd = &cli.Command{
 			}
 
 			content, _ := DecompressText(evt.Content)
+			decrypted := false
 
 			// Decrypt if needed
 			if isEncrypted && autoDecrypt {
-				decrypted, err := crypto.DecryptMessage(content, recipientSK, evt.PubKey)
+				plain, err := crypto.DecryptMessage(content, recipientSK, evt.PubKey)
 				if err == nil {
-					content = decrypted
-					content = "🔓 " + content
+					content = plain
+					decrypted = true
 				} else {
-					content = "🔒 [encrypted - cannot decrypt]"
+					content = "[encrypted - cannot decrypt]"
 				}
 			} else if isEncrypted {
-				content = "🔒 [encrypted message]"
+				content = "[encrypted message]"
 			}
 
 			// Store in local history
 			StoreIncomingMessage(&evt, content, isEncrypted)
 
-			fmt.Printf("[%s] %s: %s\n", evt.CreatedAt.Time().Format("15:04"), senderName, common.TruncateString(content, 50))
+			entries = append(entries, inboxEntry{
+				Time:      evt.CreatedAt.Time().Format("15:04"),
+				From:      senderName,
+				Content:   content,
+				Encrypted: isEncrypted,
+				Decrypted: decrypted,
+			})
 		}
+
+		common.Emit(jsonMode, entries, func() {
+			for _, e := range entries {
+				prefix := ""
+				switch {
+				case e.Encrypted && e.Decrypted:
+					prefix = "🔓 "
+				case e.Encrypted:
+					prefix = "🔒 "
+				}
+				fmt.Printf("[%s] %s: %s\n", e.Time, e.From, common.TruncateString(prefix+e.Content, 50))
+			}
+		})
 		return nil
 	},
 }
