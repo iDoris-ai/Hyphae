@@ -246,8 +246,16 @@ func SetDefault(ks *types.KeyStore, nickname string) error {
 	return SaveKeyStore(ks)
 }
 
-// AddContact adds a contact
+// AddContact adds a contact with the default role (human). Equivalent to
+// AddContactWithRole(ks, nickname, npub, types.RoleHuman).
 func AddContact(ks *types.KeyStore, nickname, npub string) error {
+	return AddContactWithRole(ks, nickname, npub, types.RoleHuman)
+}
+
+// AddContactWithRole adds a contact, marking whether it's a human or an
+// Agent. See pkg/types.Role — this is a label, not an access-control
+// mechanism.
+func AddContactWithRole(ks *types.KeyStore, nickname, npub string, role types.Role) error {
 	if _, exists := ks.Contacts[nickname]; exists {
 		return fmt.Errorf("contact '%s' already exists", nickname)
 	}
@@ -262,6 +270,7 @@ func AddContact(ks *types.KeyStore, nickname, npub string) error {
 		Nickname: nickname,
 		Npub:     common.EncodeNpub(pk),
 		AddedAt:  int64(nostr.Now()),
+		Role:     role,
 	}
 
 	return SaveKeyStore(ks)

@@ -8,6 +8,7 @@ import (
 
 	"github.com/AuraAIHQ/agent-speaker/internal/audit"
 	"github.com/AuraAIHQ/agent-speaker/internal/identity"
+	"github.com/AuraAIHQ/agent-speaker/pkg/types"
 	"github.com/fatih/color"
 	"github.com/urfave/cli/v3"
 )
@@ -64,14 +65,21 @@ var GroupCreateCmd = &cli.Command{
 			return err
 		}
 
-		// Resolve member nicknames to npubs
+		// Resolve member nicknames to npubs, and their roles where known.
 		var memberNpubs []string
 		memberNpubs = append(memberNpubs, myIdentity.Npub) // Add creator
+		memberRoles := map[string]types.Role{myIdentity.Npub: types.RoleHuman}
 
 		for _, nick := range c.StringSlice("members") {
 			npub, err := identity.ResolveRecipient(ks, nick)
 			if err != nil {
 				return fmt.Errorf("failed to resolve member '%s': %w", nick, err)
+			}
+			// A nickname might resolve via contact, identity, or a raw npub
+			// (ResolveRecipient's fallback order) — only the contact case has
+			// a role to inherit; anything else defaults to human.
+			if contact, cErr := identity.GetContact(ks, nick); cErr == nil {
+				memberRoles[npub] = contact.Role
 			}
 			// Avoid duplicates
 			found := false
@@ -97,6 +105,7 @@ var GroupCreateCmd = &cli.Command{
 			c.String("description"),
 			myIdentity.Npub,
 			memberNpubs,
+			memberRoles,
 		)
 		if err != nil {
 			return err
@@ -160,7 +169,21 @@ var GroupListCmd = &cli.Command{
 			if g.CreatedAt > 0 {
 				created = "✓"
 			}
-			fmt.Fprintf(w, "%s\t%d\t%s\n", g.Name, len(g.Members), created)
+
+			memberSummary := fmt.Sprintf("%d", len(g.Members))
+			if withRoles, rErr := db.GetGroupMembersWithRoles(g.ID); rErr == nil {
+				agents := 0
+				for _, m := range withRoles {
+					if m.Role == types.RoleAgent {
+						agents++
+					}
+				}
+				if agents > 0 {
+					memberSummary = fmt.Sprintf("%d (%d human, %d agent)", len(g.Members), len(g.Members)-agents, agents)
+				}
+			}
+
+			fmt.Fprintf(w, "%s\t%s\t%s\n", g.Name, memberSummary, created)
 		}
 		w.Flush()
 
@@ -226,8 +249,15 @@ var GroupAddCmd = &cli.Command{
 			return err
 		}
 
+		// Role from contact record if there — see the equivalent lookup in
+		// GroupCreateCmd for why not every resolution path has a contact.
+		role := types.RoleHuman
+		if contact, cErr := identity.GetContact(ks, c.String("user")); cErr == nil {
+			role = contact.Role
+		}
+
 		// Add member
-		if err := db.AddMember(groupID, npub); err != nil {
+		if err := db.AddMember(groupID, npub, role); err != nil {
 			return err
 		}
 

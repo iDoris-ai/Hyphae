@@ -14,6 +14,11 @@ type Contact struct {
 	Nickname string `json:"nickname"`
 	Npub     string `json:"npub"`
 	AddedAt  int64  `json:"added_at"`
+	// Role defaults to the zero value "", which Role.String() and every
+	// display path treats as RoleHuman — old keystore.json contacts saved
+	// before this field existed deserialize with Role == "" and are still
+	// correctly treated as human, no migration needed.
+	Role Role `json:"role,omitempty"`
 }
 
 // StoredMessage 表示存储的消息
