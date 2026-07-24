@@ -113,8 +113,13 @@ func (p *AgentProfile) Validate() error {
 	// mismatches before building the profile, but a profile loaded via
 	// --json-file skips that path entirely, so the schema-per-mode
 	// constraint has to be enforced here too, not just at the flag layer.
-	hasStructuredFields := p.Description != "" || len(p.Capabilities) > 0 ||
-		(p.RateSheet != nil && len(p.RateSheet.Rates) > 0) || p.Contact != nil
+	// Every field outside {name, mode, tags} counts as "structured" here
+	// (including a non-nil RateSheet with no rates, and Availability/Version
+	// set to anything) -- the simple/tagged JSON schemas in
+	// specs/m1.5/tasks/06-profile-register-mode-schema.md are exhaustive,
+	// not illustrative, so partial structured data must be rejected too.
+	hasStructuredFields := p.Description != "" || p.Availability != "" || p.Version != "" ||
+		len(p.Capabilities) > 0 || p.RateSheet != nil || p.Contact != nil
 	switch p.Mode.Effective() {
 	case ModeSimple:
 		if len(p.Tags) > 0 || hasStructuredFields {

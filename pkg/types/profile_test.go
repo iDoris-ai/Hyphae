@@ -68,6 +68,28 @@ func TestAgentProfileValidateByMode(t *testing.T) {
 			profile: &AgentProfile{Name: "Alice", Description: "old profile", Capabilities: []Capability{{Name: "seo"}}},
 		},
 		{
+			// Codex review finding on task 06: availability/version/an empty-
+			// but-non-nil RateSheet must also be rejected for simple/tagged --
+			// the schema in the task spec is exhaustive ({name, mode[, tags]}),
+			// not just "no capabilities/description/contact".
+			name:    "simple mode with availability set is rejected",
+			profile: &AgentProfile{Name: "Alice", Mode: ModeSimple, Availability: AvailabilityBusy},
+			wantErr: true,
+			errMsg:  `mode "simple" only supports 'name'`,
+		},
+		{
+			name:    "tagged mode with version set is rejected",
+			profile: &AgentProfile{Name: "Alice", Mode: ModeTagged, Tags: []string{"dev"}, Version: "1.0"},
+			wantErr: true,
+			errMsg:  `mode "tagged" only supports 'name' and 'tags'`,
+		},
+		{
+			name:    "tagged mode with an empty but non-nil RateSheet is rejected",
+			profile: &AgentProfile{Name: "Alice", Mode: ModeTagged, Tags: []string{"dev"}, RateSheet: &RateSheet{Currency: "USD"}},
+			wantErr: true,
+			errMsg:  `mode "tagged" only supports 'name' and 'tags'`,
+		},
+		{
 			name:    "invalid mode string is rejected",
 			profile: &AgentProfile{Name: "Alice", Mode: ProfileMode("bogus")},
 			wantErr: true,

@@ -74,3 +74,12 @@ const (
 - 三种 mode 的 profile 落地到本地 SQLite 时走的是已有的 `profile_json` 整块 JSON blob 字段（`internal/profile/db.go` 的 `StoreProfile`/`GetProfile`），不需要加新列——`Mode`/`Tags` 字段跟其余字段一样序列化进这个 blob，读回来自然带上，没有单独处理。
 - Live smoke test：起本地 `scripts/minirelay.go`，分别用 `--mode simple`/`--mode tagged`/默认 structured 三种方式 publish，再用 `profile discover --json` 读回来，逐条核对 JSON 内容跟 spec 里的三份 schema 示例完全一致（`simple` 只有 `name`+`mode`；`tagged` 多了 `tags`；`structured` 是完整字段）；也验证了 `--mode simple --description ...`、`--mode tagged --capability ...`、`--mode bogus` 三种非法组合都被清晰拒绝、非零退出码。测试产生的 profile 记录已在提交前从本地 `~/.agent-speaker/messages.db` 清理。
 - `pkg/types/profile.go` 加字段导致 `AgentProfile` struct 的列对齐被 gofmt 要求重新计算——顺手跑了 `gofmt -w` 这一个文件（连带修正了这个文件里 pre-existing 的 `Availability` 常量块对齐问题，不是本任务引入的，但既然文件已经在改就一起交给 gofmt 处理了）。
+
+### Codex review（Tier 1）第一轮
+
+Codex 提了 2 个 Medium + 2 个"流程性"意见，处理如下：
+
+1. **Medium（已修复）——`Validate()` 对 simple/tagged 的字段校验漏了 `Availability`/`Version`/"非空但没有 rates 的 RateSheet"**：原来的 `hasStructuredFields` 只查 `Description`/`Capabilities`/`RateSheet.Rates`/`Contact`，一份 `--json-file` 传入的 `{"name":"x","mode":"simple","availability":"busy"}` 能绕过去。spec 里 simple/tagged 的 JSON schema 示例是穷尽性的（`{name, mode}`/`{name, mode, tags}`），不是"举例但不限于"，所以收紧成把 `Availability != ""`、`Version != ""`、`RateSheet != nil`（不再要求 `len(Rates) > 0`）都算进结构化字段里。补了 3 个测试用例覆盖这三种漏网场景。
+2. **Medium（不修，记录分歧）——simple/tagged 发布的 JSON 里仍然带 `updated_at`**：`AgentProfile.UpdatedAt` 没有 `omitempty` 且发布前一定会被设成当前时间，所以就算加上 `omitempty` 也不会消失（它从来不是零值）。这个字段是发布时间戳这类元数据，不是"结构化 vs 简单"这个 mode 概念要区分的东西——simple/tagged 的 schema 例子里没写 `updated_at` 更多是"这是 mode 特有字段的示意图"而不是"完整 wire format 定义"（对比：structured 例子本身也用 `...` 省略了很多字段）。保留 `updated_at` 是有意决定，不是遗漏。
+3. **"不相关改动"（不修，记录理由）——diff 里带了 `specs/m1.5/README.md`（task 5 状态 + generateGroupID 遗留问题）和 `LOOP_PLAYBOOK.md`（protected branch 说明）的改动**：这是本分支的第一个 commit，按 `LOOP_PLAYBOOK.md` 已经写明的约定（"可以合并进下一个任务的第一个 commit"）故意bundle 进来的，为的是避免每个任务之间都单独开一个纯文档的小 PR（参考任务 4→5 之间产生的 PR #17 那次开销）。不是范围蔓延，是既定流程的一部分。
+4. **确认无误——"default `--mode structured` 输出现在多了 `"mode":"structured"` 字段，跟改动前不是 byte-for-byte 一致"**：这是任务本身设计里明确要求的（"structured（现状 + mode 字段）"——spec 原文就是要求给 structured 也加上 mode 字段），不是本任务引入的意外副作用。现有的回归测试（`TestProfileToEvent`/`TestEventToProfile` 等)验证的是具体字段的值而不是"不能出现新字段"，这些测试全部通过；acceptance criteria 2 的"行为完全不变"指的是 CLI 调用方式和已有字段的语义不变，不是要求 JSON 里不能新增字段（那样任务本身就做不成）。
