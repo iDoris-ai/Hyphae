@@ -44,6 +44,30 @@ func InitStorage() error {
 	return nil
 }
 
+// ResetStoreForTest clears the package-level store singleton so a
+// subsequent InitStorage() call re-opens against whatever HOME/temp
+// directory is current, instead of silently continuing to use whichever
+// store an earlier test in the same process happened to initialize first.
+//
+// InitStorage() is a "first call wins" singleton (see above: `if store !=
+// nil { return nil }`), which is fine for production (one process, one
+// HOME) but means tests in different packages that each set up their own
+// t.TempDir() + t.Setenv("HOME", ...) and call InitStorage() can silently
+// end up sharing the *first* test's store instead of getting their own --
+// exported (not just internal/messaging's own store_test.go resetStore
+// helper) so other packages' tests that need real storage, like
+// internal/daemon's, can call it too.
+func ResetStoreForTest() {
+	storeMu.Lock()
+	defer storeMu.Unlock()
+	if storage.DB != nil {
+		_ = storage.CloseDB()
+		storage.DB = nil
+	}
+	store = nil
+	storeErr = nil
+}
+
 // GetStore returns the message store instance
 func GetStore() (*storage.MessageStore, error) {
 	if err := InitStorage(); err != nil {

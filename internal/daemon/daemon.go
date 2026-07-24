@@ -369,10 +369,7 @@ func watchOneRelay(
 			notify.PlaySound()
 		}
 
-		// Only auto-reply on messages we actually understood. Otherwise we
-		// would be replying to opaque ciphertext, and our reply would in
-		// turn fail the prefix check on the other side, creating a storm.
-		if autoReply && decryptedOK && !isAutoReplyMessage(content) {
+		if shouldAutoReply(autoReply, decryptedOK, content) {
 			go sendAutoReply(ctx, myIdentity, ks, senderNpub, content, relays)
 		}
 	}
@@ -419,6 +416,26 @@ func isAutoReplyMessage(content string) bool {
 	return strings.HasPrefix(content, "[auto-reply] ")
 }
 
+// shouldAutoReply is the anti-storm gate from watchOneRelay's per-event
+// loop, extracted so it can be unit tested without a live relay connection.
+// All three conditions matter: the daemon must have --auto-reply enabled,
+// the incoming message must have actually been understood (an
+// enc=nip44-tagged message that failed to decrypt is NOT eligible --
+// replying to opaque ciphertext would itself fail the recipient's prefix
+// check and could storm), and the message itself must not already be one of
+// our own auto-replies.
+func shouldAutoReply(autoReplyEnabled, decryptedOK bool, content string) bool {
+	return autoReplyEnabled && decryptedOK && !isAutoReplyMessage(content)
+}
+
+// buildAutoReplyText composes the auto-reply body sendAutoReply publishes.
+// The "[auto-reply] " prefix is exactly what isAutoReplyMessage checks for
+// on the receiving side -- this is the other half of the anti-storm
+// contract, so the two must stay in sync (see the round-trip test).
+func buildAutoReplyText(nickname, originalContent string) string {
+	return fmt.Sprintf("[auto-reply] %s received your message: %s", nickname, common.TruncateString(originalContent, 30))
+}
+
 // safePrefix returns s[:n] when len(s) >= n, otherwise s. Avoids the panic
 // the previous code would hit if an event ID came back shorter than expected.
 func safePrefix(s string, n int) string {
@@ -439,7 +456,7 @@ func sendAutoReply(ctx context.Context, myIdentity *types.Identity, ks *types.Ke
 		return
 	}
 
-	replyText := fmt.Sprintf("[auto-reply] %s received your message: %s", myIdentity.Nickname, common.TruncateString(originalContent, 30))
+	replyText := buildAutoReplyText(myIdentity.Nickname, originalContent)
 
 	var messageContent string
 	encrypted, encErr := crypto.EncryptMessage(replyText, mySK, toPK)

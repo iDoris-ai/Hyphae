@@ -10,6 +10,11 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+// publishJSONArg receives PublishCmd's positional "json" argument. See the
+// identical verifyEventArg pattern + comment in verify.go: a single-value
+// Argument in this urfave/cli version is only populated via Destination.
+var publishJSONArg string
+
 var PublishCmd = &cli.Command{
 	Name:  "publish",
 	Usage: "Publish a JSON event",
@@ -31,11 +36,13 @@ Example: agent-speaker publish '{"kind":1,"content":"Hello"}'`,
 	},
 	Arguments: []cli.Argument{
 		&cli.StringArg{
-			Name: "json",
+			Name:        "json",
+			Max:         1,
+			Destination: &publishJSONArg,
 		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
-		jsonStr := c.String("json")
+		jsonStr := publishJSONArg
 		if jsonStr == "" {
 			return fmt.Errorf("JSON event is required")
 		}
