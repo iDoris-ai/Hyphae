@@ -3,6 +3,7 @@ package group
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/AuraAIHQ/agent-speaker/internal/storage"
@@ -55,12 +56,23 @@ func (g *DB) migrate() error {
 			nickname TEXT,
 			joined_at INTEGER NOT NULL,
 			is_admin BOOLEAN DEFAULT 0,
+			role TEXT NOT NULL DEFAULT 'human',
 			PRIMARY KEY (group_id, npub),
 			FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
 		)
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to create group_members table: %w", err)
+	}
+	// CREATE TABLE IF NOT EXISTS above only covers brand-new databases; a
+	// group_members table created before this field existed needs the column
+	// added explicitly. SQLite has no "ADD COLUMN IF NOT EXISTS", so this
+	// tries the ALTER and ignores the specific "duplicate column" error that
+	// means it's already there — any other error still surfaces.
+	if _, err := g.db.Exec(`ALTER TABLE group_members ADD COLUMN role TEXT NOT NULL DEFAULT 'human'`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("failed to add role column to group_members: %w", err)
+		}
 	}
 
 	// Group messages table
@@ -99,8 +111,15 @@ func (g *DB) migrate() error {
 	return nil
 }
 
-// CreateGroup creates a new group
-func (g *DB) CreateGroup(name, description, creator string, members []string) (*types.Group, error) {
+// CreateGroup creates a new group. roles maps member npub -> types.Role; a
+// member with no entry (or a nil map) defaults to types.RoleHuman.
+func (g *DB) CreateGroup(name, description, creator string, members []string, roles map[string]types.Role) (*types.Group, error) {
+	for member, role := range roles {
+		if role != "" && !role.IsValid() {
+			return nil, fmt.Errorf("invalid role %q for member %q: must be %q or %q", role, member, types.RoleHuman, types.RoleAgent)
+		}
+	}
+
 	id := generateGroupID(name, creator)
 	now := time.Now().Unix()
 
@@ -115,9 +134,13 @@ func (g *DB) CreateGroup(name, description, creator string, members []string) (*
 
 	// Add members
 	for _, member := range members {
+		role := types.RoleHuman
+		if r, ok := roles[member]; ok && r != "" {
+			role = r
+		}
 		_, err := g.db.Exec(
-			"INSERT INTO group_members (group_id, npub, joined_at, is_admin) VALUES (?, ?, ?, ?)",
-			id, member, now, member == creator,
+			"INSERT INTO group_members (group_id, npub, joined_at, is_admin, role) VALUES (?, ?, ?, ?, ?)",
+			id, member, now, member == creator, string(role),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to add member: %w", err)
@@ -175,6 +198,36 @@ func (g *DB) GetGroupMembers(groupID string) ([]string, error) {
 	return members, nil
 }
 
+// GetGroupMembersWithRoles gets all members of a group with their role and
+// admin/join metadata, for display purposes (e.g. `group list`). Unlike
+// GetGroupMembers (npub only, used by the existing Group.Members/IsMember
+// call sites), this is additive — it doesn't change what those already rely on.
+func (g *DB) GetGroupMembersWithRoles(groupID string) ([]types.GroupMember, error) {
+	rows, err := g.db.Query(
+		"SELECT group_id, npub, nickname, joined_at, is_admin, role FROM group_members WHERE group_id = ? ORDER BY joined_at",
+		groupID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var members []types.GroupMember
+	for rows.Next() {
+		var m types.GroupMember
+		var nickname sql.NullString
+		var role string
+		if err := rows.Scan(&m.GroupID, &m.Npub, &nickname, &m.JoinedAt, &m.IsAdmin, &role); err != nil {
+			continue
+		}
+		m.Nickname = nickname.String
+		m.Role = types.Role(role)
+		members = append(members, m)
+	}
+
+	return members, rows.Err()
+}
+
 // GetGroupsForUser gets all groups a user is member of
 func (g *DB) GetGroupsForUser(npub string) ([]*types.Group, error) {
 	rows, err := g.db.Query(`
@@ -207,11 +260,17 @@ func (g *DB) GetGroupsForUser(npub string) ([]*types.Group, error) {
 	return groups, nil
 }
 
-// AddMember adds a member to a group
-func (g *DB) AddMember(groupID, npub string) error {
+// AddMember adds a member to a group with the given role (types.RoleHuman if
+// role is empty).
+func (g *DB) AddMember(groupID, npub string, role types.Role) error {
+	if role == "" {
+		role = types.RoleHuman
+	} else if !role.IsValid() {
+		return fmt.Errorf("invalid role %q: must be %q or %q", role, types.RoleHuman, types.RoleAgent)
+	}
 	_, err := g.db.Exec(
-		"INSERT OR IGNORE INTO group_members (group_id, npub, joined_at) VALUES (?, ?, ?)",
-		groupID, npub, time.Now().Unix(),
+		"INSERT OR IGNORE INTO group_members (group_id, npub, joined_at, role) VALUES (?, ?, ?, ?)",
+		groupID, npub, time.Now().Unix(), string(role),
 	)
 	if err != nil {
 		return err

@@ -37,7 +37,7 @@ func TestCreateGroup(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	group, err := db.CreateGroup("Test Group", "A test group", "npub1creator", []string{"npub1alice", "npub1bob"})
+	group, err := db.CreateGroup("Test Group", "A test group", "npub1creator", []string{"npub1alice", "npub1bob"}, nil)
 	require.NoError(t, err)
 	assert.NotNil(t, group)
 	assert.Equal(t, "Test Group", group.Name)
@@ -53,7 +53,7 @@ func TestGetGroup(t *testing.T) {
 	defer cleanup()
 
 	// Create group
-	created, err := db.CreateGroup("Get Test", "Testing get", "npub1creator", []string{"npub1member"})
+	created, err := db.CreateGroup("Get Test", "Testing get", "npub1creator", []string{"npub1member"}, nil)
 	require.NoError(t, err)
 
 	// Get group
@@ -74,7 +74,7 @@ func TestGetGroupMembers(t *testing.T) {
 	defer cleanup()
 
 	members := []string{"npub1alice", "npub1bob", "npub1charlie"}
-	group, err := db.CreateGroup("Members Test", "", "npub1creator", members)
+	group, err := db.CreateGroup("Members Test", "", "npub1creator", members, nil)
 	require.NoError(t, err)
 
 	retrievedMembers, err := db.GetGroupMembers(group.ID)
@@ -90,13 +90,13 @@ func TestGetGroupsForUser(t *testing.T) {
 	bob := "npub1bob"
 
 	// Create groups - include creator in members
-	_, err := db.CreateGroup("Group 1", "", alice, []string{alice, bob})
+	_, err := db.CreateGroup("Group 1", "", alice, []string{alice, bob}, nil)
 	require.NoError(t, err)
 
-	_, err = db.CreateGroup("Group 2", "", bob, []string{bob, alice})
+	_, err = db.CreateGroup("Group 2", "", bob, []string{bob, alice}, nil)
 	require.NoError(t, err)
 
-	_, err = db.CreateGroup("Group 3", "", "npub1other", []string{"npub1other", "npub1other2"})
+	_, err = db.CreateGroup("Group 3", "", "npub1other", []string{"npub1other", "npub1other2"}, nil)
 	require.NoError(t, err)
 
 	// Get groups for alice
@@ -109,11 +109,11 @@ func TestAddMember(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	group, err := db.CreateGroup("Add Member Test", "", "npub1creator", []string{"npub1existing"})
+	group, err := db.CreateGroup("Add Member Test", "", "npub1creator", []string{"npub1existing"}, nil)
 	require.NoError(t, err)
 
 	// Add new member
-	err = db.AddMember(group.ID, "npub1new")
+	err = db.AddMember(group.ID, "npub1new", types.RoleHuman)
 	require.NoError(t, err)
 
 	// Verify
@@ -122,7 +122,7 @@ func TestAddMember(t *testing.T) {
 	assert.Len(t, members, 2)
 
 	// Add duplicate (should not error)
-	err = db.AddMember(group.ID, "npub1new")
+	err = db.AddMember(group.ID, "npub1new", types.RoleHuman)
 	require.NoError(t, err)
 }
 
@@ -134,7 +134,7 @@ func TestRemoveMember(t *testing.T) {
 	bob := "npub1bob"
 	charlie := "npub1charlie"
 
-	group, err := db.CreateGroup("Remove Test", "", alice, []string{alice, bob, charlie})
+	group, err := db.CreateGroup("Remove Test", "", alice, []string{alice, bob, charlie}, nil)
 	require.NoError(t, err)
 
 	// Remove bob
@@ -157,7 +157,7 @@ func TestIsMember(t *testing.T) {
 	alice := "npub1alice"
 	bob := "npub1bob"
 
-	group, err := db.CreateGroup("Is Member Test", "", alice, []string{alice, bob})
+	group, err := db.CreateGroup("Is Member Test", "", alice, []string{alice, bob}, nil)
 	require.NoError(t, err)
 
 	// Check alice is member
@@ -180,7 +180,7 @@ func TestDeleteGroup(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	group, err := db.CreateGroup("Delete Test", "", "npub1creator", []string{"npub1creator", "npub1member"})
+	group, err := db.CreateGroup("Delete Test", "", "npub1creator", []string{"npub1creator", "npub1member"}, nil)
 	require.NoError(t, err)
 
 	// Delete
@@ -197,17 +197,17 @@ func TestStoreGroupMessage(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	group, err := db.CreateGroup("Message Test", "", "npub1creator", []string{"npub1creator", "npub1member"})
+	group, err := db.CreateGroup("Message Test", "", "npub1creator", []string{"npub1creator", "npub1member"}, nil)
 	require.NoError(t, err)
 
 	msg := &types.GroupMessage{
-		ID:        "msg-1",
-		EventID:   "event-1",
-		GroupID:   group.ID,
-		Sender:    "npub1sender",
-		Content:   "encrypted",
-		Plaintext: "Hello group",
-		CreatedAt: 1234567890,
+		ID:          "msg-1",
+		EventID:     "event-1",
+		GroupID:     group.ID,
+		Sender:      "npub1sender",
+		Content:     "encrypted",
+		Plaintext:   "Hello group",
+		CreatedAt:   1234567890,
 		IsEncrypted: false,
 	}
 
@@ -225,7 +225,7 @@ func TestGetGroupMessages(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	group, err := db.CreateGroup("Messages Test", "", "npub1creator", []string{"npub1creator", "npub1member"})
+	group, err := db.CreateGroup("Messages Test", "", "npub1creator", []string{"npub1creator", "npub1member"}, nil)
 	require.NoError(t, err)
 
 	// Store multiple messages with unique IDs
@@ -286,4 +286,109 @@ func TestGroupRemoveMemberMethod(t *testing.T) {
 	assert.Contains(t, g.Members, "npub1alice")
 	assert.Contains(t, g.Members, "npub1charlie")
 	assert.NotContains(t, g.Members, "npub1bob")
+}
+
+func TestCreateGroupWithRoles(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	roles := map[string]types.Role{
+		"npub1creator": types.RoleHuman,
+		"npub1bot":     types.RoleAgent,
+		// "npub1alice" deliberately omitted — should default to human.
+	}
+
+	group, err := db.CreateGroup("Role Test", "", "npub1creator", []string{"npub1creator", "npub1bot", "npub1alice"}, roles)
+	require.NoError(t, err)
+
+	members, err := db.GetGroupMembersWithRoles(group.ID)
+	require.NoError(t, err)
+	require.Len(t, members, 3)
+
+	byNpub := map[string]types.Role{}
+	for _, m := range members {
+		byNpub[m.Npub] = m.Role
+	}
+	assert.Equal(t, types.RoleHuman, byNpub["npub1creator"])
+	assert.Equal(t, types.RoleAgent, byNpub["npub1bot"])
+	assert.Equal(t, types.RoleHuman, byNpub["npub1alice"], "member with no entry in the roles map should default to human")
+}
+
+func TestCreateGroupNilRolesDefaultsAllToHuman(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	group, err := db.CreateGroup("Nil Roles Test", "", "npub1creator", []string{"npub1creator", "npub1alice"}, nil)
+	require.NoError(t, err)
+
+	members, err := db.GetGroupMembersWithRoles(group.ID)
+	require.NoError(t, err)
+	for _, m := range members {
+		assert.Equal(t, types.RoleHuman, m.Role)
+	}
+}
+
+func TestAddMemberWithRole(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	group, err := db.CreateGroup("Add Role Test", "", "npub1creator", []string{"npub1creator"}, nil)
+	require.NoError(t, err)
+
+	require.NoError(t, db.AddMember(group.ID, "npub1bot", types.RoleAgent))
+	require.NoError(t, db.AddMember(group.ID, "npub1empty-role", ""))
+
+	members, err := db.GetGroupMembersWithRoles(group.ID)
+	require.NoError(t, err)
+
+	byNpub := map[string]types.Role{}
+	for _, m := range members {
+		byNpub[m.Npub] = m.Role
+	}
+	assert.Equal(t, types.RoleAgent, byNpub["npub1bot"])
+	assert.Equal(t, types.RoleHuman, byNpub["npub1empty-role"], "empty role passed to AddMember should default to human")
+}
+
+// TestAddMemberRejectsInvalidRole and TestCreateGroupRejectsInvalidRole cover
+// the defense-in-depth validation added at the group DB boundary (Codex
+// review finding): only the CLI validated --role before this, so any other
+// caller of these exported methods could persist an arbitrary role string.
+func TestAddMemberRejectsInvalidRole(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	group, err := db.CreateGroup("Invalid Role Test", "", "npub1creator", []string{"npub1creator"}, nil)
+	require.NoError(t, err)
+
+	err = db.AddMember(group.ID, "npub1bogus", types.Role("bogus"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid role")
+
+	members, err := db.GetGroupMembers(group.ID)
+	require.NoError(t, err)
+	assert.NotContains(t, members, "npub1bogus", "a rejected AddMember call must not persist the member")
+}
+
+func TestCreateGroupRejectsInvalidRole(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	roles := map[string]types.Role{"npub1bad": types.Role("bogus")}
+	_, err := db.CreateGroup("Invalid Role Create Test", "", "npub1creator", []string{"npub1creator", "npub1bad"}, roles)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid role")
+}
+
+// TestGroupMembersTableMigrationIsIdempotent covers the ALTER TABLE ADD
+// COLUMN path added for the role field: migrate() must be safe to run
+// against a database that already has the column (e.g. NewDB() called twice
+// against the same file, or an app restart), not just against a brand-new one.
+func TestGroupMembersTableMigrationIsIdempotent(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	// migrate() already ran once inside setupTestDB's NewDB(). Running it
+	// again against the same underlying *sql.DB must not error.
+	require.NoError(t, db.migrate())
+	require.NoError(t, db.migrate())
 }
