@@ -19,6 +19,13 @@ import (
 var version = "dev"
 
 func main() {
+	// messaging.OutboxCmd lives in internal/messaging (not internal/storage)
+	// to avoid an import cycle -- internal/messaging already imports
+	// internal/storage for the SQLite message store, so internal/storage
+	// can't import internal/messaging back. Wiring it into `storage outbox`
+	// happens here, at the composition root, which can see both packages.
+	storage.StorageCmd.Commands = append(storage.StorageCmd.Commands, messaging.OutboxCmd)
+
 	app := &cli.Command{
 		Name:    "agent-speaker",
 		Usage:   "A nostr-based agent communication CLI",
