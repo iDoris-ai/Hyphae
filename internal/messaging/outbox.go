@@ -164,9 +164,20 @@ func RemoveFromOutbox(ob *types.Outbox, id string) error {
 
 // SendResult describes the outcome of a single AttemptSend call.
 type SendResult struct {
-	Attempted    bool // false only when the entry never got as far as dialing a relay (e.g. unparseable EventJSON)
+	Attempted    bool // false only when the entry never got as far as dialing a relay (e.g. unparseable EventJSON, or a duplicate-ID refusal)
 	Sent         bool // true if the event was successfully published
 	MarkedFailed bool // true if this attempt exhausted retries and the entry was marked "failed"
+}
+
+// countByID reports how many entries in entries share the given ID.
+func countByID(entries []types.OutboxEntry, id string) int {
+	n := 0
+	for _, e := range entries {
+		if e.ID == id {
+			n++
+		}
+	}
+	return n
 }
 
 // AttemptSend tries to publish a single outbox entry to its target relays
@@ -190,7 +201,21 @@ type SendResult struct {
 // alongside a send attempt whose own outcome is already reflected in the
 // result; callers should log it but must not treat a non-nil error as "the
 // send failed" when Result.Attempted is true.
+//
+// AttemptSend refuses to process an entry whose ID collides with another
+// entry in ob.Entries (Attempted stays false, matching a parse error): on
+// success it would call RemoveFromOutbox, which deletes every entry sharing
+// that ID, not just this one -- with a pre-existing bug where an unsigned
+// event keeps a zero-value ID (see specs/m1.5/README.md), that would
+// silently delete other, never-actually-sent entries. This check lives here
+// rather than only at each call site so it protects the daemon's automatic
+// retry loop too, not just an interactive CLI command that happens to add
+// its own guard.
 func AttemptSend(ctx context.Context, ob *types.Outbox, entry types.OutboxEntry, defaultRelays []string, dialTimeout time.Duration) (SendResult, error) {
+	if n := countByID(ob.Entries, entry.ID); n > 1 {
+		return SendResult{}, fmt.Errorf("%d outbox entries share this ID -- refusing to send/mutate (see specs/m1.5/README.md's outbox ID-collision note)", n)
+	}
+
 	var event nostr.Event
 	if err := json.Unmarshal([]byte(entry.EventJSON), &event); err != nil {
 		return SendResult{}, fmt.Errorf("parse event: %w", err)

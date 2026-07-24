@@ -125,6 +125,32 @@ func TestRemoveFromOutbox(t *testing.T) {
 	assert.Equal(t, "2", ob2.Entries[0].ID)
 }
 
+// TestAttemptSend_RefusesDuplicateID covers a Codex review finding: the
+// original fix (retry --id refusing to proceed) only protected the manual
+// CLI path -- the daemon's automatic retry loop calls AttemptSend directly
+// with no duplicate-ID awareness of its own. Moving the guard into
+// AttemptSend itself protects both callers, since RemoveFromOutbox on
+// success would otherwise delete every entry sharing this ID, not just the
+// one being sent.
+func TestAttemptSend_RefusesDuplicateID(t *testing.T) {
+	setupTempOutbox(t)
+	ob := &types.Outbox{Entries: []types.OutboxEntry{
+		{ID: "dup", Status: "pending", RetryCount: 0, MaxRetries: 10},
+		{ID: "dup", Status: "pending", RetryCount: 0, MaxRetries: 10},
+	}}
+	require.NoError(t, SaveOutbox(ob))
+
+	result, err := AttemptSend(context.Background(), ob, ob.Entries[0], nil, 200*time.Millisecond)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "2 outbox entries share this ID")
+	assert.False(t, result.Attempted, "a duplicate-ID refusal never got as far as dialing a relay")
+	assert.False(t, result.Sent)
+
+	ob2, err := LoadOutbox()
+	require.NoError(t, err)
+	assert.Len(t, ob2.Entries, 2, "refusing must not touch either entry")
+}
+
 func TestAttemptSend_ParseError(t *testing.T) {
 	setupTempOutbox(t)
 	ob := &types.Outbox{Entries: []types.OutboxEntry{

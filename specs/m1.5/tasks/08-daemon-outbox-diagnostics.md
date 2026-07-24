@@ -67,3 +67,11 @@ Codex 提了 1 个 High + 2 个 Medium，都已修复：
 3. **Medium（已修复）——`retry --id` 传一个恰好是合法 hex 但其实是字面量字符串的 ID 时，永远匹配不到**：原来的逻辑是"hex 解码成功就只用解码结果去匹配，不会再退回去试字面量"，导致 `--json-file`/脚本场景下如果调用方传的是未经 hex 编码的原始字符串 ID（哪怕这个字符串碰巧是合法 hex），会被误当成 hex 输入、解码成一堆不相关的字节、永远匹配不到。修复：改成`findOutboxMatches`——先按 hex 解码后的字节去匹配，只有解码结果**一条都没匹配上**时，才退回去试字面量匹配。补了 `TestFindOutboxMatches_HexFirstThenLiteralFallback`。
 4. **确认无误（不修）——diff 里带了任务 7 的 README 状态更新**：这是本分支的第一个 commit，按已经确定的"折进下一个任务分支的第一个 commit"约定（详见 `LOOP_PLAYBOOK.md`），不是范围蔓延。
 5. **未修（记录，不属于本任务范围）——`outbox.json` 读-改-写没有跨进程锁**：`clear`/`retry` 和 daemon 的自动重试循环都是"读整个文件 → 改内存 → 原子 rename 写回"，如果两个进程真的同时操作会有"后写的覆盖先写的"这类丢更新风险。这是 outbox.json 这个存储设计从一开始就有的架构限制（`SaveOutbox` 的原子 rename 保证的是"不会读到写了一半的文件"，不保证"两个并发写者不会互相覆盖"），任务 8 的 spec 明确要求不改变存储格式/机制，加跨进程锁属于更大的架构改动，不在本任务范围内。
+
+### Codex review（Tier 1）第二轮
+
+第一轮的 High 修复（duplicate ID 拒绝重试）只覆盖了 `retry --id` 这一条手动命令路径，Codex 第二轮指出：**daemon 自己的自动重试循环（`processOutbox`）直接调 `messaging.AttemptSend`，完全没有这层保护**——如果 daemon 在正常的 60 秒自动重试周期里恰好处理到重复 ID 组里的第一条并且发送成功，`RemoveFromOutbox` 一样会把同 ID 的所有"兄弟"记录一起删掉（正是本地真实环境那 9 条记录会遇到的风险）。这是个正确、重要的发现——第一轮的修复位置选错了（挡在了调用方，而不是共享逻辑本身）。
+
+**修复**：把 duplicate-ID 检查从 `outbox retry` 命令挪到 `AttemptSend` 函数内部最前面（`countByID` 检查，发现同 ID 记录数 > 1 就直接拒绝，`Attempted` 保持 `false`，等价于"还没走到拨号这一步就退出"）——这样 daemon 的自动循环和 CLI 的手动命令都统一走这一层保护，不需要在每个调用点各自维护一份检查逻辑。`outbox retry` 命令自己原有的重复 ID 检查保留（体验更好：在真正调用 `AttemptSend` 之前就能给出针对性的报错，而不是等内部拒绝），两层检查不冲突、职责不同：CLI 层挡的是"用户传的 --id 查找结果有歧义"，`AttemptSend` 层挡的是"即将处理的这个 entry 本身的 ID 在 ob.Entries 里跟别的记录冲突"（后者才是真正保护 daemon 自动循环的那一层）。加了 `TestAttemptSend_RefusesDuplicateID`（直接测 `AttemptSend`）和 `TestProcessOutbox_SkipsDuplicateIDEntriesWithoutMutating`（`internal/daemon` 包里新增，直接调 `processOutbox` 验证 daemon 的真实代码路径也被保护到了，不只是 messaging 包内部）。
+
+（顺带一提：这一轮 review 期间，本地 `internal/messaging/outbox_test.go` 一度出现又消失了一个不属于本 PR 的并发测试——跟任务 4/5 阶段遇到的情况一样，是仓库自己的 review bot 在本地做独立验证时留下的临时文件改动，不是这个分支的内容，已确认工作区恢复干净后再继续。）
