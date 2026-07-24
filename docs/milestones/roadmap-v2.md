@@ -235,6 +235,7 @@ agent-speaker profile vault set --field interests --tier match-only
 
 ## 🔗 相关文档
 
+- [`../../specs/m1.5/`](../../specs/m1.5/) — **M1.5 可执行任务包**：把本文件 M1.5 一节拆成 10 个独立、可被 `/loop` 自动化循环逐条实现+自测+双重 review+开 PR 的任务规格（接口/设计/数据/流程/验收标准），配一份 `LOOP_PLAYBOOK.md` 操作手册
 - [`../protocol-v2.md`](../protocol-v2.md) — 架构决策权威文档（L1/L2/L3、Token、Relay 软件选型、待决策事项）
 - [`../buzz-comparison-analysis.md`](../buzz-comparison-analysis.md) — Buzz（block/buzz）架构对比与借鉴分析
 - [`../TODO.md`](../TODO.md) — 不依赖 V2 重构、可独立推进的短期工程任务
