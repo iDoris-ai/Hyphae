@@ -18,11 +18,6 @@ import (
 
 var version = "dev"
 
-// jsonMode is set by the root command's Before hook, before any subcommand
-// Action runs, and read again in main's top-level error handler after
-// app.Run returns (which no longer has a *cli.Command in scope to query).
-var jsonMode bool
-
 func main() {
 	app := &cli.Command{
 		Name:    "agent-speaker",
@@ -36,10 +31,6 @@ func main() {
 				Name:  "json",
 				Usage: "Machine-readable output: stdout is a JSON envelope, stderr is a JSON error, exit code is semantic (also settable via AGENT_SPEAKER_OUTPUT=json)",
 			},
-		},
-		Before: func(ctx context.Context, c *cli.Command) (context.Context, error) {
-			jsonMode = common.JSONMode(c)
-			return ctx, nil
 		},
 		Commands: []*cli.Command{
 			// Nostr base commands
@@ -71,6 +62,12 @@ func main() {
 	}
 
 	if err := app.Run(context.Background(), os.Args); err != nil {
-		os.Exit(common.EmitError(jsonMode, err))
+		// Scan raw argv rather than trusting any *cli.Command flag state: the
+		// failure may have happened before the relevant subcommand's flags
+		// were even fully parsed (e.g. a missing required flag), so there's
+		// no reliable c.Bool("json") in scope at this point. See
+		// JSONModeFromArgs's doc comment for why a value latched earlier via
+		// a Before hook doesn't work here.
+		os.Exit(common.EmitError(common.JSONModeFromArgs(os.Args), err))
 	}
 }

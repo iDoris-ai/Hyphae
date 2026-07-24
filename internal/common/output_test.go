@@ -3,6 +3,7 @@ package common
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/urfave/cli/v3"
@@ -106,5 +107,86 @@ func TestExitErrorUnwrap(t *testing.T) {
 	wrapped := NewExitError(ErrCodeAuth, inner)
 	if !errors.Is(wrapped, inner) {
 		t.Fatal("expected errors.Is to see through ExitError via Unwrap")
+	}
+}
+
+func TestJSONModeFromArgsFlagAnyPosition(t *testing.T) {
+	cases := [][]string{
+		{"agent-speaker", "--json", "agent", "msg"},
+		{"agent-speaker", "agent", "msg", "--json"},
+		{"agent-speaker", "agent", "--json", "msg"},
+	}
+	for _, args := range cases {
+		if !JSONModeFromArgs(args) {
+			t.Errorf("JSONModeFromArgs(%v) = false, want true", args)
+		}
+	}
+}
+
+func TestJSONModeFromArgsEqualsForm(t *testing.T) {
+	if !JSONModeFromArgs([]string{"agent-speaker", "agent", "msg", "--json=true"}) {
+		t.Error("expected --json=true to enable JSON mode")
+	}
+	if JSONModeFromArgs([]string{"agent-speaker", "agent", "msg", "--json=false"}) {
+		t.Error("expected --json=false to NOT enable JSON mode")
+	}
+}
+
+func TestJSONModeFromArgsEnvFallback(t *testing.T) {
+	t.Setenv("AGENT_SPEAKER_OUTPUT", "json")
+	if !JSONModeFromArgs([]string{"agent-speaker", "agent", "msg"}) {
+		t.Error("expected env fallback to enable JSON mode when --json is absent from argv")
+	}
+}
+
+func TestJSONModeFromArgsDefaultFalse(t *testing.T) {
+	t.Setenv("AGENT_SPEAKER_OUTPUT", "")
+	if JSONModeFromArgs([]string{"agent-speaker", "agent", "msg"}) {
+		t.Error("expected JSONModeFromArgs false with no flag and no env var")
+	}
+}
+
+func TestClassifyUnwrappedErrorRequiredFlags(t *testing.T) {
+	cases := []error{
+		errors.New(`Required flag "to" not set`),
+		errors.New(`Required flags "to, content" not set`),
+	}
+	for _, err := range cases {
+		if got := classifyUnwrappedError(err); got != ErrCodeUser {
+			t.Errorf("classifyUnwrappedError(%q) = %q, want %q", err, got, ErrCodeUser)
+		}
+	}
+}
+
+func TestClassifyUnwrappedErrorUnknownDefaultsToOther(t *testing.T) {
+	if got := classifyUnwrappedError(errors.New("something else broke")); got != ErrCodeOther {
+		t.Errorf("classifyUnwrappedError = %q, want %q", got, ErrCodeOther)
+	}
+}
+
+func TestRedactSecretsRedactsNsec(t *testing.T) {
+	msg := "'nsec1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq' is not a known nickname or valid npub"
+	got := redactSecrets(msg)
+	if strings.Contains(got, "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq") {
+		t.Errorf("redactSecrets did not redact the nsec: %q", got)
+	}
+	if !strings.Contains(got, "[redacted-nsec]") {
+		t.Errorf("redactSecrets output missing redaction marker: %q", got)
+	}
+}
+
+func TestRedactSecretsLeavesNonSecretTextAlone(t *testing.T) {
+	msg := "sender not found: identity 'alice' not found"
+	if got := redactSecrets(msg); got != msg {
+		t.Errorf("redactSecrets altered a message with no secrets: %q", got)
+	}
+}
+
+func TestEmitErrorRedactsMessage(t *testing.T) {
+	err := errors.New("'nsec1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq' is invalid")
+	// EmitError writes to stderr; this test only checks it doesn't panic and
+	// returns the expected exit code — redactSecrets itself is covered above.
+	if got := EmitError(true, err); got != ExitOtherError {
+		t.Errorf("EmitError = %d, want %d", got, ExitOtherError)
 	}
 }

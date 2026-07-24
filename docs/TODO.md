@@ -52,7 +52,8 @@
 
 > 来源：`docs/milestones/roadmap-v2.md` M1 测试状态一节。跑了 `go test ./... -cover` + 本地 relay 全链路真实自测后发现，均不影响核心功能，但值得顺手修掉。
 
-- [ ] `cmd/agent-speaker/main.go` 的 `color.NoColor = false` 是硬编码，不判断 stdout 是否被重定向就强制输出 ANSI 颜色码，管道/脚本消费 CLI 输出会看到转义符乱码（和上面的 `--json` 模式一起做最省事）
-- [ ] `history conversation --with <name>` 要求 `<name>` 必须在 contact 列表里，`agent msg --to <name>` 的解析更宽松，两个命令行为不一致，容易被误认为是 bug——统一一下解析规则
-- [ ] `internal/nostr`、`internal/common`、`internal/daemon` 三个包单元测试覆盖率分别是 0%/0%/0.5%（其余包普遍 27%-86%），其中 `internal/daemon` 是 outbox 重试/自动回复的核心逻辑，值得补几个关键路径的单元测试
-- [ ] daemon 的 outbox 里有历史遗留的失效队列条目（重试全部失败），加一个 `agent-speaker storage outbox` 诊断/清理子命令，方便定位和清理陈旧数据
+- [x] `cmd/agent-speaker/main.go` 的 `color.NoColor = false` 是硬编码，不判断 stdout 是否被重定向就强制输出 ANSI 颜色码，管道/脚本消费 CLI 输出会看到转义符乱码（[#13](https://github.com/iDoris-ai/agent-speaker/pull/13)）
+- [ ] `history conversation --with <name>` 要求 `<name>` 必须在 contact 列表里，`agent msg --to <name>` 的解析更宽松，两个命令行为不一致，容易被误认为是 bug——统一一下解析规则（`specs/m1.5/tasks/03-history-contact-resolution-fix.md`）
+- [ ] `internal/nostr`、`internal/common`、`internal/daemon` 三个包单元测试覆盖率分别是 0%/0%/0.5%（其余包普遍 27%-86%），其中 `internal/daemon` 是 outbox 重试/自动回复的核心逻辑，值得补几个关键路径的单元测试（`specs/m1.5/tasks/09-nostr-daemon-test-coverage.md`）
+- [ ] daemon 的 outbox 里有历史遗留的失效队列条目（重试全部失败），加一个 `agent-speaker storage outbox` 诊断/清理子命令，方便定位和清理陈旧数据（`specs/m1.5/tasks/08-daemon-outbox-diagnostics.md`）
+- [ ] `history stats`（以及大概率 `history` 系列其他命令）在零消息的全新身份上会因为 `internal/storage/message.go` 的 SQL 扫描把 NULL 列转成 `int` 而崩溃（`sql: Scan error ... converting NULL to int is unsupported`）——PR #14 code review 时用一个全新身份复现，和 `--json` 无关，两种模式下都会崩，值得单开一个任务修
