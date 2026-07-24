@@ -65,3 +65,12 @@ const (
 3. 解析一份没有 `mode` 字段的 legacy profile 事件（测试 fixture），应该被当作 `structured` 处理，不报错
 4. `simple`/`tagged` 模式下如果用户传了结构化专属的 flag（比如 `--capability`），命令应该给出清晰提示（warning 或 error，二选一，实现时定下来并在这里补记），不能静默丢弃
 5. `go test ./...` 全绿
+
+## 实现笔记
+
+- **验收标准 4 的决定：error，不是 warning。** `contact add --role bogus`（任务 5）已经用 error 处理过类似的"用户传了不兼容的参数"场景，这里保持一致——`--mode simple`/`--mode tagged` 撞上结构化专属 flag（`--description`/`--capability`/`--availability`/`--rate`/`--currency`，用 `c.IsSet(...)` 判断用户是否真的显式传了，而不是命中了 flag 自带的默认值）时直接返回清晰的 error 并列出冲突的 flag 名和修复建议，不发布任何东西。选 error 而不是 warning 是因为 warning 之后静默丢弃字段 = 用户以为发布了结构化信息，实际上服务端啥都没收到，这比直接拒绝更容易造成误解。
+- `pkg/types.ProfileMode` 完全照抄任务 5 `pkg/types.Role` 的模式：字符串枚举 + `Effective()`（零值 `""` 兜底成 `ModeStructured`，对应 display/兼容路径）+ `IsValid()`（零值故意判定为无效，对应"必须显式选择"的写入路径）。这两个方法分工不重叠，`AgentProfile.Validate()` 里两处都用到：先用 `Mode != "" && !Mode.IsValid()` 拒绝无效的显式值，再用 `Mode.Effective()` 决定该按哪种 schema 校验字段。
+- **`Validate()` 里也做了 mode-vs-字段校验**（不只是 CLI flag 层），因为 `profile publish --json-file` 这条路径完全绕过 CLI 的 flag 校验，直接把用户提供的 JSON 反序列化成 `AgentProfile` 再调 `Validate()`——如果只在 CLI 层挡，`--json-file` 传一份 `mode: simple` 但塞满 capabilities 的 JSON 会直接绕过去。这是任务 5 Codex review 那次"验证只做在 CLI 层不够"的教训直接应用。
+- 三种 mode 的 profile 落地到本地 SQLite 时走的是已有的 `profile_json` 整块 JSON blob 字段（`internal/profile/db.go` 的 `StoreProfile`/`GetProfile`），不需要加新列——`Mode`/`Tags` 字段跟其余字段一样序列化进这个 blob，读回来自然带上，没有单独处理。
+- Live smoke test：起本地 `scripts/minirelay.go`，分别用 `--mode simple`/`--mode tagged`/默认 structured 三种方式 publish，再用 `profile discover --json` 读回来，逐条核对 JSON 内容跟 spec 里的三份 schema 示例完全一致（`simple` 只有 `name`+`mode`；`tagged` 多了 `tags`；`structured` 是完整字段）；也验证了 `--mode simple --description ...`、`--mode tagged --capability ...`、`--mode bogus` 三种非法组合都被清晰拒绝、非零退出码。测试产生的 profile 记录已在提交前从本地 `~/.agent-speaker/messages.db` 清理。
+- `pkg/types/profile.go` 加字段导致 `AgentProfile` struct 的列对齐被 gofmt 要求重新计算——顺手跑了 `gofmt -w` 这一个文件（连带修正了这个文件里 pre-existing 的 `Availability` 常量块对齐问题，不是本任务引入的，但既然文件已经在改就一起交给 gofmt 处理了）。

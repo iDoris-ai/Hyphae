@@ -93,6 +93,57 @@ func TestEventToProfile(t *testing.T) {
 	assert.Equal(t, "2.0", result.Version)
 }
 
+func TestEventToProfile_SimpleAndTaggedModes(t *testing.T) {
+	sk := nostr.Generate()
+	pk := sk.Public()
+
+	simple := &types.AgentProfile{Name: "Alice", Mode: types.ModeSimple}
+	event, err := ProfileToEvent(simple, pk)
+	require.NoError(t, err)
+	result, err := EventToProfile(event)
+	require.NoError(t, err)
+	assert.Equal(t, types.ModeSimple, result.Mode)
+	assert.Equal(t, "Alice", result.Name)
+	assert.Empty(t, result.Tags)
+
+	tagged := &types.AgentProfile{Name: "Bob", Mode: types.ModeTagged, Tags: []string{"dev", "go"}}
+	event2, err := ProfileToEvent(tagged, pk)
+	require.NoError(t, err)
+	result2, err := EventToProfile(event2)
+	require.NoError(t, err)
+	assert.Equal(t, types.ModeTagged, result2.Mode)
+	assert.Equal(t, []string{"dev", "go"}, result2.Tags)
+}
+
+// TestEventToProfile_LegacyEventWithoutModeField covers a Kind 0 profile
+// event published by a pre-M1.5 client (or before this task), which never
+// had a "mode" field in its JSON content at all.
+func TestEventToProfile_LegacyEventWithoutModeField(t *testing.T) {
+	sk := nostr.Generate()
+	pk := sk.Public()
+
+	event := &nostr.Event{
+		CreatedAt: nostr.Now(),
+		Kind:      ProfileKind,
+		Tags:      nostr.Tags{{"d", ProfileDTag}, {"c", ProfileTag}},
+		Content:   `{"name":"Legacy Bot","availability":"available","version":"1.0"}`,
+		PubKey:    pk,
+	}
+	require.NoError(t, event.Sign(sk))
+
+	result, err := EventToProfile(event)
+	require.NoError(t, err)
+	assert.Equal(t, "Legacy Bot", result.Name)
+	assert.Equal(t, types.ProfileMode(""), result.Mode)
+	assert.Equal(t, types.ModeStructured, result.Mode.Effective())
+}
+
+func TestCleanTags(t *testing.T) {
+	assert.Nil(t, cleanTags(nil))
+	assert.Nil(t, cleanTags([]string{}))
+	assert.Equal(t, []string{"dev", "go"}, cleanTags([]string{" dev ", "go", ""}))
+}
+
 func TestEventToProfile_WrongKind(t *testing.T) {
 	sk := nostr.Generate()
 	pk := sk.Public()

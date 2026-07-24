@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -41,6 +42,15 @@ var profilePublishCmd = &cli.Command{
 			Name:    "name",
 			Aliases: []string{"n"},
 			Usage:   "Agent display name",
+		},
+		&cli.StringFlag{
+			Name:  "mode",
+			Usage: "Registration mode: simple (name only), tagged (name+tags), or structured (full capabilities/rates, default)",
+			Value: string(types.ModeStructured),
+		},
+		&cli.StringSliceFlag{
+			Name:  "tags",
+			Usage: "Free-form tags (mode=tagged), comma-separated or repeated",
 		},
 		&cli.StringFlag{
 			Name:    "description",
@@ -113,29 +123,57 @@ var profilePublishCmd = &cli.Command{
 				name = agent.Nickname
 			}
 
-			profile = &types.AgentProfile{
-				Name:         name,
-				Description:  c.String("description"),
-				Availability: c.String("availability"),
-				Version:      "1.0",
-				Capabilities: make([]types.Capability, 0),
-				RateSheet: &types.RateSheet{
-					Currency: c.String("currency"),
-					Rates:    make([]types.RateEntry, 0),
-				},
+			mode := types.ProfileMode(c.String("mode"))
+			if !mode.IsValid() {
+				return fmt.Errorf("invalid --mode %q: must be %q, %q, or %q", mode, types.ModeSimple, types.ModeTagged, types.ModeStructured)
 			}
 
-			// Parse capabilities
-			for _, capStr := range c.StringSlice("capability") {
-				cap := parseCapability(capStr)
-				profile.Capabilities = append(profile.Capabilities, cap)
-			}
+			// Structured-only flags: reject rather than silently drop when
+			// the user picked a leaner mode but still passed them (spec
+			// requires a clear signal, not silent data loss).
+			structuredOnlySet := c.IsSet("description") || c.IsSet("capability") ||
+				c.IsSet("availability") || c.IsSet("rate") || c.IsSet("currency")
 
-			// Parse rates
-			for _, rateStr := range c.StringSlice("rate") {
-				entry := parseRateEntry(rateStr)
-				if entry.Service != "" {
-					profile.RateSheet.Rates = append(profile.RateSheet.Rates, entry)
+			switch mode {
+			case types.ModeSimple:
+				if structuredOnlySet || c.IsSet("tags") {
+					return fmt.Errorf("--mode simple only supports --name; remove --description/--capability/--availability/--rate/--currency/--tags, or use --mode tagged/structured")
+				}
+				profile = &types.AgentProfile{Name: name, Mode: types.ModeSimple}
+
+			case types.ModeTagged:
+				if structuredOnlySet {
+					return fmt.Errorf("--mode tagged only supports --name and --tags; remove --description/--capability/--availability/--rate/--currency, or use --mode structured")
+				}
+				profile = &types.AgentProfile{Name: name, Mode: types.ModeTagged, Tags: cleanTags(c.StringSlice("tags"))}
+
+			default: // structured
+				profile = &types.AgentProfile{
+					Name:         name,
+					Mode:         types.ModeStructured,
+					Tags:         cleanTags(c.StringSlice("tags")),
+					Description:  c.String("description"),
+					Availability: c.String("availability"),
+					Version:      "1.0",
+					Capabilities: make([]types.Capability, 0),
+					RateSheet: &types.RateSheet{
+						Currency: c.String("currency"),
+						Rates:    make([]types.RateEntry, 0),
+					},
+				}
+
+				// Parse capabilities
+				for _, capStr := range c.StringSlice("capability") {
+					cap := parseCapability(capStr)
+					profile.Capabilities = append(profile.Capabilities, cap)
+				}
+
+				// Parse rates
+				for _, rateStr := range c.StringSlice("rate") {
+					entry := parseRateEntry(rateStr)
+					if entry.Service != "" {
+						profile.RateSheet.Rates = append(profile.RateSheet.Rates, entry)
+					}
 				}
 			}
 		}
@@ -421,6 +459,21 @@ var profileDiscoverCmd = &cli.Command{
 	},
 }
 
+// cleanTags trims whitespace and drops empty entries from --tags values.
+func cleanTags(raw []string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	tags := make([]string, 0, len(raw))
+	for _, t := range raw {
+		t = strings.TrimSpace(t)
+		if t != "" {
+			tags = append(tags, t)
+		}
+	}
+	return tags
+}
+
 // parseCapability parses a capability string "name:description"
 func parseCapability(s string) types.Capability {
 	var cap types.Capability
@@ -482,11 +535,19 @@ func printProfile(npub string, profile *types.AgentProfile) {
 
 	fmt.Printf("\n%s %s\n", green("👤"), green(profile.Name))
 	fmt.Printf("   Npub: %s\n", yellow(npub))
+	fmt.Printf("   Mode: %s\n", cyan(string(profile.Mode.Effective())))
+	if len(profile.Tags) > 0 {
+		fmt.Printf("   Tags: %s\n", strings.Join(profile.Tags, ", "))
+	}
 	if profile.Description != "" {
 		fmt.Printf("   %s\n", profile.Description)
 	}
-	fmt.Printf("   Availability: %s\n", cyan(profile.Availability))
-	fmt.Printf("   Version: %s\n", profile.Version)
+	if profile.Availability != "" {
+		fmt.Printf("   Availability: %s\n", cyan(profile.Availability))
+	}
+	if profile.Version != "" {
+		fmt.Printf("   Version: %s\n", profile.Version)
+	}
 
 	if len(profile.Capabilities) > 0 {
 		fmt.Println("   Capabilities:")
