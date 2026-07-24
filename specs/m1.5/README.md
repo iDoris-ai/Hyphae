@@ -22,7 +22,7 @@
 | 4 | 审计哈希链（`audit_log` 表） | [`tasks/04-audit-log-hash-chain.md`](tasks/04-audit-log-hash-chain.md) | — | M | done ([#16](https://github.com/iDoris-ai/agent-speaker/pull/16)) |
 | 5 | 成员角色模型（Human/Agent） | [`tasks/05-member-role-model.md`](tasks/05-member-role-model.md) | — | M | done ([#18](https://github.com/iDoris-ai/agent-speaker/pull/18)) |
 | 6 | Profile register 三模式 schema | [`tasks/06-profile-register-mode-schema.md`](tasks/06-profile-register-mode-schema.md) | — | M | done ([#19](https://github.com/iDoris-ai/agent-speaker/pull/19)) |
-| 7 | Profile discover 过滤条件扩展 | [`tasks/07-profile-discover-filters.md`](tasks/07-profile-discover-filters.md) | 6 | S | ready |
+| 7 | Profile discover 过滤条件扩展 | [`tasks/07-profile-discover-filters.md`](tasks/07-profile-discover-filters.md) | 6 | S | done ([#20](https://github.com/iDoris-ai/agent-speaker/pull/20)) |
 | 8 | daemon outbox 诊断/清理命令 | [`tasks/08-daemon-outbox-diagnostics.md`](tasks/08-daemon-outbox-diagnostics.md) | — | S | ready |
 | 9 | `internal/nostr` + `internal/daemon` 单元测试补齐 | [`tasks/09-nostr-daemon-test-coverage.md`](tasks/09-nostr-daemon-test-coverage.md) | — | M | ready |
 | 10 | relay 部署脚本加固（为切换 `relay-khatru` fork 做准备） | [`tasks/10-relay-deploy-hardening.md`](tasks/10-relay-deploy-hardening.md) | — | S | ready |
@@ -47,6 +47,7 @@
 ## 跑 loop 过程中发现的、不属于当前任务范围的问题（记录以免丢失，后续单独排期）
 
 - **`internal/group/db.go` 的 `generateGroupID`（`fmt.Sprintf("group_%s_%d", creator[:8], time.Now().UnixNano())`）在高并发下有极小概率生成重复 ID**，导致 `INSERT` 撞 `UNIQUE constraint failed: groups.id`。PR #18 review 时用同一 creator 连续发起 30 个并发 `CreateGroup` 调用复现（9 次里 2 次撞车），但这是 pre-existing 代码（PR #18 完全没碰这个函数），跟本次角色模型任务无关。真实场景下（独立 CLI 进程、有自然的进程启动 jitter）触发概率远低于测试用的紧凑并发场景。建议后续开一个小任务：换成带随机后缀/计数器或者 ULID 的 ID 生成方式。
+- **`profile discover` 的 `--price-min`/`--price-max` 是 `cli.IntFlag`（只能传整数边界），跟 `--rating-min` 的 `cli.FloatFlag` 不一致**。PR #20 review 时发现：内部比较逻辑（`matchesPriceRange`）已经改成用 `float64` 精确比较（避免把 rate 价格截断成 int），但用户从 CLI 侧传不了小数边界（比如 `--price-max 99.99`）——不是正确性 bug，只是这次 fix 的动机（float 精度）跟 CLI 实际能表达的输入范围不匹配。非阻塞，建议后续把这两个 flag 也改成 `cli.FloatFlag`。
 
 ## 明确排除在本 spec pack 之外（不是 loop 任务）
 
