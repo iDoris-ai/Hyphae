@@ -247,18 +247,21 @@ func TestSendAutoReply_PublishesAndRecordsOutgoingMessage(t *testing.T) {
 
 // startFakeRelay runs a minimal in-process NIP-01 relay. On the first
 // message it receives (the client's REQ), it replies with one pre-built
-// EVENT, then EOSE, then a CLOSED envelope for the same subscription.
+// EVENT, then EOSE, then blocks until closeWhenReady is closed before
+// sending a CLOSED envelope for the same subscription.
 //
-// An earlier version of this fake relied on `time.Sleep` plus closing the
-// connection to end the subscription -- watchOneRelay's `for evt := range
-// sub.Events` only exits once the client library notices the connection
-// died (which cancels the subscription and closes sub.Events), and that
-// made the test's timing an arbitrary guess. Sending CLOSED is
-// deterministic instead: the client library's handleClosed
-// (fiatjaf.com/nostr's subscription.go) reacts to a CLOSED envelope by
-// canceling the subscription synchronously, which is what actually closes
-// sub.Events -- no sleep, no race with OS write buffering.
-func startFakeRelay(t *testing.T, eventJSON json.RawMessage) string {
+// Two earlier versions of this were timing-based and both wrong in a
+// different way: (1) time.Sleep + closing the connection depended on
+// OS/network connection-death detection; (2) sending CLOSED after a fixed
+// short sleep was still a race, just a smaller one -- fiatjaf.com/nostr's
+// Subscription.dispatchEvent delivers an EVENT asynchronously via
+// `select { case sub.Events <- evt: ...; case <-sub.Context.Done(): ... }`,
+// and CLOSED cancels sub.Context, so a sleep that's merely "usually long
+// enough" can still lose that race under scheduler contention (e.g. CI
+// load). closeWhenReady removes the guesswork: the caller only closes it
+// once it has confirmed the event was actually processed (e.g. durably
+// stored), so CLOSED is never sent before delivery has already happened.
+func startFakeRelay(t *testing.T, eventJSON json.RawMessage, closeWhenReady <-chan struct{}) string {
 	t.Helper()
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 
@@ -285,26 +288,10 @@ func startFakeRelay(t *testing.T, eventJSON json.RawMessage) string {
 		eoseMsg, _ := json.Marshal([]any{"EOSE", subID})
 		_ = conn.WriteMessage(websocket.TextMessage, eoseMsg)
 
-		// fiatjaf.com/nostr's Subscription.dispatchEvent delivers an EVENT
-		// asynchronously: it spawns a goroutine that does
-		// `select { case sub.Events <- evt: ...; case <-sub.Context.Done(): ... }`.
-		// Sending CLOSED immediately (which cancels sub.Context) races that
-		// select -- cancellation can win, silently dropping the event before
-		// it's ever delivered. This pause is what actually makes the test
-		// reliable: not "wait for the OS to flush a write" (the original,
-		// wrong theory), but "give the client's own dispatch goroutine a
-		// window to win its race before we cancel the subscription."
-		time.Sleep(50 * time.Millisecond)
+		<-closeWhenReady
 
 		closedMsg, _ := json.Marshal([]any{"CLOSED", subID, "test done"})
 		_ = conn.WriteMessage(websocket.TextMessage, closedMsg)
-
-		// Give the client a moment to process CLOSED before this handler
-		// returns and tears down the connection out from under it; any
-		// subsequent message on this connection (e.g. an EVENT publish from
-		// the auto-reply this test triggers) is intentionally ignored --
-		// this fake only knows how to answer one REQ.
-		time.Sleep(50 * time.Millisecond)
 	}))
 	t.Cleanup(srv.Close)
 
@@ -348,13 +335,42 @@ func TestWatchInbox_ReceivesEventMarksSeenAndAutoReplies(t *testing.T) {
 	eventJSON, err := json.Marshal(incoming)
 	require.NoError(t, err)
 
-	relayURL := startFakeRelay(t, eventJSON)
+	closeWhenReady := make(chan struct{})
+	relayURL := startFakeRelay(t, eventJSON, closeWhenReady)
 
 	seen := newSeenSet()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	watchInbox(ctx, myIdentity, ks, seen, nostr.Timestamp(0), []string{relayURL}, false, true)
 
+	// watchInbox blocks until watchOneRelay's sub.Events channel closes,
+	// which only happens once the fake relay sends CLOSED -- so it has to
+	// run concurrently with the wait below, not before it.
+	watchInboxDone := make(chan struct{})
+	go func() {
+		defer close(watchInboxDone)
+		watchInbox(ctx, myIdentity, ks, seen, nostr.Timestamp(0), []string{relayURL}, false, true)
+	}()
+
+	// Confirm the event was actually processed (durably stored -- SQLite is
+	// safe for this concurrent read/write, unlike seen, a plain unsynchronized
+	// map) before letting the fake relay send CLOSED. This is what makes the
+	// test deterministic instead of racing dispatchEvent's async delivery
+	// against a guessed sleep duration.
+	require.Eventually(t, func() bool {
+		inbox, err := messaging.GetInbox(nil, myIdentity.Npub, 10)
+		return err == nil && len(inbox) == 1
+	}, 2*time.Second, 5*time.Millisecond, "the incoming event must be durably stored before the fake relay is allowed to close the subscription")
+
+	close(closeWhenReady)
+
+	select {
+	case <-watchInboxDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("watchInbox did not return after the fake relay sent CLOSED")
+	}
+
+	// Only safe to read `seen` now that the watchInbox goroutine has fully
+	// returned -- it's a plain map with no locking of its own.
 	assert.True(t, seen.Has(string(incoming.ID[:])), "the event must be marked seen after being processed")
 
 	// The conversation ends up with two messages: the original incoming one
