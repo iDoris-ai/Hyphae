@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -336,6 +337,8 @@ func TestWatchInbox_ReceivesEventMarksSeenAndAutoReplies(t *testing.T) {
 	require.NoError(t, err)
 
 	closeWhenReady := make(chan struct{})
+	releaseFakeRelay := sync.OnceFunc(func() { close(closeWhenReady) })
+
 	relayURL := startFakeRelay(t, eventJSON, closeWhenReady)
 
 	seen := newSeenSet()
@@ -351,6 +354,21 @@ func TestWatchInbox_ReceivesEventMarksSeenAndAutoReplies(t *testing.T) {
 		watchInbox(ctx, myIdentity, ks, seen, nostr.Timestamp(0), []string{relayURL}, false, true)
 	}()
 
+	// Deferred cleanup, registered so it unwinds in this order (LIFO):
+	// releaseFakeRelay() first (unblocks the fake relay's handler so it can
+	// send CLOSED), then wait for watchInboxDone (now it can actually
+	// finish; also bounded by ctx's own 5s timeout regardless). Needed
+	// because require.Eventually below calls t.FailNow() (runtime.Goexit())
+	// on failure, which skips every subsequent line in this function --
+	// including the explicit releaseFakeRelay() call further down. Without
+	// this safety net, the fake relay's handler would stay parked on
+	// <-closeWhenReady forever, and t.Cleanup(srv.Close) (which waits for
+	// in-flight requests) would hang the whole test run instead of failing
+	// cleanly. sync.OnceFunc makes calling releaseFakeRelay twice (here and
+	// on the success path below) harmless.
+	defer func() { <-watchInboxDone }()
+	defer releaseFakeRelay()
+
 	// Confirm the event was actually processed (durably stored -- SQLite is
 	// safe for this concurrent read/write, unlike seen, a plain unsynchronized
 	// map) before letting the fake relay send CLOSED. This is what makes the
@@ -361,7 +379,7 @@ func TestWatchInbox_ReceivesEventMarksSeenAndAutoReplies(t *testing.T) {
 		return err == nil && len(inbox) == 1
 	}, 2*time.Second, 5*time.Millisecond, "the incoming event must be durably stored before the fake relay is allowed to close the subscription")
 
-	close(closeWhenReady)
+	releaseFakeRelay()
 
 	select {
 	case <-watchInboxDone:
