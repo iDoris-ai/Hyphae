@@ -26,7 +26,7 @@ agent-speaker profile discover \
 ```go
 type DiscoverFilter struct {
     Capability string
-    PriceMin, PriceMax *int
+    PriceMin, PriceMax *float64
     RatingMin  *float64
     OnlineOnly bool
 }

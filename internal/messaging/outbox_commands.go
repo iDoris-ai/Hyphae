@@ -191,12 +191,13 @@ var outboxRetryCmd = &cli.Command{
 			return fmt.Errorf("failed to load outbox: %w", err)
 		}
 
-		// `list` displays IDs hex-encoded (see hexOutboxID) since the raw
-		// stored ID is arbitrary bytes, not printable text. Try that hex
-		// form first; only fall back to a literal match (for a caller that
-		// already has the raw ID, e.g. scripting against LoadOutbox
-		// directly) if nothing matches the decoded bytes -- a value that
-		// happens to be valid hex but was meant literally must still be
+		// `list` displays IDs hex-encoded (see displayOutboxID) since a
+		// legacy entry's raw stored ID is arbitrary bytes, not printable
+		// text. Try that hex form first; only fall back to a literal match
+		// (for a caller that already has the raw ID, e.g. scripting against
+		// LoadOutbox directly) if nothing matches the decoded bytes -- a
+		// value that happens to be valid hex but was meant literally must
+		// still be
 		// reachable.
 		id := c.String("id")
 		matches := findOutboxMatches(ob.Entries, id)
