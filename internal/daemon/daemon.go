@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -217,56 +216,17 @@ func processOutbox(ctx context.Context, myIdentity *types.Identity, relays []str
 			}
 		}
 
-		// Parse event
-		var event nostr.Event
-		if err := json.Unmarshal([]byte(entry.EventJSON), &event); err != nil {
-			fmt.Printf("   ⚠️  Failed to parse event %s...: %v\n", safePrefix(entry.ID, 16), err)
+		result, err := messaging.AttemptSend(ctx, outbox, entry, relays, relayDialTimeout)
+		if err != nil {
+			fmt.Printf("   ⚠️  %s...: %v\n", safePrefix(entry.ID, 16), err)
 			continue
 		}
 
-		// Per-relay timeout so one slow relay does not eat the whole budget
-		// for the rest of the targets.
-		success := false
-		targets := entry.Relays
-		if len(targets) == 0 {
-			targets = relays
-		}
-		for _, url := range targets {
-			relayCtx, cancel := context.WithTimeout(ctx, relayDialTimeout)
-			relay, err := nostr.RelayConnect(relayCtx, url, nostr.RelayOptions{})
-			if err != nil {
-				cancel()
-				continue
-			}
-			pubErr := relay.Publish(relayCtx, event)
-			relay.Close()
-			cancel()
-			if pubErr == nil {
-				success = true
-				break
-			}
-		}
-
-		if success {
-			if err := messaging.UpdateOutboxStatus(outbox, entry.ID, "sent"); err != nil {
-				fmt.Printf("   ⚠️  Update outbox status: %v\n", err)
-			}
-			if err := messaging.RemoveFromOutbox(outbox, entry.ID); err != nil {
-				fmt.Printf("   ⚠️  Remove from outbox: %v\n", err)
-			}
-			if err := messaging.StoreOutgoingMessage(&event, entry.RecipientNpub, event.Content, true); err != nil {
-				fmt.Printf("   ⚠️  Store outgoing message: %v\n", err)
-			}
+		if result.Sent {
 			successCount++
 			fmt.Printf("   ✅ Sent: %s...\n", safePrefix(entry.ID, 16))
 		} else {
-			if err := messaging.IncrementOutboxRetry(outbox, entry.ID); err != nil {
-				fmt.Printf("   ⚠️  Increment retry: %v\n", err)
-			}
-			if entry.RetryCount >= entry.MaxRetries-1 {
-				if err := messaging.UpdateOutboxStatus(outbox, entry.ID, "failed"); err != nil {
-					fmt.Printf("   ⚠️  Mark failed: %v\n", err)
-				}
+			if result.MarkedFailed {
 				fmt.Printf("   ❌ Failed (max retries): %s...\n", safePrefix(entry.ID, 16))
 			}
 			failCount++

@@ -1,6 +1,7 @@
 package messaging
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -158,6 +159,80 @@ func RemoveFromOutbox(ob *types.Outbox, id string) error {
 	}
 	ob.Entries = newEntries
 	return SaveOutbox(ob)
+}
+
+// SendResult describes the outcome of a single AttemptSend call.
+type SendResult struct {
+	Sent         bool // true if the event was successfully published
+	MarkedFailed bool // true if this attempt exhausted retries and the entry was marked "failed"
+}
+
+// AttemptSend tries to publish a single outbox entry to its target relays
+// (falling back to defaultRelays when entry.Relays is empty), then updates
+// and persists ob's status for this entry -- "sent" + removed on success,
+// retry count incremented (and marked "failed" once retries are exhausted)
+// on failure.
+//
+// This is the one place that mutates outbox state after a send attempt --
+// both the daemon's automatic retry loop (internal/daemon) and the manual
+// `storage outbox retry` CLI command call this, so the status-transition
+// logic only exists once. Unlike the daemon's automatic loop, AttemptSend
+// does NOT perform the exponential-backoff eligibility check: callers that
+// want backoff (the daemon's ticker) must check that themselves before
+// calling; a manual retry is expected to bypass backoff by design (that's
+// the whole point of "don't wait for the daemon's 60s cycle").
+func AttemptSend(ctx context.Context, ob *types.Outbox, entry types.OutboxEntry, defaultRelays []string, dialTimeout time.Duration) (SendResult, error) {
+	var event nostr.Event
+	if err := json.Unmarshal([]byte(entry.EventJSON), &event); err != nil {
+		return SendResult{}, fmt.Errorf("parse event: %w", err)
+	}
+
+	targets := entry.Relays
+	if len(targets) == 0 {
+		targets = defaultRelays
+	}
+
+	sent := false
+	for _, url := range targets {
+		relayCtx, cancel := context.WithTimeout(ctx, dialTimeout)
+		relay, err := nostr.RelayConnect(relayCtx, url, nostr.RelayOptions{})
+		if err != nil {
+			cancel()
+			continue
+		}
+		pubErr := relay.Publish(relayCtx, event)
+		relay.Close()
+		cancel()
+		if pubErr == nil {
+			sent = true
+			break
+		}
+	}
+
+	if sent {
+		if err := UpdateOutboxStatus(ob, entry.ID, "sent"); err != nil {
+			return SendResult{Sent: true}, fmt.Errorf("update outbox status: %w", err)
+		}
+		if err := RemoveFromOutbox(ob, entry.ID); err != nil {
+			return SendResult{Sent: true}, fmt.Errorf("remove from outbox: %w", err)
+		}
+		if err := StoreOutgoingMessage(&event, entry.RecipientNpub, event.Content, true); err != nil {
+			return SendResult{Sent: true}, fmt.Errorf("store outgoing message: %w", err)
+		}
+		return SendResult{Sent: true}, nil
+	}
+
+	if err := IncrementOutboxRetry(ob, entry.ID); err != nil {
+		return SendResult{}, fmt.Errorf("increment retry: %w", err)
+	}
+	result := SendResult{}
+	if entry.RetryCount >= entry.MaxRetries-1 {
+		if err := UpdateOutboxStatus(ob, entry.ID, "failed"); err != nil {
+			return result, fmt.Errorf("mark failed: %w", err)
+		}
+		result.MarkedFailed = true
+	}
+	return result, nil
 }
 
 // CleanupOutbox removes old sent entries
