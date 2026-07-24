@@ -150,8 +150,21 @@ func IncrementOutboxRetry(ob *types.Outbox, id string) error {
 	return fmt.Errorf("entry not found")
 }
 
-// RemoveFromOutbox removes a sent entry
+// RemoveFromOutbox removes the single entry with the given ID.
+//
+// If more than one entry shares that ID, it refuses and removes nothing:
+// filtering by "ID != id" would otherwise delete every one of them, not
+// just the one the caller meant, and with the pre-existing bug where an
+// unsigned event keeps a zero-value ID (see specs/m1.5/README.md), that's a
+// real way to silently lose other, unrelated, never-actually-sent entries.
+// AttemptSend already guards against this earlier via countByID, but
+// RemoveFromOutbox is called directly elsewhere too (e.g. agent.go's normal
+// send path cleans up a stale outbox entry after a successful publish), so
+// the check belongs here too, not only in one caller.
 func RemoveFromOutbox(ob *types.Outbox, id string) error {
+	if n := countByID(ob.Entries, id); n > 1 {
+		return fmt.Errorf("%d outbox entries share id %q -- refusing to remove any of them", n, id)
+	}
 	newEntries := make([]types.OutboxEntry, 0)
 	for _, entry := range ob.Entries {
 		if entry.ID != id {

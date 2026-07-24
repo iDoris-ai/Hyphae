@@ -2,13 +2,38 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
+	"io"
+	"os"
 	"testing"
 
+	"fiatjaf.com/nostr"
 	"github.com/AuraAIHQ/agent-speaker/internal/messaging"
 	"github.com/AuraAIHQ/agent-speaker/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// captureStdout runs fn with os.Stdout redirected to a pipe and returns
+// everything written to it -- processOutbox prints directly rather than
+// taking an io.Writer, so this is the smallest way to assert on what it
+// actually reported for a given outbox state.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stdout = w
+
+	fn()
+
+	require.NoError(t, w.Close())
+	os.Stdout = orig
+
+	out, err := io.ReadAll(r)
+	require.NoError(t, err)
+	return string(out)
+}
 
 // TestProcessOutbox_SkipsDuplicateIDEntriesWithoutMutating covers a Codex
 // review finding on specs/m1.5/tasks/08-daemon-outbox-diagnostics.md: the
@@ -19,19 +44,35 @@ import (
 // RemoveFromOutbox, not just the one processed. The guard now lives inside
 // AttemptSend itself, so this exercises it through processOutbox (the
 // actual daemon code path), not just through AttemptSend directly.
+//
+// A follow-up Codex round correctly pointed out the first version of this
+// test used empty EventJSON, so it "passed" even without the fix -- an
+// empty/invalid EventJSON hits the pre-existing parse-error skip regardless
+// of the new guard, proving nothing about it specifically. This version
+// uses a valid, parseable event and asserts on the specific "share this ID"
+// warning text, which only the new guard produces.
 func TestProcessOutbox_SkipsDuplicateIDEntriesWithoutMutating(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	ob := &types.Outbox{Entries: []types.OutboxEntry{
-		{ID: "dup", Status: "pending", RetryCount: 0, MaxRetries: 10},
-		{ID: "dup", Status: "pending", RetryCount: 0, MaxRetries: 10},
-	}}
+	event := &nostr.Event{Kind: 1, Content: "hi"}
+	event.ID = [32]byte{9}
+	eventJSON, err := json.Marshal(event)
+	require.NoError(t, err)
+
+	entry := types.OutboxEntry{
+		ID: string(event.ID[:]), Status: "pending", EventJSON: string(eventJSON),
+		RetryCount: 0, MaxRetries: 10,
+	}
+	ob := &types.Outbox{Entries: []types.OutboxEntry{entry, entry}}
 	require.NoError(t, messaging.SaveOutbox(ob))
 
-	assert.NotPanics(t, func() {
+	out := captureStdout(t, func() {
 		processOutbox(context.Background(), &types.Identity{Nickname: "test"}, []string{"ws://127.0.0.1:1"})
 	})
+
+	assert.Contains(t, out, "share this ID",
+		"processOutbox must surface the new duplicate-ID guard specifically, not just some other unrelated skip path")
 
 	ob2, err := messaging.LoadOutbox()
 	require.NoError(t, err)

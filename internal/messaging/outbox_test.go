@@ -125,6 +125,31 @@ func TestRemoveFromOutbox(t *testing.T) {
 	assert.Equal(t, "2", ob2.Entries[0].ID)
 }
 
+// TestRemoveFromOutbox_RefusesDuplicateID covers a Codex review finding:
+// RemoveFromOutbox is called directly outside AttemptSend too (agent.go's
+// normal `agent msg` send path cleans up a stale outbox entry after a
+// successful publish, ignoring the error since usually there's nothing to
+// clean up) -- AttemptSend's own duplicate-ID guard doesn't protect that
+// call site at all. Hardening RemoveFromOutbox itself closes the gap for
+// every caller, present or future, not just the ones already known about.
+func TestRemoveFromOutbox_RefusesDuplicateID(t *testing.T) {
+	setupTempOutbox(t)
+	ob := &types.Outbox{Entries: []types.OutboxEntry{
+		{ID: "dup", Status: "pending"},
+		{ID: "dup", Status: "pending"},
+		{ID: "other", Status: "pending"},
+	}}
+	require.NoError(t, SaveOutbox(ob))
+
+	err := RemoveFromOutbox(ob, "dup")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "2 outbox entries share id")
+
+	ob2, err := LoadOutbox()
+	require.NoError(t, err)
+	assert.Len(t, ob2.Entries, 3, "refusing must not remove anything, not even the unambiguous entry")
+}
+
 // TestAttemptSend_RefusesDuplicateID covers a Codex review finding: the
 // original fix (retry --id refusing to proceed) only protected the manual
 // CLI path -- the daemon's automatic retry loop calls AttemptSend directly
