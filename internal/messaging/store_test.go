@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"fiatjaf.com/nostr"
-	"github.com/AuraAIHQ/agent-speaker/internal/storage"
 	"github.com/AuraAIHQ/agent-speaker/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,17 +13,7 @@ func resetStore(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	// Close and clear global DB
-	if storage.DB != nil {
-		_ = storage.CloseDB()
-		storage.DB = nil
-	}
-
-	// Reset package-level globals (sync.Once replaced with mutex, so this is safe)
-	storeMu.Lock()
-	store = nil
-	storeErr = nil
-	storeMu.Unlock()
+	ResetStoreForTest()
 
 	require.NoError(t, InitStorage())
 }

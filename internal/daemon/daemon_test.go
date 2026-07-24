@@ -189,6 +189,7 @@ func TestCleanupOutbox_MissingFileIsANoop(t *testing.T) {
 func TestPreloadRecentSeen_MarksStoredIDsAsSeen(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	messaging.ResetStoreForTest()
 	require.NoError(t, messaging.InitStorage())
 
 	senderSK := nostr.Generate()
@@ -221,6 +222,7 @@ func TestPreloadRecentSeen_MarksStoredIDsAsSeen(t *testing.T) {
 func TestSendAutoReply_PublishesAndRecordsOutgoingMessage(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	messaging.ResetStoreForTest()
 	require.NoError(t, messaging.InitStorage())
 
 	ks := &types.KeyStore{
@@ -244,17 +246,18 @@ func TestSendAutoReply_PublishesAndRecordsOutgoingMessage(t *testing.T) {
 }
 
 // startFakeRelay runs a minimal in-process NIP-01 relay. On the first
-// message it receives (the client's REQ), it replies with exactly one
-// pre-built EVENT + EOSE, then holds the connection open briefly before the
-// handler returns (which closes it). watchOneRelay's `for evt := range
-// sub.Events` only exits once the client library notices the underlying
-// connection died (which cancels the subscription and closes sub.Events) --
-// closing immediately after the write raced the OS actually flushing the
-// bytes before teardown in practice, so the pause is needed, but it's still
-// far faster than waiting out the real subscribeWindow. Any subsequent
-// message on the same connection (e.g. an EVENT publish from the auto-reply
-// this test triggers) is intentionally ignored -- this fake only knows how
-// to answer one REQ.
+// message it receives (the client's REQ), it replies with one pre-built
+// EVENT, then EOSE, then a CLOSED envelope for the same subscription.
+//
+// An earlier version of this fake relied on `time.Sleep` plus closing the
+// connection to end the subscription -- watchOneRelay's `for evt := range
+// sub.Events` only exits once the client library notices the connection
+// died (which cancels the subscription and closes sub.Events), and that
+// made the test's timing an arbitrary guess. Sending CLOSED is
+// deterministic instead: the client library's handleClosed
+// (fiatjaf.com/nostr's subscription.go) reacts to a CLOSED envelope by
+// canceling the subscription synchronously, which is what actually closes
+// sub.Events -- no sleep, no race with OS write buffering.
 func startFakeRelay(t *testing.T, eventJSON json.RawMessage) string {
 	t.Helper()
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
@@ -281,7 +284,27 @@ func startFakeRelay(t *testing.T, eventJSON json.RawMessage) string {
 		_ = conn.WriteMessage(websocket.TextMessage, eventMsg)
 		eoseMsg, _ := json.Marshal([]any{"EOSE", subID})
 		_ = conn.WriteMessage(websocket.TextMessage, eoseMsg)
-		time.Sleep(1 * time.Second)
+
+		// fiatjaf.com/nostr's Subscription.dispatchEvent delivers an EVENT
+		// asynchronously: it spawns a goroutine that does
+		// `select { case sub.Events <- evt: ...; case <-sub.Context.Done(): ... }`.
+		// Sending CLOSED immediately (which cancels sub.Context) races that
+		// select -- cancellation can win, silently dropping the event before
+		// it's ever delivered. This pause is what actually makes the test
+		// reliable: not "wait for the OS to flush a write" (the original,
+		// wrong theory), but "give the client's own dispatch goroutine a
+		// window to win its race before we cancel the subscription."
+		time.Sleep(50 * time.Millisecond)
+
+		closedMsg, _ := json.Marshal([]any{"CLOSED", subID, "test done"})
+		_ = conn.WriteMessage(websocket.TextMessage, closedMsg)
+
+		// Give the client a moment to process CLOSED before this handler
+		// returns and tears down the connection out from under it; any
+		// subsequent message on this connection (e.g. an EVENT publish from
+		// the auto-reply this test triggers) is intentionally ignored --
+		// this fake only knows how to answer one REQ.
+		time.Sleep(50 * time.Millisecond)
 	}))
 	t.Cleanup(srv.Close)
 
@@ -297,6 +320,7 @@ func startFakeRelay(t *testing.T, eventJSON json.RawMessage) string {
 func TestWatchInbox_ReceivesEventMarksSeenAndAutoReplies(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	messaging.ResetStoreForTest()
 	require.NoError(t, messaging.InitStorage())
 
 	ks := &types.KeyStore{
