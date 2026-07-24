@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"os"
 	"time"
 
 	"fiatjaf.com/nostr"
+	"github.com/AuraAIHQ/agent-speaker/internal/audit"
 	"github.com/AuraAIHQ/agent-speaker/internal/common"
 	"github.com/AuraAIHQ/agent-speaker/internal/identity"
 	"github.com/AuraAIHQ/agent-speaker/pkg/crypto"
@@ -195,6 +197,11 @@ Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 		queuedForRetry := false
 		if success > 0 {
 			StoreOutgoingMessage(event, recipientNpub, content, isEncrypted)
+			if err := audit.LogAction(sender.Nickname, audit.ActionMessageSent, map[string]any{
+				"to": recipientNpub, "encrypted": isEncrypted, "event_id": event.ID.Hex(),
+			}); err != nil {
+				fmt.Fprintf(os.Stderr, "⚠️  audit log failed: %v\n", err)
+			}
 			// Remove from outbox if it was there
 			ob, _ := LoadOutbox()
 			RemoveFromOutbox(ob, string(event.ID[:]))
@@ -368,6 +375,11 @@ var AgentInboxCmd = &cli.Command{
 
 			// Store in local history
 			StoreIncomingMessage(&evt, content, isEncrypted)
+			if err := audit.LogAction(recipient.Nickname, audit.ActionMessageReceived, map[string]any{
+				"from": senderNpub, "encrypted": isEncrypted,
+			}); err != nil {
+				fmt.Fprintf(os.Stderr, "⚠️  audit log failed: %v\n", err)
+			}
 
 			entries = append(entries, inboxEntry{
 				Time:      evt.CreatedAt.Time().Format("15:04"),

@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/AuraAIHQ/agent-speaker/internal/audit"
 	"github.com/urfave/cli/v3"
 )
 
 // StorageCmd provides storage management commands
 var StorageCmd = &cli.Command{
-	Name:  "storage",
-	Usage: "Manage local storage",
+	Name:        "storage",
+	Usage:       "Manage local storage",
 	Description: `View and manage the SQLite message database`,
 	Commands: []*cli.Command{
 		{
@@ -72,6 +73,50 @@ var StorageCmd = &cli.Command{
 					fmt.Printf("   - %s\n", name)
 				}
 
+				return nil
+			},
+		},
+		{
+			Name:  "audit-log",
+			Usage: "View or verify the tamper-evident audit log",
+			Flags: []cli.Flag{
+				&cli.IntFlag{
+					Name:  "limit",
+					Usage: "Maximum entries to show (most recent first, 0 = all)",
+					Value: 20,
+				},
+				&cli.BoolFlag{
+					Name:  "verify",
+					Usage: "Verify chain integrity instead of listing entries",
+				},
+			},
+			Action: func(ctx context.Context, c *cli.Command) error {
+				if c.Bool("verify") {
+					ok, brokenAt, err := audit.VerifyChain()
+					if err != nil {
+						return fmt.Errorf("failed to verify audit chain: %w", err)
+					}
+					if ok {
+						fmt.Println("✅ Audit chain intact")
+						return nil
+					}
+					fmt.Printf("❌ Audit chain broken at seq %d\n", brokenAt)
+					return fmt.Errorf("audit chain broken at seq %d", brokenAt)
+				}
+
+				entries, err := audit.List(int(c.Int("limit")))
+				if err != nil {
+					return fmt.Errorf("failed to read audit log: %w", err)
+				}
+				if len(entries) == 0 {
+					fmt.Println("📭 Audit log is empty")
+					return nil
+				}
+
+				fmt.Printf("📜 Audit Log (%d entries)\n\n", len(entries))
+				for _, e := range entries {
+					fmt.Printf("[%d] seq=%d actor=%s action=%s\n", e.Timestamp, e.Seq, e.Actor, e.Action)
+				}
 				return nil
 			},
 		},
