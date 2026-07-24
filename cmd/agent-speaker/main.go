@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/fatih/color"
 	"github.com/AuraAIHQ/agent-speaker/internal/daemon"
 	"github.com/AuraAIHQ/agent-speaker/internal/group"
 	"github.com/AuraAIHQ/agent-speaker/internal/identity"
@@ -20,8 +19,6 @@ import (
 var version = "dev"
 
 func main() {
-	color.NoColor = false
-
 	app := &cli.Command{
 		Name:    "agent-speaker",
 		Usage:   "A nostr-based agent communication CLI",
