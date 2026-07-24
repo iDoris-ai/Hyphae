@@ -83,6 +83,8 @@ git checkout main && git pull
 
 把 `specs/m1.5/README.md` 任务表里这一条的 status 改成 `done`，提交（可以是一个单独的小 commit，也可以合并进下一个任务的第一个 commit）。回到 Step 0（此时应该走到"没有开着的 PR"分支，开始下一个任务）。
 
+> **注意**：`main` 是受保护分支，不能直接 `git push origin main`——哪怕只改一行文档也会被拒（`GH006: Protected branch update failed`）。默认走"合并进下一个任务分支的第一个 commit"这条路（省一次单独开 PR 的开销）；只有当下一个任务还没确定、或者需要立刻让 main 反映最新状态时，才单独开一个纯文档的小分支/PR（参考任务 4→5 之间因为这个原因产生的 PR #17）。
+
 ### Step 6b：Request changes → 修复，重新申请 review
 
 1. 读 review 意见，逐条对照修
