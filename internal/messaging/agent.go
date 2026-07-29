@@ -2,10 +2,13 @@ package messaging
 
 import (
 	"context"
+	cryptorand "crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"fiatjaf.com/nostr"
@@ -52,6 +55,29 @@ func DecompressText(encoded string) (string, error) {
 		return "", err
 	}
 	return string(decompressed), nil
+}
+
+// deriveMessageDTag returns a per-message "d" tag value for kind 30078
+// agent messages. Kind 30078 falls in NIP-01's addressable/parameterized-
+// replaceable range (30000-39999): a compliant relay keeps only the latest
+// event per (pubkey, kind, d) coordinate, treating a missing "d" as "". Since
+// profile publish (internal/profile/profile.go) uses a fixed ProfileDTag on
+// the same kind to intentionally keep one replaceable profile per identity,
+// agent messages need a value that's unique per message instead, or
+// consecutive messages from the same sender would evict each other on such
+// relays -- see CC-82. The random component guarantees uniqueness even for
+// byte-identical content sent twice within the same second (e.g. retries
+// with encryption disabled, where the ciphertext wouldn't otherwise differ).
+func deriveMessageDTag(content string, createdAt nostr.Timestamp) (string, error) {
+	nonce := make([]byte, 8)
+	if _, err := cryptorand.Read(nonce); err != nil {
+		return "", err
+	}
+	h := sha256.New()
+	h.Write([]byte(content))
+	h.Write([]byte(strconv.FormatInt(int64(createdAt), 10)))
+	h.Write(nonce)
+	return hex.EncodeToString(h.Sum(nil))[:16], nil
 }
 
 // AgentMsgCmd - Send message using nicknames
@@ -134,11 +160,24 @@ Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 		}
 
 		compressed, _ := CompressText(messageContent)
+		createdAt := nostr.Now()
+		dTag, err := deriveMessageDTag(compressed, createdAt)
+		if err != nil {
+			return fmt.Errorf("failed to derive d tag: %w", err)
+		}
 		tags := nostr.Tags{
 			{"p", common.PubKeyToHex(recipientPK)},
 			{"c", AgentTag},
 			{"z", CompressTag},
 			{"v", AgentVersion},
+			// Kind 30078 is a NIP-01 addressable/parameterized-replaceable
+			// kind range (30000-39999): relays that follow the spec keep
+			// only the latest event per (pubkey, kind, d) coordinate. A
+			// unique per-message d (unlike profile's fixed ProfileDTag,
+			// see internal/profile/profile.go) keeps every message its own
+			// coordinate so consecutive messages from the same sender
+			// don't silently evict each other -- see CC-82 discussion.
+			{"d", dTag},
 		}
 		// Use "enc" tag to mark encrypted messages
 		if isEncrypted {
@@ -146,7 +185,7 @@ Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
 		}
 
 		event := &nostr.Event{
-			CreatedAt: nostr.Now(),
+			CreatedAt: createdAt,
 			Kind:      AgentKind,
 			Tags:      tags,
 			Content:   compressed,
