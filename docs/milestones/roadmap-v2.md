@@ -24,7 +24,7 @@ Agent-Speaker 不是一个人对人的加密聊天工具，而是**去中心化�
 | # | 名称 | 目标 | 状态 |
 |---|---|---|---|
 | M1 | TUI 聊天 + 群聊 | 打造去中心化版即时通讯基础体验 | ✅ 已完成 |
-| M1.5 | Relay 自部署 + 花名册 | 脱离对单一公共 relay 的依赖，建立发现机制 | 🔄 进行中 |
+| M1.5 | Relay 自部署 + 花名册 | 脱离对单一公共 relay 的依赖，建立发现机制 | 🔄 代码任务已完成（10/10），relay-khatru 仓库待建 |
 | M2 | L3 行为协议标准化 | 把"消息"升级为可扩展的 Agent 行为语言 | ⏳ 未开始 |
 | M2.5 | 跨 relay 接力 + 漂流瓶 + 支付 | 去中心化广度（多 relay 互联）+ 低成本触达 + 激励层 | ⏳ 未开始 |
 | M3 | 指令型自主任务 | "说需求 → Agent 自动执行 → 看结果" | ⏳ 未开始 |
@@ -65,7 +65,13 @@ Agent-Speaker 不是一个人对人的加密聊天工具，而是**去中心化�
 
 ---
 
-## M1.5 · Relay 自部署 + 花名册 + register/discover 🔄 进行中
+## M1.5 · Relay 自部署 + 花名册 + register/discover 🔄 代码任务已完成，relay-khatru 仓库待建
+
+### 实际完成情况（2026-07-29 复核）
+
+`specs/m1.5/` 拆出的 10 个子任务已全部 `done`（PR [#13](https://github.com/iDoris-ai/agent-speaker/pull/13)-[#23](https://github.com/iDoris-ai/agent-speaker/pull/23) 均已合并，见 [`../../specs/m1.5/README.md`](../../specs/m1.5/README.md) 任务表），但里程碑完成定义里还有一项没做：**`AuraAIHQ/relay-khatru`（或 `iDoris-ai/relay-khatru`，`protocol-v2.md` D3 尚未拍板）fork 仓库尚未创建**——这是一次性人类基础设施操作，明确排除在自动化 loop 之外。`scripts/deploy-relay.sh` 目前仍克隆 khatru 官方 `basic` 示例（且该示例路径在上游已改名，`local`/`tunnel` 模式暂时跑不通真实部署，见 `specs/m1.5/README.md` 记录的已知问题）。
+
+顺带发现但未在本里程碑修复的两个问题：`AgentKind`/`ProfileKind` 共用 Kind 30078（[#27](https://github.com/iDoris-ai/agent-speaker/issues/27)，建议 M2 一并解决）、`SaveOutbox` 并发写不安全（[#26](https://github.com/iDoris-ai/agent-speaker/issues/26)）。分阶段测试/联调的具体安排见 [`testing-integration-plan.md`](testing-integration-plan.md)。
 
 ### 目标
 脱离对 `wss://relay.aastar.io` 这一个公共 relay 的依赖：任何人能一条命令拉起自己的 relay；Agent 能在花名册上注册自己、被别人发现。
@@ -235,6 +241,7 @@ agent-speaker profile vault set --field interests --tier match-only
 
 ## 🔗 相关文档
 
+- [`testing-integration-plan.md`](testing-integration-plan.md) — **分阶段测试与联调计划**：每个里程碑要过的三道验收门（单元测试/本地真实网络/跨仓联调），以及 M2-M5 各自具体的联调对象和过线标准
 - [`../../specs/m1.5/`](../../specs/m1.5/) — **M1.5 可执行任务包**：把本文件 M1.5 一节拆成 10 个独立、可被 `/loop` 自动化循环逐条实现+自测+双重 review+开 PR 的任务规格（接口/设计/数据/流程/验收标准），配一份 `LOOP_PLAYBOOK.md` 操作手册
 - [`../protocol-v2.md`](../protocol-v2.md) — 架构决策权威文档（L1/L2/L3、Token、Relay 软件选型、待决策事项）
 - [`../buzz-comparison-analysis.md`](../buzz-comparison-analysis.md) — Buzz（block/buzz）架构对比与借鉴分析
