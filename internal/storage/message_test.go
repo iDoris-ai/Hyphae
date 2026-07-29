@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"encoding/hex"
 	"testing"
 
 	"fiatjaf.com/nostr"
@@ -304,10 +305,14 @@ func TestStoreOutgoingMessage(t *testing.T) {
 	err := store.StoreOutgoingMessage(event, "npub1recipient", "plaintext message", true)
 	require.NoError(t, err)
 
-	// Verify
-	retrieved, err := store.GetMessage(string(event.ID[:]))
+	// Verify -- the stored ID is the hex-encoded event ID (a CC-82 joint-test
+	// regression: it used to be the raw 32 bytes cast to a string, which
+	// produced unusable garbage in JSON output).
+	wantID := hex.EncodeToString(event.ID[:])
+	retrieved, err := store.GetMessage(wantID)
 	require.NoError(t, err)
 	assert.NotNil(t, retrieved)
+	assert.Equal(t, wantID, retrieved.ID)
 	assert.Equal(t, "plaintext message", retrieved.Plaintext)
 	assert.True(t, retrieved.IsEncrypted)
 	assert.False(t, retrieved.IsIncoming)
@@ -333,9 +338,11 @@ func TestStoreIncomingMessage(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify
-	retrieved, err := store.GetMessage(string(event.ID[:]))
+	wantID := hex.EncodeToString(event.ID[:])
+	retrieved, err := store.GetMessage(wantID)
 	require.NoError(t, err)
 	assert.NotNil(t, retrieved)
+	assert.Equal(t, wantID, retrieved.ID)
 	assert.Equal(t, "decrypted message", retrieved.Plaintext)
 	assert.True(t, retrieved.IsIncoming)
 }

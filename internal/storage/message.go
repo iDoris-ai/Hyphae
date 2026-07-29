@@ -2,6 +2,7 @@ package storage
 
 import (
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -265,7 +266,7 @@ func (s *MessageStore) DeleteMessage(id string) error {
 // StoreOutgoingMessage stores a sent message from a nostr event
 func (s *MessageStore) StoreOutgoingMessage(event *nostr.Event, recipientNpub, plaintext string, isEncrypted bool) error {
 	msg := &types.StoredMessage{
-		ID:            string(event.ID[:]),
+		ID:            hex.EncodeToString(event.ID[:]),
 		SenderNpub:    common.EncodeNpub(event.PubKey),
 		RecipientNpub: recipientNpub,
 		Content:       event.Content,
@@ -291,7 +292,7 @@ func (s *MessageStore) StoreIncomingMessage(event *nostr.Event, plaintext string
 	}
 
 	msg := &types.StoredMessage{
-		ID:            string(event.ID[:]),
+		ID:            hex.EncodeToString(event.ID[:]),
 		SenderNpub:    common.EncodeNpub(event.PubKey),
 		RecipientNpub: recipientNpub,
 		Content:       event.Content,

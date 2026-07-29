@@ -1,6 +1,7 @@
 package messaging
 
 import (
+	"encoding/hex"
 	"testing"
 
 	"fiatjaf.com/nostr"
@@ -135,7 +136,10 @@ func TestStoreOutgoingMessage(t *testing.T) {
 
 	s, err := GetStore()
 	require.NoError(t, err)
-	msg, err := s.GetMessage(string(event.ID[:]))
+	// The stored ID is the hex-encoded event ID (a CC-82 joint-test
+	// regression: it used to be the raw 32 bytes cast to a string, which
+	// produced unusable garbage in JSON output).
+	msg, err := s.GetMessage(hex.EncodeToString(event.ID[:]))
 	require.NoError(t, err)
 	require.NotNil(t, msg)
 	assert.False(t, msg.IsIncoming)
@@ -157,7 +161,7 @@ func TestStoreIncomingMessage(t *testing.T) {
 
 	s, err := GetStore()
 	require.NoError(t, err)
-	msg, err := s.GetMessage(string(event.ID[:]))
+	msg, err := s.GetMessage(hex.EncodeToString(event.ID[:]))
 	require.NoError(t, err)
 	require.NotNil(t, msg)
 	assert.True(t, msg.IsIncoming)
