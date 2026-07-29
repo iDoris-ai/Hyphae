@@ -202,6 +202,11 @@ var HistoryCmd = &cli.Command{
 			Name:  "inbox",
 			Usage: "Show inbox (received messages)",
 			Flags: []cli.Flag{
+				&cli.StringFlag{
+					Name:    "as",
+					Aliases: []string{"a"},
+					Usage:   "Your nickname (defaults to the keystore's default identity)",
+				},
 				&cli.IntFlag{
 					Name:    "limit",
 					Aliases: []string{"l"},
@@ -220,7 +225,7 @@ var HistoryCmd = &cli.Command{
 					return err
 				}
 
-				myIdentity, err := identity.GetIdentity(ks, "")
+				myIdentity, err := identity.GetIdentity(ks, c.String("as"))
 				if err != nil {
 					return err
 				}

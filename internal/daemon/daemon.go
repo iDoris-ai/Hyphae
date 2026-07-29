@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/signal"
@@ -321,7 +322,11 @@ func watchOneRelay(
 
 	newCount := 0
 	for evt := range sub.Events {
-		eventID := string(evt.ID[:])
+		// Hex-encoded to match messaging.RecentIncomingEventIDs, which reads
+		// the same encoding back out of SQLite's "id" column (see
+		// preloadRecentSeen below) -- a mismatched encoding here would make
+		// every preloaded ID a no-op, silently defeating restart dedup.
+		eventID := hex.EncodeToString(evt.ID[:])
 		if seen.Has(eventID) {
 			continue
 		}
