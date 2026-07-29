@@ -126,6 +126,8 @@ agent-speaker profile discover --capability seo --online-only --rating-min 4.5
 - [ ] `tip`/`drifting-bottle` 的 payload schema 先定义好（供 M2.5 直接用），本里程碑不实现执行逻辑
 - [ ]（**借鉴 Buzz NIP-OA**）在 behavior schema 里预留 owner-attestation 字段：`["auth", "<owner-pubkey-hex>", "<conditions>", "<sig-hex>"]` 的等价设计，但 owner 身份对接 **AAstar AirAccount**（而非泛化 pubkey）。本里程碑只做数据结构 + 签名/校验函数，不接入真实 AirAccount SDK（那是 M5 范畴）——现在预留，避免 M2.5/M5 做 `tip`/`drifting-bottle` 时才发现协议要推翻重来
 - [ ] 标准 Nostr 客户端兼容性验证：确认非 L2/L3-aware 客户端读到 Kind 30078 不报错（`protocol-v2.md` §11 兼容性承诺的验收测试）
+- [ ] **（[#27](https://github.com/iDoris-ai/agent-speaker/issues/27) 遗留债）** `AgentKind`（`agent msg`）和 `ProfileKind`（`profile publish`）目前共用 Kind 30078，纯属巧合非设计。既然本里程碑要把 `register`/`publish`/`inquire`/`tip`/`subscribe` 统一收敛进新的 behavior 信封，这是重新定义 kind/tag 约定的天然时机——本任务给新 behavior 信封分配一个独立 kind（不再和 `agent msg` 共用 30078），并确认这不破坏已发布事件的可读性（标准客户端仍能读到旧的 Kind 30078 消息，只是不再有新的 behavior 事件混进同一个 kind）
+- [ ] **（[#26](https://github.com/iDoris-ai/agent-speaker/issues/26) 遗留债）** `internal/messaging/outbox.go` 的 `SaveOutbox` 并发读-改-写无锁，有丢更新和文件损坏两种失败模式（daemon 自动重试循环和用户手动 CLI 已经会真的并发操作同一个 `outbox.json`）。本里程碑新增的 behavior 收发会进一步增加对 outbox 的并发写入场景（`publish`/`tip`/`subscribe` 各自的失败重试），修复应先于这些新 behavior 上线，而不是让并发写者数量继续增加
 
 ### 交付物（示例）
 ```bash
