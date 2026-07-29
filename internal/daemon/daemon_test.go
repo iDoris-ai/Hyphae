@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -208,11 +209,12 @@ func TestPreloadRecentSeen_MarksStoredIDsAsSeen(t *testing.T) {
 	require.NoError(t, messaging.StoreIncomingMessage(event, "hi", false))
 
 	seen := newSeenSet()
-	assert.False(t, seen.Has(string(event.ID[:])))
+	wantID := hex.EncodeToString(event.ID[:])
+	assert.False(t, seen.Has(wantID))
 
 	preloadRecentSeen(seen, myNpub)
 
-	assert.True(t, seen.Has(string(event.ID[:])), "an already-stored incoming event must be pre-marked as seen")
+	assert.True(t, seen.Has(wantID), "an already-stored incoming event must be pre-marked as seen")
 }
 
 // TestSendAutoReply_PublishesAndRecordsOutgoingMessage exercises
@@ -389,7 +391,7 @@ func TestWatchInbox_ReceivesEventMarksSeenAndAutoReplies(t *testing.T) {
 
 	// Only safe to read `seen` now that the watchInbox goroutine has fully
 	// returned -- it's a plain map with no locking of its own.
-	assert.True(t, seen.Has(string(incoming.ID[:])), "the event must be marked seen after being processed")
+	assert.True(t, seen.Has(hex.EncodeToString(incoming.ID[:])), "the event must be marked seen after being processed")
 
 	// The conversation ends up with two messages: the original incoming one
 	// (stored by watchOneRelay itself) and the auto-reply sendAutoReply
