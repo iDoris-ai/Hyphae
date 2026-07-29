@@ -8,6 +8,7 @@ import (
 
 	"github.com/AuraAIHQ/agent-speaker/internal/common"
 	"github.com/AuraAIHQ/agent-speaker/internal/identity"
+	"github.com/AuraAIHQ/agent-speaker/pkg/types"
 	"github.com/urfave/cli/v3"
 )
 
@@ -233,40 +234,46 @@ var HistoryCmd = &cli.Command{
 				if err != nil {
 					return err
 				}
-
-				if len(messages) == 0 {
-					fmt.Println("📭 Inbox is empty")
-					return nil
+				if messages == nil {
+					messages = []types.StoredMessage{}
 				}
 
-				fmt.Printf("📬 Inbox (%d messages)\n\n", len(messages))
-
-				for _, msg := range messages {
-					content := msg.Plaintext
-					if content == "" {
-						content = msg.Content
+				jsonMode := common.JSONMode(c)
+				common.Emit(jsonMode, messages, func() {
+					if len(messages) == 0 {
+						fmt.Println("📭 Inbox is empty")
+						return
 					}
 
-					encrypted := ""
-					if msg.IsEncrypted {
-						encrypted = "🔒"
-					}
+					fmt.Printf("📬 Inbox (%d messages)\n\n", len(messages))
 
-					// Try to get sender nickname
-					senderName := msg.SenderNpub[:16] + "..."
-					for _, contact := range identity.ListContacts(ks) {
-						if contact.Npub == msg.SenderNpub {
-							senderName = contact.Nickname
-							break
+					for _, msg := range messages {
+						content := msg.Plaintext
+						if content == "" {
+							content = msg.Content
 						}
-					}
 
-					fmt.Printf("[%d] %s: %s %s\n",
-						msg.CreatedAt,
-						senderName,
-						encrypted,
-						common.TruncateString(content, 40))
-				}
+						encrypted := ""
+						if msg.IsEncrypted {
+							encrypted = "🔒"
+						}
+
+						// Try to get sender nickname
+						senderName := msg.SenderNpub[:16] + "..."
+						for _, contact := range identity.ListContacts(ks) {
+							if contact.Npub == msg.SenderNpub {
+								senderName = contact.Nickname
+								break
+							}
+						}
+
+						fmt.Printf("[%d] %s: %s %s\n",
+							msg.CreatedAt,
+							senderName,
+							encrypted,
+							common.TruncateString(content, 40))
+					}
+				})
 
 				return nil
 			},

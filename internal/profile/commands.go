@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
-	"github.com/fatih/color"
 	"github.com/AuraAIHQ/agent-speaker/internal/common"
 	"github.com/AuraAIHQ/agent-speaker/internal/identity"
 	"github.com/AuraAIHQ/agent-speaker/pkg/types"
+	"github.com/fatih/color"
 	"github.com/urfave/cli/v3"
 )
 
@@ -200,11 +200,21 @@ var profilePublishCmd = &cli.Command{
 
 		// Publish
 		relays := c.StringSlice("relay")
+		jsonMode := common.JSONMode(c)
+		type relayResult struct {
+			URL   string `json:"url"`
+			OK    bool   `json:"ok"`
+			Error string `json:"error,omitempty"`
+		}
+		results := make([]relayResult, 0, len(relays))
 		success := 0
 		for _, url := range relays {
 			relay, err := nostr.RelayConnect(ctx, url, nostr.RelayOptions{})
 			if err != nil {
-				fmt.Printf("   ❌ %s: connect failed: %v\n", url, err)
+				if !jsonMode {
+					fmt.Printf("   ❌ %s: connect failed: %v\n", url, err)
+				}
+				results = append(results, relayResult{URL: url, OK: false, Error: fmt.Sprintf("connect failed: %v", err)})
 				continue
 			}
 
@@ -214,9 +224,15 @@ var profilePublishCmd = &cli.Command{
 			relay.Close()
 
 			if err != nil {
-				fmt.Printf("   ❌ %s: publish failed: %v\n", url, err)
+				if !jsonMode {
+					fmt.Printf("   ❌ %s: publish failed: %v\n", url, err)
+				}
+				results = append(results, relayResult{URL: url, OK: false, Error: fmt.Sprintf("publish failed: %v", err)})
 			} else {
-				fmt.Printf("   ✅ %s\n", url)
+				if !jsonMode {
+					fmt.Printf("   ✅ %s\n", url)
+				}
+				results = append(results, relayResult{URL: url, OK: true})
 				success++
 			}
 		}
@@ -231,7 +247,14 @@ var profilePublishCmd = &cli.Command{
 			}
 		}
 
-		fmt.Printf("📤 Profile '%s' published to %d/%d relays\n", profile.Name, success, len(relays))
+		common.Emit(jsonMode, map[string]any{
+			"name":         profile.Name,
+			"relays":       results,
+			"published_to": success,
+			"relay_count":  len(relays),
+		}, func() {
+			fmt.Printf("📤 Profile '%s' published to %d/%d relays\n", profile.Name, success, len(relays))
+		})
 		return nil
 	},
 }
