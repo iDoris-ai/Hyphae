@@ -36,18 +36,22 @@
 
 ## 2. 进 M2 之前：先把 M1.5 的账结清
 
-`specs/m1.5/README.md` 的 10 个任务已经全部 `done`（PR #13-#23 均已合并），但里程碑完成定义里还有两项没做：
+`specs/m1.5/README.md` 的 10 个任务已经全部 `done`（PR #13-#23 均已合并），里程碑完成定义里的文档同步项已处理完：
 
-- [ ] `roadmap-v2.md` 把 M1.5 状态从 🔄 改成"代码任务已完成，relay-khatru 仓库待建"，补一段实际完成情况（本文档 §1 的引言可以直接引用）
-- [ ] `docs/TODO.md` 里对应勾掉的项目没同步打 `[x]`（第 56/57/58 行的三个 M1.5 子任务链接实际已经合并，TODO.md 还是未勾选状态——纯粹是文档漂移，不是代码问题）
-- [ ] 决定 `AuraAIHQ/relay-khatru`（还是 `iDoris-ai/relay-khatru`？`protocol-v2.md` D3 还没拍板）这个 fork 仓库到底建不建、什么时候建——这是一次性人类操作，`specs/m1.5/README.md` 明确写了不适合自动化循环代劳
+- [x] `roadmap-v2.md` 把 M1.5 状态从 🔄 改成"代码任务已完成，relay-khatru 仓库待建"，补了实际完成情况说明
+- [x] `docs/TODO.md` 里对应勾掉的项目已同步打 `[x]`
+- [ ] 决定 `AuraAIHQ/relay-khatru`（还是 `iDoris-ai/relay-khatru`？`protocol-v2.md` D3 还没拍板）这个 fork 仓库到底建不建、什么时候建——这是一次性人类操作，`specs/m1.5/README.md` 明确写了不适合自动化循环代劳。**这项不阻塞 M2 开工**：relay-khatru 只是 M2.5（跨 relay 转发）的前置条件，M2（behavior 信封 schema 标准化）在单 relay 上就能完整开发/测试/联调。
 
-另外两个 M1.5 期间发现、记录在案但没修的问题，建议在 M2 启动时一并处理，而不是继续挂着：
+### M2 能不能现在开始：可以
 
-| Issue | 内容 | 建议处理时机 |
+`specs/m1.5/README.md` 原文写"M2 及之后的任务——依赖 `docs/protocol-v2.md` §10 里还没拍板的开放决策（D1-D5），等 M1.5 跑完、这些决策定下来后再产出下一批 spec pack"——逐条核对了 D1-D5（邀请券上链、漂流瓶向量算法、relay fork 仓库位置、NIP-42 auth、1对1 通道协议格式），**全部是 M2.5（跨 relay + 漂流瓶 + 隐私分层）的决策，没有一条是 M2（behavior 信封 schema）需要的**。所以严格来说这条排除说明写得比实际需要的更保守——M2 现在就可以开工，D1-D5 只需要在 M2.5 启动前拍板，不需要现在就定。
+
+另外两个 M1.5 期间发现、记录在案但没修的问题，**已正式编入 M2 子任务**（见 `roadmap-v2.md` M2 一节），不再是"独立排期"的模糊状态：
+
+| Issue | 内容 | 编入 M2 的理由 |
 |---|---|---|
-| [#27](https://github.com/iDoris-ai/agent-speaker/issues/27) | `AgentKind`（agent msg）和 `ProfileKind`（profile publish）都是 `30078`，纯属巧合不是设计 | **建议在 M2 一并解决**——M2 本来就要把 register/publish/inquire/tip/subscribe 收敛成统一 behavior 信封（`internal/behavior/`），这是重新定义 kind/tag 约定的天然时机，此时把两者的 kind 分开成本最低；等到 M2 之后再改，已发布事件的兼容性包袱只会更重 |
-| [#26](https://github.com/iDoris-ai/agent-speaker/issues/26) | `SaveOutbox` 并发写有丢更新和文件损坏两种失败模式 | 和 M2 无强关联，可独立排期，但既然 daemon 的自动重试循环和用户手动 CLI 已经开始真的并发操作同一个 outbox.json，建议别拖到出现真实数据损坏才修 |
+| [#27](https://github.com/iDoris-ai/agent-speaker/issues/27) | `AgentKind`（agent msg）和 `ProfileKind`（profile publish）都是 `30078`，纯属巧合不是设计 | M2 本来就要把 register/publish/inquire/tip/subscribe 收敛成统一 behavior 信封（`internal/behavior/`），这是重新定义 kind/tag 约定的天然时机，此时把两者的 kind 分开成本最低；等到 M2 之后再改，已发布事件的兼容性包袱只会更重 |
+| [#26](https://github.com/iDoris-ai/agent-speaker/issues/26) | `SaveOutbox` 并发写有丢更新和文件损坏两种失败模式 | M2 新增的 `publish`/`tip`/`subscribe` behavior 各自的失败重试会进一步增加对 `outbox.json` 的并发写入场景——并发写者只会变多不会变少，修复应先于这些新 behavior 上线 |
 
 ---
 
@@ -57,10 +61,10 @@
 
 **改动了什么对外契约**：`agent msg`/`profile publish` 背后的"临时约定"（`c`/`z`/`v`/`d`/`enc` 几个 tag）升级成统一的 behavior 信封（`register`/`publish`/`inquire`/`tip`/`subscribe`），外部消费者过去手搓的 tag 解析逻辑可能要跟着换。
 
-- **单元测试**：behavior envelope 编解码器（zstd 压缩/解压、tag 解析）、owner-attestation 字段的签名/校验函数。
-- **本地真实网络**：本地 relay 上跑一遍 `register`/`publish`/`inquire`/`subscribe` 四种 behavior，直接对 relay 发原始 `REQ` 核对 tag/content 结构（就像这次验证 d 标签唯一性时做的那样）。同时验收 `protocol-v2.md` §11 的"标准 Nostr 客户端读到 Kind 30078 不报错"这条兼容性承诺。
-- **跨仓联调**：Agent24 的 F4 桥（PR #89/#92）已经在生产用今天这套"临时约定"了。**开工前**要开一个新的 Cooperation-Center 任务，把新 behavior 信封的 schema 草案发给 `repo:agent24`，明确问"这次收敛会不会破坏你现有的 say/announce/listen 映射"——这是本里程碑最高风险点，务必在写代码之前就对齐，而不是写完再发现要推倒重来。**合并前**要让 Agent24 拿新版二进制把 F4a/F4b 跑一遍全部三个场景（1:1、profile 广播、连发不丢），确认新旧行为一致或者提前收到破坏性变更通知。
-- **过线标准**：三道门都过，且 Agent24 明确回复"F4 桥不用改代码"或"F4 桥已按新契约更新且验证通过"。
+- **单元测试**：behavior envelope 编解码器（zstd 压缩/解压、tag 解析）、owner-attestation 字段的签名/校验函数；`#26`（`SaveOutbox` 并发写）修复的并发场景回归测试（20 并发读-改-写不再丢更新/损坏文件）。
+- **本地真实网络**：本地 relay 上跑一遍 `register`/`publish`/`inquire`/`subscribe` 四种 behavior，直接对 relay 发原始 `REQ` 核对 tag/content 结构（就像这次验证 d 标签唯一性时做的那样）。同时验收 `protocol-v2.md` §11 的"标准 Nostr 客户端读到 Kind 30078 不报错"这条兼容性承诺——**这条尤其要覆盖 `#27` 的 kind 迁移**：确认迁移后旧的 `agent msg`（Kind 30078）历史事件仍然可读，新 behavior 信封用的新 kind 也对标准客户端呈现"看不懂但不报错"。
+- **跨仓联调**：Agent24 的 F4 桥（PR #89/#92）已经在生产用今天这套"临时约定"了，且直接依赖 `AgentKind`/`ProfileKind` 都是 30078 这件事（虽然是巧合）。**开工前**要开一个新的 Cooperation-Center 任务，把新 behavior 信封的 schema 草案 + kind 迁移方案（`#27`）一起发给 `repo:agent24`，明确问"这次收敛 + kind 拆分会不会破坏你现有的 say/announce/listen 映射"——这是本里程碑最高风险点，务必在写代码之前就对齐，而不是写完再发现要推倒重来。**合并前**要让 Agent24 拿新版二进制把 F4a/F4b 跑一遍全部三个场景（1:1、profile 广播、连发不丢），确认新旧行为一致或者提前收到破坏性变更通知。
+- **过线标准**：三道门都过，`#26`/`#27` 均已修复并有对应回归测试，且 Agent24 明确回复"F4 桥不用改代码"或"F4 桥已按新契约更新且验证通过"。
 
 ### M2.5 · 跨 relay 接力 + 漂流瓶 + AAstar Point 支付
 
