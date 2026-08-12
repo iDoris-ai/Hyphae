@@ -3,7 +3,7 @@ package profile
 import (
 	"testing"
 
-	"github.com/AuraAIHQ/agent-speaker/pkg/types"
+	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/stretchr/testify/assert"
 )
 

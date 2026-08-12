@@ -1,5 +1,5 @@
 #!/bin/bash
-# Agent Speaker 全面验收测试
+# Hyphae 全面验收测试
 # TC-001 ~ TC-012
 
 # 不启用 set -e，手动检查错误
@@ -20,12 +20,12 @@ else
 fi
 
 # 检查二进制
-if [ ! -f "./bin/agent-speaker" ]; then
+if [ ! -f "./bin/hyphae" ]; then
     echo -e "${RED}❌ 错误: 请先构建项目: make build${NC}"
     exit 1
 fi
 
-AGENT="./bin/agent-speaker"
+AGENT="./bin/hyphae"
 PASSED=0
 FAILED=0
 
@@ -253,7 +253,7 @@ tc012_compression() {
 
 # 主程序
 echo "========================================"
-echo "Agent Speaker 全面验收测试"
+echo "Hyphae 全面验收测试"
 echo "========================================"
 echo ""
 echo "测试账户:"

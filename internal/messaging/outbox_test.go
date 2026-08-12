@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
-	"github.com/AuraAIHQ/agent-speaker/pkg/types"
+	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -40,7 +40,7 @@ func TestAddToOutbox(t *testing.T) {
 	require.NoError(t, err)
 
 	event := &nostr.Event{
-		Kind: 1,
+		Kind:    1,
 		Content: "test",
 	}
 	event.ID = [32]byte{1}

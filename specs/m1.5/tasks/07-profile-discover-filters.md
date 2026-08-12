@@ -10,7 +10,7 @@
 ## 接口
 
 ```
-agent-speaker profile discover \
+hyphae profile discover \
   --capability seo \
   --price-min 100 --price-max 500 \
   --rating-min 4.5 \
@@ -58,7 +58,7 @@ CLI flag 解析 → 组装 `DiscoverFilter` → 调用 `Manager.Discover` → �
   - **评分过滤**：`pkg/types.AgentProfile` 新增 `Rating *float64`（指针是为了区分"没设置评分"和"评分恰好是 0"）。这是 structured-only 字段，同一套 `Validate()` mode-vs-字段校验（任务 6 引入的机制）也把它算进去，加了对应测试。**这个字段目前只是自评分**（profile 自己声明的分数），不是第三方计算的信誉分——没有评价/信誉系统能算出这种分数，那是另一个话题（见 `docs/protocol-v2.md` 里 CityRep 那部分），本任务不涉及。目前也没有给 `profile publish` 加 `--rating` flag——spec 给的接口示例只提到 `discover --rating-min`，没提到 publish 侧怎么设置评分，所以先只加 schema 字段（可以通过 `--json-file` 设置，用于测试/未来铺垫），不额外发明一个跟本任务无关的 publish flag。
 - **没有 `Manager` 类型**：spec 的设计示例写的是 `func (m *Manager) Discover(filter DiscoverFilter) (...)`，但这个仓库里从来没有叫 `Manager` 的类型（现有模式是 `internal/profile/db.go` 的 `DB`，方法名如 `ListProfiles`/`SearchProfiles`）。没有照抄一个跟现有代码风格不一致的新类型，而是把 `DiscoverFilter` 实现成一个纯逻辑类型（`internal/profile/filter.go`，`Matches(profile) bool` 方法），在 `profile discover` 的 Action 里直接用它过滤已经从 relay 拿到的 profile 列表——跟 spec"内存过滤即可"的要求一致，只是不需要一个新的容器类型来承载它。
 - **只加到 `profile discover`，没碰 `profile search`**：spec 的"接口"一节给的具体例子只有 `profile discover --capability ... --price-min ...`，目标一节提到"discover/search 目前只能按关键词搜索"这句话本身也不准确（`discover` 现在压根没有关键词搜索，那是 `search` 专属的）。为了不臆测超出接口示例范围的需求，这次只把过滤加到 `discover`（对着 relay 现拿的结果过滤），`search`（本地 SQLite 关键词搜索）维持原样不动。
-- Live smoke test：起本地 `scripts/minirelay.go`，发布了 3 个不同身份的 profile（`seo-e2e-bot`：structured/seo/price 200/rating 4.8/available；`writing-e2e-bot`：structured/writing/price 50/rating 3.5/busy；`simple-e2e-bot`：simple 模式）。依次验证：不传 filter 能看到全部；`--capability seo` 只留下 seo 的两条；`--capability seo --price-min 100 --price-max 300` 组合条件正确；`--price-min 500` 全部排除掉；`--rating-min 4.5` 正确排除评分较低和无评分的记录；`--online-only` 正确排除 busy 的记录；全程 `simple-e2e-bot` 在按 capability/price/rating 过滤时都被正确排除、没有报错或 panic。测试产生的 profile 记录已在提交前从本地 `~/.agent-speaker/messages.db` 清理。
+- Live smoke test：起本地 `scripts/minirelay.go`，发布了 3 个不同身份的 profile（`seo-e2e-bot`：structured/seo/price 200/rating 4.8/available；`writing-e2e-bot`：structured/writing/price 50/rating 3.5/busy；`simple-e2e-bot`：simple 模式）。依次验证：不传 filter 能看到全部；`--capability seo` 只留下 seo 的两条；`--capability seo --price-min 100 --price-max 300` 组合条件正确；`--price-min 500` 全部排除掉；`--rating-min 4.5` 正确排除评分较低和无评分的记录；`--online-only` 正确排除 busy 的记录；全程 `simple-e2e-bot` 在按 capability/price/rating 过滤时都被正确排除、没有报错或 panic。测试产生的 profile 记录已在提交前从本地 `~/.hyphae/messages.db` 清理。
 
 ### Codex review（Tier 1）第一轮
 

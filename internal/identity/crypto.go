@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/AuraAIHQ/agent-speaker/pkg/types"
+	"github.com/iDoris-ai/hyphae/pkg/types"
 	"golang.org/x/crypto/scrypt"
 )
 
@@ -18,7 +18,7 @@ const (
 	scryptR      = 8
 	scryptP      = 1
 	scryptKeyLen = 32
-	verifyToken  = "agent-speaker-keystore-v1"
+	verifyToken  = "hyphae-keystore-v1"
 )
 
 // deriveMasterKey derives a 32-byte key from password and salt using scrypt

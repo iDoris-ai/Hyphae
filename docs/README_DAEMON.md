@@ -4,15 +4,15 @@
 
 ```bash
 # 前台运行（适合测试）
-agent-speaker daemon --identity alice
+hyphae daemon --identity alice
 
 # 后台运行（使用 nohup 或 &）
-nohup agent-speaker daemon --identity alice > ~/.agent-speaker/daemon.log 2>&1 &
+nohup hyphae daemon --identity alice > ~/.hyphae/daemon.log 2>&1 &
 ```
 
 ## 配置自动启动（macOS）
 
-创建 `~/Library/LaunchAgents/com.agent-speaker.daemon.plist`:
+创建 `~/Library/LaunchAgents/com.hyphae.daemon.plist`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -20,10 +20,10 @@ nohup agent-speaker daemon --identity alice > ~/.agent-speaker/daemon.log 2>&1 &
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.agent-speaker.daemon</string>
+    <string>com.hyphae.daemon</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/agent-speaker</string>
+        <string>/usr/local/bin/hyphae</string>
         <string>daemon</string>
         <string>--identity</string>
         <string>alice</string>
@@ -33,24 +33,24 @@ nohup agent-speaker daemon --identity alice > ~/.agent-speaker/daemon.log 2>&1 &
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/Users/YOURNAME/.agent-speaker/daemon.log</string>
+    <string>/Users/YOURNAME/.hyphae/daemon.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/YOURNAME/.agent-speaker/daemon.error.log</string>
+    <string>/Users/YOURNAME/.hyphae/daemon.error.log</string>
 </dict>
 </plist>
 ```
 
 加载服务：
 ```bash
-launchctl load ~/Library/LaunchAgents/com.agent-speaker.daemon.plist
+launchctl load ~/Library/LaunchAgents/com.hyphae.daemon.plist
 ```
 
 ## 检查 Daemon 状态
 
 ```bash
 # 查看日志
-tail -f ~/.agent-speaker/daemon.log
+tail -f ~/.hyphae/daemon.log
 
 # 查看进程
-ps aux | grep "agent-speaker daemon"
+ps aux | grep "hyphae daemon"
 ```

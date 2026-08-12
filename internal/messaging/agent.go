@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
-	"github.com/AuraAIHQ/agent-speaker/internal/audit"
-	"github.com/AuraAIHQ/agent-speaker/internal/common"
-	"github.com/AuraAIHQ/agent-speaker/internal/identity"
-	"github.com/AuraAIHQ/agent-speaker/pkg/crypto"
+	"github.com/iDoris-ai/hyphae/internal/audit"
+	"github.com/iDoris-ai/hyphae/internal/common"
+	"github.com/iDoris-ai/hyphae/internal/identity"
+	"github.com/iDoris-ai/hyphae/pkg/crypto"
 	"github.com/klauspost/compress/zstd"
 	"github.com/urfave/cli/v3"
 )
@@ -85,7 +85,7 @@ var AgentMsgCmd = &cli.Command{
 	Name:  "msg",
 	Usage: "Send a message to another agent",
 	Description: `Send a message using nicknames with optional E2E encryption.
-Example: agent-speaker agent msg --from alice --to bob --content "Hello!"`,
+Example: hyphae agent msg --from alice --to bob --content "Hello!"`,
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:    "from",

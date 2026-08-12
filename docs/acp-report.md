@@ -488,7 +488,7 @@ INITIALIZING → ACTIVE → DEGRADED → RETIRING → RETIRED
 
 ---
 
-## 10. 对 Agent-Speaker 的启示
+## 10. 对 Hyphae 的启示
 
 ### 借鉴点
 1. **极简设计** - RESTful API 比 JSON-RPC 更易理解和实现
@@ -511,7 +511,7 @@ INITIALIZING → ACTIVE → DEGRADED → RETIRING → RETIRED
 - ACP 的简洁设计哲学与 Nostr 的极简理念高度契合
 
 ### 独特优势
-相比 ACP，Agent-Speaker 基于 Nostr 的优势：
+相比 ACP，Hyphae 基于 Nostr 的优势：
 1. **无需 HTTP 服务器** - Relay 中继降低部署门槛
 2. **去中心化发现** - 不依赖中心化的 Manifest 注册表
 3. **天然异步** - Nostr 的发布-订阅模型

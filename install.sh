@@ -1,9 +1,9 @@
 #!/bin/bash
-# Agent Speaker 一键安装脚本
+# Hyphae 一键安装脚本
 
 set -e
 
-REPO="AuraAIHQ/agent-speaker"
+REPO="iDoris-ai/hyphae"
 INSTALL_DIR="/usr/local/bin"
 VERSION="${VERSION:-latest}"
 
@@ -32,9 +32,9 @@ install() {
     echo "检测到平台: $PLATFORM"
     
     if [ "$VERSION" = "latest" ]; then
-        DOWNLOAD_URL="https://github.com/${REPO}/releases/latest/download/agent-speaker-${PLATFORM}.tar.gz"
+        DOWNLOAD_URL="https://github.com/${REPO}/releases/latest/download/hyphae-${PLATFORM}.tar.gz"
     else
-        DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/agent-speaker-${PLATFORM}.tar.gz"
+        DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/hyphae-${PLATFORM}.tar.gz"
     fi
     
     echo "下载地址: $DOWNLOAD_URL"
@@ -46,9 +46,9 @@ install() {
     # 下载
     echo "正在下载..."
     if command -v curl &> /dev/null; then
-        curl -L -o "$TMP_DIR/agent-speaker.tar.gz" "$DOWNLOAD_URL"
+        curl -L -o "$TMP_DIR/hyphae.tar.gz" "$DOWNLOAD_URL"
     elif command -v wget &> /dev/null; then
-        wget -O "$TMP_DIR/agent-speaker.tar.gz" "$DOWNLOAD_URL"
+        wget -O "$TMP_DIR/hyphae.tar.gz" "$DOWNLOAD_URL"
     else
         echo "需要 curl 或 wget"
         exit 1
@@ -56,27 +56,27 @@ install() {
     
     # 解压
     echo "正在解压..."
-    tar -xzf "$TMP_DIR/agent-speaker.tar.gz" -C "$TMP_DIR"
+    tar -xzf "$TMP_DIR/hyphae.tar.gz" -C "$TMP_DIR"
     
     # 安装
     echo "正在安装到 $INSTALL_DIR..."
     if [ -w "$INSTALL_DIR" ]; then
-        mv "$TMP_DIR/agent-speaker" "$INSTALL_DIR/"
-        chmod +x "$INSTALL_DIR/agent-speaker"
+        mv "$TMP_DIR/hyphae" "$INSTALL_DIR/"
+        chmod +x "$INSTALL_DIR/hyphae"
     else
         echo "需要管理员权限，请输入密码:"
-        sudo mv "$TMP_DIR/agent-speaker" "$INSTALL_DIR/"
-        sudo chmod +x "$INSTALL_DIR/agent-speaker"
+        sudo mv "$TMP_DIR/hyphae" "$INSTALL_DIR/"
+        sudo chmod +x "$INSTALL_DIR/hyphae"
     fi
     
     # 验证
-    if command -v agent-speaker &> /dev/null; then
+    if command -v hyphae &> /dev/null; then
         echo "✅ 安装成功!"
-        agent-speaker --version
+        hyphae --version
         echo ""
         echo "快速开始:"
-        echo "  agent-speaker identity create --nickname alice --default"
-        echo "  agent-speaker --help"
+        echo "  hyphae identity create --nickname alice --default"
+        echo "  hyphae --help"
     else
         echo "⚠️ 安装可能成功，但命令未找到"
         echo "请确保 $INSTALL_DIR 在 PATH 中"
@@ -105,13 +105,13 @@ install_from_source() {
     cd "$TMP_DIR/repo"
     
     echo "编译..."
-    go build -o bin/agent-speaker .
+    go build -o bin/hyphae .
     
     echo "安装..."
     if [ -w "$INSTALL_DIR" ]; then
-        mv bin/agent-speaker "$INSTALL_DIR/"
+        mv bin/hyphae "$INSTALL_DIR/"
     else
-        sudo mv bin/agent-speaker "$INSTALL_DIR/"
+        sudo mv bin/hyphae "$INSTALL_DIR/"
     fi
     
     echo "✅ 从源码安装成功!"
@@ -123,7 +123,7 @@ case "${1:-}" in
         install_from_source
         ;;
     --help|-h)
-        echo "Agent Speaker 安装脚本"
+        echo "Hyphae 安装脚本"
         echo ""
         echo "用法:"
         echo "  curl -fsSL https://.../install.sh | bash"

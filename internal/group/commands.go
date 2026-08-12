@@ -6,10 +6,10 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/AuraAIHQ/agent-speaker/internal/audit"
-	"github.com/AuraAIHQ/agent-speaker/internal/identity"
-	"github.com/AuraAIHQ/agent-speaker/pkg/types"
 	"github.com/fatih/color"
+	"github.com/iDoris-ai/hyphae/internal/audit"
+	"github.com/iDoris-ai/hyphae/internal/identity"
+	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/urfave/cli/v3"
 )
 
@@ -18,7 +18,7 @@ var GroupCmd = &cli.Command{
 	Name:  "group",
 	Usage: "Manage group chats",
 	Description: `Create and manage group chats with multiple participants.
-Example: agent-speaker group create --name "Dev Team" --members bob,charlie`,
+Example: hyphae group create --name "Dev Team" --members bob,charlie`,
 	Commands: []*cli.Command{
 		GroupCreateCmd,
 		GroupListCmd,
@@ -123,7 +123,7 @@ var GroupCreateCmd = &cli.Command{
 		fmt.Printf("✅ Created group '%s'\n", green(group.Name))
 		fmt.Printf("   ID: %s\n", yellow(group.ID))
 		fmt.Printf("   Members: %d\n", len(group.Members))
-		fmt.Printf("\n💡 Use 'agent-speaker group chat --name \"%s\"' to start chatting\n", group.Name)
+		fmt.Printf("\n💡 Use 'hyphae group chat --name \"%s\"' to start chatting\n", group.Name)
 
 		return nil
 	},
@@ -156,7 +156,7 @@ var GroupListCmd = &cli.Command{
 
 		if len(groups) == 0 {
 			fmt.Println("No groups found. Create one with:")
-			fmt.Println("  agent-speaker group create --name <name> --members <nicknames>")
+			fmt.Println("  hyphae group create --name <name> --members <nicknames>")
 			return nil
 		}
 

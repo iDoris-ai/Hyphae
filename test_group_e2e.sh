@@ -48,9 +48,9 @@ echo "🔨 Building..."
 # Check identities
 echo "📋 Checking identities..."
 for user in alice bob jack; do
-    if ! ./bin/agent-speaker identity list | grep -q "^$user "; then
+    if ! ./bin/hyphae identity list | grep -q "^$user "; then
         echo -e "${YELLOW}Creating identity '$user'...${NC}"
-        ./bin/agent-speaker identity create --nickname $user 2>/dev/null || true
+        ./bin/hyphae identity create --nickname $user 2>/dev/null || true
     fi
     echo "  ✅ $user"
 done
@@ -58,9 +58,9 @@ done
 # Add contacts
 echo ""
 echo "🔗 Adding contacts..."
-ALICE_NPUB=$(./bin/agent-speaker identity export --nickname alice 2>/dev/null | grep "Npub:" | awk '{print $2}')
-BOB_NPUB=$(./bin/agent-speaker identity export --nickname bob 2>/dev/null | grep "Npub:" | awk '{print $2}')
-JACK_NPUB=$(./bin/agent-speaker identity export --nickname jack 2>/dev/null | grep "Npub:" | awk '{print $2}')
+ALICE_NPUB=$(./bin/hyphae identity export --nickname alice 2>/dev/null | grep "Npub:" | awk '{print $2}')
+BOB_NPUB=$(./bin/hyphae identity export --nickname bob 2>/dev/null | grep "Npub:" | awk '{print $2}')
+JACK_NPUB=$(./bin/hyphae identity export --nickname jack 2>/dev/null | grep "Npub:" | awk '{print $2}')
 
 # Add as contacts if not already
 echo "  Alice npub: ${ALICE_NPUB:0:20}..."
@@ -74,13 +74,13 @@ echo "=========================================="
 
 # Test group help
 run_test "Group help command" \
-    "./bin/agent-speaker group --help"
+    "./bin/hyphae group --help"
 
 run_test "Group create help" \
-    "./bin/agent-speaker group create --help"
+    "./bin/hyphae group create --help"
 
 run_test "Group list help" \
-    "./bin/agent-speaker group list --help"
+    "./bin/hyphae group list --help"
 
 # Test group creation
 echo ""
@@ -91,10 +91,10 @@ echo "=========================================="
 GROUP_NAME="test-group-$(date +%s)"
 
 run_test "Create group with alice, bob, jack" \
-    "./bin/agent-speaker group create --name '$GROUP_NAME' --description 'Test group for E2E' --members bob,jack"
+    "./bin/hyphae group create --name '$GROUP_NAME' --description 'Test group for E2E' --members bob,jack"
 
 run_test "List groups (should show new group)" \
-    "./bin/agent-speaker group list | grep -q '$GROUP_NAME'"
+    "./bin/hyphae group list | grep -q '$GROUP_NAME'"
 
 # Test member management
 echo ""
@@ -104,10 +104,10 @@ echo "=========================================="
 
 # Leave and rejoin test
 run_test "Leave group as alice" \
-    "./bin/agent-speaker group leave --name '$GROUP_NAME'"
+    "./bin/hyphae group leave --name '$GROUP_NAME'"
 
 run_test "List groups (should be empty after leave)" \
-    "./bin/agent-speaker group list | grep -q 'No groups' || ./bin/agent-speaker identity list > /dev/null"
+    "./bin/hyphae group list | grep -q 'No groups' || ./bin/hyphae identity list > /dev/null"
 
 echo ""
 echo "=========================================="
@@ -119,18 +119,18 @@ echo -e "${BLUE}▶ Send message to group members${NC}"
 
 # Send from alice to bob and jack
 MSG1="Hello from alice to group at $(date +%s)"
-./bin/agent-speaker agent msg --from alice --to bob --content "$MSG1" --relay $RELAY --encrypt=false > /dev/null 2>&1 || true
-./bin/agent-speaker agent msg --from alice --to jack --content "$MSG1" --relay $RELAY --encrypt=false > /dev/null 2>&1 || true
+./bin/hyphae agent msg --from alice --to bob --content "$MSG1" --relay $RELAY --encrypt=false > /dev/null 2>&1 || true
+./bin/hyphae agent msg --from alice --to jack --content "$MSG1" --relay $RELAY --encrypt=false > /dev/null 2>&1 || true
 
 # Send from bob
 MSG2="Bob here, testing group chat at $(date +%s)"
-./bin/agent-speaker agent msg --from bob --to alice --content "$MSG2" --relay $RELAY --encrypt=false > /dev/null 2>&1 || true
-./bin/agent-speaker agent msg --from bob --to jack --content "$MSG2" --relay $RELAY --encrypt=false > /dev/null 2>&1 || true
+./bin/hyphae agent msg --from bob --to alice --content "$MSG2" --relay $RELAY --encrypt=false > /dev/null 2>&1 || true
+./bin/hyphae agent msg --from bob --to jack --content "$MSG2" --relay $RELAY --encrypt=false > /dev/null 2>&1 || true
 
 # Send from jack
 MSG3="Jack joining the conversation at $(date +%s)"
-./bin/agent-speaker agent msg --from jack --to alice --content "$MSG3" --relay $RELAY --encrypt=false > /dev/null 2>&1 || true
-./bin/agent-speaker agent msg --from jack --to bob --content "$MSG3" --relay $RELAY --encrypt=false > /dev/null 2>&1 || true
+./bin/hyphae agent msg --from jack --to alice --content "$MSG3" --relay $RELAY --encrypt=false > /dev/null 2>&1 || true
+./bin/hyphae agent msg --from jack --to bob --content "$MSG3" --relay $RELAY --encrypt=false > /dev/null 2>&1 || true
 
 echo -e "${GREEN}  ✅ Messages sent to all group members${NC}"
 ((TESTS_PASSED++))
@@ -146,24 +146,24 @@ sleep 5
 
 # Check message stats
 run_test "Alice message stats" \
-    "./bin/agent-speaker history stats"
+    "./bin/hyphae history stats"
 
 run_test "Bob message stats" \
-    "./bin/agent-speaker history stats"
+    "./bin/hyphae history stats"
 
 run_test "Jack message stats" \
-    "./bin/agent-speaker history stats"
+    "./bin/hyphae history stats"
 
 # Check conversations
 run_test "Alice-Bob conversation" \
-    "./bin/agent-speaker history conversation --with bob --limit 10 | grep -q 'alice' || true"
+    "./bin/hyphae history conversation --with bob --limit 10 | grep -q 'alice' || true"
 
 run_test "Alice-Jack conversation" \
-    "./bin/agent-speaker history conversation --with jack --limit 10 | grep -q 'jack' || true"
+    "./bin/hyphae history conversation --with jack --limit 10 | grep -q 'jack' || true"
 
 # Search for group messages
 run_test "Search group messages" \
-    "./bin/agent-speaker history search --query 'group' | grep -q '$(echo $MSG1 | cut -d' ' -f1)' || true"
+    "./bin/hyphae history search --query 'group' | grep -q '$(echo $MSG1 | cut -d' ' -f1)' || true"
 
 echo ""
 echo "=========================================="

@@ -9,13 +9,13 @@ import (
 	"syscall"
 
 	"fiatjaf.com/nostr"
-	"github.com/AuraAIHQ/agent-speaker/internal/common"
-	"github.com/AuraAIHQ/agent-speaker/pkg/types"
+	"github.com/iDoris-ai/hyphae/internal/common"
+	"github.com/iDoris-ai/hyphae/pkg/types"
 	"golang.org/x/term"
 )
 
 const (
-	KeyStoreDirName = ".agent-speaker"
+	KeyStoreDirName = ".hyphae"
 	KeyStoreFile    = "keystore.json"
 )
 

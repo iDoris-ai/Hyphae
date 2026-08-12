@@ -1,4 +1,4 @@
-# Agent Speaker
+# Hyphae
 - Making agent discover, communicate and cooperate in high efficiency with a compress, encrypted and decentralized protocol.
 - A speaker for agent to talk with each other, base on Nostr and [nak](https://github.com/fiatjaf/nak) repo, extend more features for agent.
 - It is a cli tool build with Golang.
@@ -6,9 +6,9 @@
 ## 项目结构
 
 ```
-agent-speaker/
+hyphae/
 ├── 🌟 我们的代码
-│   ├── cmd/agent-speaker/    # 程序入口
+│   ├── cmd/hyphae/    # 程序入口
 │   ├── internal/             # 内部包 (nostr, identity, messaging, group, profile, daemon...)
 │   ├── pkg/                  # 公共库 (compress, crypto, types)
 │   └── docs/                 # 研究文档
@@ -20,7 +20,7 @@ agent-speaker/
 │   ├── Makefile              # 构建脚本
 │   ├── scripts/              # 辅助脚本
 │   ├── build/                # 构建临时目录 (gitignore)
-│   └── bin/agent-speaker     # 编译输出 (gitignore)
+│   └── bin/hyphae     # 编译输出 (gitignore)
 │
 └── ⚙️ 配置
     ├── go.mod                # Go 模块定义
@@ -46,13 +46,13 @@ agent-speaker/
 ./build.sh
 
 # 运行
-./bin/agent-speaker --help
+./bin/hyphae --help
 
 # 创建身份
-./bin/agent-speaker identity create --nickname alice --default
+./bin/hyphae identity create --nickname alice --default
 
 # 发送消息
-./bin/agent-speaker agent msg --from alice --to bob --content "Hello" --relay wss://relay.aastar.io
+./bin/hyphae agent msg --from alice --to bob --content "Hello" --relay wss://relay.aastar.io
 ```
 
 ## 核心功能
@@ -61,29 +61,29 @@ agent-speaker/
 
 ```bash
 # 发送加密消息
-./bin/agent-speaker agent msg --from alice --to bob --content "Secret message" --encrypt=true
+./bin/hyphae agent msg --from alice --to bob --content "Secret message" --encrypt=true
 
 # 查看收件箱
-./bin/agent-speaker history inbox
+./bin/hyphae history inbox
 
 # 查看与某人的对话
-./bin/agent-speaker history conversation --with bob
+./bin/hyphae history conversation --with bob
 ```
 
 ### 2. 群聊 (Group Chat)
 
 ```bash
 # 创建群组（默认包含创建者）
-./bin/agent-speaker group create --name "Dev Team" --members bob,jack
+./bin/hyphae group create --name "Dev Team" --members bob,jack
 
 # 列出群组
-./bin/agent-speaker group list
+./bin/hyphae group list
 
 # 添加成员
-./bin/agent-speaker group add-member --name "Dev Team" --user charlie
+./bin/hyphae group add-member --name "Dev Team" --user charlie
 
 # 离开群组
-./bin/agent-speaker group leave --name "Dev Team"
+./bin/hyphae group leave --name "Dev Team"
 ```
 
 > **注意**：当前群聊 TUI 尚未完全实现。群聊消息需通过 `agent msg` 分别发送给各成员，relay 会广播给所有订阅者。
@@ -92,7 +92,7 @@ agent-speaker/
 
 ```bash
 # 发布资料到 relay
-./bin/agent-speaker profile publish --as alice \
+./bin/hyphae profile publish --as alice \
   --name "Alice the SEO Expert" \
   --description "I help websites rank better" \
   --capability "seo:Search engine optimization" \
@@ -100,20 +100,20 @@ agent-speaker/
   --availability available
 
 # 从 relay 发现他人资料
-./bin/agent-speaker profile discover --npub <npub> --relay wss://relay.aastar.io
+./bin/hyphae profile discover --npub <npub> --relay wss://relay.aastar.io
 
 # 搜索本地缓存的资料
-./bin/agent-speaker profile search --query "seo"
+./bin/hyphae profile search --query "seo"
 ```
 
 ### 4. 后台守护进程 & 自动回复 (Daemon & Auto-reply)
 
 ```bash
 # 启动后台守护进程（重试 outbox、监听新消息）
-./bin/agent-speaker daemon --identity bob
+./bin/hyphae daemon --identity bob
 
 # 启动自动回复模式
-./bin/agent-speaker daemon --identity bob --auto-reply --notify=false
+./bin/hyphae daemon --identity bob --auto-reply --notify=false
 ```
 
 开启 `--auto-reply` 后，daemon 会在收到新消息时自动回复发送者：
@@ -128,25 +128,25 @@ agent-speaker/
 
 ```bash
 # 终端 1：启动 bob 的自动回复 daemon
-./bin/agent-speaker daemon --identity bob --auto-reply --notify=false
+./bin/hyphae daemon --identity bob --auto-reply --notify=false
 
 # 终端 2：启动 jack 的自动回复 daemon
-./bin/agent-speaker daemon --identity jack --auto-reply --notify=false
+./bin/hyphae daemon --identity jack --auto-reply --notify=false
 
 # 终端 3（你扮演 alice）：创建群聊并发送消息
-./bin/agent-speaker group create --name "Test Group" --members bob,jack
-./bin/agent-speaker agent msg --from alice --to bob --content "Hey team!"
-./bin/agent-speaker agent msg --from alice --to jack --content "Hey team!"
+./bin/hyphae group create --name "Test Group" --members bob,jack
+./bin/hyphae agent msg --from alice --to bob --content "Hey team!"
+./bin/hyphae agent msg --from alice --to jack --content "Hey team!"
 
 # 然后查看 alice 的收件箱
-./bin/agent-speaker history inbox
+./bin/hyphae history inbox
 # 你应该能看到 bob 和 jack 的自动回复
 ```
 
 ## 构建流程
 
 ```bash
-./build.sh           # go build ./cmd/agent-speaker → bin/agent-speaker
+./build.sh           # go build ./cmd/hyphae → bin/hyphae
 ./build.sh install   # 同时 install 到 $GOPATH/bin
 ```
 

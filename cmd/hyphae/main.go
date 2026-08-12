@@ -4,15 +4,15 @@ import (
 	"context"
 	"os"
 
-	"github.com/AuraAIHQ/agent-speaker/internal/common"
-	"github.com/AuraAIHQ/agent-speaker/internal/daemon"
-	"github.com/AuraAIHQ/agent-speaker/internal/group"
-	"github.com/AuraAIHQ/agent-speaker/internal/identity"
-	"github.com/AuraAIHQ/agent-speaker/internal/messaging"
-	"github.com/AuraAIHQ/agent-speaker/internal/nostr"
-	"github.com/AuraAIHQ/agent-speaker/internal/profile"
-	"github.com/AuraAIHQ/agent-speaker/internal/storage"
-	"github.com/AuraAIHQ/agent-speaker/internal/tui"
+	"github.com/iDoris-ai/hyphae/internal/common"
+	"github.com/iDoris-ai/hyphae/internal/daemon"
+	"github.com/iDoris-ai/hyphae/internal/group"
+	"github.com/iDoris-ai/hyphae/internal/identity"
+	"github.com/iDoris-ai/hyphae/internal/messaging"
+	"github.com/iDoris-ai/hyphae/internal/nostr"
+	"github.com/iDoris-ai/hyphae/internal/profile"
+	"github.com/iDoris-ai/hyphae/internal/storage"
+	"github.com/iDoris-ai/hyphae/internal/tui"
 	"github.com/urfave/cli/v3"
 )
 
@@ -27,7 +27,7 @@ func main() {
 	storage.StorageCmd.Commands = append(storage.StorageCmd.Commands, messaging.OutboxCmd)
 
 	app := &cli.Command{
-		Name:    "agent-speaker",
+		Name:    "hyphae",
 		Usage:   "A nostr-based agent communication CLI",
 		Version: version,
 		Flags: []cli.Flag{

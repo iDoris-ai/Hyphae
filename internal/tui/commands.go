@@ -14,7 +14,7 @@ var ChatCmd = &cli.Command{
 	Name:  "chat",
 	Usage: "Start TUI chat with a contact",
 	Description: `Launch an interactive terminal chat interface with a contact.
-Example: agent-speaker chat --with bob`,
+Example: hyphae chat --with bob`,
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:     "with",

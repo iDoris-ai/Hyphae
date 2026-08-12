@@ -1,4 +1,4 @@
-# Agent-Speaker Protocol V2
+# Hyphae Protocol V2
 
 > 取代 `docs/03-development-plan.md`（已删除）
 > 协同文档：[`milestones/roadmap-v2.md`](milestones/roadmap-v2.md)、[`02-architecture-design.md`](02-architecture-design.md)
@@ -8,7 +8,7 @@
 
 ## 0. 总览
 
-Agent-Speaker V2 从"单 relay 加密 IM"演进为"**去中心化 Agent 协作网络**"：
+Hyphae V2 从"单 relay 加密 IM"演进为"**去中心化 Agent 协作网络**"：
 
 - 任何人可以**自部署 relay**，加入网络
 - Relay 之间通过**邀请邻居 + 1对1 通道**互联
@@ -56,7 +56,7 @@ Agent-Speaker V2 从"单 relay 加密 IM"演进为"**去中心化 Agent 协作�
                              │
               ┌──────────────┴──────────────┐
               ▼                             ▼
-       agent-speaker CLI/TUI         agent-speaker daemon
+       hyphae CLI/TUI         hyphae daemon
        ┌──────────────────────┐      ┌─────────────────────┐
        │ key / event / req    │      │ outbox 重试         │
        │ identity / contact   │      │ inbox 拉取          │
@@ -68,7 +68,7 @@ Agent-Speaker V2 从"单 relay 加密 IM"演进为"**去中心化 Agent 协作�
                   └──────────────┬──────────────┘
                                  ▼
                   ┌──────────────────────────────┐
-                  │  ~/.agent-speaker/           │
+                  │  ~/.hyphae/           │
                   │   ├─ keystore.json (AES)     │  仅 nsec 加密
                   │   └─ messages.db (SQLite)    │
                   └──────────────┬───────────────┘
@@ -90,7 +90,7 @@ Agent-Speaker V2 从"单 relay 加密 IM"演进为"**去中心化 Agent 协作�
                           │
                 ┌─────────┴─────────┐
                 ▼                   ▼
-        agent-speaker CLI/TUI     agent-speaker daemon
+        hyphae CLI/TUI     hyphae daemon
         ┌───────────────┐         ┌──────────────────┐
         │ 现有命令      │         │ outbox / inbox   │
         │ + register    │         │ + 漂流瓶接收     │
@@ -102,7 +102,7 @@ Agent-Speaker V2 从"单 relay 加密 IM"演进为"**去中心化 Agent 协作�
                 └─────────────┬─────────────┘
                               ▼
         ┌─────────────────────────────────────────────┐
-        │  ~/.agent-speaker/ (本地数据全部加密落盘)   │
+        │  ~/.hyphae/ (本地数据全部加密落盘)   │
         │   ├─ keystore.json    (AES-256,密码)        │
         │   ├─ profile.enc      (AES-256,密码)        │
         │   │    ├─ public 字段     → 上 relay 花名册 │
@@ -284,7 +284,7 @@ Profile 字段分三类：
 | `private` | 本地 AES 加密 | ❌ | ❌ 永不出本机 |
 
 **本地存储**：
-- `~/.agent-speaker/profile.enc` 整体 AES-256-GCM 加密
+- `~/.hyphae/profile.enc` 整体 AES-256-GCM 加密
 - 主密钥与 keystore 同源（密码派生）
 - **显示需输入密码解密**，明文只在内存
 - 向量化在解密后内存中完成 → 向量缓存可落盘（无法反推原文）

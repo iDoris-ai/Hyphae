@@ -11,7 +11,7 @@
 │   │  Layer 3: Agent Collaboration     (Agent ↔ Agent)                  │  │
 │   │                                                                     │  │
 │   │   ┌─────────────┐     ┌─────────────┐     ┌─────────────────────┐  │  │
-│   │   │     A2A     │     │    ACP*     │     │  Agent-Speaker      │  │  │
+│   │   │     A2A     │     │    ACP*     │     │  Hyphae      │  │  │
 │   │   │  (Google)   │◄────┤   (IBM)     │     │  (Nostr-based)      │  │  │
 │   │   │  JSON-RPC   │     │    REST     │     │  Decentralized      │  │  │
 │   │   └─────────────┘     └─────────────┘     └─────────────────────┘  │  │
@@ -49,7 +49,7 @@
 
 ### 1.1 协议特性对比表
 
-| 维度 | MCP | A2A | ACP | Agent-Speaker |
+| 维度 | MCP | A2A | ACP | Hyphae |
 |------|-----|-----|-----|---------------|
 | **发布方** | Anthropic | Google | IBM | AuraAIHQ |
 | **发布时间** | 2024-11 | 2025-04 | 2025-03 | 2025 |
@@ -69,8 +69,8 @@
 | 本地工具集成 | MCP | 进程隔离、能力声明 |
 | 企业内网协作 | A2A | 企业级安全、审计 |
 | 边缘计算 | ACP/A2A | 轻量级、低延迟 |
-| 跨组织协作 | Agent-Speaker | 去中心化、无信任假设 |
-| 开放网络 | Agent-Speaker | 抗审查、无需基础设施 |
+| 跨组织协作 | Hyphae | 去中心化、无信任假设 |
+| 开放网络 | Hyphae | 抗审查、无需基础设施 |
 | 快速原型 | ACP | 纯 REST，curl 即可测试 |
 
 ---
@@ -91,7 +91,7 @@
 - ❌ 无 Agent 间通信能力
 - ❌ 同步调用为主
 
-**对 Agent-Speaker 的启示**:
+**对 Hyphae 的启示**:
 - 可作为 Agent 内部工具调用层
 - 借鉴其能力声明机制
 - 参考其安全模型设计
@@ -111,7 +111,7 @@
 - ❌ 需要 HTTP 基础设施
 - ❌ 中心化发现 (Agent Card URL)
 
-**对 Agent-Speaker 的启示**:
+**对 Hyphae 的启示**:
 - 借鉴 Task 生命周期管理
 - 参考 Agent Card 能力发现
 - 学习多模态消息设计
@@ -129,20 +129,20 @@
 - ⚠️ 已合并入 A2A (停止独立演进)
 - ⚠️ 生态相对较小
 
-**对 Agent-Speaker 的启示**:
+**对 Hyphae 的启示**:
 - 极简设计哲学与 Nostr 契合
 - Manifest 可映射到 Nostr Kind 0
 - REST 端点可对应 Relay 接口
 
 ---
 
-## 3. Agent-Speaker 的差异化定位
+## 3. Hyphae 的差异化定位
 
 ### 3.1 核心差异化价值
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│           Agent-Speaker 独特价值主张                             │
+│           Hyphae 独特价值主张                             │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
 │   ┌─────────────────────────────────────────────────────────┐  │
@@ -205,16 +205,16 @@
 ### 4.1 短期目标 (3-6个月)
 
 #### 4.1.1 MCP 客户端兼容
-**目标**: 让 Agent-Speaker 能调用 MCP 服务器
+**目标**: 让 Hyphae 能调用 MCP 服务器
 
 ```go
 // 伪代码示例
 mcpClient := mcp.NewClient("stdio", "python server.py")
 tools := mcpClient.ListTools()
 
-// 将 MCP 工具包装为 Agent-Speaker 消息
+// 将 MCP 工具包装为 Hyphae 消息
 for _, tool := range tools {
-    agentSpeaker.RegisterTool(tool.Name, func(input string) string {
+    hyphae.RegisterTool(tool.Name, func(input string) string {
         return mcpClient.CallTool(tool.Name, input)
     })
 }
@@ -223,14 +223,14 @@ for _, tool := range tools {
 **实施步骤**:
 1. 实现 MCP 客户端协议
 2. 添加工具发现机制
-3. 将 MCP 工具映射为 Agent-Speaker 命令
+3. 将 MCP 工具映射为 Hyphae 命令
 
 #### 4.1.2 A2A 适配层
-**目标**: Agent-Speaker 可以作为 A2A Agent 参与协作
+**目标**: Hyphae 可以作为 A2A Agent 参与协作
 
 ```go
 // A2A 适配器
-a2aAdapter := NewA2AAdapter(agentSpeaker)
+a2aAdapter := NewA2AAdapter(hyphae)
 
 // 暴露 A2A 端点
 http.Handle("/agent-card", a2aAdapter.AgentCard())
@@ -310,12 +310,12 @@ http.Handle("/tasks/", a2aAdapter.GetTask())
 ```
 
 #### 4.2.3 Manifest 标准
-定义 Agent-Speaker 的 Agent Manifest:
+定义 Hyphae 的 Agent Manifest:
 
 ```json
 {
   "agent": {
-    "name": "agent-speaker-bot",
+    "name": "hyphae-bot",
     "version": "1.0.0",
     "capabilities": ["messaging", "task-management"]
   },
@@ -338,7 +338,7 @@ http.Handle("/tasks/", a2aAdapter.GetTask())
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                     Agent-Speaker Hub                        │
+│                     Hyphae Hub                        │
 ├──────────────────────────────────────────────────────────────┤
 │                                                               │
 │   ┌─────────────┐    ┌──────────────┐    ┌─────────────┐    │
@@ -375,7 +375,7 @@ http.Handle("/tasks/", a2aAdapter.GetTask())
 ### 5.1 核心模块设计
 
 ```
-agent-speaker/
+hyphae/
 ├── core/
 │   ├── nostr/           # Nostr 协议核心
 │   ├── identity/        # 身份管理
@@ -455,7 +455,7 @@ type ProtocolAdapter interface {
 
 ### 6.3 差异化竞争
 
-| 竞品 | 优势 | Agent-Speaker 差异化 |
+| 竞品 | 优势 | Hyphae 差异化 |
 |------|------|---------------------|
 | MCP | 生态成熟 | 去中心化、无需托管 |
 | A2A | 企业背书 | 无基础设施要求 |
@@ -485,12 +485,12 @@ type ProtocolAdapter interface {
 
 ### 7.3 最终愿景
 
-> **Agent-Speaker 成为 AI Agent 的 "互联网" —— 一个开放、去中心化、无需许可的 Agent 通信网络。**
+> **Hyphae 成为 AI Agent 的 "互联网" —— 一个开放、去中心化、无需许可的 Agent 通信网络。**
 
 ```
                     ┌─────────────────────────┐
                     │   Internet of Agents    │
-                    │    (Agent-Speaker)      │
+                    │    (Hyphae)      │
                     └─────────────────────────┘
                                │
            ┌───────────────────┼───────────────────┐

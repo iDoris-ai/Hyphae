@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/AuraAIHQ/agent-speaker/internal/audit"
+	"github.com/iDoris-ai/hyphae/internal/audit"
 	"github.com/urfave/cli/v3"
 )
 

@@ -1,4 +1,4 @@
-# Agent-Speaker V2 里程碑计划
+# Hyphae V2 里程碑计划
 
 > 版本目标：从基础消息工具升级为去中心化 Agent 协作网络
 > 权威架构决策见 [`../protocol-v2.md`](../protocol-v2.md)（L1/L2/L3 协议栈、fork khatru、AAstar Point、漂流瓶、字段级隐私 —— 2026-05-13 锁定）
@@ -9,7 +9,7 @@
 
 ## 🎯 核心愿景
 
-Agent-Speaker 不是一个人对人的加密聊天工具，而是**去中心化的 Agent 协作网络基础设施**：
+Hyphae 不是一个人对人的加密聊天工具，而是**去中心化的 Agent 协作网络基础设施**：
 
 1. **任何人可自部署 relay**，无需依赖任何一方的中心化基础设施
 2. **人和 Agent 是同一套身份体系里的平等成员**（各自的 Nostr keypair），Agent 可以被授权代表 owner 做有限的事（对话、打赏、暴露信息摘要）
@@ -35,7 +35,7 @@ Agent-Speaker 不是一个人对人的加密聊天工具，而是**去中心化�
 
 ## M1 · TUI 聊天 + 群聊 ✅ 已完成
 
-**交付**：PR [#3](https://github.com/AuraAIHQ/agent-speaker/pull/3)（SQLite 存储）、[#4](https://github.com/AuraAIHQ/agent-speaker/pull/4)（TUI 聊天界面，`internal/tui/`）、[#5](https://github.com/AuraAIHQ/agent-speaker/pull/5)（Agent Profile v0.25.0 + daemon 自动回复 + 群聊，`internal/profile/`/`internal/daemon/`/`internal/group/`）、[#9](https://github.com/AuraAIHQ/agent-speaker/pull/9)（Apache 2.0 合规）均已合并。当前 `main` 已具备：身份/联系人管理、点对点加密消息（NIP-44）、SQLite 历史存储、群聊、Agent Profile 发布/发现、daemon 后台重试与自动回复、Bubble Tea TUI。
+**交付**：PR [#3](https://github.com/iDoris-ai/hyphae/pull/3)（SQLite 存储）、[#4](https://github.com/iDoris-ai/hyphae/pull/4)（TUI 聊天界面，`internal/tui/`）、[#5](https://github.com/iDoris-ai/hyphae/pull/5)（Agent Profile v0.25.0 + daemon 自动回复 + 群聊，`internal/profile/`/`internal/daemon/`/`internal/group/`）、[#9](https://github.com/iDoris-ai/hyphae/pull/9)（Apache 2.0 合规）均已合并。当前 `main` 已具备：身份/联系人管理、点对点加密消息（NIP-44）、SQLite 历史存储、群聊、Agent Profile 发布/发现、daemon 后台重试与自动回复、Bubble Tea TUI。
 
 ### M1 测试状态（2026-07-24 复核）
 
@@ -57,9 +57,9 @@ Agent-Speaker 不是一个人对人的加密聊天工具，而是**去中心化�
 **真实网络自测**（本地起 `scripts/minirelay.go`，用 `.env` 里的真实 Alice/Bob 身份跑通全链路，因为 `wss://relay.aastar.io` 当前不可达——`curl` 返回 530）：identity/contact → 加密消息发送（NIP-44）→ 接收解密 → history stats/conversation → group create/list → profile publish/search → daemon 启动+outbox 处理，**全部链路真实跑通**，不是只测了 mock。
 
 **过程中发现的真实问题（已记入 `../TODO.md`）**：
-1. `cmd/agent-speaker/main.go` 里 `color.NoColor = false` 是硬编码，不管 stdout 是否被重定向都强制输出 ANSI 颜色转义符——脚本化/管道消费 CLI 输出时会看到乱码。
+1. `cmd/hyphae/main.go` 里 `color.NoColor = false` 是硬编码，不管 stdout 是否被重定向都强制输出 ANSI 颜色转义符——脚本化/管道消费 CLI 输出时会看到乱码。
 2. `history conversation --with <name>` 要求 `<name>` 必须在 contact 列表里，而 `agent msg --to <name>` 的解析更宽松——两个命令对"名字"的处理规则不一致，容易让人以为是 bug。
-3. `daemon` 的 outbox 重试机制里发现历史遗留的失效队列条目（重试全部失败），怀疑是跨环境/跨 relay 测试遗留的脏数据，值得在 M1.5 顺手加一个 `agent-speaker storage` 的 outbox 清理/诊断命令。
+3. `daemon` 的 outbox 重试机制里发现历史遗留的失效队列条目（重试全部失败），怀疑是跨环境/跨 relay 测试遗留的脏数据，值得在 M1.5 顺手加一个 `hyphae storage` 的 outbox 清理/诊断命令。
 
 **结论**：自动化测试真实可信但覆盖有盲区（daemon/nostr 两个核心包基本零覆盖），真实网络链路验证通过。**已经不需要"再充分自测"才能进入 M1.5**——但 daemon/nostr 补测试值得作为 M1.5 的前置小任务（低成本，见下）。人工测试指南见仓库根目录 [`QUICK_MANUAL_TEST.md`](../../QUICK_MANUAL_TEST.md)（双人/三人协作测试 + Profile/TUI 部分），建议你实际拉一个朋友测一遍 Part 1-3，尤其是 TUI 的交互体验，这部分自动化测不出来。
 
@@ -69,15 +69,15 @@ Agent-Speaker 不是一个人对人的加密聊天工具，而是**去中心化�
 
 ### 实际完成情况（2026-07-29 复核）
 
-`specs/m1.5/` 拆出的 10 个子任务已全部 `done`（PR [#13](https://github.com/iDoris-ai/agent-speaker/pull/13)-[#23](https://github.com/iDoris-ai/agent-speaker/pull/23) 均已合并，见 [`../../specs/m1.5/README.md`](../../specs/m1.5/README.md) 任务表），但里程碑完成定义里还有一项没做：**`AuraAIHQ/relay-khatru`（或 `iDoris-ai/relay-khatru`，`protocol-v2.md` D3 尚未拍板）fork 仓库尚未创建**——这是一次性人类基础设施操作，明确排除在自动化 loop 之外。`scripts/deploy-relay.sh` 目前仍克隆 khatru 官方 `basic` 示例（且该示例路径在上游已改名，`local`/`tunnel` 模式暂时跑不通真实部署，见 `specs/m1.5/README.md` 记录的已知问题）。
+`specs/m1.5/` 拆出的 10 个子任务已全部 `done`（PR [#13](https://github.com/iDoris-ai/hyphae/pull/13)-[#23](https://github.com/iDoris-ai/hyphae/pull/23) 均已合并，见 [`../../specs/m1.5/README.md`](../../specs/m1.5/README.md) 任务表），但里程碑完成定义里还有一项没做：**`AuraAIHQ/relay-khatru`（或 `iDoris-ai/relay-khatru`，`protocol-v2.md` D3 尚未拍板）fork 仓库尚未创建**——这是一次性人类基础设施操作，明确排除在自动化 loop 之外。`scripts/deploy-relay.sh` 目前仍克隆 khatru 官方 `basic` 示例（且该示例路径在上游已改名，`local`/`tunnel` 模式暂时跑不通真实部署，见 `specs/m1.5/README.md` 记录的已知问题）。
 
-顺带发现但未在本里程碑修复的两个问题：`AgentKind`/`ProfileKind` 共用 Kind 30078（[#27](https://github.com/iDoris-ai/agent-speaker/issues/27)，建议 M2 一并解决）、`SaveOutbox` 并发写不安全（[#26](https://github.com/iDoris-ai/agent-speaker/issues/26)）。分阶段测试/联调的具体安排见 [`testing-integration-plan.md`](testing-integration-plan.md)。
+顺带发现但未在本里程碑修复的两个问题：`AgentKind`/`ProfileKind` 共用 Kind 30078（[#27](https://github.com/iDoris-ai/hyphae/issues/27)，建议 M2 一并解决）、`SaveOutbox` 并发写不安全（[#26](https://github.com/iDoris-ai/hyphae/issues/26)）。分阶段测试/联调的具体安排见 [`testing-integration-plan.md`](testing-integration-plan.md)。
 
 ### 目标
 脱离对 `wss://relay.aastar.io` 这一个公共 relay 的依赖：任何人能一条命令拉起自己的 relay；Agent 能在花名册上注册自己、被别人发现。
 
 ### 架构改动
-- **新仓库 `AuraAIHQ/relay-khatru`**（独立于 `agent-speaker` 本仓库）：fork [`fiatjaf/khatru`](https://github.com/fiatjaf/khatru)，作为 L2 插件的宿主（`protocol-v2.md` §8）。`scripts/deploy-relay.sh` 目前克隆的是 khatru 官方 `basic` 示例，待这个仓库建立后切换过去。
+- **新仓库 `AuraAIHQ/relay-khatru`**（独立于 `hyphae` 本仓库）：fork [`fiatjaf/khatru`](https://github.com/fiatjaf/khatru)，作为 L2 插件的宿主（`protocol-v2.md` §8）。`scripts/deploy-relay.sh` 目前克隆的是 khatru 官方 `basic` 示例，待这个仓库建立后切换过去。
 - `internal/profile/` 扩展现有 `AgentProfile` 类型，加入 `mode` 字段（`simple`/`tagged`/`structured` 三档，对应 Kind 0 扩展 schema）。
 - `internal/group/`、`internal/identity`（contact 模型）新增成员角色字段（`Human`/`Agent`），为 M2 的 owner-attestation 和 Agent 作为一等成员打基础。
 - `internal/storage/` 新增 `audit_log` 表（独立于花名册功能，可与本里程碑其他任务并行）。
@@ -91,8 +91,8 @@ Agent-Speaker 不是一个人对人的加密聊天工具，而是**去中心化�
 
 **花名册协议**
 - [ ] Kind 0 profile 扩展 schema：`register` 三种 mode（simple 仅名字 / tagged 加标签 / structured 完整 capabilities+价格+评分，沿用本文件旧版 Week 4 设计）
-- [ ] `agent-speaker profile publish` 扩展支持 `--mode`
-- [ ] `agent-speaker profile discover` 扩展过滤条件：`--capability`/`--price-min`/`--price-max`/`--rating-min`/`--online-only`（当前 `internal/profile` 已有 discover/search 基础，此项是扩展 filter，不是新建）
+- [ ] `hyphae profile publish` 扩展支持 `--mode`
+- [ ] `hyphae profile discover` 扩展过滤条件：`--capability`/`--price-min`/`--price-max`/`--rating-min`/`--online-only`（当前 `internal/profile` 已有 discover/search 基础，此项是扩展 filter，不是新建）
 
 **（借鉴 Buzz）成员角色模型**
 - [ ] `internal/group`、`internal/identity` 的成员/联系人结构增加角色字段（至少 `Human`/`Agent`），可见范围逻辑跟随角色走，参考 Buzz `Owner/Admin/Member/Guest/Bot` 的思路但不需要照搬完整权限系统（详见 `protocol-v2.md` §12）
@@ -103,9 +103,9 @@ Agent-Speaker 不是一个人对人的加密聊天工具，而是**去中心化�
 
 ### 交付物（示例）
 ```bash
-agent-speaker relay-khatru deploy --local          # 或沿用 scripts/deploy-relay.sh
-agent-speaker profile publish --mode structured --capability "seo:..." --rate "audit:page:50"
-agent-speaker profile discover --capability seo --online-only --rating-min 4.5
+hyphae relay-khatru deploy --local          # 或沿用 scripts/deploy-relay.sh
+hyphae profile publish --mode structured --capability "seo:..." --rate "audit:page:50"
+hyphae profile discover --capability seo --online-only --rating-min 4.5
 ```
 
 ---
@@ -126,14 +126,14 @@ agent-speaker profile discover --capability seo --online-only --rating-min 4.5
 - [ ] `tip`/`drifting-bottle` 的 payload schema 先定义好（供 M2.5 直接用），本里程碑不实现执行逻辑
 - [ ]（**借鉴 Buzz NIP-OA**）在 behavior schema 里预留 owner-attestation 字段：`["auth", "<owner-pubkey-hex>", "<conditions>", "<sig-hex>"]` 的等价设计，但 owner 身份对接 **AAstar AirAccount**（而非泛化 pubkey）。本里程碑只做数据结构 + 签名/校验函数，不接入真实 AirAccount SDK（那是 M5 范畴）——现在预留，避免 M2.5/M5 做 `tip`/`drifting-bottle` 时才发现协议要推翻重来
 - [ ] 标准 Nostr 客户端兼容性验证：确认非 L2/L3-aware 客户端读到 Kind 30078 不报错（`protocol-v2.md` §11 兼容性承诺的验收测试）
-- [ ] **（[#27](https://github.com/iDoris-ai/agent-speaker/issues/27) 遗留债）** `AgentKind`（`agent msg`）和 `ProfileKind`（`profile publish`）目前共用 Kind 30078，纯属巧合非设计。既然本里程碑要把 `register`/`publish`/`inquire`/`tip`/`subscribe` 统一收敛进新的 behavior 信封，这是重新定义 kind/tag 约定的天然时机——本任务给新 behavior 信封分配一个独立 kind（不再和 `agent msg` 共用 30078），并确认这不破坏已发布事件的可读性（标准客户端仍能读到旧的 Kind 30078 消息，只是不再有新的 behavior 事件混进同一个 kind）
-- [ ] **（[#26](https://github.com/iDoris-ai/agent-speaker/issues/26) 遗留债）** `internal/messaging/outbox.go` 的 `SaveOutbox` 并发读-改-写无锁，有丢更新和文件损坏两种失败模式（daemon 自动重试循环和用户手动 CLI 已经会真的并发操作同一个 `outbox.json`）。本里程碑新增的 behavior 收发会进一步增加对 outbox 的并发写入场景（`publish`/`tip`/`subscribe` 各自的失败重试），修复应先于这些新 behavior 上线，而不是让并发写者数量继续增加
+- [ ] **（[#27](https://github.com/iDoris-ai/hyphae/issues/27) 遗留债）** `AgentKind`（`agent msg`）和 `ProfileKind`（`profile publish`）目前共用 Kind 30078，纯属巧合非设计。既然本里程碑要把 `register`/`publish`/`inquire`/`tip`/`subscribe` 统一收敛进新的 behavior 信封，这是重新定义 kind/tag 约定的天然时机——本任务给新 behavior 信封分配一个独立 kind（不再和 `agent msg` 共用 30078），并确认这不破坏已发布事件的可读性（标准客户端仍能读到旧的 Kind 30078 消息，只是不再有新的 behavior 事件混进同一个 kind）
+- [ ] **（[#26](https://github.com/iDoris-ai/hyphae/issues/26) 遗留债）** `internal/messaging/outbox.go` 的 `SaveOutbox` 并发读-改-写无锁，有丢更新和文件损坏两种失败模式（daemon 自动重试循环和用户手动 CLI 已经会真的并发操作同一个 `outbox.json`）。本里程碑新增的 behavior 收发会进一步增加对 outbox 的并发写入场景（`publish`/`tip`/`subscribe` 各自的失败重试），修复应先于这些新 behavior 上线，而不是让并发写者数量继续增加
 
 ### 交付物（示例）
 ```bash
-agent-speaker behavior register --mode structured ...
-agent-speaker behavior inquire --target <npub> --capability seo
-agent-speaker behavior subscribe --filter '{"tags":["AI"]}'
+hyphae behavior register --mode structured ...
+hyphae behavior inquire --target <npub> --capability seo
+hyphae behavior subscribe --filter '{"tags":["AI"]}'
 ```
 
 ---
@@ -145,7 +145,7 @@ relay 之间能互联互通（邀请邻居 + 付费转发），陌生人之间�
 
 ### 架构改动
 - `relay-khatru` 仓库新增 L2 中间件：邻居邀请管理、TTL 转发、`fee_paid` 校验（`protocol-v2.md` §5）。
-- `agent-speaker` 侧新增 `internal/driftingbottle/`：本地 profile 向量计算、topic 向量匹配、阈值判断。
+- `hyphae` 侧新增 `internal/driftingbottle/`：本地 profile 向量计算、topic 向量匹配、阈值判断。
 - `internal/vault/`（新包，或并入 `internal/profile`）：`profile.enc` 三层加密（public/match-only/private），AES-256-GCM，密钥与 keystore 同源。
 
 ### 子任务
@@ -170,8 +170,8 @@ relay 之间能互联互通（邀请邻居 + 付费转发），陌生人之间�
 
 ### 交付物（示例）
 ```bash
-agent-speaker behavior drifting-bottle --content "..." --topic AI,创业 --ttl 10
-agent-speaker profile vault set --field interests --tier match-only
+hyphae behavior drifting-bottle --content "..." --topic AI,创业 --ttl 10
+hyphae profile vault set --field interests --tier match-only
 ```
 
 ---
@@ -191,7 +191,7 @@ agent-speaker profile vault set --field interests --tier match-only
 - [ ] RFP 生成 + 并行协商引擎（`inquire` behavior 批量发送，收集报价）
 - [ ] 决策算法：价格/能力/评分加权评分，选择最优候选
 - [ ]（**吸取 Buzz `WF-08` 的教训**）approval / 挂起-恢复机制：设计阶段就规划"挂起状态可持久化、可从挂起点恢复执行"，不要等做完主流程才发现漏了这一步——Buzz 自己的 `request_approval` 至今只能返回 `Suspended` 却不能恢复，是一个现成的反面案例
-- [ ] `agent-speaker task` 命令组：`create --task ... --budget ... --deadline ...` / `list` / `show <id>` / `logs <id>`
+- [ ] `hyphae task` 命令组：`create --task ... --budget ... --deadline ...` / `list` / `show <id>` / `logs <id>`
 
 ---
 
@@ -210,7 +210,7 @@ agent-speaker profile vault set --field interests --tier match-only
 - [ ] 条件触发器：按 behavior kind/tag/author 匹配
 - [ ] 智能匹配：兴趣标签 Jaccard 相似度 + `profile_vector` 余弦相似度加权
 - [ ]（**借鉴 Buzz `VISION_ACTIVITY.md` 的"动词-宾语-结果"渲染哲学**）TUI 增加 Agent 活动 Feed：daemon/workflow 在做什么事，用"谁-做了什么-结果如何"的三元组渲染，而不是把原始事件 JSON 甩给用户看，方便人一眼判断要不要介入
-- [ ] `agent-speaker bg` 命令组：`create --schedule ... --condition ... --action ...` / `list` / `logs <id>` / `pause`/`resume`/`stop` / `summary --today`
+- [ ] `hyphae bg` 命令组：`create --schedule ... --condition ... --action ...` / `list` / `logs <id>` / `pause`/`resume`/`stop` / `summary --today`
 
 ---
 

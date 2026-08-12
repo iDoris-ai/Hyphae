@@ -1,6 +1,6 @@
-# Agent-Speaker 手动测试指南
+# Hyphae 手动测试指南
 
-> 场景：在两台/三台电脑上测试 agent-speaker 的核心功能。
+> 场景：在两台/三台电脑上测试 hyphae 的核心功能。
 > 预计用时：双人 10 分钟，三人追加 10 分钟，Profile/TUI 追加 5 分钟。
 > 本文档原是一份未合并的草稿（找回于本地 stash），2026-07-24 校对更新：relay 默认改为本地自建（`wss://relay.aastar.io` 当前不可达，`curl` 返回 530），并补充了 Profile 和 TUI 部分。
 
@@ -31,15 +31,15 @@ go test ./... -cover # 单元测试 + 覆盖率
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/iDoris-ai/agent-speaker.git
-cd agent-speaker
+git clone https://github.com/iDoris-ai/hyphae.git
+cd hyphae
 
 # 2. 编译
 ./build.sh
-# 或者：go build -o bin/agent-speaker ./cmd/agent-speaker
+# 或者：go build -o bin/hyphae ./cmd/hyphae
 
 # 3. 确认二进制文件存在
-./bin/agent-speaker --help
+./bin/hyphae --help
 ```
 
 ### Relay：优先用本地自建（推荐）
@@ -60,15 +60,15 @@ go run scripts/minirelay.go
 
 ### 你做：
 ```bash
-./bin/agent-speaker identity create --nickname jason --default
-./bin/agent-speaker identity export --nickname jason
+./bin/hyphae identity create --nickname jason --default
+./bin/hyphae identity export --nickname jason
 ```
 把输出里的 `Npub: npub1xxx...` 复制下来，发给对方。
 
 ### 伙伴做：
 ```bash
-./bin/agent-speaker identity create --nickname annie --default
-./bin/agent-speaker identity export --nickname annie
+./bin/hyphae identity create --nickname annie --default
+./bin/hyphae identity export --nickname annie
 ```
 把输出里的 `Npub: npub1yyy...` 复制下来，发给你。
 
@@ -78,12 +78,12 @@ go run scripts/minirelay.go
 
 ### 你做（用对方给你的 npub）：
 ```bash
-./bin/agent-speaker contact add --nickname annie --npub "npub1yyy..."
+./bin/hyphae contact add --nickname annie --npub "npub1yyy..."
 ```
 
 ### 伙伴做（用你给的 npub）：
 ```bash
-./bin/agent-speaker contact add --nickname jason --npub "npub1xxx..."
+./bin/hyphae contact add --nickname jason --npub "npub1xxx..."
 ```
 
 ---
@@ -92,7 +92,7 @@ go run scripts/minirelay.go
 
 ### 你 → 伙伴（明文）：
 ```bash
-./bin/agent-speaker agent msg \
+./bin/hyphae agent msg \
   --from jason \
   --to annie \
   --content "Hi, this is a plain message!" \
@@ -102,7 +102,7 @@ go run scripts/minirelay.go
 
 ### 伙伴 → 你（加密）：
 ```bash
-./bin/agent-speaker agent msg \
+./bin/hyphae agent msg \
   --from annie \
   --to jason \
   --content "Hi, this is an encrypted reply!" \
@@ -118,10 +118,10 @@ go run scripts/minirelay.go
 
 ```bash
 # 你查收
-./bin/agent-speaker agent inbox --as jason --decrypt=true
+./bin/hyphae agent inbox --as jason --decrypt=true
 
 # 伙伴查收
-./bin/agent-speaker agent inbox --as annie --decrypt=true
+./bin/hyphae agent inbox --as annie --decrypt=true
 ```
 
 ---
@@ -130,10 +130,10 @@ go run scripts/minirelay.go
 
 ```bash
 # 你看和伙伴的对话
-./bin/agent-speaker history conversation --with annie --limit 20
+./bin/hyphae history conversation --with annie --limit 20
 
 # 伙伴看和你的对话
-./bin/agent-speaker history conversation --with jason --limit 20
+./bin/hyphae history conversation --with jason --limit 20
 ```
 
 > ⚠️ **已知限制**：`history conversation --with <name>` 要求 `<name>` 必须是你 **contact 列表里已存在的昵称**（跟 `agent msg --to` 的解析规则不完全一致，`agent msg --to` 对未知昵称/npub 更宽松）。如果提示 `contact 'xxx' not found`，先 `contact add` 一下。这是 M1.5 阶段值得统一的一个小的不一致，不影响核心功能。
@@ -144,7 +144,7 @@ go run scripts/minirelay.go
 
 ```bash
 # 两人都可以运行
-./bin/agent-speaker history stats
+./bin/hyphae history stats
 ```
 应该能看到 Total / Incoming / Outgoing / Encrypted 消息数。
 
@@ -153,8 +153,8 @@ go run scripts/minirelay.go
 ## Step 7：搜索消息
 
 ```bash
-./bin/agent-speaker history search --query "plain"
-./bin/agent-speaker history search --query "encrypted"
+./bin/hyphae history search --query "plain"
+./bin/hyphae history search --query "encrypted"
 ```
 
 ---
@@ -180,8 +180,8 @@ go run scripts/minirelay.go
 ## Step 1：第三人创建身份并加入
 
 ```bash
-./bin/agent-speaker identity create --nickname brother --default
-./bin/agent-speaker identity export --nickname brother
+./bin/hyphae identity create --nickname brother --default
+./bin/hyphae identity export --nickname brother
 ```
 把 `Npub: npub1zzz...` 分别发给另外两人，另外两人各自 `contact add`，第三人也把另外两人的 npub `contact add` 回来（三方两两互加）。
 
@@ -192,7 +192,7 @@ go run scripts/minirelay.go
 > ⚠️ 群组**管理**（创建、加人、列群、离开/重新加入）已可用，但**群聊消息目前没有专门的广播命令/TUI 视图**——群消息需要给每个成员分别 `agent msg`，relay 会把它们当独立的 1 对 1 加密/明文消息处理。下面的测试就是覆盖这两块：已实现的群组管理 + 通过私聊模拟群广播。
 
 ```bash
-./bin/agent-speaker group create \
+./bin/hyphae group create \
   --name "ThreeAmigos" \
   --description "three-person group chat" \
   --members annie,brother
@@ -206,7 +206,7 @@ go run scripts/minirelay.go
 
 ```bash
 # 三人都可以运行
-./bin/agent-speaker group list
+./bin/hyphae group list
 ```
 
 ---
@@ -216,8 +216,8 @@ go run scripts/minirelay.go
 ```bash
 # 你给另外两人各发一条
 MSG="Hey team, welcome to our group chat!"
-./bin/agent-speaker agent msg --from jason --to annie --content "$MSG" --relay ws://localhost:7777 --encrypt=false
-./bin/agent-speaker agent msg --from jason --to brother --content "$MSG" --relay ws://localhost:7777 --encrypt=false
+./bin/hyphae agent msg --from jason --to annie --content "$MSG" --relay ws://localhost:7777 --encrypt=false
+./bin/hyphae agent msg --from jason --to brother --content "$MSG" --relay ws://localhost:7777 --encrypt=false
 ```
 其余两人依样回复给另外两人。
 
@@ -228,9 +228,9 @@ MSG="Hey team, welcome to our group chat!"
 ## Step 5：验证三人都能收到消息
 
 ```bash
-./bin/agent-speaker agent inbox --as jason --decrypt=true
-./bin/agent-speaker agent inbox --as annie --decrypt=true
-./bin/agent-speaker agent inbox --as brother --decrypt=true
+./bin/hyphae agent inbox --as jason --decrypt=true
+./bin/hyphae agent inbox --as annie --decrypt=true
+./bin/hyphae agent inbox --as brother --decrypt=true
 ```
 
 ---
@@ -238,8 +238,8 @@ MSG="Hey team, welcome to our group chat!"
 ## Step 6：查看各对话历史
 
 ```bash
-./bin/agent-speaker history conversation --with annie --limit 10
-./bin/agent-speaker history conversation --with brother --limit 10
+./bin/hyphae history conversation --with annie --limit 10
+./bin/hyphae history conversation --with brother --limit 10
 ```
 
 ---
@@ -248,10 +248,10 @@ MSG="Hey team, welcome to our group chat!"
 
 ```bash
 # 想离开群组
-./bin/agent-speaker group leave --name "ThreeAmigos"
+./bin/hyphae group leave --name "ThreeAmigos"
 
 # 群主重新添加
-./bin/agent-speaker group add-member --name "ThreeAmigos" --user brother
+./bin/hyphae group add-member --name "ThreeAmigos" --user brother
 ```
 
 ---
@@ -259,8 +259,8 @@ MSG="Hey team, welcome to our group chat!"
 ## Step 8：三人统计与搜索
 
 ```bash
-./bin/agent-speaker history stats
-./bin/agent-speaker history search --query "group"
+./bin/hyphae history stats
+./bin/hyphae history search --query "group"
 ```
 
 ---
@@ -284,18 +284,18 @@ MSG="Hey team, welcome to our group chat!"
 ## Profile 发布与发现
 
 ```bash
-./bin/agent-speaker profile publish --as jason \
+./bin/hyphae profile publish --as jason \
   --name "Jason" --description "manual test run" \
   --relay ws://localhost:7777
 
-./bin/agent-speaker profile search --query "Jason"
+./bin/hyphae profile search --query "Jason"
 ```
 
 ## TUI 聊天界面
 
 ```bash
-./bin/agent-speaker tui --relay ws://localhost:7777
-# 或直接 1 对 1：./bin/agent-speaker chat --with annie --relay ws://localhost:7777
+./bin/hyphae tui --relay ws://localhost:7777
+# 或直接 1 对 1：./bin/hyphae chat --with annie --relay ws://localhost:7777
 ```
 在 TUI 里应该能看到和 Part 1 里发的消息同一份历史，收发新消息也应实时刷新。这部分是交互式界面，无法脚本化验证，需要人工盯着看。
 
@@ -312,7 +312,7 @@ MSG="Hey team, welcome to our group chat!"
 
 **Q: inbox 看不到消息？**
 A: 等 3-5 秒让 relay 传播，再试一次。如果还是收不到，检查：
-- relay 是否连通：`./bin/agent-speaker relay info ws://localhost:7777`（或你实际用的 relay 地址）
+- relay 是否连通：`./bin/hyphae relay info ws://localhost:7777`（或你实际用的 relay 地址）
 - 双方的 identity 和 contact 是否配置正确
 
 **Q: 加密消息解密失败？**
@@ -322,16 +322,16 @@ A: 确认发送方和接收方都有对方的正确 npub，且使用的是同一
 A: 见 Step 5 的已知限制说明，先 `contact add` 那个昵称。
 
 **Q: 命令输出里出现一堆 `[32m`/`[0m` 这种乱码？**
-A: 已知问题——`cmd/agent-speaker/main.go` 里强制打开了终端颜色（不管输出是不是被重定向/管道），把命令输出存文件或喂给脚本时会看到这些转义符。已记录在 `docs/TODO.md`，等 CLI 支持 `--json`/纯文本输出模式时一并修。不影响功能，只是重定向输出会不好看。
+A: 已知问题——`cmd/hyphae/main.go` 里强制打开了终端颜色（不管输出是不是被重定向/管道），把命令输出存文件或喂给脚本时会看到这些转义符。已记录在 `docs/TODO.md`，等 CLI 支持 `--json`/纯文本输出模式时一并修。不影响功能，只是重定向输出会不好看。
 
 **Q: 想重新测试？**
 A: 删除本地数据即可重新开始：
 ```bash
-rm -rf ~/.agent-speaker
+rm -rf ~/.hyphae
 ```
 
 ---
 
 ## 完整测试通过标准
 
-如果 **Part 1**、**Part 2**、**Part 3** 的全部勾选都完成，agent-speaker 的核心通信 + 群组管理 + Profile + TUI 就验证完毕了。
+如果 **Part 1**、**Part 2**、**Part 3** 的全部勾选都完成，hyphae 的核心通信 + 群组管理 + Profile + TUI 就验证完毕了。
