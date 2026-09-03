@@ -36,7 +36,7 @@ copy-tests: sync-nak add-agent-cmd
 	@cp test/*_test.go $(BUILD_DIR)/nak-src/ 2>/dev/null || true
 	@mkdir -p $(BUILD_DIR)/nak-src/pkg/compress
 	@cp pkg/compress/*.go $(BUILD_DIR)/nak-src/pkg/compress/ 2>/dev/null || true
-	@echo "replace github.com/jason/hyphae/pkg/compress => ./pkg/compress" >> $(BUILD_DIR)/nak-src/go.mod
+	@echo "replace github.com/iDoris-ai/hyphae/pkg/compress => ./pkg/compress" >> $(BUILD_DIR)/nak-src/go.mod
 	@echo "✅ Tests copied"
 
 # 开发构建

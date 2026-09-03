@@ -51,7 +51,7 @@
 
 | 维度 | MCP | A2A | ACP | Hyphae |
 |------|-----|-----|-----|---------------|
-| **发布方** | Anthropic | Google | IBM | AuraAIHQ |
+| **发布方** | Anthropic | Google | IBM | iDoris-ai |
 | **发布时间** | 2024-11 | 2025-04 | 2025-03 | 2025 |
 | **治理** | Linux Foundation | Linux Foundation | 并入 A2A | 开源 |
 | **协议层** | Agent-Tool | Agent-Agent | Agent-Agent | Agent-Agent |

@@ -3,6 +3,19 @@
 - A speaker for agent to talk with each other, base on Nostr and [nak](https://github.com/fiatjaf/nak) repo, extend more features for agent.
 - It is a cli tool build with Golang.
 
+## 从 agent-speaker 升级
+
+本项目原名 `agent-speaker`，改名为 `hyphae`（呼应 Mycelium Protocol 的网络命名）。**新版二进制会自动识别并升级旧的加密 keystore**（首次用正确密码解锁时，静默把校验 token 换成新版本，无需手动操作、私钥不受影响）。但下面几件事仓库改不到，需要手动处理：
+
+1. **本地数据目录**：旧版把身份和消息存在 `~/.agent-speaker/`，新版读写 `~/.hyphae/`，不会自动搬迁。手动执行一次：
+   ```bash
+   mv ~/.agent-speaker ~/.hyphae
+   ```
+   如果 `~/.hyphae` 已经存在（比如已经跑过一次新版本创建了空目录），**不要**直接覆盖——请先确认两边内容，手动合并需要的身份/消息。
+2. **macOS 后台服务（如果配置过 launchd 自启动）**：先卸载旧的 `com.agent-speaker.daemon`，再装新的 `com.hyphae.daemon`，详见 [`docs/README_DAEMON.md`](docs/README_DAEMON.md#配置自动启动macos)——旧 plist 的 `KeepAlive=true` 会在旧二进制找不到身份时无限重启循环。
+3. **旧二进制**：`install.sh` 不会自动删除 `/usr/local/bin/agent-speaker`，装完新版本后自行 `rm` 掉，避免和新版本混用（尤其是两边同时跑 daemon 会对同一身份产生重复的自动回复）。
+4. **脚本/自动化**：`AGENT_SPEAKER_OUTPUT=json` 环境变量作为兼容别名继续有效，但新脚本建议改用 `HYPHAE_OUTPUT=json`。
+
 ## 项目结构
 
 ```

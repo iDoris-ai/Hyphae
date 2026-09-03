@@ -49,7 +49,7 @@ cd hyphae
 git checkout refine  # 或 main
 
 # 3. 编译
-go build -o bin/hyphae .
+go build -o bin/hyphae ./cmd/hyphae
 
 # 4. 安装到系统（可选）
 ln -sf $(pwd)/bin/hyphae /usr/local/bin/hyphae
@@ -59,12 +59,12 @@ ln -sf $(pwd)/bin/hyphae /usr/local/bin/hyphae
 
 ```bash
 # 拉取镜像
-docker pull ghcr.io/auraaihq/hyphae:latest
+docker pull ghcr.io/idoris-ai/hyphae:latest
 
 # 运行
 docker run --rm -it \
   -v ~/.hyphae:/root/.hyphae \
-  ghcr.io/auraaihq/hyphae:latest \
+  ghcr.io/idoris-ai/hyphae:latest \
   hyphae identity create --nickname alice
 ```
 

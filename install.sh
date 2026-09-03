@@ -105,7 +105,7 @@ install_from_source() {
     cd "$TMP_DIR/repo"
     
     echo "编译..."
-    go build -o bin/hyphae .
+    go build -o bin/hyphae ./cmd/hyphae
     
     echo "安装..."
     if [ -w "$INSTALL_DIR" ]; then

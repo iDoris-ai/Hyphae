@@ -2,7 +2,10 @@ package identity
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/iDoris-ai/hyphae/pkg/types"
@@ -172,6 +175,43 @@ func TestEncryptUnencryptedKeystore(t *testing.T) {
 	assert.NotEqual(t, [32]byte{}, sk)
 }
 
+// TestUnlockKeyStore_LegacyVerificationTokenUpgrades is the golden-fixture regression
+// test for the agent-speaker -> hyphae rename (PR #33 review, finding B1): a keystore
+// encrypted before the rename has legacyVerifyToken baked into its on-disk
+// Verification field. Renaming that constant without keeping the old value
+// acceptable locked every encrypted keystore out, correct password or not. This
+// builds exactly that pre-rename keystore on disk, confirms it still unlocks, and
+// confirms the on-disk token gets silently upgraded so later unlocks take the
+// fast (non-legacy) path.
+func TestUnlockKeyStore_LegacyVerificationTokenUpgrades(t *testing.T) {
+	setupTempKeyStore(t)
+	password := "legacy-password"
+
+	saltB64, verificationB64, err := createLegacyVerification(password)
+	require.NoError(t, err)
+
+	ks := &types.KeyStore{
+		Encrypted:    true,
+		Salt:         saltB64,
+		Verification: verificationB64,
+		Identities:   make(map[string]*types.Identity),
+		Contacts:     make(map[string]*types.Contact),
+	}
+	require.NoError(t, SaveKeyStore(ks))
+
+	loaded, err := LoadKeyStore()
+	require.NoError(t, err)
+	require.NoError(t, UnlockKeyStore(loaded, password), "correct password on a legacy keystore must still unlock")
+	assert.NotNil(t, loaded.MasterKey)
+
+	reloaded, err := LoadKeyStore()
+	require.NoError(t, err)
+	assert.NotEqual(t, verificationB64, reloaded.Verification, "verification token should have been upgraded on disk")
+
+	require.NoError(t, UnlockKeyStore(reloaded, password), "must still unlock after the upgrade")
+	assert.NotNil(t, reloaded.MasterKey)
+}
+
 func TestResolveRecipient(t *testing.T) {
 	setupTempKeyStore(t)
 	ks := &types.KeyStore{
@@ -289,4 +329,73 @@ func TestLegacyContactWithoutRoleFieldDefaultsToHuman(t *testing.T) {
 	assert.Equal(t, types.Role(""), contact.Role, "zero value for a legacy record with no role key")
 	assert.Equal(t, "human", contact.Role.String(), "Role.String() must treat the zero value as human")
 	assert.NotEqual(t, types.RoleAgent, contact.Role, "a legacy contact must never be mistaken for an agent")
+}
+
+// TestSaveKeyStore_ConcurrentWritesNeverCorrupt guards the unique-temp-file
+// property of SaveKeyStore (PR #33 review, concurrency round). With a fixed
+// temp name, concurrent writers open the same inode with O_TRUNC and write at
+// independent offsets, so os.Rename publishes spliced garbage — measured at
+// ~11% of concurrent pairs. Renaming is atomic for the directory entry, not
+// for the bytes, so the temp file itself has to be unique. Every observer must
+// see a complete, parseable keystore, never a torn one.
+func TestSaveKeyStore_ConcurrentWritesNeverCorrupt(t *testing.T) {
+	setupTempKeyStore(t)
+
+	// Two keystores of deliberately different serialized sizes: a torn write
+	// splices one into the other, which shows up as a JSON parse failure.
+	small := &types.KeyStore{
+		Identities: map[string]*types.Identity{"a": {Nickname: "a", Npub: "npub-a"}},
+		Contacts:   make(map[string]*types.Contact),
+	}
+	large := &types.KeyStore{
+		Identities: make(map[string]*types.Identity),
+		Contacts:   make(map[string]*types.Contact),
+	}
+	for i := 0; i < 200; i++ {
+		name := fmt.Sprintf("identity-%03d", i)
+		large.Identities[name] = &types.Identity{
+			Nickname: name,
+			Npub:     strings.Repeat("x", 120),
+			Nsec:     strings.Repeat("y", 120),
+		}
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ks := small
+			if i%2 == 0 {
+				ks = large
+			}
+			if err := SaveKeyStore(ks); err != nil {
+				t.Errorf("SaveKeyStore failed: %v", err)
+			}
+		}(i)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// Concurrent reader: must never observe a torn file. A missing
+			// file is fine (nothing has been renamed into place yet).
+			if _, err := LoadKeyStore(); err != nil {
+				t.Errorf("LoadKeyStore observed a corrupt keystore: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	final, err := LoadKeyStore()
+	require.NoError(t, err, "keystore must be parseable after concurrent writes")
+	assert.True(t, len(final.Identities) == 1 || len(final.Identities) == 200,
+		"final keystore must be exactly one writer's complete document, got %d identities",
+		len(final.Identities))
+
+	// No temp files may be left behind.
+	entries, err := os.ReadDir(GetKeyStorePath())
+	require.NoError(t, err)
+	for _, e := range entries {
+		assert.False(t, strings.HasSuffix(e.Name(), ".tmp"),
+			"leftover temp file: %s", e.Name())
+	}
 }

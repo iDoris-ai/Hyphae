@@ -36,7 +36,7 @@ func main() {
 			// TestPersistentFlag in the vendored library) — no extra opt-in needed.
 			&cli.BoolFlag{
 				Name:  "json",
-				Usage: "Machine-readable output: stdout is a JSON envelope, stderr is a JSON error, exit code is semantic (also settable via AGENT_SPEAKER_OUTPUT=json)",
+				Usage: "Machine-readable output: stdout is a JSON envelope, stderr is a JSON error, exit code is semantic (also settable via HYPHAE_OUTPUT=json, or the legacy AGENT_SPEAKER_OUTPUT=json)",
 			},
 		},
 		Commands: []*cli.Command{

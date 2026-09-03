@@ -160,7 +160,7 @@ Identity/Contact (keystore.json)  →  hyphae CLI/TUI ⇄ daemon(outbox/inbox/�
 
 ### 短期（V1 收尾 / M1.5 启动前，低成本高价值，可独立于协议重构先做）
 
-- [ ] `hyphae` 全局增加 `--json` 输出标志（或 `AGENT_SPEAKER_OUTPUT=json` 环境变量），stdout 纯 JSON、stderr 结构化错误对象、区分退出码（成功/用户错误/网络错误/鉴权错误/写冲突），为后续被 Agent24 或其他 Agent 工具化调用做准备。
+- [ ] `hyphae` 全局增加 `--json` 输出标志（或 `HYPHAE_OUTPUT=json` 环境变量），stdout 纯 JSON、stderr 结构化错误对象、区分退出码（成功/用户错误/网络错误/鉴权错误/写冲突），为后续被 Agent24 或其他 Agent 工具化调用做准备。
 - [ ] `internal/storage` 增加 `audit_log` 表（SHA-256 append-only hash chain，记录 identity 创建、消息发送/接收、群组增删成员、daemon 自动回复等关键动作），成本低、价值高，直接呼应生态"透明是默认值"的价值观。
 - [ ] `internal/group`（以及未来的 contact/membership 模型）显式引入角色概念（至少区分 Human / Agent-Bot），为 M1.5 之后"Agent 作为一等成员"打基础，不必现在就做完整权限系统。
 

@@ -12,6 +12,16 @@ nohup hyphae daemon --identity alice > ~/.hyphae/daemon.log 2>&1 &
 
 ## 配置自动启动（macOS）
 
+**从 agent-speaker 升级的用户请先做这一步。** launchd 的 `Label`/plist 属于系统状态，不在本仓库控制范围内，改名 PR 改不到它；旧 plist 的 `RunAtLoad`+`KeepAlive` 都是 `true`，旧二进制改名/搬走之后它会以 launchd 的节流间隔不断重启、日志无限追加，不会自愈：
+
+```bash
+launchctl unload -w ~/Library/LaunchAgents/com.agent-speaker.daemon.plist
+rm ~/Library/LaunchAgents/com.agent-speaker.daemon.plist
+rm /usr/local/bin/agent-speaker   # 如果 install.sh 之前装过旧二进制
+```
+
+确认旧任务已经卸载（`launchctl list | grep agent-speaker` 应该没有输出）之后，再继续下面的步骤装新的 `com.hyphae.daemon.plist`。
+
 创建 `~/Library/LaunchAgents/com.hyphae.daemon.plist`:
 
 ```xml
