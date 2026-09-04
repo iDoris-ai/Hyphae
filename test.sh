@@ -1,9 +1,9 @@
 #!/bin/bash
-# Comprehensive test script for agent-speaker
+# Comprehensive test script for hyphae
 
 set -e
 
-echo "🧪 Running agent-speaker tests..."
+echo "🧪 Running hyphae tests..."
 
 # Test function
 run_test() {
@@ -45,14 +45,14 @@ echo "CLI TESTS"
 echo "========================================="
 
 # Nostr base commands
-run_test "key generate" "./bin/agent-speaker key generate"
-run_test "identity list" "./bin/agent-speaker identity list"
-run_test "contact list" "./bin/agent-speaker contact list"
-run_test "history stats" "./bin/agent-speaker history stats"
-run_test "decode bech32" "./bin/agent-speaker decode -i npub1cndcuc26ngzk76j8mun2nx060ky2wdd6akagsx00s7q5mt4w7jdqfv9lw4"
+run_test "key generate" "./bin/hyphae key generate"
+run_test "identity list" "./bin/hyphae identity list"
+run_test "contact list" "./bin/hyphae contact list"
+run_test "history stats" "./bin/hyphae history stats"
+run_test "decode bech32" "./bin/hyphae decode -i npub1cndcuc26ngzk76j8mun2nx060ky2wdd6akagsx00s7q5mt4w7jdqfv9lw4"
 
 # Storage commands
-run_test "storage info" "./bin/agent-speaker storage info"
+run_test "storage info" "./bin/hyphae storage info"
 
 echo ""
 echo "========================================="
@@ -82,9 +82,9 @@ echo "E2E TESTS (Requires identities)"
 echo "========================================="
 
 # Check if we have test identities for E2E tests
-if ./bin/agent-speaker identity list | grep -q "No identities"; then
+if ./bin/hyphae identity list | grep -q "No identities"; then
     echo "  ⚠️  Skipping E2E tests (no identities found)"
-    echo "      Run: ./bin/agent-speaker identity create --nickname test"
+    echo "      Run: ./bin/hyphae identity create --nickname test"
 else
     echo "  ✅ Identities found - E2E tests ready"
     echo "      Run ./test_e2e.sh for full messaging E2E tests"

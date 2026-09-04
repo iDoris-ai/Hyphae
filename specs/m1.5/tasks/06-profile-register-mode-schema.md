@@ -10,9 +10,9 @@
 ## 接口
 
 ```
-agent-speaker profile publish --mode simple --name "Alice"
-agent-speaker profile publish --mode tagged --name "Alice" --tags dev,go,AI
-agent-speaker profile publish --mode structured --name "Alice" --capability "seo:..." --rate "audit:page:50" ...  # 现有行为，mode 默认值
+hyphae profile publish --mode simple --name "Alice"
+hyphae profile publish --mode tagged --name "Alice" --tags dev,go,AI
+hyphae profile publish --mode structured --name "Alice" --capability "seo:..." --rate "audit:page:50" ...  # 现有行为，mode 默认值
 ```
 
 不传 `--mode` 时默认 `structured`，**保证现有调用方式完全不受影响**（这是硬性向后兼容要求）。
@@ -72,7 +72,7 @@ const (
 - `pkg/types.ProfileMode` 完全照抄任务 5 `pkg/types.Role` 的模式：字符串枚举 + `Effective()`（零值 `""` 兜底成 `ModeStructured`，对应 display/兼容路径）+ `IsValid()`（零值故意判定为无效，对应"必须显式选择"的写入路径）。这两个方法分工不重叠，`AgentProfile.Validate()` 里两处都用到：先用 `Mode != "" && !Mode.IsValid()` 拒绝无效的显式值，再用 `Mode.Effective()` 决定该按哪种 schema 校验字段。
 - **`Validate()` 里也做了 mode-vs-字段校验**（不只是 CLI flag 层），因为 `profile publish --json-file` 这条路径完全绕过 CLI 的 flag 校验，直接把用户提供的 JSON 反序列化成 `AgentProfile` 再调 `Validate()`——如果只在 CLI 层挡，`--json-file` 传一份 `mode: simple` 但塞满 capabilities 的 JSON 会直接绕过去。这是任务 5 Codex review 那次"验证只做在 CLI 层不够"的教训直接应用。
 - 三种 mode 的 profile 落地到本地 SQLite 时走的是已有的 `profile_json` 整块 JSON blob 字段（`internal/profile/db.go` 的 `StoreProfile`/`GetProfile`），不需要加新列——`Mode`/`Tags` 字段跟其余字段一样序列化进这个 blob，读回来自然带上，没有单独处理。
-- Live smoke test：起本地 `scripts/minirelay.go`，分别用 `--mode simple`/`--mode tagged`/默认 structured 三种方式 publish，再用 `profile discover --json` 读回来，逐条核对 JSON 内容跟 spec 里的三份 schema 示例完全一致（`simple` 只有 `name`+`mode`；`tagged` 多了 `tags`；`structured` 是完整字段）；也验证了 `--mode simple --description ...`、`--mode tagged --capability ...`、`--mode bogus` 三种非法组合都被清晰拒绝、非零退出码。测试产生的 profile 记录已在提交前从本地 `~/.agent-speaker/messages.db` 清理。
+- Live smoke test：起本地 `scripts/minirelay.go`，分别用 `--mode simple`/`--mode tagged`/默认 structured 三种方式 publish，再用 `profile discover --json` 读回来，逐条核对 JSON 内容跟 spec 里的三份 schema 示例完全一致（`simple` 只有 `name`+`mode`；`tagged` 多了 `tags`；`structured` 是完整字段）；也验证了 `--mode simple --description ...`、`--mode tagged --capability ...`、`--mode bogus` 三种非法组合都被清晰拒绝、非零退出码。测试产生的 profile 记录已在提交前从本地 `~/.hyphae/messages.db` 清理。
 - `pkg/types/profile.go` 加字段导致 `AgentProfile` struct 的列对齐被 gofmt 要求重新计算——顺手跑了 `gofmt -w` 这一个文件（连带修正了这个文件里 pre-existing 的 `Availability` 常量块对齐问题，不是本任务引入的，但既然文件已经在改就一起交给 gofmt 处理了）。
 
 ### Codex review（Tier 1）第一轮

@@ -1,16 +1,16 @@
-# Buzz（block/buzz）vs Agent-Speaker：架构对比分析与借鉴建议
+# Buzz（block/buzz）vs Hyphae：架构对比分析与借鉴建议
 
 > 调研触发：https://blog.mushroom.cv/blog/block-buzz-nostr-human-agent-workspace/ 提及的 `block/buzz`
 > 调研方式：克隆源码（Apache 2.0，7393★，2026-03-06 开源，最后 push 2026-07-24）+ 通读 `ARCHITECTURE.md`/`NOSTR.md`/`VISION*.md`/关键 crate 源码
 > 对照对象：本仓库当前 V1 实现 + `docs/protocol-v2.md`（2026-05-13 锁定）+ `docs/agent-protocols-summary.md`
 > 撰写日期：2026-07-24（2026-07-24 复核并补充落地事项）
-> **范围说明**：本报告目的是从 Buzz 的具体技术实现和产品理念中挑值得借鉴的点，**不改变 Agent-Speaker Protocol V2 已锁定的产品方向和架构**（去中心化、任何人可自部署、无中心化托管）。第 8 节的 TODO 已按里程碑拆分落地到 [`protocol-v2.md`](./protocol-v2.md) §12「借鉴 Buzz（block/buzz）调研的落地事项」（中长期，挂在 M1.5–M5）和 [`TODO.md`](./TODO.md)（短期，独立于 V2 协议重构可先做）。
+> **范围说明**：本报告目的是从 Buzz 的具体技术实现和产品理念中挑值得借鉴的点，**不改变 Hyphae Protocol V2 已锁定的产品方向和架构**（去中心化、任何人可自部署、无中心化托管）。第 8 节的 TODO 已按里程碑拆分落地到 [`protocol-v2.md`](./protocol-v2.md) §12「借鉴 Buzz（block/buzz）调研的落地事项」（中长期，挂在 M1.5–M5）和 [`TODO.md`](./TODO.md)（短期，独立于 V2 协议重构可先做）。
 
 ---
 
 ## 0. 一句话结论
 
-**Buzz 和 Agent-Speaker 不是同一类产品，不存在"抄谁作业"的问题**——Buzz 是 Block（原 Square）出品、面向"一个组织内部团队"的**中心化托管协作工作区**（Slack + GitHub + CI 的替代品，人和 Agent 共享一个 relay 里的房间）；Agent-Speaker/Protocol V2 的目标是**任何人可自部署、relay 之间互联的去中心化 Agent 对等网络**（没有"一个组织拥有一个 relay"这个假设，出发点更接近比特币/Nostr 本身的无许可精神，也更贴合 Mycelium Protocol「数字主权、拒绝平台垄断」的价值观）。
+**Buzz 和 Hyphae 不是同一类产品，不存在"抄谁作业"的问题**——Buzz 是 Block（原 Square）出品、面向"一个组织内部团队"的**中心化托管协作工作区**（Slack + GitHub + CI 的替代品，人和 Agent 共享一个 relay 里的房间）；Hyphae/Protocol V2 的目标是**任何人可自部署、relay 之间互联的去中心化 Agent 对等网络**（没有"一个组织拥有一个 relay"这个假设，出发点更接近比特币/Nostr 本身的无许可精神，也更贴合 Mycelium Protocol「数字主权、拒绝平台垄断」的价值观）。
 
 但两者共享同一个底层协议（Nostr）和同一个核心命题（"Agent 应该像人类队友一样拥有独立身份、被审计、可协作"），Buzz 背靠 Block 的工程资源，把这个命题的很多"深水区"细节（Agent 身份模型、workflow 引擎、审计链、CLI 的机器可读接口）已经做出了可运行、可复现的具体实现，**这些具体设计值得我们直接参考，但 Buzz 的重量级多租户后端架构不值得照搬**。以下逐项展开。
 
@@ -18,7 +18,7 @@
 
 ## 1. 项目背景对比
 
-| 维度 | Buzz | Agent-Speaker |
+| 维度 | Buzz | Hyphae |
 |---|---|---|
 | 出品方 | Block Inc.（原 Square，Jack Dorsey） | iDoris.ai（Mycelium Protocol 生态） |
 | 开源时间 | 2026-03-06（内部项目开源，非从零起步——CHANGELOG PR 编号已到 #2589+） | 从 0.1 版本原生开源迭代 |
@@ -48,10 +48,10 @@ Clients (桌面 Tauri+React / Web / Mobile Flutter / buzz-cli / buzz-acp)
 - **多租户（"community"）通过 host 域名解析**，同一套 Postgres/Redis/S3 服务多个隔离的 community，隔离性用 TLA+ 证明，用 Tamarin 证明鉴权协议健全性，还有一个 `buzz-conformance` crate 在**运行时**用轨迹回放校验实现是否仍然符合形式化模型。
 - 12 步严格顺序的事件处理管线（AUTH→PUBKEY MATCH→...→WORKFLOW TRIGGER），fan-out 用 DashMap 三层索引，安全边界是"先查权限再注册订阅"，避免竞态泄露私有频道。
 
-### 2.2 Agent-Speaker 架构（对等 CLI + daemon，无中心）
+### 2.2 Hyphae 架构（对等 CLI + daemon，无中心）
 
 ```
-Identity/Contact (keystore.json)  →  agent-speaker CLI/TUI ⇄ daemon(outbox/inbox/自动回复)
+Identity/Contact (keystore.json)  →  hyphae CLI/TUI ⇄ daemon(outbox/inbox/自动回复)
                                               │ NIP-44 + zstd
                                               ▼
                                     wss://relay.aastar.io（单一公共 relay，V1）
@@ -67,7 +67,7 @@ Identity/Contact (keystore.json)  →  agent-speaker CLI/TUI ⇄ daemon(outbox/i
 
 ## 3. Nostr 协议使用对比
 
-| 维度 | Buzz | Agent-Speaker V1 | Agent-Speaker V2（规划） |
+| 维度 | Buzz | Hyphae V1 | Hyphae V2（规划） |
 |---|---|---|---|
 | 底层协议 | NIP-01 + 原生 NIP-29 群组 relay | NIP-01 + NIP-44 加密 | NIP-01（L1，不变） |
 | Kind 分配策略 | 40000-49999 为 Buzz 自定义区，81 个具名常量，按功能分段（channel/agent/forum/workflow/audit/presence） | Kind 4（加密DM）/ Kind 1（明文） | Kind 30078（L3 JSON 行为协议）、Kind 30079（漂流瓶，新增） |
@@ -95,19 +95,19 @@ Identity/Contact (keystore.json)  →  agent-speaker CLI/TUI ⇄ daemon(outbox/i
 
 > **术语提醒**：Buzz 的 "ACP" = Zed 提出的 **Agent Client Protocol**（stdio JSON-RPC，编辑器/宿主 ↔ Agent），跟我们 `docs/agent-protocols-summary.md` 里对比的 "ACP" = IBM 的 **Agent Communication Protocol**（已并入 A2A）**完全是两个不同的协议，同名不同物**。以后再讨论 ACP 时要先确认说的是哪一个，避免团队内部产生误解。Zed 的 ACP 目前是 Goose/Codex/Claude Code 这类"终端里跑的编码 Agent"接入宿主应用的事实标准之一，跟我们 Agent24 的定位（"基于 Claude Code 的自主任务执行框架"）关系更近，值得单独调研。
 
-### 4.2 Agent-Speaker 当前状态
+### 4.2 Hyphae 当前状态
 
 - 身份模型本质上和 Buzz 相同的起点：每个 identity 一个 Nostr keypair，存在 `keystore.json` 里——**这一步我们已经做对了，不用改**。
 - 但目前止步于"点对点消息 + 群聊成员"，**没有 Buzz 那种"Agent 是 channel/group 的一等成员，可见范围由 membership 决定"的显式建模**——我们的 `internal/group` 目前应该只有扁平的"成员列表"，没有区分 Human/Agent/Bot 角色，也没有"channel-scoped 可见性"这个概念（我们本来就是点对点转发，没有 relay 侧的 channel 隔离逻辑）。
 - **没有 owner attestation / 委托授权机制**——这一点其实对我们更重要，因为我们规划中 Agent 要执行 `tip`（打赏，涉及 AAstar Point 真实资金）和 `drifting-bottle`（涉及个人 profile 向量），"Agent 代表谁在花钱/代表谁在暴露信息"这个授权链条现在是空白的。
-- CLI 目前是人类可读文本输出为主，**没有统一的机器可读（JSON）输出模式**，这会成为 Agent24 或其他 Agent 想直接调用 agent-speaker CLI 时的摩擦点。
+- CLI 目前是人类可读文本输出为主，**没有统一的机器可读（JSON）输出模式**，这会成为 Agent24 或其他 Agent 想直接调用 hyphae CLI 时的摩擦点。
 - **没有 persona / team 的概念**，但这本来就不是我们的核心场景（我们更像"通信协议 SDK/CLI"，不是"团队协作产品"），不需要照搬。
 
 ---
 
 ## 5. Workflow / 自动化对比
 
-| 维度 | Buzz `buzz-workflow` | Agent-Speaker |
+| 维度 | Buzz `buzz-workflow` | Hyphae |
 |---|---|---|
 | 现状 | YAML-as-code 引擎，4 类触发器（message_posted/reaction_added/schedule/webhook）+ 7 类 action（send_message/send_dm/set_channel_topic/add_reaction/call_webhook/request_approval/delay），`{{trigger.text}}` 模板变量，`evalexpr` 条件求值，100 并发信号量 | 只有 `daemon --auto-reply` 这一种硬编码自动化行为（收到消息就回一句固定前缀的回复） |
 | 成熟度 | approval gate 未打通（`request_approval` 返回 Suspended 但不能恢复，官方 issue WF-08）、`send_dm`/`set_channel_topic` 是桩（WF-07）——**即便 Block 的资源，这块也还没完全做完** | 无 workflow 概念，M3（指令型自主任务）、M4（长期背景任务）尚未开始 |
@@ -121,7 +121,7 @@ Identity/Contact (keystore.json)  →  agent-speaker CLI/TUI ⇄ daemon(outbox/i
 
 ## 6. 技术成熟度信号对比
 
-| 信号 | Buzz | Agent-Speaker |
+| 信号 | Buzz | Hyphae |
 |---|---|---|
 | 形式化验证 | TLA+（多租户隔离性证明）+ Tamarin（鉴权协议健全性，32 lemma）+ 运行时 conformance checker（轨迹回放校验实现是否符合模型）+ mutation testing | 无 |
 | 审计日志 | 每 community 独立 SHA-256 append-only 哈希链，10 种审计动作，`pg_advisory_lock` 单写者保证 | 无 |
@@ -160,7 +160,7 @@ Identity/Contact (keystore.json)  →  agent-speaker CLI/TUI ⇄ daemon(outbox/i
 
 ### 短期（V1 收尾 / M1.5 启动前，低成本高价值，可独立于协议重构先做）
 
-- [ ] `agent-speaker` 全局增加 `--json` 输出标志（或 `AGENT_SPEAKER_OUTPUT=json` 环境变量），stdout 纯 JSON、stderr 结构化错误对象、区分退出码（成功/用户错误/网络错误/鉴权错误/写冲突），为后续被 Agent24 或其他 Agent 工具化调用做准备。
+- [ ] `hyphae` 全局增加 `--json` 输出标志（或 `HYPHAE_OUTPUT=json` 环境变量），stdout 纯 JSON、stderr 结构化错误对象、区分退出码（成功/用户错误/网络错误/鉴权错误/写冲突），为后续被 Agent24 或其他 Agent 工具化调用做准备。
 - [ ] `internal/storage` 增加 `audit_log` 表（SHA-256 append-only hash chain，记录 identity 创建、消息发送/接收、群组增删成员、daemon 自动回复等关键动作），成本低、价值高，直接呼应生态"透明是默认值"的价值观。
 - [ ] `internal/group`（以及未来的 contact/membership 模型）显式引入角色概念（至少区分 Human / Agent-Bot），为 M1.5 之后"Agent 作为一等成员"打基础，不必现在就做完整权限系统。
 

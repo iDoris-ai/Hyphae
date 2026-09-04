@@ -6,8 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/AuraAIHQ/agent-speaker/internal/identity"
-	"github.com/AuraAIHQ/agent-speaker/pkg/types"
+	"github.com/iDoris-ai/hyphae/internal/identity"
+	"github.com/iDoris-ai/hyphae/pkg/types"
 )
 
 // ContactsModel represents the contacts list TUI
@@ -147,7 +147,7 @@ func (m *ContactsModel) View() string {
 	if len(m.contacts) == 0 {
 		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#666666")).Render("  No contacts. Add one with:"))
 		b.WriteString("\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#666666")).Render("  agent-speaker contact add --nickname <name> --npub <npub>"))
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#666666")).Render("  hyphae contact add --nickname <name> --npub <npub>"))
 		b.WriteString("\n")
 	}
 

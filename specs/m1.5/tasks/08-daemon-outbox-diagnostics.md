@@ -9,10 +9,10 @@
 ## 接口
 
 ```
-agent-speaker storage outbox list                    # 列出所有 outbox 条目，含状态/失败次数/年龄/目标 relay
-agent-speaker storage outbox list --failed-only       # 只看失败的
-agent-speaker storage outbox clear --failed           # 清掉所有失败次数超过阈值的条目（需要二次确认或 --yes）
-agent-speaker storage outbox retry --id <id>          # 手动触发单条重试（不用等 daemon 的 60s 周期）
+hyphae storage outbox list                    # 列出所有 outbox 条目，含状态/失败次数/年龄/目标 relay
+hyphae storage outbox list --failed-only       # 只看失败的
+hyphae storage outbox clear --failed           # 清掉所有失败次数超过阈值的条目（需要二次确认或 --yes）
+hyphae storage outbox retry --id <id>          # 手动触发单条重试（不用等 daemon 的 60s 周期）
 ```
 
 ## 设计
@@ -37,9 +37,9 @@ agent-speaker storage outbox retry --id <id>          # 手动触发单条重试
 
 ## 实现笔记
 
-- **outbox 实际存储在 `~/.agent-speaker/outbox.json`（JSON 文件），不是 SQLite**——CLAUDE.md 架构表里"SQLite ... for messages and outbox"这句话是过时/不准确的（`messages.db` 里根本没有 outbox 表）。本任务没有改这个事实，只是确认现状；顺手校对了一下但没有修改 CLAUDE.md（不属于本任务范围）。
+- **outbox 实际存储在 `~/.hyphae/outbox.json`（JSON 文件），不是 SQLite**——CLAUDE.md 架构表里"SQLite ... for messages and outbox"这句话是过时/不准确的（`messages.db` 里根本没有 outbox 表）。本任务没有改这个事实，只是确认现状；顺手校对了一下但没有修改 CLAUDE.md（不属于本任务范围）。
 - **`retry --id` 复用逻辑，不是复制粘贴**：把 `internal/daemon/daemon.go` 里 `processOutbox` 循环体中"解析事件 → 尝试各 relay → 更新 outbox 状态"这一段（原来内联在 daemon 的重试循环里）提取成 `internal/messaging.AttemptSend(ctx, ob, entry, defaultRelays, dialTimeout) (SendResult, error)`，daemon 的自动重试循环和 CLI 的 `outbox retry` 命令都调用这一个函数。daemon 保留了自己的指数退避资格检查（`AttemptSend` 本身不做退避判断——手动 retry 的整个意义就是跳过等待，符合 spec 要求）。这个提取几乎是行为不变的重构：把原来直接写在 daemon.go 里的 `internal/daemon` 测试和 `internal/messaging` 全套测试跑一遍都全绿，没有引入新的行为差异。
-- **`outbox` 命令放在 `internal/messaging` 而不是 `internal/storage`**：`internal/messaging` 已经 import 了 `internal/storage`（用于 SQLite 消息存储），如果反过来在 `internal/storage` 里 import `internal/messaging` 会产生 import cycle。解决办法：`OutboxCmd` 定义在 `internal/messaging`，在 `cmd/agent-speaker/main.go`（组合根，两个包都能 import）里用 `storage.StorageCmd.Commands = append(storage.StorageCmd.Commands, messaging.OutboxCmd)` 挂到 `storage` 命令组下面，最终用户看到的还是 `agent-speaker storage outbox list/clear/retry`，跟 spec 的接口设计完全一致。
+- **`outbox` 命令放在 `internal/messaging` 而不是 `internal/storage`**：`internal/messaging` 已经 import 了 `internal/storage`（用于 SQLite 消息存储），如果反过来在 `internal/storage` 里 import `internal/messaging` 会产生 import cycle。解决办法：`OutboxCmd` 定义在 `internal/messaging`，在 `cmd/hyphae/main.go`（组合根，两个包都能 import）里用 `storage.StorageCmd.Commands = append(storage.StorageCmd.Commands, messaging.OutboxCmd)` 挂到 `storage` 命令组下面，最终用户看到的还是 `hyphae storage outbox list/clear/retry`，跟 spec 的接口设计完全一致。
 - **没有加"失败原因"字段**：现有 `OutboxEntry` 没有记录失败原因（比如 relay 拒绝的具体错误），`AttemptSend`/daemon 原来的逻辑本来就把 relay 的 publish 错误直接丢弃、只用来判断成功/失败。按 spec 的指引（"如果改动现有 outbox 结构影响面较大，可以先只加 list/clear...把'记录失败原因'拆成一条新的 TODO"），这次没有加这个字段——加了会牵涉到 `OutboxEntry` 序列化格式变化和 daemon/CLI 两处调用点都要传递错误详情，超出 S 规模。记在下面 README 的"发现的问题"里当独立 TODO。
 - **`clear --failed` 的判定标准是 `status == "failed" || retry_count >= min-failures`（默认 5）**，不是只看 `status` 字段——这是因为发现了一个更深的 pre-existing bug（见下面第一条），单纯看 `status=="failed"` 完全不可靠。
 - **`list` 展示时把 ID 从原始字节 hex 编码**：`AddToOutbox` 存的是 `string(event.ID[:])`（32 字节原始二进制内容当 Go string 存），直接打印会在终端里显示成乱码控制字符。只在展示层做了 hex 编码（`hexOutboxID`），不改变实际存储的字段内容；`retry --id`/后续可能的 `clear` 按 ID 操作时，先尝试把传入值当 hex 解码，解码失败就当字面量字符串处理（兼容脚本直接传原始 ID 的场景）。ID 列特意没有截断（不像 RECIPIENT 列会截断）——截断后用户没法把它复制粘贴回 `retry --id`，之前踩过这个坑，修正后才定下最终版本。
@@ -52,7 +52,7 @@ agent-speaker storage outbox retry --id <id>          # 手动触发单条重试
 
 ## Live 验收（对应验收标准 4）
 
-用编译好的二进制直接跑 `storage outbox list` 对着真实的 `~/.agent-speaker/outbox.json`（13 条真实历史记录）：
+用编译好的二进制直接跑 `storage outbox list` 对着真实的 `~/.hyphae/outbox.json`（13 条真实历史记录）：
 - 9 条共享同一个全零字节 ID 的记录全部被正确标成 `⚠️dup`；其中 1 条（retry_count=145，远超 max_retries=10）被正确识别成 `pending (stuck)`，另外 8 条冻结在 `0/10`——这正是上面第 1 条 bug 的真实表现，现在完全可见。
 - `list --failed-only` 正确只挑出那 1 条真正"卡死"的记录（8 条冻结在 0 重试的记录因为 retry_count 没有超过阈值，不会被 `--min-failures` 判定为可清理——这是第 1 条 bug 的直接后果，已经在上面记录，不在本任务修）。
 - 用 `echo "n" | storage outbox clear --failed` 验证了不传 `--yes` 时确认提示正常工作，且没有误删真实数据（`diff` 校验前后 `outbox.json` 完全一致）。

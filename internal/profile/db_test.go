@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/AuraAIHQ/agent-speaker/pkg/types"
+	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

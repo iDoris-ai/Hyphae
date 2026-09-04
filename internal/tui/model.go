@@ -11,16 +11,16 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
-	"github.com/AuraAIHQ/agent-speaker/internal/common"
-	"github.com/AuraAIHQ/agent-speaker/internal/identity"
-	"github.com/AuraAIHQ/agent-speaker/internal/messaging"
-	"github.com/AuraAIHQ/agent-speaker/internal/storage"
-	"github.com/AuraAIHQ/agent-speaker/pkg/crypto"
-	"github.com/AuraAIHQ/agent-speaker/pkg/types"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/iDoris-ai/hyphae/internal/common"
+	"github.com/iDoris-ai/hyphae/internal/identity"
+	"github.com/iDoris-ai/hyphae/internal/messaging"
+	"github.com/iDoris-ai/hyphae/internal/storage"
+	"github.com/iDoris-ai/hyphae/pkg/crypto"
+	"github.com/iDoris-ai/hyphae/pkg/types"
 )
 
 const (

@@ -74,7 +74,7 @@ start_relay() {
             echo "Web URL:   http://localhost:7777"
             echo ""
             echo "Test connection:"
-            echo "  ./bin/agent-speaker relay info ws://localhost:7777"
+            echo "  ./bin/hyphae relay info ws://localhost:7777"
             return 0
         fi
         sleep 1
@@ -99,7 +99,7 @@ restart_relay() {
 relay_status() {
     cd "$COMPOSE_DIR"
     
-    if docker compose ps | grep -q "agent-speaker-relay"; then
+    if docker compose ps | grep -q "hyphae-relay"; then
         log_info "Local relay is running"
         docker compose ps
         echo ""

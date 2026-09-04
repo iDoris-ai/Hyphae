@@ -1,11 +1,12 @@
 package identity
 
 import (
+	"encoding/base64"
 	"testing"
 
+	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/AuraAIHQ/agent-speaker/pkg/types"
 )
 
 func TestEncryptDecryptWithKey(t *testing.T) {
@@ -44,10 +45,47 @@ func TestCreateAndVerifyVerification(t *testing.T) {
 	require.NoError(t, err)
 	key, err := deriveMasterKey(password, saltBytes)
 	require.NoError(t, err)
-	assert.True(t, verifyMasterKey(verificationB64, key))
+	ok, isLegacy := verifyMasterKey(verificationB64, key)
+	assert.True(t, ok)
+	assert.False(t, isLegacy)
 
 	wrongKey := [32]byte{}
-	assert.False(t, verifyMasterKey(verificationB64, wrongKey))
+	ok, isLegacy = verifyMasterKey(verificationB64, wrongKey)
+	assert.False(t, ok)
+	assert.False(t, isLegacy)
+}
+
+// createLegacyVerification mirrors createVerification but encrypts legacyVerifyToken,
+// simulating a keystore.json written before the agent-speaker -> hyphae rename.
+func createLegacyVerification(password string) (saltB64, verificationB64 string, err error) {
+	salt, err := generateSalt()
+	if err != nil {
+		return "", "", err
+	}
+	key, err := deriveMasterKey(password, salt)
+	if err != nil {
+		return "", "", err
+	}
+	verification, err := encryptWithKey(legacyVerifyToken, key)
+	if err != nil {
+		return "", "", err
+	}
+	return base64.StdEncoding.EncodeToString(salt), verification, nil
+}
+
+func TestVerifyMasterKey_AcceptsLegacyToken(t *testing.T) {
+	password := "legacy-password"
+	saltB64, verificationB64, err := createLegacyVerification(password)
+	require.NoError(t, err)
+
+	saltBytes, err := mustDecodeB64(saltB64)
+	require.NoError(t, err)
+	key, err := deriveMasterKey(password, saltBytes)
+	require.NoError(t, err)
+
+	ok, isLegacy := verifyMasterKey(verificationB64, key)
+	assert.True(t, ok, "correct password on a legacy-token keystore must still verify")
+	assert.True(t, isLegacy, "legacy token must be flagged for upgrade")
 }
 
 func TestUnlockKeyStore_Success(t *testing.T) {

@@ -10,10 +10,10 @@
 ## 接口
 
 ```
-agent-speaker contact add --nickname X --npub Y [--role human|agent]   # 默认 human
-agent-speaker contact list                                              # 输出增加 ROLE 列
-agent-speaker group add-member --name G --user X                        # role 从 contact 记录继承，无需重复指定
-agent-speaker group list                                                # 成员列表展示里增加角色标记
+hyphae contact add --nickname X --npub Y [--role human|agent]   # 默认 human
+hyphae contact list                                              # 输出增加 ROLE 列
+hyphae group add-member --name G --user X                        # role 从 contact 记录继承，无需重复指定
+hyphae group list                                                # 成员列表展示里增加角色标记
 ```
 
 ## 设计
@@ -55,8 +55,8 @@ const (
 - `group_members` 表用 `CREATE TABLE IF NOT EXISTS`（内建 `role TEXT NOT NULL DEFAULT 'human'`）+ 幂等的 `ALTER TABLE ... ADD COLUMN`（忽略 "duplicate column name" 错误）两条路径覆盖：全新库和已存在的旧库都能正确升级。`TestGroupMembersTableMigrationIsIdempotent` 验证 `migrate()` 能重复调用不出错。
 - `group create`/`group add-member` 的 role 继承：先用 `identity.ResolveRecipient` 解析昵称拿到 npub（跟 `agent msg`/`history conversation` 共用同一条解析路径），再额外查一次 `identity.GetContact`——只有走 contact 记录的成员才有 role 可继承，走 identity 昵称或裸 npub 解析出来的成员（没有 contact 记录）就默认 human，这是 `ResolveRecipient` 本身解析优先级（contact → identity → 裸 npub）决定的，不是本任务引入的新行为。
 - `group list` 只在组内存在至少一个 agent 成员时才显示 `(N human, M agent)` 的细分，全人类的组仍然只显示成员数——这是刻意的最小侵入性展示选择，不影响老用户已经习惯的输出格式。
-- Live smoke test（用编译好的二进制在真实 `~/.agent-speaker/` 环境里跑）：`contact add --role agent`、`contact add --role bogus`（正确报错并以非零码退出）、`group create`/`group add-member` 的 role 继承、`group list` 的 human/agent 细分展示全部验证通过；测试过程中产生的 `role-test-bot` contact 和 `role-test-group-*`/`add-member-role-test-*` group 已在提交前清理干净，不留痕迹在真实 keystore/DB 里。
-- 顺带发现并用单独的 PR（[#17](https://github.com/iDoris-ai/agent-speaker/pull/17)）修复了一个跟本任务无关的遗留问题：任务 4（审计哈希链，PR #16）合并后，`specs/m1.5/README.md` 里的状态行没有同步成 `done`，之前是本地未提交的改动，切分支时被顺带带到了本分支——已经拆出去单独提交，本分支的 diff 里不包含这行。
+- Live smoke test（用编译好的二进制在真实 `~/.hyphae/` 环境里跑）：`contact add --role agent`、`contact add --role bogus`（正确报错并以非零码退出）、`group create`/`group add-member` 的 role 继承、`group list` 的 human/agent 细分展示全部验证通过；测试过程中产生的 `role-test-bot` contact 和 `role-test-group-*`/`add-member-role-test-*` group 已在提交前清理干净，不留痕迹在真实 keystore/DB 里。
+- 顺带发现并用单独的 PR（[#17](https://github.com/iDoris-ai/hyphae/pull/17)）修复了一个跟本任务无关的遗留问题：任务 4（审计哈希链，PR #16）合并后，`specs/m1.5/README.md` 里的状态行没有同步成 `done`，之前是本地未提交的改动，切分支时被顺带带到了本分支——已经拆出去单独提交，本分支的 diff 里不包含这行。
 
 ### Codex review（Tier 1）第一轮
 

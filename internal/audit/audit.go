@@ -31,7 +31,7 @@ import (
 // package while this package imported internal/identity back would be a
 // cycle. This is 3 lines of path-joining logic, not worth restructuring the
 // package graph over.
-const keyStoreDirName = ".agent-speaker"
+const keyStoreDirName = ".hyphae"
 
 func keyStoreDir() (string, error) {
 	home, err := os.UserHomeDir()

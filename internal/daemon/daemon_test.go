@@ -15,11 +15,11 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
-	"github.com/AuraAIHQ/agent-speaker/internal/common"
-	"github.com/AuraAIHQ/agent-speaker/internal/identity"
-	"github.com/AuraAIHQ/agent-speaker/internal/messaging"
-	"github.com/AuraAIHQ/agent-speaker/pkg/types"
 	"github.com/gorilla/websocket"
+	"github.com/iDoris-ai/hyphae/internal/common"
+	"github.com/iDoris-ai/hyphae/internal/identity"
+	"github.com/iDoris-ai/hyphae/internal/messaging"
+	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

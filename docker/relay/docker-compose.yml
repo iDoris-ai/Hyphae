@@ -6,7 +6,7 @@ version: '3.8'
 services:
   strfry:
     image: dockurr/strfry:latest
-    container_name: agent-speaker-relay
+    container_name: hyphae-relay
     restart: unless-stopped
     ports:
       - "7777:7777"

@@ -56,7 +56,7 @@ func TestMigrateFromJSON(t *testing.T) {
 	t.Setenv("HOME", tempDir)
 
 	// Create keystore dir
-	keystoreDir := filepath.Join(tempDir, ".agent-speaker")
+	keystoreDir := filepath.Join(tempDir, ".hyphae")
 	err := os.MkdirAll(keystoreDir, 0700)
 	require.NoError(t, err)
 

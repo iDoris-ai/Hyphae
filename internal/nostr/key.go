@@ -6,7 +6,7 @@ import (
 
 	"fiatjaf.com/nostr"
 	"github.com/fatih/color"
-	"github.com/AuraAIHQ/agent-speaker/internal/common"
+	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/urfave/cli/v3"
 )
 

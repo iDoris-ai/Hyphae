@@ -9,13 +9,13 @@ import (
 	"syscall"
 
 	"fiatjaf.com/nostr"
-	"github.com/AuraAIHQ/agent-speaker/internal/common"
-	"github.com/AuraAIHQ/agent-speaker/pkg/types"
+	"github.com/iDoris-ai/hyphae/internal/common"
+	"github.com/iDoris-ai/hyphae/pkg/types"
 	"golang.org/x/term"
 )
 
 const (
-	KeyStoreDirName = ".agent-speaker"
+	KeyStoreDirName = ".hyphae"
 	KeyStoreFile    = "keystore.json"
 )
 
@@ -88,7 +88,20 @@ func LoadKeyStore() (*types.KeyStore, error) {
 	return ks, nil
 }
 
-// SaveKeyStore saves the keystore to disk
+// SaveKeyStore saves the keystore to disk. The write is atomic (temp file + fsync +
+// rename) so a crash never leaves keystore.json truncated or half-written.
+//
+// The temp file gets a unique name via os.CreateTemp rather than a fixed
+// "keystore.json.tmp". A fixed name is not enough: two concurrent writers both
+// open it with O_TRUNC, land on the same inode, and write at independent
+// offsets, so the file that Rename atomically publishes is already spliced
+// garbage — the rename being atomic protects the directory entry, not the
+// bytes. Measured at ~11% of concurrent pairs producing an unparseable
+// keystore (PR #33 review, concurrency round). There is no keystore backup
+// anywhere, so a corrupted one means permanent loss of every private key.
+// internal/messaging/outbox.go's SaveOutbox still has the fixed-name form and
+// is far more exposed (daemon retry tick + every send, both non-interactive) —
+// tracked as FU-2, out of scope here.
 func SaveKeyStore(ks *types.KeyStore) error {
 	path, err := EnsureKeyStore()
 	if err != nil {
@@ -102,9 +115,29 @@ func SaveKeyStore(ks *types.KeyStore) error {
 		return fmt.Errorf("failed to marshal keystore: %w", err)
 	}
 
-	// Write with 600 permissions (only owner can read/write)
-	if err := os.WriteFile(file, data, 0600); err != nil {
-		return fmt.Errorf("failed to write keystore: %w", err)
+	// os.CreateTemp creates with 0600, the mode the keystore requires.
+	f, err := os.CreateTemp(path, KeyStoreFile+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("open temp keystore: %w", err)
+	}
+	tmp := f.Name()
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf("write temp keystore: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf("fsync temp keystore: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("close temp keystore: %w", err)
+	}
+	if err := os.Rename(tmp, file); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("rename keystore: %w", err)
 	}
 
 	return nil

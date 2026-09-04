@@ -6,10 +6,10 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/AuraAIHQ/agent-speaker/internal/audit"
-	"github.com/AuraAIHQ/agent-speaker/internal/common"
-	"github.com/AuraAIHQ/agent-speaker/pkg/types"
 	"github.com/fatih/color"
+	"github.com/iDoris-ai/hyphae/internal/audit"
+	"github.com/iDoris-ai/hyphae/internal/common"
+	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/urfave/cli/v3"
 )
 
@@ -18,7 +18,7 @@ var IdentityCmd = &cli.Command{
 	Name:  "identity",
 	Usage: "Manage local identities",
 	Description: `Create and manage local identities with secure key storage.
-Identities are stored in ~/.agent-speaker/ with 600 permissions.`,
+Identities are stored in ~/.hyphae/ with 600 permissions.`,
 	Commands: []*cli.Command{
 		{
 			Name:  "create",
@@ -106,7 +106,7 @@ Identities are stored in ~/.agent-speaker/ with 600 permissions.`,
 				if ks.Encrypted {
 					fmt.Printf("   Encryption: %s\n", cyan("AES-256-GCM + scrypt"))
 				}
-				fmt.Printf("\n🔐 Keys stored in ~/.agent-speaker/ (permissions: 600)\n")
+				fmt.Printf("\n🔐 Keys stored in ~/.hyphae/ (permissions: 600)\n")
 
 				return nil
 			},
@@ -145,7 +145,7 @@ Identities are stored in ~/.agent-speaker/ with 600 permissions.`,
 				common.Emit(jsonMode, entries, func() {
 					if len(identities) == 0 {
 						fmt.Println("No identities found. Create one with:")
-						fmt.Println("  agent-speaker identity create --nickname <name>")
+						fmt.Println("  hyphae identity create --nickname <name>")
 						return
 					}
 
@@ -379,7 +379,7 @@ Contacts are stored locally and mapped to their npubs.`,
 				contacts := ListContacts(ks)
 				if len(contacts) == 0 {
 					fmt.Println("No contacts found. Add one with:")
-					fmt.Println("  agent-speaker contact add --nickname <name> --npub <npub>")
+					fmt.Println("  hyphae contact add --nickname <name> --npub <npub>")
 					return nil
 				}
 

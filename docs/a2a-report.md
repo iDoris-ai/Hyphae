@@ -435,7 +435,7 @@ submitted → working → input_required → working → completed
 
 ---
 
-## 10. 对 Agent-Speaker 的启示
+## 10. 对 Hyphae 的启示
 
 ### 借鉴点
 1. **Agent Card 机制** - 标准化的能力发现机制
@@ -444,7 +444,7 @@ submitted → working → input_required → working → completed
 4. **通信模式** - 同步/异步/流式的灵活支持
 
 ### 差异点
-| 维度 | A2A | Agent-Speaker |
+| 维度 | A2A | Hyphae |
 |------|-----|---------------|
 | 发现机制 | Agent Card URL | Nostr Relay 广播 |
 | 通信方式 | HTTP 直连 | Relay 中继 |
@@ -453,6 +453,6 @@ submitted → working → input_required → working → completed
 | 适用场景 | 企业内网 | 开放网络/跨组织 |
 
 ### 可兼容性
-- 可以实现 A2A 协议适配层，让 Agent-Speaker 作为 A2A Agent 参与协作
+- 可以实现 A2A 协议适配层，让 Hyphae 作为 A2A Agent 参与协作
 - Agent Card 可以发布到 Nostr 上实现去中心化发现
 - 结合两者优势：A2A 的任务模型 + Nostr 的去中心化通信

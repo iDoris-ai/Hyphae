@@ -11,13 +11,13 @@
 ## 推荐的项目结构
 
 ```
-agent-speaker/
+hyphae/
 ├── api/                    # API 定义（Protobuf/OpenAPI）
 │   └── v1/
 │       └── types.proto
 │
 ├── cmd/                    # 应用程序入口
-│   └── agent-speaker/      # 主应用
+│   └── hyphae/      # 主应用
 │       └── main.go         # 唯一包含 main 函数的地方
 │
 ├── internal/               # 私有代码（不允许外部导入）
@@ -158,7 +158,7 @@ func (c *Client) SendMessage(to, content string) error {
 }
 
 // 其他项目可以这样使用：
-// import "github.com/AuraAIHQ/agent-speaker/pkg/client"
+// import "github.com/iDoris-ai/hyphae/pkg/client"
 // cli, _ := client.New()
 // cli.SendMessage("bob", "hello")
 ```
@@ -198,13 +198,13 @@ agent-mouth-cli/
 
 ```bash
 # 1. 创建标准目录结构
-mkdir -p cmd/agent-speaker
+mkdir -p cmd/hyphae
 mkdir -p internal/{identity,messaging,nostr,daemon}
 mkdir -p pkg/{crypto,types}
 mkdir -p plugins/{encryptor,storage}
 
 # 2. 移动 main.go
-cp main.go cmd/agent-speaker/
+cp main.go cmd/hyphae/
 
 # 3. 按功能分组移动文件
 # identity_*.go -> internal/identity/
@@ -242,7 +242,7 @@ type Message struct {
 // plugins/encryptor/nip44/nip44.go
 package nip44
 
-import "github.com/AuraAIHQ/agent-speaker/plugins/encryptor"
+import "github.com/iDoris-ai/hyphae/plugins/encryptor"
 
 type NIP44Plugin struct{}
 
@@ -290,7 +290,7 @@ v1.0.0  # 稳定版本
 
 ```go
 // go.mod
-module github.com/AuraAIHQ/agent-speaker
+module github.com/iDoris-ai/hyphae
 
 go 1.21
 
@@ -310,7 +310,7 @@ git push origin v0.3.0
 
 # 2. Go proxy 会自动缓存
 # 其他项目可以通过 go get 使用
-go get github.com/AuraAIHQ/agent-speaker/pkg/client@v0.3.0
+go get github.com/iDoris-ai/hyphae/pkg/client@v0.3.0
 ```
 
 ---

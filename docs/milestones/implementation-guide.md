@@ -761,7 +761,7 @@ tasks:
 ### 5.1 本地存储结构
 
 ```
-~/.agent-speaker/
+~/.hyphae/
 ├── identity.json          # 身份信息 (已存在)
 ├── config.yaml            # 配置文件
 ├── local-db/
@@ -774,7 +774,7 @@ tasks:
 │       ├── active/
 │       └── completed/
 └── logs/
-    └── agent-speaker.log
+    └── hyphae.log
 ```
 
 ### 5.2 消息缓存
@@ -927,31 +927,31 @@ cloudflared tunnel run agent-relay
 
 ```bash
 # 人对人聊天
-./agent-speaker chat <pubkey>              # 启动聊天界面
-./agent-speaker msg --to <pubkey> "msg"    # 快速发送
+./hyphae chat <pubkey>              # 启动聊天界面
+./hyphae msg --to <pubkey> "msg"    # 快速发送
 
 # Agent 委托
-./agent-speaker delegate --task "xxx" --budget 1000
-./agent-speaker task list                  # 查看任务
-./agent-speaker task logs <id>             # 查看日志
+./hyphae delegate --task "xxx" --budget 1000
+./hyphae task list                  # 查看任务
+./hyphae task logs <id>             # 查看日志
 
 # 背景任务
-./agent-speaker bg create --name "xxx" --schedule "0 9 * * *"
-./agent-speaker bg list
-./agent-speaker bg logs <id>
+./hyphae bg create --name "xxx" --schedule "0 9 * * *"
+./hyphae bg list
+./hyphae bg logs <id>
 
 # Agent 发现
-./agent-speaker agent register             # 注册自己
-./agent-speaker agent discover --capability marketing
-./agent-speaker agent show <pubkey>
+./hyphae agent register             # 注册自己
+./hyphae agent discover --capability marketing
+./hyphae agent show <pubkey>
 ```
 
 ### B. 配置文件示例
 
 ```yaml
-# ~/.agent-speaker/config.yaml
+# ~/.hyphae/config.yaml
 identity:
-  private_key_file: ~/.agent-speaker/identity.json
+  private_key_file: ~/.hyphae/identity.json
 
 relays:
   primary: wss://relay.yourdomain.com

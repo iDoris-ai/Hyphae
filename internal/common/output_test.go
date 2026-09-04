@@ -39,20 +39,28 @@ func TestJSONModeFlagTakesPrecedence(t *testing.T) {
 }
 
 func TestJSONModeEnvFallback(t *testing.T) {
+	if got := runJSONModeCommand(t, []string{"app"}, map[string]string{"HYPHAE_OUTPUT": "json"}); !got {
+		t.Error("expected JSONMode true when HYPHAE_OUTPUT=json and no --json flag")
+	}
+}
+
+func TestJSONModeEnvFallback_LegacyAlias(t *testing.T) {
+	// AGENT_SPEAKER_OUTPUT is the pre-rename name, kept working indefinitely
+	// so existing scripts/automation don't silently stop getting JSON output.
 	if got := runJSONModeCommand(t, []string{"app"}, map[string]string{"AGENT_SPEAKER_OUTPUT": "json"}); !got {
-		t.Error("expected JSONMode true when AGENT_SPEAKER_OUTPUT=json and no --json flag")
+		t.Error("expected JSONMode true when the legacy AGENT_SPEAKER_OUTPUT=json is set and no --json flag")
 	}
 }
 
 func TestJSONModeDefaultFalse(t *testing.T) {
-	if got := runJSONModeCommand(t, []string{"app"}, map[string]string{"AGENT_SPEAKER_OUTPUT": ""}); got {
+	if got := runJSONModeCommand(t, []string{"app"}, map[string]string{"HYPHAE_OUTPUT": ""}); got {
 		t.Error("expected JSONMode false with no flag and no env var")
 	}
 }
 
 func TestJSONModeIgnoresUnrelatedEnvValue(t *testing.T) {
-	if got := runJSONModeCommand(t, []string{"app"}, map[string]string{"AGENT_SPEAKER_OUTPUT": "yaml"}); got {
-		t.Error("expected JSONMode false when AGENT_SPEAKER_OUTPUT is set to something other than 'json'")
+	if got := runJSONModeCommand(t, []string{"app"}, map[string]string{"HYPHAE_OUTPUT": "yaml"}); got {
+		t.Error("expected JSONMode false when HYPHAE_OUTPUT is set to something other than 'json'")
 	}
 }
 
@@ -112,9 +120,9 @@ func TestExitErrorUnwrap(t *testing.T) {
 
 func TestJSONModeFromArgsFlagAnyPosition(t *testing.T) {
 	cases := [][]string{
-		{"agent-speaker", "--json", "agent", "msg"},
-		{"agent-speaker", "agent", "msg", "--json"},
-		{"agent-speaker", "agent", "--json", "msg"},
+		{"hyphae", "--json", "agent", "msg"},
+		{"hyphae", "agent", "msg", "--json"},
+		{"hyphae", "agent", "--json", "msg"},
 	}
 	for _, args := range cases {
 		if !JSONModeFromArgs(args) {
@@ -124,24 +132,31 @@ func TestJSONModeFromArgsFlagAnyPosition(t *testing.T) {
 }
 
 func TestJSONModeFromArgsEqualsForm(t *testing.T) {
-	if !JSONModeFromArgs([]string{"agent-speaker", "agent", "msg", "--json=true"}) {
+	if !JSONModeFromArgs([]string{"hyphae", "agent", "msg", "--json=true"}) {
 		t.Error("expected --json=true to enable JSON mode")
 	}
-	if JSONModeFromArgs([]string{"agent-speaker", "agent", "msg", "--json=false"}) {
+	if JSONModeFromArgs([]string{"hyphae", "agent", "msg", "--json=false"}) {
 		t.Error("expected --json=false to NOT enable JSON mode")
 	}
 }
 
 func TestJSONModeFromArgsEnvFallback(t *testing.T) {
-	t.Setenv("AGENT_SPEAKER_OUTPUT", "json")
-	if !JSONModeFromArgs([]string{"agent-speaker", "agent", "msg"}) {
+	t.Setenv("HYPHAE_OUTPUT", "json")
+	if !JSONModeFromArgs([]string{"hyphae", "agent", "msg"}) {
 		t.Error("expected env fallback to enable JSON mode when --json is absent from argv")
 	}
 }
 
+func TestJSONModeFromArgsEnvFallback_LegacyAlias(t *testing.T) {
+	t.Setenv("AGENT_SPEAKER_OUTPUT", "json")
+	if !JSONModeFromArgs([]string{"hyphae", "agent", "msg"}) {
+		t.Error("expected the legacy AGENT_SPEAKER_OUTPUT env fallback to still enable JSON mode")
+	}
+}
+
 func TestJSONModeFromArgsDefaultFalse(t *testing.T) {
-	t.Setenv("AGENT_SPEAKER_OUTPUT", "")
-	if JSONModeFromArgs([]string{"agent-speaker", "agent", "msg"}) {
+	t.Setenv("HYPHAE_OUTPUT", "")
+	if JSONModeFromArgs([]string{"hyphae", "agent", "msg"}) {
 		t.Error("expected JSONModeFromArgs false with no flag and no env var")
 	}
 }

@@ -4,13 +4,13 @@
 
 ## 问题
 
-`cmd/agent-speaker/main.go` 里有一行：
+`cmd/hyphae/main.go` 里有一行：
 
 ```go
 color.NoColor = false
 ```
 
-`fatih/color` 库本来会自动检测 stdout 是不是终端（`isatty`），非终端（管道、重定向到文件、脚本消费）时自动关闭颜色。这行代码把这个自动检测强制覆盖成"永远开颜色"，导致任何脚本化调用 CLI 的场景（`agent-speaker ... | grep`、`agent-speaker ... > out.txt`、CI 里跑、被 Task 02 的 `--json` 模式间接调用底层输出函数时）都会在输出里混入 `\x1b[32m`、`\x1b[0m` 这类转义符。
+`fatih/color` 库本来会自动检测 stdout 是不是终端（`isatty`），非终端（管道、重定向到文件、脚本消费）时自动关闭颜色。这行代码把这个自动检测强制覆盖成"永远开颜色"，导致任何脚本化调用 CLI 的场景（`hyphae ... | grep`、`hyphae ... > out.txt`、CI 里跑、被 Task 02 的 `--json` 模式间接调用底层输出函数时）都会在输出里混入 `\x1b[32m`、`\x1b[0m` 这类转义符。
 
 ## 接口
 
@@ -32,7 +32,7 @@ color.NoColor = false
 
 ## 验收标准
 
-1. `./bin/agent-speaker identity list | cat` 的输出里不应该出现 `\x1b[` 或 `[3Xm`/`[0m` 这类转义序列
+1. `./bin/hyphae identity list | cat` 的输出里不应该出现 `\x1b[` 或 `[3Xm`/`[0m` 这类转义序列
 2. 交互式终端里跑同样的命令，颜色应该还在（正常人眼看得出高亮）——这个手动验证一下即可，不强求自动化测试覆盖"有没有颜色"这种视觉判断
 3. `go build ./... && go vet ./... && go test ./...` 全绿，不应该有任何测试依赖了"颜色总是开着"这个前提（如果发现有，说明之前测试写得有问题，顺手修一下断言方式，不要为了保住这行硬编码去改测试）
 

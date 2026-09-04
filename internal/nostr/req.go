@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
-	"github.com/AuraAIHQ/agent-speaker/internal/common"
+	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/urfave/cli/v3"
 )
 
@@ -16,7 +16,7 @@ var ReqCmd = &cli.Command{
 	Aliases: []string{"query"},
 	Usage:   "Query events from relays",
 	Description: `Query nostr relays for events matching filters.
-Example: agent-speaker req --kinds 1 --authors <npub> --limit 10`,
+Example: hyphae req --kinds 1 --authors <npub> --limit 10`,
 	Flags: []cli.Flag{
 		&cli.StringSliceFlag{
 			Name:    "kinds",
