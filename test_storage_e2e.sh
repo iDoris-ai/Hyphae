@@ -43,12 +43,12 @@ echo "🔨 Building..."
 
 # Check identities exist
 echo "📋 Checking prerequisites..."
-if ! ./bin/agent-speaker identity list | grep -q "alice"; then
+if ! ./bin/hyphae identity list | grep -q "alice"; then
     echo -e "${YELLOW}Creating test identity 'alice'...${NC}"
-    ./bin/agent-speaker identity create --nickname alice --default 2>/dev/null || true
+    ./bin/hyphae identity create --nickname alice --default 2>/dev/null || true
 fi
 
-BOB_ID=$(./bin/agent-speaker contact list | grep "^bob" | head -1 | awk '{print $1}')
+BOB_ID=$(./bin/hyphae contact list | grep "^bob" | head -1 | awk '{print $1}')
 if [ -z "$$BOB_ID" ]; then
     BOB_ID="bob_e2e"
 fi
@@ -60,10 +60,10 @@ echo "📊 Storage Info Tests"
 echo "=========================================="
 
 run_test "Storage info command" \
-    "./bin/agent-speaker storage info | grep -q 'Database:'"
+    "./bin/hyphae storage info | grep -q 'Database:'"
 
 run_test "Storage shows tables" \
-    "./bin/agent-speaker storage info | grep -q 'messages'"
+    "./bin/hyphae storage info | grep -q 'messages'"
 
 echo ""
 echo "=========================================="
@@ -73,14 +73,14 @@ echo "=========================================="
 # Send a test message
 TEST_MSG="Storage test $(date +%s)"
 run_test "Send message (stores to SQLite)" \
-    "./bin/agent-speaker agent msg --from alice --to $BOB_ID --content '$TEST_MSG' --relay wss://relay.aastar.io --encrypt=false"
+    "./bin/hyphae agent msg --from alice --to $BOB_ID --content '$TEST_MSG' --relay wss://relay.aastar.io --encrypt=false"
 
 # Check stats updated
 echo ""
 echo -e "${BLUE}▶ Checking stats updated${NC}"
 sleep 2
-./bin/agent-speaker history stats
-STATS_OUTPUT=$(./bin/agent-speaker history stats 2>&1)
+./bin/hyphae history stats
+STATS_OUTPUT=$(./bin/hyphae history stats 2>&1)
 if echo "$STATS_OUTPUT" | grep -q "Total messages:"; then
     TOTAL=$(echo "$STATS_OUTPUT" | grep "Total messages:" | awk '{print $3}')
     if [ "$TOTAL" -gt "0" ] 2>/dev/null; then
@@ -101,10 +101,10 @@ echo "🔍 Search Tests"
 echo "=========================================="
 
 run_test "History search command" \
-    "./bin/agent-speaker history search --query 'test' > /dev/null"
+    "./bin/hyphae history search --query 'test' > /dev/null"
 
 run_test "History inbox command" \
-    "./bin/agent-speaker history inbox > /dev/null"
+    "./bin/hyphae history inbox > /dev/null"
 
 echo ""
 echo "=========================================="
@@ -112,7 +112,7 @@ echo "📜 Conversation Tests"
 echo "=========================================="
 
 run_test "History conversation command" \
-    "./bin/agent-speaker history conversation --with $BOB_ID --limit 10 > /dev/null"
+    "./bin/hyphae history conversation --with $BOB_ID --limit 10 > /dev/null"
 
 echo ""
 echo "=========================================="
@@ -124,7 +124,7 @@ echo -e "${RED}Failed: $TESTS_FAILED${NC}"
 # Show final storage info
 echo ""
 echo -e "${BLUE}Final Storage State:${NC}"
-./bin/agent-speaker storage info 2>/dev/null || echo "  (storage info unavailable)"
+./bin/hyphae storage info 2>/dev/null || echo "  (storage info unavailable)"
 
 if [ $TESTS_FAILED -eq 0 ]; then
     echo ""

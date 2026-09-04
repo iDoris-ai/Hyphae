@@ -1,4 +1,4 @@
-# Agent Speaker 验收测试指南
+# Hyphae 验收测试指南
 
 ## 1. 测试环境设计
 
@@ -85,14 +85,14 @@ functions:
 ```bash
 # Terminal 1 - Alice
 export NOSTR_SECRET_KEY="nsec1alice..."
-./bin/agent-speaker agent msg --to $(cat bob_npub.txt) "Hello Bob!"
+./bin/hyphae agent msg --to $(cat bob_npub.txt) "Hello Bob!"
 
 # Terminal 2 - Bob
 export NOSTR_SECRET_KEY="nsec1bob..."
-./bin/agent-speaker agent timeline --decompress
+./bin/hyphae agent timeline --decompress
 
 # Terminal 3 - Charlie (启动本地 relay)
-./bin/agent-speaker agent relay start --port 7777
+./bin/hyphae agent relay start --port 7777
 ```
 
 #### 方式 2: 多机网络测试
@@ -114,8 +114,8 @@ export NOSTR_SECRET_KEY="nsec1bob..."
 场景: Alice 发送未压缩消息给 Bob
 前置: 双方已生成密钥对
 步骤:
-  1. Alice: ./agent-speaker agent msg --to <bob_npub> --compress=false "Hello"
-  2. Bob:   ./agent-speaker agent query --authors <alice_npub>
+  1. Alice: ./hyphae agent msg --to <bob_npub> --compress=false "Hello"
+  2. Bob:   ./hyphae agent query --authors <alice_npub>
 期望: Bob 收到明文 "Hello"
 ```
 
@@ -124,8 +124,8 @@ export NOSTR_SECRET_KEY="nsec1bob..."
 场景: Alice 发送压缩消息给 Bob
 前置: 同上
 步骤:
-  1. Alice: ./agent-speaker agent msg --to <bob_npub> --compress=true "Long message..."
-  2. Bob:   ./agent-speaker agent query --decompress
+  1. Alice: ./hyphae agent msg --to <bob_npub> --compress=true "Long message..."
+  2. Bob:   ./hyphae agent query --decompress
 期望: Bob 自动解压并显示原文
 ```
 
@@ -190,8 +190,8 @@ export NOSTR_SECRET_KEY="nsec1bob..."
 ```
 场景: Charlie 启动本地 Relay，Alice 直连
 步骤:
-  1. Charlie: ./agent-speaker agent relay start --port 7777
-  2. Alice:   ./agent-speaker agent msg --relay ws://192.168.1.103:7777
+  1. Charlie: ./hyphae agent relay start --port 7777
+  2. Alice:   ./hyphae agent msg --relay ws://192.168.1.103:7777
   3. Charlie: 查看本地存储
 期望: 消息存储在 Charlie 本地
 ```
@@ -298,14 +298,14 @@ ALICE_SEC="nsec1alice..."
 BOB_PUB="npub1bob..."
 
 echo "[Alice] 发送消息给 Bob..."
-./agent-speaker agent msg \
+./hyphae agent msg \
   --sec "$ALICE_SEC" \
   --to "$BOB_PUB" \
   --relay wss://relay.damus.io \
   "Test message from Alice"
 
 echo "[Bob] 查询消息..."
-./agent-speaker agent query \
+./hyphae agent query \
   --authors "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798" \
   --kinds "30078" \
   --decompress

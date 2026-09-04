@@ -10,15 +10,15 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/AuraAIHQ/agent-speaker/internal/common"
-	"github.com/AuraAIHQ/agent-speaker/pkg/types"
+	"github.com/iDoris-ai/hyphae/internal/common"
+	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/urfave/cli/v3"
 )
 
 // OutboxCmd provides read-only diagnostics and cleanup for the outbox.
 //
 // This lives in internal/messaging (not internal/storage, despite being
-// wired up under `storage outbox` in cmd/agent-speaker/main.go) because
+// wired up under `storage outbox` in cmd/hyphae/main.go) because
 // internal/messaging already imports internal/storage (for the SQLite
 // message store) -- putting this command here and appending it to
 // storage.StorageCmd.Commands at the composition root avoids an import

@@ -1,6 +1,6 @@
 package profile
 
-import "github.com/AuraAIHQ/agent-speaker/pkg/types"
+import "github.com/iDoris-ai/hyphae/pkg/types"
 
 // DiscoverFilter narrows `profile discover` results. Every field is
 // optional; the filters that are set combine with AND semantics. The zero

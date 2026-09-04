@@ -48,12 +48,19 @@ func NewExitError(code string, err error) *ExitError {
 }
 
 // JSONMode resolves whether --json output is active for the current command:
-// the --json flag takes precedence, falling back to AGENT_SPEAKER_OUTPUT=json
-// if the flag wasn't set. All commands should call this instead of reading
+// the --json flag takes precedence, falling back to HYPHAE_OUTPUT=json (or the
+// pre-rename AGENT_SPEAKER_OUTPUT=json, kept as a documented compat alias) if
+// the flag wasn't set. All commands should call this instead of reading
 // c.Bool("json") directly, so the env fallback applies consistently on every
 // code path (success and error alike).
 func JSONMode(c *cli.Command) bool {
-	return c.Bool("json") || os.Getenv("AGENT_SPEAKER_OUTPUT") == "json"
+	return c.Bool("json") || jsonOutputEnvSet()
+}
+
+// jsonOutputEnvSet checks the JSON-output env var under its current name and,
+// for backward compatibility, its pre-rename name.
+func jsonOutputEnvSet() bool {
+	return os.Getenv("HYPHAE_OUTPUT") == "json" || os.Getenv("AGENT_SPEAKER_OUTPUT") == "json"
 }
 
 // JSONModeFromArgs resolves --json mode by scanning the raw process argv
@@ -77,7 +84,7 @@ func JSONModeFromArgs(args []string) bool {
 			return v != "" && v != "false" && v != "0"
 		}
 	}
-	return os.Getenv("AGENT_SPEAKER_OUTPUT") == "json"
+	return jsonOutputEnvSet()
 }
 
 // Result is the JSON envelope written to stdout (success) or stderr (failure)

@@ -43,12 +43,12 @@ echo "🔨 Building..."
 
 # Check prerequisites
 echo "📋 Checking prerequisites..."
-if ! ./bin/agent-speaker identity list | grep -q "alice"; then
+if ! ./bin/hyphae identity list | grep -q "alice"; then
     echo -e "${YELLOW}Creating test identity 'alice'...${NC}"
-    ./bin/agent-speaker identity create --nickname alice --default 2>/dev/null || true
+    ./bin/hyphae identity create --nickname alice --default 2>/dev/null || true
 fi
 
-BOB_ID=$(./bin/agent-speaker contact list | grep "^bob" | head -1 | awk '{print $1}')
+BOB_ID=$(./bin/hyphae contact list | grep "^bob" | head -1 | awk '{print $1}')
 if [ -z "$BOB_ID" ]; then
     BOB_ID="bob_e2e"
 fi
@@ -61,13 +61,13 @@ echo "=========================================="
 
 # Test help commands (non-interactive)
 run_test "TUI help command" \
-    "./bin/agent-speaker tui --help"
+    "./bin/hyphae tui --help"
 
 run_test "Chat command help" \
-    "./bin/agent-speaker tui chat --help"
+    "./bin/hyphae tui chat --help"
 
 run_test "Contacts command help" \
-    "./bin/agent-speaker tui contacts --help"
+    "./bin/hyphae tui contacts --help"
 
 echo ""
 echo "=========================================="
@@ -76,11 +76,11 @@ echo "=========================================="
 echo -e "${YELLOW}Note: Interactive TUI tests require manual verification${NC}"
 echo ""
 echo "To test manually:"
-echo "  1. ./bin/agent-speaker tui contacts"
+echo "  1. ./bin/hyphae tui contacts"
 echo "     - Should show contact list with navigation"
 echo "     - Use ↑/↓ to navigate, q to quit"
 echo ""
-echo "  2. ./bin/agent-speaker chat --with $BOB_ID"
+echo "  2. ./bin/hyphae chat --with $BOB_ID"
 echo "     - Should open chat interface"
 echo "     - Type message and press enter"
 echo "     - Use pgup/pgdn to scroll, esc to quit"

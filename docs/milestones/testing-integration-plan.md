@@ -19,7 +19,7 @@
 |---|---|---|---|---|
 | 1 | **单元测试** | 新代码逻辑本身正确（编解码、状态转换、边界条件） | `go test ./...`，新功能配新测试 | 实现者自己 |
 | 2 | **本地真实网络** | 真实二进制打进真实（或接近真实）relay 后行为符合预期，不是只在内存里 mock | 本地起 relay（`scripts/minirelay.go` 或后续 `relay-khatru`/strfry），跑真实 CLI 命令，肉眼核对 relay 上的原始事件 | 实现者自己 |
-| 3 | **跨仓联调** | 契约对外部真实消费者是否真的成立——字段名对不对、shape 是不是消费者期待的、有没有协议层面的陷阱（比如这次的 NIP-01 addressable 覆盖问题） | Seeder `Cooperation-Center` 项目开一个 `repo:speaker` + `from:agent24`（或其他真实消费者）任务，走 [`goutou` 协同流程](../../.claude/skills/goutou/SKILL.md) | agent-speaker 工兵 + 对端工兵，双方各自真实运行 |
+| 3 | **跨仓联调** | 契约对外部真实消费者是否真的成立——字段名对不对、shape 是不是消费者期待的、有没有协议层面的陷阱（比如这次的 NIP-01 addressable 覆盖问题） | Seeder `Cooperation-Center` 项目开一个 `repo:speaker` + `from:agent24`（或其他真实消费者）任务，走 [`goutou` 协同流程](../../.claude/skills/goutou/SKILL.md) | hyphae 工兵 + 对端工兵，双方各自真实运行 |
 
 **为什么第三道门不能跳过**：CC-82 挖到的 4 个 bug 里，只有"`--json` 没接"是读代码就能发现的；`d` 标签覆盖问题需要真实 NIP-01 relay（strfry）才能实测坐；`id` 编码 bug、`from` 截断这两个是 Agent24 拿真实二进制跑自己的 bridge 代码时才现形的——**任何一边单独测都测不出来，必须两边真的对接一次**。以后同样的模式：CC-82 一开始只是"check §7 契约能不能满足"，最后演化成实打实的三轮 PR。这不是意外，是这套流程该有的样子。
 
@@ -50,8 +50,8 @@
 
 | Issue | 内容 | 编入 M2 的理由 |
 |---|---|---|
-| [#27](https://github.com/iDoris-ai/agent-speaker/issues/27) | `AgentKind`（agent msg）和 `ProfileKind`（profile publish）都是 `30078`，纯属巧合不是设计 | M2 本来就要把 register/publish/inquire/tip/subscribe 收敛成统一 behavior 信封（`internal/behavior/`），这是重新定义 kind/tag 约定的天然时机，此时把两者的 kind 分开成本最低；等到 M2 之后再改，已发布事件的兼容性包袱只会更重 |
-| [#26](https://github.com/iDoris-ai/agent-speaker/issues/26) | `SaveOutbox` 并发写有丢更新和文件损坏两种失败模式 | M2 新增的 `publish`/`tip`/`subscribe` behavior 各自的失败重试会进一步增加对 `outbox.json` 的并发写入场景——并发写者只会变多不会变少，修复应先于这些新 behavior 上线 |
+| [#27](https://github.com/iDoris-ai/hyphae/issues/27) | `AgentKind`（agent msg）和 `ProfileKind`（profile publish）都是 `30078`，纯属巧合不是设计 | M2 本来就要把 register/publish/inquire/tip/subscribe 收敛成统一 behavior 信封（`internal/behavior/`），这是重新定义 kind/tag 约定的天然时机，此时把两者的 kind 分开成本最低；等到 M2 之后再改，已发布事件的兼容性包袱只会更重 |
+| [#26](https://github.com/iDoris-ai/hyphae/issues/26) | `SaveOutbox` 并发写有丢更新和文件损坏两种失败模式 | M2 新增的 `publish`/`tip`/`subscribe` behavior 各自的失败重试会进一步增加对 `outbox.json` 的并发写入场景——并发写者只会变多不会变少，修复应先于这些新 behavior 上线 |
 
 ---
 
@@ -72,7 +72,7 @@
 
 - **单元测试**：TTL 转发中间件、`fee_paid` 校验、双花/重放/伪造授权 tag 的 property-based test（`gopter`，`roadmap-v2.md` 已经定了不上 TLA+/Tamarin）。
 - **本地真实网络**：**这一步要求 `relay-khatru` fork 已经存在并且能本地起两个节点**——用两个本地 relay 实例模拟"邻居"关系，验证跨 relay TTL 转发和漂流瓶随机转发实际工作，而不是关起门来单节点测。这是本里程碑能不能开始做真实网络验证的前置条件，如果 fork 仓库还没建，这道门过不了。
-- **跨仓联调**：这是"跨 relay"概念第一次有真实意义的联调场景——让 Agent24 的身份注册在 Relay A，agent-speaker 这边的身份/daemon 只连 Relay B，验证消息能不能真的跨节点送达（不是靠两边都连同一个 relay 蒙混过关）。漂流瓶场景可以让 Agent24 发一条不指定收件人的主题向量消息，验证 agent-speaker 这边本地向量匹配能不能正确收到。
+- **跨仓联调**：这是"跨 relay"概念第一次有真实意义的联调场景——让 Agent24 的身份注册在 Relay A，hyphae 这边的身份/daemon 只连 Relay B，验证消息能不能真的跨节点送达（不是靠两边都连同一个 relay 蒙混过关）。漂流瓶场景可以让 Agent24 发一条不指定收件人的主题向量消息，验证 hyphae 这边本地向量匹配能不能正确收到。
 - **过线标准**：三道门都过，且至少完成一次"发送方只连 A、接收方只连 B"的真实跨节点投递验证（这是 protocol-v2.md 承诺的"去中心化广度"，必须有实证，不能只凭代码逻辑推断）。
 
 ### M3 · 指令型自主任务（RFP / 协商 / 状态机）
@@ -81,8 +81,8 @@
 
 - **单元测试**：workflow 状态机转换（`Created→...→Completed/Failed`）、模板变量解析、条件求值超时保护、approval 挂起-恢复的持久化（`roadmap-v2.md` §M3 特别提醒吸取 Buzz `WF-08` 的教训，这条必须有专门测试，不能等做完主流程才发现漏了）。
 - **本地真实网络**：本地跑通一次完整 RFP 生命周期（发起 → 收到多个候选报价 → 加权评分选中 → 执行 → 验收），全部走真实 relay 收发，不能只在内存里跑状态机。
-- **跨仓联调**：这是第一次让"自主性"接受外部真实 Agent 的检验，而不是自己写的测试桩。让 Agent24（或那时候 Cooperation-Center 里任何一个真实接入的仓库）扮演"候选人"角色，真实响应 agent-speaker 发出的 RFP、报价、协商——验证的不是协议 shape，是"两个独立实现的自主决策逻辑能不能真的谈成一单"。
-- **过线标准**：三道门都过，且至少有一次由外部真实 Agent（非 agent-speaker 自己控制）完整走完一次 RFP→协商→执行→验收，中途没有人工介入修正协议层面的问题。
+- **跨仓联调**：这是第一次让"自主性"接受外部真实 Agent 的检验，而不是自己写的测试桩。让 Agent24（或那时候 Cooperation-Center 里任何一个真实接入的仓库）扮演"候选人"角色，真实响应 hyphae 发出的 RFP、报价、协商——验证的不是协议 shape，是"两个独立实现的自主决策逻辑能不能真的谈成一单"。
+- **过线标准**：三道门都过，且至少有一次由外部真实 Agent（非 hyphae 自己控制）完整走完一次 RFP→协商→执行→验收，中途没有人工介入修正协议层面的问题。
 
 ### M4 · 长期背景任务（调度 / 触发 / 智能匹配）
 
@@ -90,7 +90,7 @@
 
 - **单元测试**：cron 触发器、条件匹配、Jaccard/向量相似度加权评分。
 - **本地真实网络**：本地跑一次跨小时级别的 soak test（不是几秒钟的冒烟测试），确认 daemon 长时间运行不泄漏、`seenSet` 的 FIFO 淘汰机制在真实数据量下工作正常。
-- **跨仓联调**：让 Agent24 的 daemon 和 agent-speaker 的 daemon 同时长期运行（比如各自开一个 `/loop`），互相触发对方的匹配/触发逻辑，重点验证**反风暴循环**（现有 `shouldAutoReply` 的 anti-loop guard 那一套逻辑）在两个独立 daemon 互相触发的场景下依然成立——单机自己测的反风暴用例测不出"两个不同实现互相触发"这种真实分布式场景。
+- **跨仓联调**：让 Agent24 的 daemon 和 hyphae 的 daemon 同时长期运行（比如各自开一个 `/loop`），互相触发对方的匹配/触发逻辑，重点验证**反风暴循环**（现有 `shouldAutoReply` 的 anti-loop guard 那一套逻辑）在两个独立 daemon 互相触发的场景下依然成立——单机自己测的反风暴用例测不出"两个不同实现互相触发"这种真实分布式场景。
 - **过线标准**：三道门都过，且双 daemon 长跑场景没有出现消息风暴或重复触发。
 
 ### M5 · 加密 / 信誉 / 真支付集成收尾

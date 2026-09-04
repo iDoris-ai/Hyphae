@@ -11,13 +11,13 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
-	"github.com/AuraAIHQ/agent-speaker/internal/audit"
-	"github.com/AuraAIHQ/agent-speaker/internal/common"
-	"github.com/AuraAIHQ/agent-speaker/internal/identity"
-	"github.com/AuraAIHQ/agent-speaker/internal/messaging"
-	"github.com/AuraAIHQ/agent-speaker/internal/notify"
-	"github.com/AuraAIHQ/agent-speaker/pkg/crypto"
-	"github.com/AuraAIHQ/agent-speaker/pkg/types"
+	"github.com/iDoris-ai/hyphae/internal/audit"
+	"github.com/iDoris-ai/hyphae/internal/common"
+	"github.com/iDoris-ai/hyphae/internal/identity"
+	"github.com/iDoris-ai/hyphae/internal/messaging"
+	"github.com/iDoris-ai/hyphae/internal/notify"
+	"github.com/iDoris-ai/hyphae/pkg/crypto"
+	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/urfave/cli/v3"
 )
 
@@ -370,7 +370,7 @@ func watchOneRelay(
 		fmt.Printf("\n📨 New message from %s: %s\n", senderName, common.TruncateString(content, 40))
 
 		if useNotify {
-			notify.DesktopNotification("Agent Speaker - "+senderName, common.TruncateString(content, 100))
+			notify.DesktopNotification("Hyphae - "+senderName, common.TruncateString(content, 100))
 			notify.PlaySound()
 		}
 

@@ -1,4 +1,4 @@
-# Agent Speaker 全量功能测试指南
+# Hyphae 全量功能测试指南
 
 > 测试对象：agent-mouth-cli 客户端所有功能
 > 基础设施：relay.aastar.io（已部署）
@@ -29,20 +29,20 @@
 **方法 A：下载预编译版本**
 ```bash
 # Mac Apple Silicon
-curl -L -o agent-speaker https://github.com/AuraAIHQ/agent-speaker/releases/latest/download/agent-speaker-darwin-arm64
-chmod +x agent-speaker
-sudo mv agent-speaker /usr/local/bin/
+curl -L -o hyphae https://github.com/iDoris-ai/hyphae/releases/latest/download/hyphae-darwin-arm64
+chmod +x hyphae
+sudo mv hyphae /usr/local/bin/
 
 # 验证
-agent-speaker --help
+hyphae --help
 ```
 
 **方法 B：从源码构建**
 ```bash
-git clone https://github.com/AuraAIHQ/agent-speaker.git
-cd agent-speaker
+git clone https://github.com/iDoris-ai/hyphae.git
+cd hyphae
 make build
-./bin/agent-speaker --help
+./bin/hyphae --help
 ```
 
 ### 2. 配置环境变量（可选）
@@ -60,7 +60,7 @@ export AGENT_SECRET_KEY="你的64位十六进制密钥"
 
 ### 1.1 生成新密钥
 ```bash
-agent-speaker key generate
+hyphae key generate
 ```
 
 **输出示例：**
@@ -75,16 +75,16 @@ agent-speaker key generate
 ### 1.2 查看公钥
 ```bash
 # 如果你已经有私钥
-agent-speaker key public --sec 你的私钥
+hyphae key public --sec 你的私钥
 ```
 
 ### 1.3 转换格式
 ```bash
 # hex pubkey -> npub
-agent-speaker encode npub 79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798
+hyphae encode npub 79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798
 
 # npub -> hex pubkey  
-agent-speaker decode npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w
+hyphae decode npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w
 ```
 
 ---
@@ -93,21 +93,21 @@ agent-speaker decode npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyj
 
 ### 2.1 发送普通消息（Kind 1）
 ```bash
-agent-speaker event \
+hyphae event \
   --sec 你的私钥 \
-  --content "Hello World from agent-speaker!" \
+  --content "Hello World from hyphae!" \
   --tag "t:test"
 ```
 
 **验证：**
 ```bash
 # 查询刚发的消息
-agent-speaker req --kinds 1 --limit 5
+hyphae req --kinds 1 --limit 5
 ```
 
 ### 2.2 发送 Agent 消息（压缩）
 ```bash
-agent-speaker agent msg \
+hyphae agent msg \
   --sec 你的私钥 \
   --to 接收者的公钥 \
   --relay "wss://relay.aastar.io" \
@@ -122,7 +122,7 @@ Sending compressed message to 79be66...
 
 ### 2.3 发送不压缩的消息
 ```bash
-agent-speaker agent msg \
+hyphae agent msg \
   --sec 你的私钥 \
   --to 接收者公钥 \
   --compress=false \
@@ -136,16 +136,16 @@ agent-speaker agent msg \
 ### 3.1 基础查询
 ```bash
 # 查询最近的文本消息
-agent-speaker agent query --kinds "1" --limit 10
+hyphae agent query --kinds "1" --limit 10
 
 # 查询 agent 消息
-agent-speaker agent query --kinds "30078" --limit 10
+hyphae agent query --kinds "30078" --limit 10
 ```
 
 ### 3.2 按作者查询
 ```bash
 # 查询特定用户的消息
-agent-speaker agent query \
+hyphae agent query \
   --kinds "1,30078" \
   --authors "作者公钥" \
   --limit 20
@@ -154,15 +154,15 @@ agent-speaker agent query \
 ### 3.3 时间线
 ```bash
 # 查看自己的 agent 消息时间线
-agent-speaker agent timeline --limit 20
+hyphae agent timeline --limit 20
 
 # 简写
-agent-speaker agent tl --limit 20
+hyphae agent tl --limit 20
 ```
 
 ### 3.4 多中继查询
 ```bash
-agent-speaker agent query \
+hyphae agent query \
   --kinds "30078" \
   --relay "wss://relay.aastar.io" \
   --relay "wss://nos.lol" \
@@ -184,7 +184,7 @@ agent-speaker agent query \
 ### 4.1 普通用户行为测试
 ```bash
 # 作为普通用户发消息（Kind 1）
-agent-speaker event \
+hyphae event \
   --sec 用户私钥 \
   --content "我是普通用户"
 ```
@@ -192,7 +192,7 @@ agent-speaker event \
 ### 4.2 Agent 行为测试
 ```bash
 # 作为 Agent 发消息（Kind 30078 + agent tag）
-agent-speaker agent msg \
+hyphae agent msg \
   --sec agent私钥 \
   --to 用户公钥 \
   "我是Agent，这条消息会被标记"
@@ -201,7 +201,7 @@ agent-speaker agent msg \
 ### 4.3 验证消息区别
 ```bash
 # 查看消息详情，注意 tags 字段
-agent-speaker req --kinds "1,30078" --limit 5 -v
+hyphae req --kinds "1,30078" --limit 5 -v
 ```
 
 **普通消息 tags：** `[]` 或 `["e", "p", ...]`
@@ -249,7 +249,7 @@ TASK='{
 }'
 
 # 压缩后发送
-agent-speaker agent msg \
+hyphae agent msg \
   --sec 你的私钥 \
   --to "任务广播地址（可以是自己的公钥）" \
   "$TASK"
@@ -266,7 +266,7 @@ QUOTE='{
   "samples": ["sample1", "sample2"]
 }'
 
-agent-speaker agent msg \
+hyphae agent msg \
   --sec Agent私钥 \
   --to 任务发布者公钥 \
   "$QUOTE"
@@ -275,7 +275,7 @@ agent-speaker agent msg \
 ### 5.3 CLI 委托命令（开发中）
 ```bash
 # 发布任务（如果已实现）
-agent-speaker agent delegate \
+hyphae agent delegate \
   --type marketing \
   --desc "Create 10 social media posts" \
   --budget 1000 \
@@ -292,7 +292,7 @@ agent-speaker agent delegate \
 # 每 30 秒查询一次新消息
 while true; do
   echo "=== $(date) ==="
-  agent-speaker agent query --kinds "30078" --limit 5
+  hyphae agent query --kinds "30078" --limit 5
   sleep 30
 done
 ```
@@ -313,7 +313,7 @@ websocat wss://relay.aastar.io
 ### 7.1 启动聊天（如果已实现）
 ```bash
 # 与特定 peer 聊天
-agent-speaker agent chat \
+hyphae agent chat \
   --sec 你的私钥 \
   --relay "wss://relay.aastar.io" \
   对方的npub或公钥
@@ -337,20 +337,20 @@ agent-speaker agent chat \
 ### 8.1 添加后台任务
 ```bash
 # 自动发现 Blogger
-agent-speaker agent bg add \
+hyphae agent bg add \
   --name "blogger-discovery" \
   --type discovery \
   --interval 300 \
   --tags "blogger"
 
 # 查看任务列表
-agent-speaker agent bg list
+hyphae agent bg list
 
 # 启动后台调度
-agent-speaker agent bg start
+hyphae agent bg start
 
 # 停止
-agent-speaker agent bg stop
+hyphae agent bg stop
 ```
 
 ---
@@ -362,30 +362,30 @@ agent-speaker agent bg stop
 **角色 A（你）：**
 ```bash
 # 1. 生成身份
-MY_KEY=$(agent-speaker key generate | head -1 | awk '{print $NF}')
-MY_PUB=$(agent-speaker key public --sec $MY_KEY)
+MY_KEY=$(hyphae key generate | head -1 | awk '{print $NF}')
+MY_PUB=$(hyphae key public --sec $MY_KEY)
 
 # 2. 发送消息给同事
-agent-speaker agent msg \
+hyphae agent msg \
   --sec $MY_KEY \
   --to 同事公钥 \
   "你好，我是Agent A，请帮我设计一个Logo"
 
 # 3. 查看回复
-agent-speaker agent timeline --limit 10
+hyphae agent timeline --limit 10
 ```
 
 **角色 B（同事）：**
 ```bash
 # 1. 查询收到的消息
-agent-speaker agent query \
+hyphae agent query \
   --kinds "30078" \
   --authors "$MY_PUB" \
   --limit 5 \
   --decompress
 
 # 2. 回复
-agent-speaker agent msg \
+hyphae agent msg \
   --sec 同事私钥 \
   --to $MY_PUB \
   "收到，报价 500 CNY，3天完成"
@@ -434,14 +434,14 @@ agent-speaker agent msg \
 **A:** 
 ```bash
 # 确保使用 --decompress 参数
-agent-speaker agent query --kinds "30078" --decompress
+hyphae agent query --kinds "30078" --decompress
 ```
 
 ### Q3: 如何删除测试消息？
 **A:** 
 ```bash
 # 发布删除事件（Kind 5）
-agent-speaker event \
+hyphae event \
   --sec 你的私钥 \
   --kind 5 \
   --content "删除理由" \

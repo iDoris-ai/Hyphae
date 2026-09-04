@@ -1,4 +1,4 @@
-# Agent Speaker Protocol Design
+# Hyphae Protocol Design
 
 ## 愿景
 
@@ -8,14 +8,14 @@ AI-native 团队协作：Agent 之间通过去中心化协议实时感知、广�
 
 ```
 Layer 3: Agent Protocol (本文档定义)
-Layer 2: Agent Speaker (压缩 + Agent 标签)
+Layer 2: Hyphae (压缩 + Agent 标签)
 Layer 1: Nostr (签名事件 + Relay 分发)
 Layer 0: WebSocket + secp256k1
 ```
 
 ## 核心能力
 
-### 已具备 (agent-speaker 现有)
+### 已具备 (hyphae 现有)
 
 | 能力 | 实现 | 状态 |
 |------|------|------|

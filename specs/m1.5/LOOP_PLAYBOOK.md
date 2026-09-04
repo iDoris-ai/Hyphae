@@ -5,14 +5,14 @@
 ## 前提
 
 - 本地仓库在 `main` 分支，`git status` 干净，`git pull` 到最新
-- `gh auth status` 正常，有权限对 `iDoris-ai/agent-speaker` 开 PR
+- `gh auth status` 正常，有权限对 `iDoris-ai/hyphae` 开 PR
 - 已知：这个仓库配了一个后台 bot，大约每 5 分钟轮询一次待 review 的 PR，PR 开出后**通常 8-10 分钟内**会收到 review 结果（有时 3 分钟）。不要比这个更频繁地去戳它，也不要假设它会秒回。
 
 ## 主循环（每次唤醒执行一遍）
 
 ### Step 0：状态判断——我现在在流程的哪一步？
 
-先检查有没有一个**尚未合并、还在等结果或等修复**的 PR（`gh pr list --repo iDoris-ai/agent-speaker --author @me --state open`）：
+先检查有没有一个**尚未合并、还在等结果或等修复**的 PR（`gh pr list --repo iDoris-ai/hyphae --author @me --state open`）：
 
 - **有开着的 PR** → 跳到 Step 5（去看 review 结果），不要开新任务
 - **没有开着的 PR** → 这是一个新任务的开始，跳到 Step 1
@@ -59,7 +59,7 @@ go test ./...
 git add -A
 git commit -m "<conventional commit message，引用 specs/m1.5/tasks/NN-xxx.md>"
 git push -u origin m1.5/NN-short-name
-gh pr create --repo iDoris-ai/agent-speaker --base main --head m1.5/NN-short-name \
+gh pr create --repo iDoris-ai/hyphae --base main --head m1.5/NN-short-name \
   --title "<清晰标题>" \
   --body "对照 specs/m1.5/tasks/NN-xxx.md 的验收标准写 Summary + Test plan，注明走过自我 review 和 Codex review 两轮，Codex 提的问题分别是什么、怎么处理的"
 ```
@@ -68,7 +68,7 @@ gh pr create --repo iDoris-ai/agent-speaker --base main --head m1.5/NN-short-nam
 
 后台 bot 大约每 5 分钟轮询一次，PR 开出后通常 8-10 分钟内出结果（有时更快，3 分钟）。**不要用比这更短的间隔去戳它**——用 `ScheduleWakeup` 排一个几分钟后的下次唤醒，而不是在这一轮里死等或紧密轮询。
 
-下次唤醒时，检查 PR 状态：`gh pr view <N> --repo iDoris-ai/agent-speaker --json state,reviews,reviewDecision,comments`
+下次唤醒时，检查 PR 状态：`gh pr view <N> --repo iDoris-ai/hyphae --json state,reviews,reviewDecision,comments`
 
 - **`reviewDecision` 还是空/PENDING** → 还没审完，继续 ScheduleWakeup 等下一轮（同样给几分钟间隔，别加速轮询）
 - **`APPROVED`** → 跳到 Step 6a
@@ -77,7 +77,7 @@ gh pr create --repo iDoris-ai/agent-speaker --base main --head m1.5/NN-short-nam
 ### Step 6a：Approved → merge，继续下一个任务
 
 ```bash
-gh pr merge <N> --repo iDoris-ai/agent-speaker --squash --delete-branch
+gh pr merge <N> --repo iDoris-ai/hyphae --squash --delete-branch
 git checkout main && git pull
 ```
 
@@ -90,7 +90,7 @@ git checkout main && git pull
 1. 读 review 意见，逐条对照修
 2. 改完重新跑 Step 3（本地自测）
 3. `git push`（同一个分支追加 commit，不要开新 PR）
-4. `gh pr comment <N> --repo iDoris-ai/agent-speaker --body "已按意见修复：<简述改了什么>，重新申请 review"`
+4. `gh pr comment <N> --repo iDoris-ai/hyphae --body "已按意见修复：<简述改了什么>，重新申请 review"`
 5. 回到 Step 5（继续等下一轮 bot review）
 
 ## 什么情况下要暂停、通知人类，而不是自己硬闯

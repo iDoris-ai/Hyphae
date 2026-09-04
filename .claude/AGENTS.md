@@ -1,4 +1,4 @@
-# Agent Development Guidelines for agent-speaker
+# Agent Development Guidelines for hyphae
 
 ## Test Coverage Requirement (MUST)
 
@@ -7,7 +7,7 @@ Every milestone **MUST** have:
 1. **100% Unit Test Coverage** for all new packages/functions
    - Every public function must have at least one unit test
    - Edge cases must be covered (nil inputs, errors, empty results)
-   - Use temp directories / mock data - NEVER touch production `~/.agent-speaker/`
+   - Use temp directories / mock data - NEVER touch production `~/.hyphae/`
 
 2. **Real E2E Tests** using `wss://relay.aastar.io`
    - E2E tests must use the real relay, not mocks

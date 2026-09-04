@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"fiatjaf.com/nostr"
-	"github.com/AuraAIHQ/agent-speaker/internal/common"
+	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

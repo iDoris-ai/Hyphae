@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# deploy-relay.sh — Self-deploy an agent-speaker compatible Nostr relay.
+# deploy-relay.sh — Self-deploy an hyphae compatible Nostr relay.
 #
 # Foundation: khatru (https://github.com/fiatjaf/khatru) — Go, by fiatjaf.
 # Strategy:   This is a skeleton. It clones the khatru `basic` example as the
-#             starting point. As Agent-Speaker's L2 routing plugins land in a
+#             starting point. As Hyphae's L2 routing plugins land in a
 #             separate repo (planned: AuraAIHQ/relay-khatru), this script will
 #             switch to building that fork instead.
 #

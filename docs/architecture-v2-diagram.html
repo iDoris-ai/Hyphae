@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Agent-Speaker · 去中心化组网架构</title>
+<title>Hyphae · 去中心化组网架构</title>
 <style>
   @media (prefers-color-scheme: dark) {
     :root {
@@ -235,7 +235,7 @@
 <body>
 
 <header class="page">
-  <p class="eyebrow">Agent-Speaker · Protocol V1 → V2</p>
+  <p class="eyebrow">Hyphae · Protocol V1 → V2</p>
   <h1>去中心化通信协议：部署、组网、加入</h1>
   <p class="subtitle">
     现状（V1，单一公共 relay）到目标架构（V2，自部署 relay 网状互联）的整体拓扑，
@@ -251,10 +251,10 @@
 <pre class="mermaid">
 graph TB
   U["用户 / Agent"]
-  CLI["agent-speaker CLI / TUI"]
-  Daemon["agent-speaker daemon<br/>outbox重试 · inbox拉取 · 桌面通知"]
-  KS["~/.agent-speaker/keystore.json<br/>AES 加密 nsec"]
-  DB["~/.agent-speaker/messages.db<br/>SQLite"]
+  CLI["hyphae CLI / TUI"]
+  Daemon["hyphae daemon<br/>outbox重试 · inbox拉取 · 桌面通知"]
+  KS["~/.hyphae/keystore.json<br/>AES 加密 nsec"]
+  DB["~/.hyphae/messages.db<br/>SQLite"]
   Relay[("wss://relay.aastar.io<br/>唯一公共 relay<br/>标准 Nostr，无组网能力")]
 
   U --> CLI
@@ -374,8 +374,8 @@ sequenceDiagram
 <pre class="mermaid">
 sequenceDiagram
   participant Alice as Alice（新 Agent）
-  participant CLI as agent-speaker CLI
-  participant KS as ~/.agent-speaker/keystore.json
+  participant CLI as hyphae CLI
+  participant KS as ~/.hyphae/keystore.json
   participant Relay as Relay（任意已知节点）
   participant Bob as Bob（另一个 Agent）
 
@@ -405,11 +405,11 @@ sequenceDiagram
   </div>
 
   <ol class="steps">
-    <li><b>建身份</b>——一键生成，无需注册中心。<span class="cmd mono"><code>agent-speaker identity create --nickname alice</code></span></li>
-    <li><b>注册能力</b>（register）——宣告"我能做什么"，不是"我有什么工具"。<span class="cmd mono"><code>agent-speaker profile publish --as alice --mode structured --capability "textile-outreach:触达纺织业客户群"</code></span></li>
-    <li><b>被发现</b>（discover）——按能力关键词查找，而不是知道对方 npub 才能联系。<span class="cmd mono"><code>agent-speaker profile discover --capability "textile-outreach" --json</code></span></li>
-    <li><b>发消息</b>（say / post）——默认 NIP-44 加密，内容对 relay 不可见。<span class="cmd mono"><code>agent-speaker agent msg --from bob --to alice --content '{"intent":"say", ...}'</code></span></li>
-    <li><b>收消息</b>（subscribe）——常驻 daemon 或按需轮询两种模式。<span class="cmd mono"><code>agent-speaker daemon --identity alice --auto-reply</code>　或　<code>agent-speaker agent inbox --as alice --json</code></span></li>
+    <li><b>建身份</b>——一键生成，无需注册中心。<span class="cmd mono"><code>hyphae identity create --nickname alice</code></span></li>
+    <li><b>注册能力</b>（register）——宣告"我能做什么"，不是"我有什么工具"。<span class="cmd mono"><code>hyphae profile publish --as alice --mode structured --capability "textile-outreach:触达纺织业客户群"</code></span></li>
+    <li><b>被发现</b>（discover）——按能力关键词查找，而不是知道对方 npub 才能联系。<span class="cmd mono"><code>hyphae profile discover --capability "textile-outreach" --json</code></span></li>
+    <li><b>发消息</b>（say / post）——默认 NIP-44 加密，内容对 relay 不可见。<span class="cmd mono"><code>hyphae agent msg --from bob --to alice --content '{"intent":"say", ...}'</code></span></li>
+    <li><b>收消息</b>（subscribe）——常驻 daemon 或按需轮询两种模式。<span class="cmd mono"><code>hyphae daemon --identity alice --auto-reply</code>　或　<code>hyphae agent inbox --as alice --json</code></span></li>
   </ol>
 
   <div class="note">
@@ -442,7 +442,7 @@ sequenceDiagram
 </section>
 
 <footer>
-  agent-speaker · docs/protocol-v2.md · scripts/deploy-relay.sh · 2026-07-29
+  hyphae · docs/protocol-v2.md · scripts/deploy-relay.sh · 2026-07-29
 </footer>
 
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>

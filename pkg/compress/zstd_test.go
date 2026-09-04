@@ -1,4 +1,4 @@
-// Package compress provides compression utilities for agent-speaker
+// Package compress provides compression utilities for hyphae
 package compress
 
 import (
@@ -13,9 +13,9 @@ import (
 // TestCompressDecompress tests basic compression and decompression
 func TestCompressDecompress(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    []byte
-		wantErr  bool
+		name    string
+		input   []byte
+		wantErr bool
 	}{
 		{
 			name:    "simple_text",
@@ -63,20 +63,20 @@ func TestCompressDecompress(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
-			
+
 			// Empty input should return empty string
 			if len(tt.input) == 0 {
 				assert.Empty(t, compressed)
 				return
 			}
-			
+
 			// Compressed should be different from original (when base64 encoded)
 			assert.NotEqual(t, string(tt.input), compressed)
-			
+
 			// Decompress
 			decompressed, err := Decompress(compressed)
 			require.NoError(t, err)
-			
+
 			// Should match original
 			assert.Equal(t, tt.input, decompressed)
 		})
@@ -120,13 +120,13 @@ func TestCompressWithPrefix(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
-			
+
 			if len(tt.data) == 0 {
 				// Empty data produces "agent:v1:zstd:" prefix only
 				assert.True(t, strings.HasPrefix(compressed, "agent:"))
 				return
 			}
-			
+
 			// Should have prefix
 			assert.True(t, strings.HasPrefix(compressed, "agent:"))
 			assert.Contains(t, compressed, tt.version)
@@ -138,25 +138,25 @@ func TestCompressWithPrefix(t *testing.T) {
 // TestDecompressWithPrefix tests decompression with agent prefix
 func TestDecompressWithPrefix(t *testing.T) {
 	tests := []struct {
-		name           string
-		input          string
-		expectedData   []byte
-		expectedVer    string
-		wantErr        bool
+		name         string
+		input        string
+		expectedData []byte
+		expectedVer  string
+		wantErr      bool
 	}{
 		{
-			name:           "with_prefix",
-			input:          "",
-			expectedData:   []byte{},
-			expectedVer:    "",
-			wantErr:        false,
+			name:         "with_prefix",
+			input:        "",
+			expectedData: []byte{},
+			expectedVer:  "",
+			wantErr:      false,
 		},
 		{
-			name:           "empty_string",
-			input:          "",
-			expectedData:   []byte{},
-			expectedVer:    "",
-			wantErr:        false,
+			name:         "empty_string",
+			input:        "",
+			expectedData: []byte{},
+			expectedVer:  "",
+			wantErr:      false,
 		},
 	}
 
@@ -170,7 +170,7 @@ func TestDecompressWithPrefix(t *testing.T) {
 				assert.Empty(t, ver)
 				return
 			}
-			
+
 			data, ver, err := DecompressWithPrefix(tt.input)
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -186,23 +186,23 @@ func TestDecompressWithPrefix(t *testing.T) {
 // TestRoundTrip tests full round-trip compression/decompression
 func TestRoundTrip(t *testing.T) {
 	original := []byte("This is a test message for round-trip compression and decompression testing.")
-	
+
 	// Test basic round-trip
 	compressed, err := Compress(original)
 	require.NoError(t, err)
-	
+
 	decompressed, err := Decompress(compressed)
 	require.NoError(t, err)
-	
+
 	assert.Equal(t, original, decompressed)
-	
+
 	// Test with prefix round-trip
 	compressedWithPrefix, err := CompressWithPrefix(original, "v1")
 	require.NoError(t, err)
-	
+
 	decompressedWithPrefix, ver, err := DecompressWithPrefix(compressedWithPrefix)
 	require.NoError(t, err)
-	
+
 	assert.Equal(t, original, decompressedWithPrefix)
 	assert.Equal(t, "v1", ver)
 }
@@ -247,19 +247,19 @@ func TestDecompressInvalidData(t *testing.T) {
 func TestCompressionRatio(t *testing.T) {
 	// Large repetitive data should compress well
 	original := []byte(strings.Repeat("This is repetitive data. ", 100))
-	
+
 	compressed, err := Compress(original)
 	require.NoError(t, err)
-	
+
 	// Compressed size (after base64) should be less than original
 	// Note: base64 increases size by ~33%, but zstd should overcome this for repetitive data
 	originalSize := len(original)
 	compressedSize := len(compressed)
-	
+
 	ratio := float64(compressedSize) / float64(originalSize)
-	t.Logf("Compression ratio: %.2f%% (original: %d, compressed: %d)", 
+	t.Logf("Compression ratio: %.2f%% (original: %d, compressed: %d)",
 		ratio*100, originalSize, compressedSize)
-	
+
 	// For highly repetitive data, compression should be effective
 	assert.Less(t, ratio, 0.5, "Compression should reduce size by at least 50% for repetitive data")
 }
@@ -267,7 +267,7 @@ func TestCompressionRatio(t *testing.T) {
 // BenchmarkCompress benchmarks compression
 func BenchmarkCompress(b *testing.B) {
 	data := []byte(strings.Repeat("Benchmark test data. ", 100))
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, err := Compress(data)
@@ -284,7 +284,7 @@ func BenchmarkDecompress(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, err := Decompress(compressed)
@@ -297,27 +297,27 @@ func BenchmarkDecompress(b *testing.B) {
 // TestConcurrentAccess tests thread safety
 func TestConcurrentAccess(t *testing.T) {
 	data := []byte("concurrent test data")
-	
+
 	// Run multiple goroutines compressing and decompressing
 	done := make(chan bool, 10)
-	
+
 	for i := 0; i < 10; i++ {
 		go func() {
 			defer func() { done <- true }()
-			
+
 			for j := 0; j < 100; j++ {
 				compressed, err := Compress(data)
 				if err != nil {
 					t.Error(err)
 					return
 				}
-				
+
 				decompressed, err := Decompress(compressed)
 				if err != nil {
 					t.Error(err)
 					return
 				}
-				
+
 				if !bytes.Equal(data, decompressed) {
 					t.Error("Data mismatch")
 					return
@@ -325,7 +325,7 @@ func TestConcurrentAccess(t *testing.T) {
 			}
 		}()
 	}
-	
+
 	// Wait for all goroutines
 	for i := 0; i < 10; i++ {
 		<-done

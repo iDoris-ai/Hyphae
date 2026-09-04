@@ -1,21 +1,21 @@
 #!/bin/bash
-# Build script for agent-speaker
+# Build script for hyphae
 
 set -e
 
-echo "🔨 Building agent-speaker..."
+echo "🔨 Building hyphae..."
 
 # Ensure output directory exists
 mkdir -p bin
 
 # Build the application
-go build -o bin/agent-speaker ./cmd/agent-speaker/main.go
+go build -o bin/hyphae ./cmd/hyphae/main.go
 
-echo "✅ Build complete: bin/agent-speaker"
+echo "✅ Build complete: bin/hyphae"
 
 # Optional: install to GOPATH/bin
 if [ "$1" == "install" ]; then
     echo "📦 Installing to GOPATH/bin..."
-    go install ./cmd/agent-speaker/main.go
-    echo "✅ Installed to $(go env GOPATH)/bin/agent-speaker"
+    go install ./cmd/hyphae/main.go
+    echo "✅ Installed to $(go env GOPATH)/bin/hyphae"
 fi

@@ -48,15 +48,15 @@ echo "🔨 Building..."
 # Check identities
 echo "📋 Checking identities..."
 for user in alice bob; do
-    if ! ./bin/agent-speaker identity list | grep -q "^$user "; then
+    if ! ./bin/hyphae identity list | grep -q "^$user "; then
         echo -e "${YELLOW}Creating identity '$user'...${NC}"
-        ./bin/agent-speaker identity create --nickname $user 2>/dev/null || true
+        ./bin/hyphae identity create --nickname $user 2>/dev/null || true
     fi
     echo "  ✅ $user"
 done
 
-ALICE_NPUB=$(./bin/agent-speaker identity export --nickname alice 2>/dev/null | grep "Npub:" | awk '{print $2}')
-BOB_NPUB=$(./bin/agent-speaker identity export --nickname bob 2>/dev/null | grep "Npub:" | awk '{print $2}')
+ALICE_NPUB=$(./bin/hyphae identity export --nickname alice 2>/dev/null | grep "Npub:" | awk '{print $2}')
+BOB_NPUB=$(./bin/hyphae identity export --nickname bob 2>/dev/null | grep "Npub:" | awk '{print $2}')
 
 echo "  Alice npub: ${ALICE_NPUB:0:20}..."
 echo "  Bob npub: ${BOB_NPUB:0:20}..."
@@ -68,21 +68,21 @@ echo "=========================================="
 
 # Test 1: Publish alice's profile
 run_test "Publish alice profile" \
-    "./bin/agent-speaker profile publish --as alice --name 'Alice the SEO Expert' --description 'I help websites rank better' --availability available --capability 'seo:Search engine optimization' --capability 'content:Content strategy' --rate 'audit:page:50:Full SEO audit' --rate 'article:word:0.15:Blog post writing' --currency USD --relay $RELAY"
+    "./bin/hyphae profile publish --as alice --name 'Alice the SEO Expert' --description 'I help websites rank better' --availability available --capability 'seo:Search engine optimization' --capability 'content:Content strategy' --rate 'audit:page:50:Full SEO audit' --rate 'article:word:0.15:Blog post writing' --currency USD --relay $RELAY"
 
 # Test 2: Publish bob's profile with different capabilities
 run_test "Publish bob profile" \
-    "./bin/agent-speaker profile publish --as bob --name 'Bob the Developer' --description 'Full-stack developer and smart contract auditor' --availability busy --capability 'solidity:Smart contract development' --capability 'audit:Security audit' --rate 'contract:project:500:Complete smart contract' --currency USD --relay $RELAY"
+    "./bin/hyphae profile publish --as bob --name 'Bob the Developer' --description 'Full-stack developer and smart contract auditor' --availability busy --capability 'solidity:Smart contract development' --capability 'audit:Security audit' --rate 'contract:project:500:Complete smart contract' --currency USD --relay $RELAY"
 
 # Test 3: Help commands
 run_test "Profile command help" \
-    "./bin/agent-speaker profile --help"
+    "./bin/hyphae profile --help"
 
 run_test "Profile publish help" \
-    "./bin/agent-speaker profile publish --help"
+    "./bin/hyphae profile publish --help"
 
 run_test "Profile discover help" \
-    "./bin/agent-speaker profile discover --help"
+    "./bin/hyphae profile discover --help"
 
 echo ""
 echo "=========================================="
@@ -95,15 +95,15 @@ sleep 5
 
 # Test 4: Discover alice's profile by npub
 run_test "Discover alice profile by npub" \
-    "./bin/agent-speaker profile discover --npub '$ALICE_NPUB' --relay $RELAY --timeout 10"
+    "./bin/hyphae profile discover --npub '$ALICE_NPUB' --relay $RELAY --timeout 10"
 
 # Test 5: Discover bob's profile by npub
 run_test "Discover bob profile by npub" \
-    "./bin/agent-speaker profile discover --npub '$BOB_NPUB' --relay $RELAY --timeout 10"
+    "./bin/hyphae profile discover --npub '$BOB_NPUB' --relay $RELAY --timeout 10"
 
 # Test 6: Discover all profiles (no npub filter)
 run_test "Discover all profiles on relay" \
-    "./bin/agent-speaker profile discover --relay $RELAY --limit 20 --timeout 10"
+    "./bin/hyphae profile discover --relay $RELAY --limit 20 --timeout 10"
 
 echo ""
 echo "=========================================="
@@ -112,25 +112,25 @@ echo "=========================================="
 
 # Test 7: Show alice's local profile
 run_test "Show alice local profile" \
-    "./bin/agent-speaker profile show --npub '$ALICE_NPUB' | grep -q 'Alice the SEO Expert'"
+    "./bin/hyphae profile show --npub '$ALICE_NPUB' | grep -q 'Alice the SEO Expert'"
 
 # Test 8: Show bob's local profile
 run_test "Show bob local profile" \
-    "./bin/agent-speaker profile show --npub '$BOB_NPUB' | grep -q 'Bob the Developer'"
+    "./bin/hyphae profile show --npub '$BOB_NPUB' | grep -q 'Bob the Developer'"
 
 # Test 9: List all local profiles
 run_test "List local profiles" \
-    "./bin/agent-speaker profile list | grep -q 'Alice the SEO Expert' && ./bin/agent-speaker profile list | grep -q 'Bob the Developer'"
+    "./bin/hyphae profile list | grep -q 'Alice the SEO Expert' && ./bin/hyphae profile list | grep -q 'Bob the Developer'"
 
 # Test 10: Search profiles by capability
 run_test "Search profiles for 'seo'" \
-    "./bin/agent-speaker profile search --query 'seo' | grep -q 'Alice the SEO Expert'"
+    "./bin/hyphae profile search --query 'seo' | grep -q 'Alice the SEO Expert'"
 
 run_test "Search profiles for 'developer'" \
-    "./bin/agent-speaker profile search --query 'developer' | grep -q 'Bob the Developer'"
+    "./bin/hyphae profile search --query 'developer' | grep -q 'Bob the Developer'"
 
 run_test "Search profiles for 'audit' (should find both)" \
-    "./bin/agent-speaker profile search --query 'audit' | grep -q 'Alice the SEO Expert' && ./bin/agent-speaker profile search --query 'audit' | grep -q 'Bob the Developer'"
+    "./bin/hyphae profile search --query 'audit' | grep -q 'Alice the SEO Expert' && ./bin/hyphae profile search --query 'audit' | grep -q 'Bob the Developer'"
 
 echo ""
 echo "=========================================="

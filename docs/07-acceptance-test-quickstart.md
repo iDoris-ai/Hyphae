@@ -42,7 +42,7 @@ cat .gitignore | grep env  # 确保 .env 不会被提交
 
 ```
 ========================================
-Agent Speaker 全面验收测试
+Hyphae 全面验收测试
 ========================================
 
 测试账户:
@@ -76,14 +76,14 @@ Agent Speaker 全面验收测试
 source .env
 
 # Alice 发送消息给 Bob
-./bin/agent-speaker agent msg \
+./bin/hyphae agent msg \
   --sec "$ALICE_NSEC" \
   --to "$BOB_PUB" \
   --relay "$RELAY_PUBLIC" \
   "Hello Bob!"
 
 # Bob 查询消息
-./bin/agent-speaker agent query \
+./bin/hyphae agent query \
   --authors "$ALICE_PUB" \
   --kinds "30078" \
   --relay "$RELAY_PUBLIC" \
@@ -95,19 +95,19 @@ source .env
 **Terminal 1 - Alice:**
 ```bash
 source .env
-./bin/agent-speaker agent msg --sec "$ALICE_NSEC" --to "$BOB_PUB" "Hi Bob"
+./bin/hyphae agent msg --sec "$ALICE_NSEC" --to "$BOB_PUB" "Hi Bob"
 ```
 
 **Terminal 2 - Bob:**
 ```bash
 source .env
-./bin/agent-speaker agent query --authors "$ALICE_PUB" --decompress
+./bin/hyphae agent query --authors "$ALICE_PUB" --decompress
 ```
 
 **Terminal 3 - Charlie:**
 ```bash
 source .env
-./bin/agent-speaker agent relay start --port 7777
+./bin/hyphae agent relay start --port 7777
 ```
 
 ## 测试场景说明

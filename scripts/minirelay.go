@@ -250,17 +250,17 @@ func (r *Relay) handleNIP11(w http.ResponseWriter, req *http.Request) {
 	if strings.Contains(req.Header.Get("Accept"), "application/nostr+json") {
 		w.Header().Set("Content-Type", "application/nostr+json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"name":          "Agent-Speaker Mini Relay",
-			"description":   "Lightweight development relay",
-			"pubkey":        "",
-			"contact":       "",
+			"name":           "Hyphae Mini Relay",
+			"description":    "Lightweight development relay",
+			"pubkey":         "",
+			"contact":        "",
 			"supported_nips": []int{1, 2, 4, 11, 20},
-			"software":      "minirelay",
-			"version":       "0.1.0",
+			"software":       "minirelay",
+			"version":        "0.1.0",
 		})
 		return
 	}
-	w.Write([]byte("Agent-Speaker Mini Relay\n"))
+	w.Write([]byte("Hyphae Mini Relay\n"))
 }
 
 func main() {

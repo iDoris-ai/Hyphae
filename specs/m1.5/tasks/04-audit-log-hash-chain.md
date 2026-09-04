@@ -12,7 +12,7 @@
 新增（可选，非本任务硬性要求，若时间允许一起做）：
 
 ```
-agent-speaker storage audit-log [--limit N] [--verify]
+hyphae storage audit-log [--limit N] [--verify]
 ```
 
 `--verify` 模式：从头到尾重算一遍哈希链，报告是否完整（用于检测被篡改或被绕过 API 直接改库的情况）。
@@ -78,9 +78,9 @@ CREATE INDEX idx_audit_log_action ON audit_log(action);
 
 ## 实现笔记
 
-- `internal/audit` 没有依赖 `internal/identity`——虽然接口设计初稿设想直接复用 `identity.EnsureKeyStore()` 拿 keystore 目录路径，但 `internal/identity` 的 CLI 命令（`commands.go`）也需要调 `audit.LogAction`，而 `commands.go` 跟 `keystore.go` 是同一个包，一旦 `internal/audit` 反过来 import `internal/identity` 就是循环依赖。解决办法：在 `internal/audit` 里复制了 `keyStoreDir()` 这 3 行路径拼接逻辑（`~/.agent-speaker`），不导入 `identity`。这样 `internal/audit` 对内部包零依赖，可以被 `identity`/`messaging`/`group`/`daemon`/`storage` 任意导入而不会成环。
+- `internal/audit` 没有依赖 `internal/identity`——虽然接口设计初稿设想直接复用 `identity.EnsureKeyStore()` 拿 keystore 目录路径，但 `internal/identity` 的 CLI 命令（`commands.go`）也需要调 `audit.LogAction`，而 `commands.go` 跟 `keystore.go` 是同一个包，一旦 `internal/audit` 反过来 import `internal/identity` 就是循环依赖。解决办法：在 `internal/audit` 里复制了 `keyStoreDir()` 这 3 行路径拼接逻辑（`~/.hyphae`），不导入 `identity`。这样 `internal/audit` 对内部包零依赖，可以被 `identity`/`messaging`/`group`/`daemon`/`storage` 任意导入而不会成环。
 - 挂了 8 个埋点（首版实现笔记曾误写成 6 个，Codex review 时数出实际是 8 个，已更正），都是 fire-and-forget（写审计失败只打 `⚠️` warning，不影响主流程返回值）：`identity create`、`contact add`、`agent msg` 发送成功后、`agent inbox` 收到消息入库后、`group create`、`group add-member`、`group leave`（用的是 `ActionGroupMemberRemoved`，因为底层调的是同一个 `RemoveMember`，只是自己移除自己）、daemon 的 `sendAutoReply`。**`group remove-member` 命令本身现在是个占位符**（`"not yet implemented"`），没有真实逻辑可埋点，等它真正实现了再补审计调用。
-- 可选的查看命令 `agent-speaker storage audit-log [--limit] [--verify]` 也做了，`--verify` 模式下链断裂会返回非零退出码（方便脚本判断）。
+- 可选的查看命令 `hyphae storage audit-log [--limit] [--verify]` 也做了，`--verify` 模式下链断裂会返回非零退出码（方便脚本判断）。
 - Live 端到端跑了一遍全部 6 个埋点（本地 relay + 真实 identity/group/daemon），`storage audit-log --verify` 确认链完整；又手动改了一行 `details` 模拟篡改，确认 `--verify` 能在正确的 seq 位置报出断裂，之后清空了测试产生的审计记录，没有留着一条"损坏"的链在本地环境里。
 - **并发限制：第一版判断"概率低不值得处理"是错的，已经实测修正**。首版实现笔记曾经断言"同一进程内并发调用 LogAction 概率低、SQLite 写序列化能兜住，最多丢几条记录"。这个判断没有真的用并发测试验证过。后来补了 `TestLogActionConcurrentCallsDoNotCorruptOrHang`（50 个 goroutine 并发调用 `LogAction`），实测结果是 **50 个里 42 个直接失败**（`database is locked` / `SQLITE_BUSY`），丢失率远比预想的严重——因为 Go 的 `database/sql` 是连接池，`PRAGMA busy_timeout` 只对执行它的那一个连接生效，并发请求会被派发到没设置这个 PRAGMA 的新连接上，SQLite 立刻拒绝而不是等待。**修复**：`conn.SetMaxOpenConns(1)` 把连接池锁定成单连接，让 Go 自己把并发调用者排队（阻塞等连接释放），而不是指望 SQLite 层面的锁；`busy_timeout` 保留作为双保险（万一以后有人把连接数改大）。修复后同样的并发测试 **50/50 全部成功**。这个问题是在给这个任务补充测试、真实验证了自己此前写的"可接受限制"结论之后才发现的——教训是：涉及并发的"这个概率很低"判断，没有并发测试验证过就不该写进实现笔记当结论。
 

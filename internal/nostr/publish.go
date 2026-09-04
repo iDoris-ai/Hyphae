@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"fiatjaf.com/nostr"
-	"github.com/AuraAIHQ/agent-speaker/internal/common"
+	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/urfave/cli/v3"
 )
 
@@ -19,7 +19,7 @@ var PublishCmd = &cli.Command{
 	Name:  "publish",
 	Usage: "Publish a JSON event",
 	Description: `Publish a nostr event from JSON.
-Example: agent-speaker publish '{"kind":1,"content":"Hello"}'`,
+Example: hyphae publish '{"kind":1,"content":"Hello"}'`,
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:     "sec",

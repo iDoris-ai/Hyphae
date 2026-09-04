@@ -1,7 +1,7 @@
 .PHONY: build clean sync-nak dev-build test test-unit test-integration test-regression test-all bench copy-tests
 
 BUILD_DIR := build
-BIN_NAME := agent-speaker
+BIN_NAME := hyphae
 
 # ============================================================================
 # Build Targets
@@ -36,7 +36,7 @@ copy-tests: sync-nak add-agent-cmd
 	@cp test/*_test.go $(BUILD_DIR)/nak-src/ 2>/dev/null || true
 	@mkdir -p $(BUILD_DIR)/nak-src/pkg/compress
 	@cp pkg/compress/*.go $(BUILD_DIR)/nak-src/pkg/compress/ 2>/dev/null || true
-	@echo "replace github.com/jason/agent-speaker/pkg/compress => ./pkg/compress" >> $(BUILD_DIR)/nak-src/go.mod
+	@echo "replace github.com/iDoris-ai/hyphae/pkg/compress => ./pkg/compress" >> $(BUILD_DIR)/nak-src/go.mod
 	@echo "✅ Tests copied"
 
 # 开发构建
@@ -152,7 +152,7 @@ lint:
 # ============================================================================
 
 help:
-	@echo "Agent Speaker - Available targets:"
+	@echo "Hyphae - Available targets:"
 	@echo ""
 	@echo "Build:"
 	@echo "  make build          - Full build"

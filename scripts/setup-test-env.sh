@@ -3,11 +3,11 @@
 
 set -e
 
-echo "🚀 设置 Agent Speaker 测试环境"
+echo "🚀 设置 Hyphae 测试环境"
 echo ""
 
-# 检查 agent-speaker 是否已构建
-if [ ! -f "./bin/agent-speaker" ]; then
+# 检查 hyphae 是否已构建
+if [ ! -f "./bin/hyphae" ]; then
     echo "❌ 请先构建项目: make build"
     exit 1
 fi
@@ -25,26 +25,26 @@ echo "📝 生成测试账户..."
 
 # 生成 Alice 密钥
 echo "  - 生成 Alice 账户..."
-ALICE_SEC=$(./bin/agent-speaker key generate)
-ALICE_PUB=$(./bin/agent-speaker key public "$ALICE_SEC")
-ALICE_NPUB=$(./bin/agent-speaker encode npub "$ALICE_PUB" 2>/dev/null || echo "npub1alice$(openssl rand -hex 20 | cut -c1-50)")
+ALICE_SEC=$(./bin/hyphae key generate)
+ALICE_PUB=$(./bin/hyphae key public "$ALICE_SEC")
+ALICE_NPUB=$(./bin/hyphae encode npub "$ALICE_PUB" 2>/dev/null || echo "npub1alice$(openssl rand -hex 20 | cut -c1-50)")
 
 # 生成 Bob 密钥
 echo "  - 生成 Bob 账户..."
-BOB_SEC=$(./bin/agent-speaker key generate)
-BOB_PUB=$(./bin/agent-speaker key public "$BOB_SEC")
-BOB_NPUB=$(./bin/agent-speaker encode npub "$BOB_PUB" 2>/dev/null || echo "npub1bob$(openssl rand -hex 20 | cut -c1-50)")
+BOB_SEC=$(./bin/hyphae key generate)
+BOB_PUB=$(./bin/hyphae key public "$BOB_SEC")
+BOB_NPUB=$(./bin/hyphae encode npub "$BOB_PUB" 2>/dev/null || echo "npub1bob$(openssl rand -hex 20 | cut -c1-50)")
 
 # 生成 Charlie 密钥
 echo "  - 生成 Charlie 账户..."
-CHARLIE_SEC=$(./bin/agent-speaker key generate)
-CHARLIE_PUB=$(./bin/agent-speaker key public "$CHARLIE_SEC")
-CHARLIE_NPUB=$(./bin/agent-speaker encode npub "$CHARLIE_PUB" 2>/dev/null || echo "npub1charlie$(openssl rand -hex 20 | cut -c1-50)")
+CHARLIE_SEC=$(./bin/hyphae key generate)
+CHARLIE_PUB=$(./bin/hyphae key public "$CHARLIE_SEC")
+CHARLIE_NPUB=$(./bin/hyphae encode npub "$CHARLIE_PUB" 2>/dev/null || echo "npub1charlie$(openssl rand -hex 20 | cut -c1-50)")
 
 # 写入 .env 文件
 cat > "$ENV_FILE" << EOF
 # ============================================
-# Agent Speaker 测试环境配置
+# Hyphae 测试环境配置
 # 生成时间: $(date)
 # ============================================
 

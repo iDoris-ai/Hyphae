@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"fiatjaf.com/nostr"
-	"github.com/AuraAIHQ/agent-speaker/pkg/types"
+	"github.com/iDoris-ai/hyphae/pkg/types"
 )
 
 const (

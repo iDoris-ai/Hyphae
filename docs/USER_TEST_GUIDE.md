@@ -1,4 +1,4 @@
-# Agent Speaker 测试指南（普通用户版）
+# Hyphae 测试指南（普通用户版）
 
 > 本文档面向普通用户，无需编程经验，一步步教你如何测试 relay.aastar.io
 
@@ -124,24 +124,24 @@ nostr_client_messages_total{verb="REQ"} Z
 
 ---
 
-### 步骤 5：使用 agent-speaker CLI 测试（高级）
+### 步骤 5：使用 hyphae CLI 测试（高级）
 
 #### 5.1 下载预编译版本
 
 ```bash
 # Mac (Apple Silicon)
-curl -L -o agent-speaker https://github.com/AuraAIHQ/agent-speaker/releases/latest/download/agent-speaker-darwin-arm64
-chmod +x agent-speaker
+curl -L -o hyphae https://github.com/iDoris-ai/hyphae/releases/latest/download/hyphae-darwin-arm64
+chmod +x hyphae
 
 # Mac (Intel)
-curl -L -o agent-speaker https://github.com/AuraAIHQ/agent-speaker/releases/latest/download/agent-speaker-darwin-amd64
-chmod +x agent-speaker
+curl -L -o hyphae https://github.com/iDoris-ai/hyphae/releases/latest/download/hyphae-darwin-amd64
+chmod +x hyphae
 ```
 
 #### 5.2 生成测试密钥
 
 ```bash
-./agent-speaker key generate
+./hyphae key generate
 ```
 
 复制输出的密钥（64位十六进制字符串）
@@ -149,7 +149,7 @@ chmod +x agent-speaker
 #### 5.3 查询中继消息
 
 ```bash
-./agent-speaker agent query --kinds "1,30078" --limit 5
+./hyphae agent query --kinds "1,30078" --limit 5
 ```
 
 **预期：** 可能返回空（如果是新部署的中继），但不会报错
@@ -158,7 +158,7 @@ chmod +x agent-speaker
 
 ```bash
 # 替换 YOUR_SECRET_KEY 为你生成的密钥
-./agent-speaker agent msg \
+./hyphae agent msg \
   --sec YOUR_SECRET_KEY \
   --to YOUR_PUBLIC_KEY \
   "Hello from test!"

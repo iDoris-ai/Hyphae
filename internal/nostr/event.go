@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
-	"github.com/AuraAIHQ/agent-speaker/internal/common"
+	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/urfave/cli/v3"
 )
 
@@ -16,7 +16,7 @@ var EventCmd = &cli.Command{
 	Name:  "event",
 	Usage: "Create and publish nostr events",
 	Description: `Create and publish nostr events to relays.
-Example: agent-speaker event --kind 1 --content "Hello world!"`,
+Example: hyphae event --kind 1 --content "Hello world!"`,
 	Flags: []cli.Flag{
 		&cli.IntFlag{
 			Name:    "kind",

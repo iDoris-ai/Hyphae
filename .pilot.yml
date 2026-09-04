@@ -1,0 +1,23 @@
+# .pilot.yml — pilot skill 的仓库配置。
+# 脚本不解析 YAML；由 skill 用 Read 读取后作为 flag 传给脚本。
+
+# 本仓库是【单主干】：没有集成分支，PR 直接开向 main。
+# 近 20 个已合并 PR 的 base 全是 main，GitHub 默认分支也是 main。
+# 所以 integration_branch 故意等于 base_branch —— 这是合法配置，不是缺一个 preview 分支。
+# 合并走：git-guard.sh merge-pr <n> --integration main --allow-trunk
+# （--allow-trunk 不是绕过：仍要求分支保护规则要求审批、且该 PR 已 APPROVED。）
+base_branch: main
+integration_branch: main
+
+protect_patterns:
+  - release
+  - hotfix
+
+remote: origin
+
+docs_dir: docs/agent
+planning_source: docs
+
+# 本仓库自己的检查。gofmt 只查我们的代码：third_party/nak 是上游 submodule，
+# build/ 是 gitignore 的构建产物，两者都不该因格式问题挡住 PR。
+preflight: go build ./... && go vet ./... && go test ./...

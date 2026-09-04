@@ -217,7 +217,7 @@ Negotiation      Access
 
 ---
 
-## 9. 对 Agent-Speaker 的启示
+## 9. 对 Hyphae 的启示
 
 ### 借鉴点
 1. **标准化接口设计**: MCP 的工具/资源/提示词三层抽象清晰
@@ -225,7 +225,7 @@ Negotiation      Access
 3. **安全模型**: 进程隔离 + 能力声明的访问控制
 
 ### 差异点
-| 维度 | MCP | Agent-Speaker |
+| 维度 | MCP | Hyphae |
 |------|-----|---------------|
 | 通信范围 | 本地进程 | 网络/去中心化 |
 | 协议层 | Agent-Tool | Agent-Agent |
@@ -233,5 +233,5 @@ Negotiation      Access
 | 身份模型 | 无 | Nostr 公私钥 |
 
 ### 可兼容性
-- MCP 服务器可以作为 Agent-Speaker 的"工具层"
-- 考虑实现 MCP 客户端能力，允许 Agent-Speaker 调用 MCP 服务器
+- MCP 服务器可以作为 Hyphae 的"工具层"
+- 考虑实现 MCP 客户端能力，允许 Hyphae 调用 MCP 服务器

@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"fiatjaf.com/nostr"
-	"github.com/AuraAIHQ/agent-speaker/internal/common"
+	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/urfave/cli/v3"
 )
 
@@ -15,7 +15,7 @@ var EncodeCmd = &cli.Command{
 	Name:  "encode",
 	Usage: "Encode hex to bech32 format",
 	Description: `Encode hex keys to bech32 format (npub, nsec, note, etc.).
-Example: agent-speaker encode --prefix npub --hex <hex>`,
+Example: hyphae encode --prefix npub --hex <hex>`,
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:     "prefix",
