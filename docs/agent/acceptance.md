@@ -5,7 +5,7 @@
 > [`../M1.5_TEST_GUIDE.md`](../M1.5_TEST_GUIDE.md)、[`../../QUICK_MANUAL_TEST.md`](../../QUICK_MANUAL_TEST.md)。
 > 最后更新:2026-09-03
 
-## 三道验收门(从 M3 起,每个里程碑都要依次通过)
+## 三道验收门(从 M2 起,每个里程碑都要依次通过)
 
 过去的标准是「`go test ./...` 全绿 + 人工 review」。CC-82 证明了它有盲区,所以现在是三道:
 
@@ -35,7 +35,7 @@ CC-82(与 Agent24 的 F4 Nostr 渠道契约核对)一个下午挖出 4 个真实
 3. **合并前** — 若改动了声明过的契约字段,回同一任务请对方拿**真实代码**跑一遍,双方对一遍实际 JSON/事件输出。发现 bug 走「报告 → 决策 → 修 → PR → review → 合并 → 回任务同步」完整闭环。
 4. **合并后** — 贴 PR 链接 + 合并 commit,标 `✅ 已实现`。
 
-## M3 的验收标准(当前里程碑)
+## M2 的验收标准(当前里程碑)
 
 **用户视角能做到什么**:
 
@@ -50,7 +50,7 @@ hyphae behavior inquire --target <npub> --capability seo
 hyphae behavior subscribe --filter '{"tags":["AI"]}'
 ```
 
-**算做好了的硬条件**(全部满足才能把 M3 从 🔄 翻成 ✅):
+**算做好了的硬条件**(全部满足才能把 M2 从 🔄 翻成 ✅):
 
 - [ ] 四种 behavior(`register`/`publish`/`inquire`/`subscribe`)收发都跑通,各自有单元测试
 - [ ] `tip`/`drifting-bottle` 的 payload schema 已定义且被测试固定住(**不要求能执行**)

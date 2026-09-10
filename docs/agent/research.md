@@ -34,18 +34,18 @@ Buzz 是 Block 出品的**中心化托管团队协作平台**(Postgres+Redis+S3+
 
 | 借什么 | 落在哪 |
 |---|---|
-| 成员角色显式建模(至少 Human/Agent-Bot) | M2 ✅ 已做 |
-| Owner-attestation 授权字段(NIP-OA 思路,身份换成 AirAccount) | M3 · F3.4 |
-| 邻居发现/隧道传输的**思路**(选型换成 Go 生态 libp2p/gossipsub) | M4 |
-| workflow schema 极简设计(4 触发器 + 有限 action + 单遍模板解析) | M5 |
-| approval 挂起-恢复**必须能持久化**(Buzz 自己的 `WF-08` 是现成反面案例) | M5 · F5.4 |
-| Agent 活动用「动词-宾语-结果」三元组渲染,不甩原始 JSON | M6 · F6.3 |
-| 资金安全用 property-based test(`gopter`),**不上** TLA+/Tamarin | M4 · F4.4 |
-| CLI `--json` in/out、`audit_log` 哈希链 | M2 ✅ 已做 |
+| 成员角色显式建模(至少 Human/Agent-Bot) | M1.5 ✅ 已做 |
+| Owner-attestation 授权字段(NIP-OA 思路,身份换成 AirAccount) | M2 · M2-F4 |
+| 邻居发现/隧道传输的**思路**(选型换成 Go 生态 libp2p/gossipsub) | M2.5 |
+| workflow schema 极简设计(4 触发器 + 有限 action + 单遍模板解析) | M3 |
+| approval 挂起-恢复**必须能持久化**(Buzz 自己的 `WF-08` 是现成反面案例) | M3 · M3-F4 |
+| Agent 活动用「动词-宾语-结果」三元组渲染,不甩原始 JSON | M4 · M4-F3 |
+| 资金安全用 property-based test(`gopter`),**不上** TLA+/Tamarin | M2.5 · M2.5-F4 |
+| CLI `--json` in/out、`audit_log` 哈希链 | M1.5 ✅ 已做 |
 
 **明确不借**(理由见 `buzz-comparison-analysis.md` §7):Postgres+Redis+S3+多租户后端、27-crate 微服务拆分、TLA+/Tamarin 全套形式化验证、完整 Git 托管后端、Flutter 移动客户端、**「新功能=新 kind+新 NIP 草案」的协议膨胀模式**。
 
-最后一条尤其重要:它正是我们 M3 要做 behavior 统一信封的原因 —— 反向选择。
+最后一条尤其重要:它正是我们 M2 要做 behavior 统一信封的原因 —— 反向选择。
 
 ## 技术选型(已定)
 
@@ -57,12 +57,12 @@ Buzz 是 Block 出品的**中心化托管团队协作平台**(Postgres+Redis+S3+
 | 本地存储 | SQLite(WAL) | 已取代早期的 bbolt 设想 |
 | 支付 | **AAstar Point(ERC-20)+ SuperPaymaster gasless** | Lightning 是比特币 L2、与本生态无关联;AAstar 已有 ERC-4337 抽象账户 |
 | 身份/账户 | AAstar AirAccount | 同上 |
-| 漂流瓶向量 | 倾向轻量本地模型(sentence-transformers ONNX) | ⚠️ **D2 未最终拍板**,M4 开工前必须定 |
+| 漂流瓶向量 | 倾向轻量本地模型(sentence-transformers ONNX) | ⚠️ **D2 未最终拍板**,M2.5 开工前必须定 |
 
 ## License 与生态边界
 
-Apache 2.0。属 Mycelium Protocol 生态,受 MushroomDAO 商标约束(**分叉须更名**,见 `TRADEMARK.md`)。PGL 数字公共物品公约的接入(`pgl.yml`、链上分账、AgentStore 上架的「妈妈测试」)**尚未开始**,不在 M3-M7 范围内。
+Apache 2.0。属 Mycelium Protocol 生态,受 MushroomDAO 商标约束(**分叉须更名**,见 `TRADEMARK.md`)。PGL 数字公共物品公约的接入(`pgl.yml`、链上分账、AgentStore 上架的「妈妈测试」)**尚未开始**,不在 M2-M5 范围内。
 
 ## 长期跟踪的未立项方向
 
-**Buxin / 不信** —— 基于本仓库 Nostr 栈的自建家庭 IM + 音视频通话。消息层可直接复用(NIP-44 + 群聊 + relay 自部署),净新增是 WebRTC 信令(可复用 behavior 信封做 offer/answer/ICE)、NAT 穿透(倾向 WireGuard/Tailscale 私网 overlay 而非公网暴露端口)、移动端(当前完全没有,是最大缺口)。**不进 M3-M7**,未来可能独立开仓库把 hyphae 当 SDK。
+**Buxin / 不信** —— 基于本仓库 Nostr 栈的自建家庭 IM + 音视频通话。消息层可直接复用(NIP-44 + 群聊 + relay 自部署),净新增是 WebRTC 信令(可复用 behavior 信封做 offer/answer/ICE)、NAT 穿透(倾向 WireGuard/Tailscale 私网 overlay 而非公网暴露端口)、移动端(当前完全没有,是最大缺口)。**不进 M2-M5**,未来可能独立开仓库把 hyphae 当 SDK。
