@@ -89,7 +89,7 @@ func DecompressWithPrefix(data string) ([]byte, string, error) {
 
 	version := parts[1]
 	compressed := parts[3]
-	
+
 	result, err := Decompress(compressed)
 	return result, version, err
 }
