@@ -14,14 +14,22 @@ permissions:
   contents: read
 
 concurrency:
-  # A newer push to the same PR makes the older run's answer irrelevant.
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  # Only on PRs. `ci-ok` runs under `if: always()`, so when a run is cancelled it
-  # still executes and fails (needs.test.result is "cancelled", not "success") --
+  # A newer push to the same PR makes the older run's answer irrelevant, so PRs
+  # share a group per ref. Pushes to main get a group per COMMIT instead, so they
+  # never cancel each other: cancel-in-progress only governs the run that is
+  # already running, while a previously PENDING run in the same group is
+  # cancelled whenever a newer one queues, regardless of that setting. Sharing a
+  # group on main would therefore leave the middle commit of three rapid pushes
+  # with no ci-ok result at all -- not red, simply absent, which is harder to
+  # notice than a failure.
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  # Only on PRs. `ci-ok` runs under `if: always()`, so a cancelled run still
+  # executes it and fails (needs.test.result is "cancelled", not "success") --
   # it reports RED, not cancelled. On a PR that red hangs off a superseded SHA
-  # and is harmless, but main's group key is refs/heads/main, so two pushes in
-  # quick succession would leave the earlier main commit permanently red.
-  # Narrowing this is the fix; `!cancelled()` is not, because that reopens the
+  # and is harmless; on main it would be a permanent red on a real commit.
+  # Redundant with the per-commit group above, and kept anyway: either one alone
+  # would stop main from cancelling itself, and stating the intent is worth more
+  # than the duplication costs. `!cancelled()` is NOT the fix -- it reopens the
   # skipped-counts-as-passing hole above.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
