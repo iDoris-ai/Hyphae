@@ -30,11 +30,54 @@ func NewMessageStore(db sqlExecutor) *MessageStore {
 
 // StoreMessage stores a message in the database
 func (s *MessageStore) StoreMessage(msg *types.StoredMessage) error {
+	// UPSERT, not `INSERT OR REPLACE`. Two separate reasons, and each one alone
+	// would justify the change:
+	//
+	// 1. `is_incoming` must be MONOTONIC. `agent msg` publishes to the relay
+	//    before it stores the message locally, so when the daemon's own
+	//    subscription receives the echo inside that window it writes the row with
+	//    is_incoming=1 — and the sender's later write then set it back to 0,
+	//    while the daemon's `seen` set already held the id and never reprocessed
+	//    it. The arrival was erased and could not be re-observed, which is what
+	//    breaks a self-addressed liveness canary: it can never confirm its own
+	//    message arrived. How often the window is actually hit is environment
+	//    dependent and has not been pinned down -- see the test file.
+	//
+	// 2. `INSERT OR REPLACE` is DELETE-then-INSERT, so a later write that carries
+	//    no plaintext blanked the decrypted text a previous write had stored.
+	//    That is not specific to the race above; any second write did it.
+	//
+	// is_incoming is written with a CASE rather than the shorter
+	// `messages.is_incoming | excluded.is_incoming`. Both are monotonic for
+	// clean 0/1 input, but `|` ABSORBS a bad value permanently -- NULL|1 is
+	// NULL, -1|1 is -1 -- and every read then fails scanning into a Go bool,
+	// whereas `INSERT OR REPLACE` used to overwrite such a value back to a
+	// clean 0/1. Nothing can write a non-0/1 value today (the column is only
+	// ever bound from a Go bool, and defaults to 0), so this costs nothing; it
+	// just refuses to trade away the old behaviour's self-healing.
+	//
+	// Only content, plaintext and relay are guarded against being blanked.
+	// sender_npub, recipient_npub, created_at, received_at, is_encrypted and
+	// kind are deliberately last-write-wins, exactly as before this change --
+	// every production caller fills them from the nostr event, so a zero there
+	// would mean the caller is already wrong.
 	query := `
-		INSERT OR REPLACE INTO messages (
+		INSERT INTO messages (
 			id, event_id, sender_npub, recipient_npub, content, plaintext,
 			created_at, received_at, is_encrypted, is_incoming, relay, kind
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			event_id       = excluded.event_id,
+			sender_npub    = excluded.sender_npub,
+			recipient_npub = excluded.recipient_npub,
+			content        = CASE WHEN excluded.content   != '' THEN excluded.content   ELSE messages.content   END,
+			plaintext      = CASE WHEN excluded.plaintext != '' THEN excluded.plaintext ELSE messages.plaintext END,
+			created_at     = excluded.created_at,
+			received_at    = excluded.received_at,
+			is_encrypted   = excluded.is_encrypted,
+			is_incoming    = CASE WHEN messages.is_incoming = 1 OR excluded.is_incoming = 1 THEN 1 ELSE 0 END,
+			relay          = CASE WHEN excluded.relay     != '' THEN excluded.relay     ELSE messages.relay     END,
+			kind           = excluded.kind
 	`
 
 	receivedAt := msg.ReceivedAt

@@ -159,13 +159,18 @@ func MigrateFromJSON(db *sql.DB) error {
 	}
 
 	store := NewMessageStore(tx)
-	for _, msg := range ms.Messages {
+	for i, msg := range ms.Messages {
 		// Set defaults for legacy messages that may be missing fields
 		if msg.ReceivedAt == 0 {
 			msg.ReceivedAt = time.Now().Unix()
 		}
 		if msg.ID == "" {
-			msg.ID = fmt.Sprintf("legacy-%d", msg.CreatedAt)
+			// The index is part of the id because CreatedAt alone is not
+			// unique: it has one-second resolution, so two legacy messages
+			// sent in the same second collided and only one of them survived
+			// the migration. The index makes each synthesised id distinct, so
+			// both rows now migrate.
+			msg.ID = fmt.Sprintf("legacy-%d-%d", msg.CreatedAt, i)
 		}
 		if err := store.StoreMessage(&msg); err != nil {
 			_ = tx.Rollback()
