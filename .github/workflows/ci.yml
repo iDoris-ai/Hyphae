@@ -16,7 +16,14 @@ permissions:
 concurrency:
   # A newer push to the same PR makes the older run's answer irrelevant.
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Only on PRs. `ci-ok` runs under `if: always()`, so when a run is cancelled it
+  # still executes and fails (needs.test.result is "cancelled", not "success") --
+  # it reports RED, not cancelled. On a PR that red hangs off a superseded SHA
+  # and is harmless, but main's group key is refs/heads/main, so two pushes in
+  # quick succession would leave the earlier main commit permanently red.
+  # Narrowing this is the fix; `!cancelled()` is not, because that reopens the
+  # skipped-counts-as-passing hole above.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -96,13 +103,21 @@ jobs:
   # A stable name for branch protection to require.
   #
   # The matrix legs surface as "test (ubuntu-latest)" and "test (macos-latest)",
-  # so a protection rule requiring "test" or "CI" matches nothing and silently
-  # enforces nothing -- the settings page still looks correct. Requiring this
-  # job instead survives future changes to the matrix.
+  # so a rule requiring "test" or "CI" matches no check that is ever reported.
+  # GitHub then holds the PR at "Waiting for status to be reported" forever: it
+  # blocks merging rather than letting anything through, so the symptom is "this
+  # PR cannot be merged", NOT "the gate did not fire". Worth stating precisely,
+  # because someone debugging the wrong one of those looks in the wrong place.
+  # Requiring this job instead survives future changes to the matrix.
   #
   # `if: always()` is load-bearing: without it, a failing `test` makes this job
-  # SKIPPED rather than failed, and a skipped required check counts as passing.
-  # That would turn the gate into the exact thing it exists to prevent.
+  # SKIPPED rather than failed, and GitHub counts a required check as satisfied
+  # when it has a successful, skipped or neutral status. That would turn the
+  # gate into the exact thing it exists to prevent.
+  #
+  # `needs: [test]` automatically covers future legs OF `test` (adding windows
+  # needs no change here) but NOT future jobs -- a new top-level job must be
+  # added to this list or it is not gated.
   ci-ok:
     if: always()
     needs: [test]
