@@ -24,7 +24,6 @@ var RelayCmd = &cli.Command{
 			Arguments: []cli.Argument{
 				&cli.StringArg{
 					Name:        "relay_url",
-					Max:         1,
 					Destination: &relayInfoURLArg,
 				},
 			},
