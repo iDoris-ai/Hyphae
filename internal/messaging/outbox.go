@@ -387,7 +387,12 @@ func attemptSend(
 		return recordAttemptFailure(ob, current.entry, result)
 	}
 
-	if err := store(&event, current.entry.RecipientNpub, event.Content, true); err != nil {
+	plaintext, isEncrypted, err := outgoingHistoryContent(&event)
+	if err != nil {
+		result.Queued, result.Superseded, result.QueueStateUnknown = inspectAttemptQueue(current.entry)
+		return result, fmt.Errorf("prepare outgoing message history: %w", err)
+	}
+	if err := store(&event, current.entry.RecipientNpub, plaintext, isEncrypted); err != nil {
 		result.Queued, result.Superseded, result.QueueStateUnknown = inspectAttemptQueue(current.entry)
 		return result, fmt.Errorf("store outgoing message: %w", err)
 	}
@@ -416,6 +421,59 @@ func attemptSend(
 	}
 	refreshOutbox(ob, updated)
 	return result, nil
+}
+
+func outgoingHistoryContent(event *nostr.Event) (plaintext string, isEncrypted bool, err error) {
+	encryption, hasEncryption, err := outboxTagValue(event.Tags, "enc")
+	if err != nil {
+		return "", false, err
+	}
+	compression, hasCompression, err := outboxTagValue(event.Tags, "z")
+	if err != nil {
+		return "", false, err
+	}
+	if hasEncryption && encryption != "nip44" {
+		return "", false, fmt.Errorf("unsupported encryption tag %q", encryption)
+	}
+	if hasCompression && compression != CompressTag {
+		return "", false, fmt.Errorf("unsupported compression tag %q", compression)
+	}
+
+	if hasEncryption {
+		// Validate tagged compression, but never store a ciphertext (compressed
+		// or otherwise) in the plaintext column. StoreMessage preserves a
+		// plaintext value written earlier by the originating send path.
+		if hasCompression {
+			if _, err := DecompressText(event.Content); err != nil {
+				return "", false, fmt.Errorf("decompress encrypted event content: %w", err)
+			}
+		}
+		return "", true, nil
+	}
+	if hasCompression {
+		decompressed, err := DecompressText(event.Content)
+		if err != nil {
+			return "", false, fmt.Errorf("decompress event content: %w", err)
+		}
+		return decompressed, false, nil
+	}
+	return event.Content, false, nil
+}
+
+func outboxTagValue(tags nostr.Tags, name string) (value string, found bool, err error) {
+	for _, tag := range tags {
+		if len(tag) == 0 || tag[0] != name {
+			continue
+		}
+		if len(tag) < 2 || tag[1] == "" {
+			return "", false, fmt.Errorf("malformed %q tag", name)
+		}
+		if found && value != tag[1] {
+			return "", false, fmt.Errorf("conflicting %q tags", name)
+		}
+		value, found = tag[1], true
+	}
+	return value, found, nil
 }
 
 type currentAttempt struct {
