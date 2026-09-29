@@ -16,13 +16,13 @@ import (
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/internal/messaging"
 	"github.com/iDoris-ai/hyphae/internal/notify"
+	"github.com/iDoris-ai/hyphae/internal/relayconfig"
 	"github.com/iDoris-ai/hyphae/pkg/crypto"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/urfave/cli/v3"
 )
 
 const (
-	defaultRelay     = "wss://relay.aastar.io"
 	maxSeenMessages  = 10000
 	relayDialTimeout = 5 * time.Second
 	subscribeWindow  = 3 * time.Second
@@ -81,7 +81,7 @@ Run this in a separate terminal or as a system service.`,
 		&cli.StringSliceFlag{
 			Name:    "relay",
 			Aliases: []string{"r"},
-			Usage:   "Relay URL(s) to watch and publish auto-replies through (repeatable). Default: " + defaultRelay,
+			Usage:   "Relay URL(s) to watch and publish auto-replies through (repeatable). Default: " + relayconfig.DefaultRelay,
 		},
 		&cli.IntFlag{
 			Name:    "retry-interval",
@@ -119,9 +119,12 @@ Run this in a separate terminal or as a system service.`,
 			return err
 		}
 
-		relays := c.StringSlice("relay")
+		relays, err := common.ResolveRelays(c)
+		if err != nil {
+			return err
+		}
 		if len(relays) == 0 {
-			relays = []string{defaultRelay}
+			relays = []string{relayconfig.DefaultRelay}
 		}
 		retryInterval := time.Duration(c.Int("retry-interval")) * time.Second
 		watchInterval := time.Duration(c.Int("watch-interval")) * time.Second
@@ -492,7 +495,7 @@ func sendAutoReply(ctx context.Context, myIdentity *types.Identity, ks *types.Ke
 	event.Sign(mySK)
 
 	if len(relays) == 0 {
-		relays = []string{defaultRelay}
+		relays = []string{relayconfig.DefaultRelay}
 	}
 	success := false
 	for _, url := range relays {

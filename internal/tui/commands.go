@@ -6,6 +6,7 @@ import (
 	"log"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/urfave/cli/v3"
 )
 
@@ -25,11 +26,15 @@ Example: hyphae chat --with bob`,
 		&cli.StringSliceFlag{
 			Name:    "relay",
 			Aliases: []string{"r"},
-			Usage:   "Relay URL(s) to publish to (repeatable). Default: " + defaultRelay,
+			Usage:   "Relay URL(s) to publish to (repeatable)",
 		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
-		return runChat(c.String("with"), c.StringSlice("relay"))
+		relays, err := common.ResolveRelays(c)
+		if err != nil {
+			return err
+		}
+		return runChat(c.String("with"), relays)
 	},
 }
 
@@ -57,6 +62,10 @@ var ContactsCmd = &cli.Command{
 		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
+		relays, err := common.ResolveRelays(c)
+		if err != nil {
+			return err
+		}
 		model, err := NewContactsModel()
 		if err != nil {
 			return fmt.Errorf("failed to load contacts: %w", err)
@@ -69,7 +78,7 @@ var ContactsCmd = &cli.Command{
 		}
 
 		if cm, ok := finalModel.(*ContactsModel); ok && cm.selected != "" {
-			return runChat(cm.selected, c.StringSlice("relay"))
+			return runChat(cm.selected, relays)
 		}
 		return nil
 	},
