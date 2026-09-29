@@ -128,14 +128,36 @@ var outboxClearCmd = &cli.Command{
 		if err != nil {
 			return fmt.Errorf("failed to load outbox: %w", err)
 		}
+		needsQueueIDs := false
+		for _, entry := range ob.Entries {
+			if isOutboxClearable(entry, minFailures) && entry.QueueID == "" {
+				needsQueueIDs = true
+				break
+			}
+		}
+		if needsQueueIDs {
+			ob, err = UpdateOutbox(func(latest *types.Outbox) error {
+				for i := range latest.Entries {
+					entry := &latest.Entries[i]
+					if isOutboxClearable(*entry, minFailures) && entry.QueueID == "" {
+						queueID, err := newOutboxQueueID()
+						if err != nil {
+							return err
+						}
+						entry.QueueID = queueID
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				return fmt.Errorf("failed to prepare outbox clear snapshot: %w", err)
+			}
+		}
 
 		toClear := make([]types.OutboxEntry, 0)
-		toKeep := make([]types.OutboxEntry, 0, len(ob.Entries))
 		for _, e := range ob.Entries {
-			if e.Status == "failed" || e.RetryCount >= minFailures {
+			if isOutboxClearable(e, minFailures) {
 				toClear = append(toClear, e)
-			} else {
-				toKeep = append(toKeep, e)
 			}
 		}
 
@@ -155,14 +177,27 @@ var outboxClearCmd = &cli.Command{
 			}
 		}
 
-		ob.Entries = toKeep
-		if err := SaveOutbox(ob); err != nil {
+		updated, removed, err := clearConfirmedOutboxEntries(toClear)
+		if err != nil {
 			return fmt.Errorf("failed to save outbox: %w", err)
 		}
 
-		fmt.Printf("✅ Removed %d entr%s; %d remain\n", len(toClear), plural(len(toClear)), len(toKeep))
+		fmt.Printf("✅ Removed %d entr%s; %d remain\n", removed, plural(removed), len(updated.Entries))
 		return nil
 	},
+}
+
+func isOutboxClearable(entry types.OutboxEntry, minFailures int) bool {
+	return entry.Status == "failed" || entry.RetryCount >= minFailures
+}
+
+func clearConfirmedOutboxEntries(confirmed []types.OutboxEntry) (*types.Outbox, int, error) {
+	removed := 0
+	updated, err := UpdateOutbox(func(latest *types.Outbox) error {
+		removed = removeConfirmedOutboxEntries(latest, confirmed)
+		return nil
+	})
+	return updated, removed, err
 }
 
 var outboxRetryCmd = &cli.Command{
