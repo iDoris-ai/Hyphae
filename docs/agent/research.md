@@ -51,7 +51,7 @@ Buzz 是 Block 出品的**中心化托管团队协作平台**(Postgres+Redis+S3+
 
 | 需求 | 选型 | 理由 |
 |---|---|---|
-| Relay 软件 | fork [`fiatjaf/khatru`](https://github.com/fiatjaf/khatru) | Go(同语言)、官方维护、中间件机制清晰、NIP 实现完整 |
+| Relay 软件 | 薄适配层 + [`fiatjaf.com/nostr/khatru`](https://pkg.go.dev/fiatjaf.com/nostr/khatru) | Go 同语言、hook 扩展；旧 GitHub 仓库已归档，NIP 支持按固定版本测试验证 |
 | 加密 | NIP-44 | Nostr 标准 |
 | 压缩 | zstd | 已在 `pkg/compress` |
 | 本地存储 | SQLite(WAL) | 已取代早期的 bbolt 设想 |
