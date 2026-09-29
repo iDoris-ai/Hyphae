@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -303,6 +305,61 @@ func startFakeRelay(t *testing.T, eventJSON json.RawMessage, closeWhenReady <-ch
 	return "ws" + strings.TrimPrefix(srv.URL, "http")
 }
 
+func startHistoryRelay(t *testing.T, events []*nostr.Event) (string, *atomic.Int32) {
+	t.Helper()
+	var requests atomic.Int32
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetReadDeadline(time.Now().Add(8 * time.Second))
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		var req []json.RawMessage
+		if json.Unmarshal(msg, &req) != nil || len(req) < 3 {
+			return
+		}
+		var subID string
+		var filter struct {
+			Limit int             `json:"limit"`
+			Until nostr.Timestamp `json:"until"`
+		}
+		_ = json.Unmarshal(req[1], &subID)
+		_ = json.Unmarshal(req[2], &filter)
+		requests.Add(1)
+
+		eligible := make([]*nostr.Event, 0, len(events))
+		for _, event := range events {
+			if filter.Until == 0 || event.CreatedAt <= filter.Until {
+				eligible = append(eligible, event)
+			}
+		}
+		sort.Slice(eligible, func(i, j int) bool { return eligible[i].CreatedAt > eligible[j].CreatedAt })
+		if filter.Limit > 0 && len(eligible) > filter.Limit {
+			eligible = eligible[:filter.Limit]
+		}
+		_ = conn.SetWriteDeadline(time.Now().Add(3 * time.Second))
+		for _, event := range eligible {
+			wire, _ := json.Marshal([]any{"EVENT", subID, event})
+			if conn.WriteMessage(websocket.TextMessage, wire) != nil {
+				return
+			}
+		}
+		wire, _ := json.Marshal([]any{"EOSE", subID})
+		_ = conn.WriteMessage(websocket.TextMessage, wire)
+		// Fetch closes the subscription after real EOSE. Keep the fixture
+		// alive until then so tests don't race SDK EOSE dispatch against EOF.
+		_, _, _ = conn.ReadMessage()
+	}))
+	t.Cleanup(srv.Close)
+	return "ws" + strings.TrimPrefix(srv.URL, "http"), &requests
+}
+
 // TestWatchInbox_ReceivesEventMarksSeenAndAutoReplies drives watchInbox (and
 // through it, watchOneRelay) against a real local relay connection instead
 // of testing the extracted helpers in isolation -- this is the one test
@@ -355,7 +412,10 @@ func TestWatchInbox_ReceivesEventMarksSeenAndAutoReplies(t *testing.T) {
 	watchInboxDone := make(chan struct{})
 	go func() {
 		defer close(watchInboxDone)
-		watchInbox(ctx, myIdentity, ks, seen, nostr.Timestamp(0), []string{relayURL}, false, true)
+		_, watchErr := watchInbox(ctx, myIdentity, ks, seen, []string{relayURL}, false, true)
+		if watchErr != nil {
+			t.Errorf("watch inbox: %v", watchErr)
+		}
 	}()
 
 	// Deferred cleanup, registered so it unwinds in this order (LIFO):
@@ -449,7 +509,12 @@ func signedIncomingEvent(t *testing.T, sender nostr.SecretKey, recipient nostr.P
 	return event
 }
 
-func runWatchWithFakeEvent(t *testing.T, event *nostr.Event, myIdentity *types.Identity, ks *types.KeyStore, recipientSK nostr.SecretKey, seen *seenSet, useNotify, autoReply bool, hooks incomingReceiveHooks, stored chan error) int {
+type watchResult struct {
+	count int
+	err   error
+}
+
+func runWatchWithFakeEvent(t *testing.T, event *nostr.Event, myIdentity *types.Identity, ks *types.KeyStore, recipientSK nostr.SecretKey, seen *seenSet, useNotify, autoReply bool, hooks incomingReceiveHooks, stored chan error) watchResult {
 	t.Helper()
 	eventJSON, err := json.Marshal(event)
 	require.NoError(t, err)
@@ -459,9 +524,10 @@ func runWatchWithFakeEvent(t *testing.T, event *nostr.Event, myIdentity *types.I
 	relayURL := startFakeRelay(t, eventJSON, release)
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
-	done := make(chan int, 1)
+	done := make(chan watchResult, 1)
 	go func() {
-		done <- watchOneRelayWithHooks(ctx, relayURL, nostr.Filter{}, ks, recipientSK, seen, useNotify, autoReply, myIdentity, []string{relayURL}, hooks)
+		count, err := watchOneRelayWithHooks(ctx, relayURL, nostr.Filter{}, ks, recipientSK, seen, useNotify, autoReply, myIdentity, []string{relayURL}, hooks)
+		done <- watchResult{count: count, err: err}
 	}()
 	select {
 	case storeErr := <-stored:
@@ -471,11 +537,11 @@ func runWatchWithFakeEvent(t *testing.T, event *nostr.Event, myIdentity *types.I
 		t.Fatal("fake relay event was not processed")
 	}
 	select {
-	case count := <-done:
-		return count
+	case result := <-done:
+		return result
 	case <-time.After(2 * time.Second):
 		t.Fatal("watch did not finish after fake relay closed")
-		return 0
+		return watchResult{}
 	}
 }
 
@@ -506,17 +572,21 @@ func TestWatchOneRelay_DurableDuplicateAcrossFreshSeenSets(t *testing.T) {
 		reply:  func(string, string) { replies++ },
 	}
 	firstSeen := newSeenSet()
-	count := runWatchWithFakeEvent(t, event, myIdentity, ks, mySK, firstSeen, true, true, hooks, storedResult)
+	result := runWatchWithFakeEvent(t, event, myIdentity, ks, mySK, firstSeen, true, true, hooks, storedResult)
 	require.NoError(t, <-storedResult)
-	assert.Equal(t, 1, count)
+	assert.NoError(t, result.err)
+	assert.Equal(t, 1, result.count)
 	assert.True(t, firstSeen.Has(hex.EncodeToString(event.ID[:])))
 	assert.Equal(t, 1, notifications)
 	assert.Equal(t, 1, replies)
 
-	secondSeen := newSeenSet() // models a process restart with no warm cache
-	count = runWatchWithFakeEvent(t, event, myIdentity, ks, mySK, secondSeen, true, true, hooks, storedResult)
+	// Reopen the durable store to model a daemon process restart.
+	messaging.ResetStoreForTest()
+	secondSeen := newSeenSet()
+	result = runWatchWithFakeEvent(t, event, myIdentity, ks, mySK, secondSeen, true, true, hooks, storedResult)
 	require.NoError(t, <-storedResult)
-	assert.Equal(t, 0, count)
+	assert.NoError(t, result.err)
+	assert.Equal(t, 0, result.count)
 	assert.True(t, secondSeen.Has(hex.EncodeToString(event.ID[:])))
 	assert.Equal(t, 1, notifications, "a durable duplicate must not notify again")
 	assert.Equal(t, 1, replies, "a durable duplicate must not auto-reply again")
@@ -546,24 +616,134 @@ func TestWatchOneRelay_StorageFailureCanRecoverWithoutRestart(t *testing.T) {
 		},
 	}
 	seen := newSeenSet()
-	count := runWatchWithFakeEvent(t, event, myIdentity, ks, mySK, seen, true, true, hooks, storeAttempt)
+	result := runWatchWithFakeEvent(t, event, myIdentity, ks, mySK, seen, true, true, hooks, storeAttempt)
 	require.Error(t, <-storeAttempt)
-	assert.Equal(t, 0, count)
+	assert.Error(t, result.err)
+	assert.Equal(t, 0, result.count)
 	assert.False(t, seen.Has(hex.EncodeToString(event.ID[:])), "failed persistence must leave the event retryable")
 	assert.NoError(t, os.Remove(dbPath))
 
 	var notified, replied int
 	hooks.notify = func(string, string) { notified++ }
 	hooks.reply = func(string, string) { replied++ }
-	count = runWatchWithFakeEvent(t, event, myIdentity, ks, mySK, seen, true, true, hooks, storeAttempt)
+	result = runWatchWithFakeEvent(t, event, myIdentity, ks, mySK, seen, true, true, hooks, storeAttempt)
 	require.NoError(t, <-storeAttempt)
-	assert.Equal(t, 1, count)
+	assert.NoError(t, result.err)
+	assert.Equal(t, 1, result.count)
 	assert.True(t, seen.Has(hex.EncodeToString(event.ID[:])))
 	assert.Equal(t, 1, notified)
 	assert.Equal(t, 1, replied)
 	inbox, err := messaging.GetInbox(nil, myIdentity.Npub, 10)
 	require.NoError(t, err)
 	require.Len(t, inbox, 1)
+}
+
+func TestWatchOneRelay_WalksSameSecondBacklogPastOneHundred(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	messaging.ResetStoreForTest()
+	t.Cleanup(messaging.ResetStoreForTest)
+	require.NoError(t, messaging.InitStorage())
+	ks := &types.KeyStore{Identities: make(map[string]*types.Identity), Contacts: make(map[string]*types.Contact)}
+	myIdentity, err := identity.CreateIdentity(ks, "alice")
+	require.NoError(t, err)
+	mySK, err := identity.GetSecretKey(ks, "alice")
+	require.NoError(t, err)
+	sender := nostr.Generate()
+	timestamp := nostr.Now() - 1
+	events := make([]*nostr.Event, 103)
+	for i := range events {
+		compressed, err := messaging.CompressText(fmt.Sprintf("backlog-%03d", i))
+		require.NoError(t, err)
+		events[i] = &nostr.Event{
+			CreatedAt: timestamp, Kind: messaging.AgentKind,
+			Tags:    nostr.Tags{{"p", common.PubKeyToHex(mySK.Public())}, {"z", messaging.CompressTag}},
+			Content: compressed, PubKey: sender.Public(),
+		}
+		require.NoError(t, events[i].Sign(sender))
+	}
+	relayURL, requests := startHistoryRelay(t, events)
+	count, err := watchOneRelay(context.Background(), relayURL, nostr.Filter{
+		Kinds: []nostr.Kind{messaging.AgentKind},
+		Tags:  nostr.TagMap{"p": []string{common.PubKeyToHex(mySK.Public())}},
+	}, ks, mySK, newSeenSet(), false, false, myIdentity, []string{relayURL})
+	require.NoError(t, err)
+	assert.Equal(t, len(events), count)
+	assert.GreaterOrEqual(t, requests.Load(), int32(2), "pagination must request another page for the same-second backlog")
+	inbox, err := messaging.GetInbox(nil, myIdentity.Npub, 200)
+	require.NoError(t, err)
+	assert.Len(t, inbox, len(events))
+}
+
+func TestWatchOneRelay_BadEventDoesNotBlockGoodEvent(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	messaging.ResetStoreForTest()
+	t.Cleanup(messaging.ResetStoreForTest)
+	require.NoError(t, messaging.InitStorage())
+	ks := &types.KeyStore{Identities: make(map[string]*types.Identity), Contacts: make(map[string]*types.Contact)}
+	myIdentity, err := identity.CreateIdentity(ks, "alice")
+	require.NoError(t, err)
+	mySK, err := identity.GetSecretKey(ks, "alice")
+	require.NoError(t, err)
+	recipient := mySK.Public()
+	bad := signedIncomingEvent(t, nostr.Generate(), recipient, "bad compressed payload", nostr.Tags{{"z", messaging.CompressTag}})
+	goodContent, err := messaging.CompressText("good message")
+	require.NoError(t, err)
+	good := signedIncomingEvent(t, nostr.Generate(), recipient, goodContent, nostr.Tags{{"z", messaging.CompressTag}})
+	relayURL, _ := startHistoryRelay(t, []*nostr.Event{bad, good})
+	seen := newSeenSet()
+	count, err := watchOneRelay(context.Background(), relayURL, nostr.Filter{}, ks, mySK, seen, false, false, myIdentity, []string{relayURL})
+	require.Error(t, err, "a watch with a rejected message must be reported as incomplete")
+	assert.Equal(t, 1, count, "only the successfully stored event counts")
+	assert.False(t, seen.Has(hex.EncodeToString(bad.ID[:])), "failed decode remains retryable")
+	assert.True(t, seen.Has(hex.EncodeToString(good.ID[:])))
+	inbox, err := messaging.GetInbox(nil, myIdentity.Npub, 10)
+	require.NoError(t, err)
+	require.Len(t, inbox, 1)
+	assert.Equal(t, "good message", inbox[0].Plaintext)
+}
+
+func TestWatchInboxReportsQueryFailureInsteadOfNoNewMessages(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ks := &types.KeyStore{Identities: make(map[string]*types.Identity), Contacts: make(map[string]*types.Contact)}
+	myIdentity, err := identity.CreateIdentity(ks, "alice")
+	require.NoError(t, err)
+	output := captureStdout(t, func() {
+		count, err := watchInbox(context.Background(), myIdentity, ks, newSeenSet(), []string{"ws://127.0.0.1:1"}, false, false)
+		assert.Zero(t, count)
+		assert.Error(t, err)
+	})
+	assert.NotContains(t, output, "no new messages")
+}
+
+func TestWatchOneRelay_CancellationStopsAfterCurrentEvent(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	messaging.ResetStoreForTest()
+	t.Cleanup(messaging.ResetStoreForTest)
+	require.NoError(t, messaging.InitStorage())
+	ks := &types.KeyStore{Identities: make(map[string]*types.Identity), Contacts: make(map[string]*types.Contact)}
+	myIdentity, err := identity.CreateIdentity(ks, "alice")
+	require.NoError(t, err)
+	mySK, err := identity.GetSecretKey(ks, "alice")
+	require.NoError(t, err)
+	content, err := messaging.CompressText("first only")
+	require.NoError(t, err)
+	events := []*nostr.Event{
+		signedIncomingEvent(t, nostr.Generate(), mySK.Public(), content, nostr.Tags{{"z", messaging.CompressTag}}),
+		signedIncomingEvent(t, nostr.Generate(), mySK.Public(), content, nostr.Tags{{"z", messaging.CompressTag}}),
+	}
+	relayURL, _ := startHistoryRelay(t, events)
+	ctx, cancel := context.WithCancel(context.Background())
+	storeCalls := 0
+	hooks := incomingReceiveHooks{store: func(event *nostr.Event, recipient, body string, encrypted bool) (bool, error) {
+		storeCalls++
+		first, err := messaging.StoreIncomingMessageOnce(event, recipient, body, encrypted)
+		cancel()
+		return first, err
+	}}
+	count, err := watchOneRelayWithHooks(ctx, relayURL, nostr.Filter{}, ks, mySK, newSeenSet(), false, false, myIdentity, []string{relayURL}, hooks)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 1, count)
+	assert.Equal(t, 1, storeCalls, "cancellation must stop processing subsequent events")
 }
 
 func TestProcessIncomingEventRejectsDecodeFailuresBeforeStorage(t *testing.T) {
@@ -626,9 +806,10 @@ func TestWatchOneRelay_UpgradesSelfSentOutgoingEvent(t *testing.T) {
 		return first, err
 	}}
 	seen := newSeenSet()
-	count := runWatchWithFakeEvent(t, event, myIdentity, ks, mySK, seen, false, false, hooks, storedResult)
+	result := runWatchWithFakeEvent(t, event, myIdentity, ks, mySK, seen, false, false, hooks, storedResult)
 	require.NoError(t, <-storedResult)
-	assert.Equal(t, 1, count)
+	assert.NoError(t, result.err)
+	assert.Equal(t, 1, result.count)
 	msg, err := messaging.GetStore()
 	require.NoError(t, err)
 	got, err := msg.GetMessage(hex.EncodeToString(event.ID[:]))
