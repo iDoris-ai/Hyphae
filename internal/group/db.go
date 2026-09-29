@@ -316,16 +316,28 @@ func (g *DB) DeleteGroup(groupID string) error {
 // StoreGroupMessage stores a group message
 func (g *DB) StoreGroupMessage(msg *types.GroupMessage) error {
 	_, err := g.db.Exec(
-		"INSERT OR REPLACE INTO group_messages (id, event_id, group_id, sender, content, plaintext, created_at, is_encrypted) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		`INSERT INTO group_messages (id, event_id, group_id, sender, content, plaintext, created_at, is_encrypted)
+		 VALUES (?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET
+			event_id = CASE WHEN excluded.event_id IS NULL OR excluded.event_id = '' THEN group_messages.event_id ELSE excluded.event_id END,
+			group_id = excluded.group_id,
+			sender = excluded.sender,
+			content = CASE WHEN excluded.content = '' THEN group_messages.content ELSE excluded.content END,
+			plaintext = CASE WHEN excluded.plaintext = '' THEN group_messages.plaintext ELSE excluded.plaintext END,
+			created_at = excluded.created_at,
+			is_encrypted = excluded.is_encrypted`,
 		msg.ID, msg.EventID, msg.GroupID, msg.Sender, msg.Content, msg.Plaintext, msg.CreatedAt, msg.IsEncrypted,
 	)
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to store group message: %w", err)
+	}
+	return nil
 }
 
 // GetGroupMessages retrieves messages for a group
 func (g *DB) GetGroupMessages(groupID string, limit int) ([]*types.GroupMessage, error) {
 	rows, err := g.db.Query(`
-		SELECT id, event_id, group_id, sender, content, plaintext, created_at, is_encrypted
+		SELECT id, COALESCE(event_id, ''), group_id, sender, content, plaintext, created_at, is_encrypted
 		FROM group_messages
 		WHERE group_id = ?
 		ORDER BY created_at DESC

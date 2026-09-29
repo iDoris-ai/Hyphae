@@ -222,6 +222,127 @@ func TestStoreGroupMessage(t *testing.T) {
 	assert.Equal(t, "Hello group", messages[0].Plaintext)
 }
 
+func TestStoreGroupMessageUpsertPreservesEmptyContent(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	group, err := db.CreateGroup("Upsert Test", "", "npub1creator", nil, nil)
+	require.NoError(t, err)
+	original := &types.GroupMessage{
+		ID: "msg-upsert", EventID: "event-original", GroupID: group.ID,
+		Sender: "npub1original", Content: "encrypted original", Plaintext: "original plaintext",
+		CreatedAt: 100, IsEncrypted: true,
+	}
+	require.NoError(t, db.StoreGroupMessage(original))
+
+	// A retry may carry newer metadata but omit content that was already saved.
+	retry := &types.GroupMessage{
+		ID: original.ID, GroupID: group.ID, Sender: "npub1retry",
+		CreatedAt: 200, IsEncrypted: false,
+	}
+	require.NoError(t, db.StoreGroupMessage(retry))
+
+	messages, err := db.GetGroupMessages(group.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	assert.Equal(t, original.EventID, messages[0].EventID)
+	assert.Equal(t, original.Content, messages[0].Content)
+	assert.Equal(t, original.Plaintext, messages[0].Plaintext)
+	assert.Equal(t, "npub1retry", messages[0].Sender)
+	assert.Equal(t, int64(200), messages[0].CreatedAt)
+	assert.False(t, messages[0].IsEncrypted)
+
+	// Nonempty values still replace saved content.
+	update := &types.GroupMessage{
+		ID: original.ID, EventID: "event-updated", GroupID: group.ID,
+		Sender: "npub1updated", Content: "encrypted updated", Plaintext: "updated plaintext",
+		CreatedAt: 300, IsEncrypted: true,
+	}
+	require.NoError(t, db.StoreGroupMessage(update))
+	messages, err = db.GetGroupMessages(group.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	assert.Equal(t, "event-updated", messages[0].EventID)
+	assert.Equal(t, "encrypted updated", messages[0].Content)
+	assert.Equal(t, "updated plaintext", messages[0].Plaintext)
+}
+
+func TestStoreGroupMessageDuplicateEventIDKeepsExistingRows(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	group, err := db.CreateGroup("Duplicate Event Test", "", "npub1creator", nil, nil)
+	require.NoError(t, err)
+	existing := &types.GroupMessage{
+		ID: "msg-existing", EventID: "event-unique", GroupID: group.ID,
+		Sender: "npub1sender", Plaintext: "keep me", CreatedAt: 100,
+	}
+	require.NoError(t, db.StoreGroupMessage(existing))
+	require.NoError(t, db.StoreGroupMessage(&types.GroupMessage{
+		ID: "msg-no-event", GroupID: group.ID, Sender: "npub1sender", CreatedAt: 150,
+	}))
+	require.NoError(t, db.StoreGroupMessage(&types.GroupMessage{
+		ID: "msg-no-event-2", GroupID: group.ID, Sender: "npub1sender", CreatedAt: 151,
+	}))
+
+	err = db.StoreGroupMessage(&types.GroupMessage{
+		ID: "msg-new", EventID: existing.EventID, GroupID: group.ID,
+		Sender: "npub1other", Plaintext: "must not replace", CreatedAt: 200,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "UNIQUE constraint failed")
+
+	messages, err := db.GetGroupMessages(group.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, messages, 3)
+	byID := make(map[string]*types.GroupMessage, len(messages))
+	for _, message := range messages {
+		byID[message.ID] = message
+	}
+	require.Contains(t, byID, "msg-no-event")
+	require.Contains(t, byID, "msg-no-event-2")
+	require.Contains(t, byID, existing.ID)
+	assert.Equal(t, "", byID["msg-no-event"].EventID)
+	assert.Equal(t, "", byID["msg-no-event-2"].EventID)
+	assert.Equal(t, "keep me", byID[existing.ID].Plaintext)
+}
+
+func TestStoreGroupMessageRejectsMissingGroup(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	err := db.StoreGroupMessage(&types.GroupMessage{
+		ID: "msg-orphan", EventID: "event-orphan", GroupID: "missing-group",
+		Sender: "npub1sender", Plaintext: "orphan", CreatedAt: 100,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "FOREIGN KEY constraint failed")
+}
+
+func TestStoreGroupMessageDatabaseReopenCompatibility(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	group, err := db.CreateGroup("Reopen Test", "", "npub1creator", nil, nil)
+	require.NoError(t, err)
+	// Seed using the table's existing on-disk schema, as rows written by older
+	// versions must remain readable after the store's conflict handling changes.
+	_, err = db.db.Exec(`
+		INSERT INTO group_messages (id, event_id, group_id, sender, content, plaintext, created_at, is_encrypted)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, "msg-persisted", "event-persisted", group.ID, "npub1sender", "ciphertext", "saved before restart", 100, true)
+	require.NoError(t, err)
+	require.NoError(t, db.db.Close())
+
+	reopened, err := NewDB()
+	require.NoError(t, err)
+	messages, err := reopened.GetGroupMessages(group.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	assert.Equal(t, "saved before restart", messages[0].Plaintext)
+	require.NoError(t, reopened.db.Close())
+}
+
 func TestGetGroupMessages(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
