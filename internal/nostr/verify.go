@@ -12,7 +12,7 @@ import (
 )
 
 // verifyEventArg receives VerifyCmd's positional "event" argument. In this
-// urfave/cli version, a single-value Argument (Max == 1) is only actually
+// urfave/cli version, a single-value Argument is only actually
 // populated when Destination is set -- neither c.String(name) (that's for
 // Flags only) nor c.Args().First() reads it. Without Destination, the
 // command's own usage example ("hyphae verify '{...}'") always
@@ -28,7 +28,6 @@ Example: hyphae verify '{"id":"...",...}'`,
 	Arguments: []cli.Argument{
 		&cli.StringArg{
 			Name:        "event",
-			Max:         1,
 			Destination: &verifyEventArg,
 		},
 	},
