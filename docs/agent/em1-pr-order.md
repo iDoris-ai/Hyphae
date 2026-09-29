@@ -8,7 +8,7 @@
 
 2026-09-29：#37（CI）、#38（SQLite）、#40（Nostr 上游）、#41（跨仓协作约定）、#44（上游更新工作流）已通过双平台 CI 并以 merge commit 合入 main。#44 的依赖兼容性检查也已通过。
 
-同日继续合并 #68（nak）、#69（upload-artifact）、#74（testify）、#77（color），合并前逐项确认有效批准和 CI。#75/#76 随主线变化由 Dependabot 更新，冲突已消除，等待新 head 的 CI 与复审。#70/#71/#73 已批准；尝试合并 #70 时 GitHub 明确拒绝，因为当前 CLI OAuth 凭据没有 `workflow` scope。需账户持有人运行 `gh auth refresh -h github.com -s workflow` 完成授权；本地文件、终端和网络权限已经恢复，不是本次阻塞原因。
+同日继续合并 #68（nak）、#69（upload-artifact）、#74（testify）、#77（color），再次尝试后合并 #71（setup-go）；合并前逐项确认有效批准和 CI。#75/#76 随主线变化由 Dependabot 更新，冲突已消除，新 head 的 CI 已通过，等待复审。#70/#73 已批准；本次 #70 返回分支策略限制（`mergeStateStatus=BLOCKED`），#73 明确报 OAuth 凭据没有 `workflow` scope。需账户持有人完成 `gh auth refresh -h github.com -s workflow` 的浏览器授权；本地文件、终端和网络权限正常。#71 远程分支已自动删除，失效远程引用已清理，本地 main 已快进到 `3237f81`。
 
 下一批：#42、#43、#45、#46、#50、#51、#52 已改为 main；逐项比较 retarget 前后补丁，差异完全一致，head 未改。GitHub 因 base 变化撤销了旧批准，需要 PR-daemon 在新 base 上复审；这些 PR 的 Linux/macOS 测试及 `ci-ok` 均已通过。不要因旧 review 内容仍可见而直接合并。
 
