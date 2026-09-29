@@ -108,7 +108,6 @@ Example: hyphae agent msg --from alice --to bob --content "Hello!"`,
 			Name:    "relay",
 			Aliases: []string{"r"},
 			Usage:   "Relay URLs",
-			Value:   []string{"wss://relay.aastar.io"},
 		},
 		&cli.BoolFlag{
 			Name:    "encrypt",
@@ -195,7 +194,10 @@ Example: hyphae agent msg --from alice --to bob --content "Hello!"`,
 			return fmt.Errorf("failed to sign event: %w", err)
 		}
 
-		relays := c.StringSlice("relay")
+		relays, err := common.ResolveRelays(c)
+		if err != nil {
+			return err
+		}
 		jsonMode := common.JSONMode(c)
 
 		// Publish with detailed error output
@@ -301,7 +303,6 @@ var AgentInboxCmd = &cli.Command{
 		&cli.StringSliceFlag{
 			Name:    "relay",
 			Aliases: []string{"r"},
-			Value:   []string{"wss://relay.aastar.io"},
 		},
 		&cli.IntFlag{
 			Name:  "limit",
@@ -342,7 +343,10 @@ var AgentInboxCmd = &cli.Command{
 			Limit: int(c.Int("limit")),
 		}
 
-		relays := c.StringSlice("relay")
+		relays, err := common.ResolveRelays(c)
+		if err != nil {
+			return err
+		}
 		jsonMode := common.JSONMode(c)
 		if !jsonMode {
 			fmt.Printf("📬 Inbox for '%s'\n\n", recipient.Nickname)
