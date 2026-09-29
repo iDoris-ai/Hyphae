@@ -10,7 +10,7 @@
 
 ### 本轮可接线接口
 
-这些变更仍在 PR 分支，不能把当前 main 当成已支持全部接口。最新已验收的组合开发基线为 `integration/em1-cli-runtime` / `b1cbaaa`，隔离 HOME 的全量 integration 测试通过；正式打包版本须在合并后重新固定。它是依赖组合分支，各项修改仍由单独小 PR 评审。
+这些变更仍在 PR 分支，不能把当前 main 当成已支持全部接口。最新已验收的组合开发基线为 `integration/em1-cli-acceptance` / `f46744aa519937ed38832e75395591b7200d9520`；Go 1.25.0、隔离 HOME 下，全量 integration、vet、构建和 smoke 脚本均通过。正式打包版本须在合并后重新固定。它是依赖组合分支，各项修改仍由单独小 PR 评审。
 
 | 能力 | Hyphae 接口与状态 |
 |---|---|
@@ -19,9 +19,10 @@
 | 配置优先级 | 显式 --relay > `~/.hyphae/relays.json` > 既有默认；坏配置报错，不静默换公共 relay。已入队事件保持原地址 |
 | 消息可靠性 | 重试事务 #48、历史明文 #49、发布前可靠入队 [#54](https://github.com/iDoris-ai/Hyphae/pull/54) 已验收；`published_to=0` 且 `queued_for_retry=true` 表示已提交待发 |
 | 待发管理 | [#53](https://github.com/iDoris-ai/Hyphae/pull/53)：list 为安全数组，clear 返回 removed/remaining；[#56](https://github.com/iDoris-ai/Hyphae/pull/56)：retry JSON 已验收 |
-| 收件 | 原子首次收件 #51、daemon 接线 [#55](https://github.com/iDoris-ai/Hyphae/pull/55)、inbox 单次查询 [#58](https://github.com/iDoris-ai/Hyphae/pull/58) 已验收；分页模块 #60 已验收，daemon 接线与积压验收仍在实现 |
-| 加密身份 | [#63](https://github.com/iDoris-ai/Hyphae/pull/63)：msg/inbox/daemon 的 `--password-stdin` 已验收；[#64](https://github.com/iDoris-ai/Hyphae/pull/64)：创建身份的 stdin 已验收，支持首次加密创建与向加密库追加。#64 尚未进入上文 runtime 基线 |
+| 收件 | 原子首次收件 #51、daemon 接线 [#55](https://github.com/iDoris-ai/Hyphae/pull/55)、inbox 单次查询 #58、分页 #60/#65 已验收；[#66](https://github.com/iDoris-ai/Hyphae/pull/66) 以真实二进制验证 125 条离线积压和重启去重 |
+| 加密身份 | [#63](https://github.com/iDoris-ai/Hyphae/pull/63)：msg/inbox/daemon 的 `--password-stdin` 已验收；[#64](https://github.com/iDoris-ai/Hyphae/pull/64)：创建身份的 stdin 已验收，支持首次加密创建与向加密库追加 |
 | 生命周期 | [#59](https://github.com/iDoris-ai/Hyphae/pull/59)：SIGINT/SIGTERM 取消当前网络等待；[#61](https://github.com/iDoris-ai/Hyphae/pull/61) 覆盖真实二进制退出与离线重试 |
+| 空历史 | [#67](https://github.com/iDoris-ai/Hyphae/pull/67)：已有身份但没有消息时，history stats 返回四项零值；尚无身份时应先创建或选择身份 |
 
 表内单次管理/收发命令的机器模式成功在 stdout 输出一份 `{"ok":true,"data":...}`；错误在 stderr 输出错误信封，退出码沿用 1 用户输入、2 网络、3 身份解锁、4 其他、5 写冲突。UI 不解析人工提示文字。`connected=true` 只表示一次 WebSocket 握手成功，不能当持续在线、已订阅或已送达。各项字段及补收门槛见规划 PR [#39](https://github.com/iDoris-ai/Hyphae/pull/39) 的 CLI 通信契约。
 
