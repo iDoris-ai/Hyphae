@@ -4,6 +4,7 @@ import (
 	"context"
 	cryptorand "crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"github.com/iDoris-ai/hyphae/internal/messaging"
 	"github.com/iDoris-ai/hyphae/internal/notify"
 	"github.com/iDoris-ai/hyphae/internal/relayconfig"
+	"github.com/iDoris-ai/hyphae/internal/relayquery"
 	"github.com/iDoris-ai/hyphae/pkg/crypto"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/urfave/cli/v3"
@@ -27,7 +29,6 @@ import (
 const (
 	maxSeenMessages  = 10000
 	relayDialTimeout = 5 * time.Second
-	subscribeWindow  = 3 * time.Second
 )
 
 // seenSet is a bounded set of recently-seen event IDs with FIFO eviction.
@@ -166,17 +167,15 @@ Run this in a separate terminal or as a system service.`,
 		seen := newSeenSet()
 		preloadRecentSeen(seen, myIdentity.Npub)
 
-		// The relay's since filter limits this session's initial scan; durable
-		// duplicate suppression comes from StoreIncomingMessageOnce, not since.
-		since := nostr.Now()
-
 		// Run immediately
 		processOutbox(daemonCtx, myIdentity, relays)
 		if daemonCtx.Err() != nil {
 			fmt.Println("\n👋 Stopping daemon...")
 			return nil
 		}
-		watchInbox(daemonCtx, myIdentity, ks, seen, since, relays, useNotify, autoReply)
+		if _, err := watchInbox(daemonCtx, myIdentity, ks, seen, relays, useNotify, autoReply); err != nil && daemonCtx.Err() == nil {
+			fmt.Printf("[%s] ⚠️  Inbox scan incomplete: %v\n", time.Now().Format("15:04:05"), err)
+		}
 		if daemonCtx.Err() != nil {
 			fmt.Println("\n👋 Stopping daemon...")
 			return nil
@@ -187,7 +186,9 @@ Run this in a separate terminal or as a system service.`,
 			case <-retryTicker.C:
 				processOutbox(daemonCtx, myIdentity, relays)
 			case <-watchTicker.C:
-				watchInbox(daemonCtx, myIdentity, ks, seen, since, relays, useNotify, autoReply)
+				if _, err := watchInbox(daemonCtx, myIdentity, ks, seen, relays, useNotify, autoReply); err != nil && daemonCtx.Err() == nil {
+					fmt.Printf("[%s] ⚠️  Inbox scan incomplete: %v\n", time.Now().Format("15:04:05"), err)
+				}
 			case <-cleanupTicker.C:
 				cleanupOutbox()
 			case <-daemonCtx.Done():
@@ -295,49 +296,57 @@ func watchInbox(
 	myIdentity *types.Identity,
 	ks *types.KeyStore,
 	seen *seenSet,
-	since nostr.Timestamp,
 	relays []string,
 	useNotify bool,
 	autoReply bool,
-) {
+) (int, error) {
 	if ctx.Err() != nil {
-		return
+		return 0, ctx.Err()
 	}
 	recipientPK, err := identity.GetPublicKey(ks, myIdentity.Nickname)
 	if err != nil {
 		fmt.Printf("[%s] ⚠️  Failed to get public key: %v\n", time.Now().Format("15:04:05"), err)
-		return
+		return 0, fmt.Errorf("get recipient public key: %w", err)
 	}
 	recipientSK, err := identity.GetSecretKey(ks, myIdentity.Nickname)
 	if err != nil {
 		fmt.Printf("[%s] ⚠️  Failed to get secret key: %v\n", time.Now().Format("15:04:05"), err)
-		return
+		return 0, fmt.Errorf("get recipient secret key: %w", err)
 	}
 
 	filter := nostr.Filter{
 		Kinds: []nostr.Kind{messaging.AgentKind},
 		Tags:  nostr.TagMap{"p": []string{common.PubKeyToHex(recipientPK)}},
-		Limit: 10,
-		Since: since,
 	}
 
 	newCount := 0
+	var scanErrors []error
 
 	for _, url := range relays {
 		if ctx.Err() != nil {
-			return
+			return newCount, errors.Join(append(scanErrors, ctx.Err())...)
 		}
-		newCount += watchOneRelay(ctx, url, filter, ks, recipientSK, seen, useNotify, autoReply, myIdentity, relays)
+		count, err := watchOneRelay(ctx, url, filter, ks, recipientSK, seen, useNotify, autoReply, myIdentity, relays)
+		newCount += count
+		if err != nil {
+			scanErrors = append(scanErrors, fmt.Errorf("relay %s: %w", url, err))
+			if ctx.Err() != nil {
+				break
+			}
+		}
 	}
 
+	if len(scanErrors) > 0 {
+		return newCount, errors.Join(scanErrors...)
+	}
 	if newCount == 0 {
 		fmt.Printf("[%s] Watching... (no new messages)\r", time.Now().Format("15:04:05"))
 	}
+	return newCount, nil
 }
 
-// watchOneRelay polls a single relay and returns the count of newly-processed
-// events. Subscribe errors are reported and the relay is skipped (returns 0)
-// instead of panicking on a nil sub.
+// watchOneRelay scans available history from a single relay and returns the
+// count of durably stored new events plus any query or processing error.
 func watchOneRelay(
 	ctx context.Context,
 	url string,
@@ -349,7 +358,7 @@ func watchOneRelay(
 	autoReply bool,
 	myIdentity *types.Identity,
 	relays []string,
-) int {
+) (int, error) {
 	return watchOneRelayWithHooks(ctx, url, filter, ks, recipientSK, seen, useNotify, autoReply, myIdentity, relays, incomingReceiveHooks{
 		store: messaging.StoreIncomingMessageOnce,
 		notify: func(title, message string) {
@@ -380,49 +389,45 @@ func watchOneRelayWithHooks(
 	myIdentity *types.Identity,
 	relays []string,
 	hooks incomingReceiveHooks,
-) int {
-	relayCtx, cancel := context.WithTimeout(ctx, relayDialTimeout)
-	defer cancel()
-
-	relay, err := nostr.RelayConnect(relayCtx, url, nostr.RelayOptions{})
-	if err != nil {
-		if relay != nil {
-			relay.Close()
-		}
-		return 0
-	}
-	defer relay.Close()
-
-	sub, err := relay.Subscribe(ctx, filter, nostr.SubscriptionOptions{})
-	if err != nil {
-		fmt.Printf("[%s] ⚠️  Subscribe %s failed: %v\n", time.Now().Format("15:04:05"), url, err)
-		return 0
-	}
-	timeout := time.AfterFunc(subscribeWindow, func() { sub.Unsub() })
-	defer timeout.Stop()
-
+) (int, error) {
 	newCount := 0
-	for {
-		select {
-		case <-ctx.Done():
-			return newCount
-		case evt, ok := <-sub.Events:
-			if !ok {
-				return newCount
-			}
-			if ctx.Err() != nil {
-				return newCount
-			}
-			eventID := hex.EncodeToString(evt.ID[:])
-			processed, err := processIncomingEvent(&evt, recipientSK, seen, useNotify, autoReply, myIdentity, ks, hooks)
-			if err != nil {
-				fmt.Printf("   ⚠️  Event %s: %v\n", eventID, err)
-				continue
-			}
-			if processed {
-				newCount++
-			}
+	errorCount := 0
+	errorSamples := make([]string, 0, 5)
+	filter.Limit = 0 // Walk owns pagination limits and bounds.
+	_, queryErr := relayquery.Walk(ctx, url, filter, func(evt nostr.Event) error {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
+		eventID := hex.EncodeToString(evt.ID[:])
+		processed, err := processIncomingEvent(&evt, recipientSK, seen, useNotify, autoReply, myIdentity, ks, hooks)
+		if err != nil {
+			errorCount++
+			if len(errorSamples) < cap(errorSamples) {
+				errorSamples = append(errorSamples, safePrefix(eventID, 16)+":"+incomingErrorKind(err))
+			}
+			return nil // A malformed event must not block later valid inbox events.
+		}
+		if processed {
+			newCount++
+		}
+		return nil
+	})
+
+	var receiveErr error
+	if errorCount > 0 {
+		receiveErr = fmt.Errorf("%d incoming event(s) failed processing (samples: %s)", errorCount, strings.Join(errorSamples, ", "))
+	}
+	return newCount, errors.Join(queryErr, receiveErr)
+}
+
+func incomingErrorKind(err error) string {
+	switch {
+	case strings.HasPrefix(err.Error(), "decode message:"):
+		return "decode-failed"
+	case strings.HasPrefix(err.Error(), "store incoming message:"):
+		return "storage-failed"
+	default:
+		return "processing-failed"
 	}
 }
 
@@ -483,14 +488,12 @@ func cleanupOutbox() {
 	}
 }
 
-// preloadRecentSeen primes the in-memory dedup set with recent event IDs
-// already stored in SQLite. Without this, a daemon restart would re-process
-// the most recent N events the relay still holds (Limit:10 per watch tick),
-// even though we have records of them.
+// preloadRecentSeen primes the in-memory dedup set with event IDs already
+// stored in SQLite. StoreIncomingMessageOnce remains the durable authority,
+// including when older events fall outside this in-memory cache.
 //
-// Note: the previous implementation used messaging.LoadMessageStore which is
-// a compatibility shim that returns an empty slice — so it was a no-op. We
-// now query SQLite directly via messaging.RecentIncomingEventIDs.
+// This cache is an optimization; SQLite's unique incoming write handles IDs
+// that are not loaded here.
 func preloadRecentSeen(seen *seenSet, npub string) {
 	ids, err := messaging.RecentIncomingEventIDs(npub, maxSeenMessages)
 	if err != nil {
