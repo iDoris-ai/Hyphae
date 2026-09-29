@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"fiatjaf.com/nostr"
+	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -166,4 +167,25 @@ func TestStoreIncomingMessage(t *testing.T) {
 	require.NotNil(t, msg)
 	assert.True(t, msg.IsIncoming)
 	assert.False(t, msg.IsEncrypted)
+}
+
+func TestStoreIncomingMessageOnceWrapper(t *testing.T) {
+	resetStore(t)
+	recipient := nostr.Generate().Public()
+	sender := nostr.Generate()
+	event := &nostr.Event{PubKey: sender.Public(), Content: "ciphertext", Tags: nostr.Tags{{"p", hex.EncodeToString(recipient[:])}}}
+	event.ID = [32]byte{9}
+	npub := common.EncodeNpub(recipient)
+	first, err := StoreIncomingMessageOnce(event, npub, "first plaintext", true)
+	require.NoError(t, err)
+	assert.True(t, first)
+	second, err := StoreIncomingMessageOnce(event, npub, "changed plaintext", true)
+	require.NoError(t, err)
+	assert.False(t, second)
+	s, err := GetStore()
+	require.NoError(t, err)
+	stored, err := s.GetMessage(hex.EncodeToString(event.ID[:]))
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, "first plaintext", stored.Plaintext)
 }
