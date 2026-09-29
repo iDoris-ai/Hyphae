@@ -61,6 +61,20 @@ daemon 是长驻进程，当前输出运行日志，并未提供 JSON 消息流�
 5. 建立 Hyphae 版本升级检查：校验发布来源与摘要、版本兼容、更新失败回滚。首次可用人工确认更新，不要求静默安装。
 6. 高层任务阶段补持久化 request/run 关联、执行去重和回执重试；执行后崩溃进入待核对状态。
 
+### 高层协议前的兼容收口
+
+审阅基线的 `packages/nostr-bridge/src/protocol.ts` 使用 `f4/1`、say/announce/listen 和开放 intent；Hyphae 的历史方案使用 register/publish/inquire/subscribe。两者层级不同，不能把动词逐字替换，更不能因识别到 `intent=ask` 就授予执行权限。
+
+目前 `inbound.ts` 的 `handle → process` 对白名单发件人的普通正文和任意已识别 intent 都调用 `runToCompletion`，包括 answer；seen 仅存在内存。它还没有本轮要求的“通信与执行分流、跨重启执行去重”。因此基础 CLI/UI 接线只做收发和历史展示，不应直接启用这个旧入站执行路径。以下改动由 Agent24 后续单独实现并提供验收：
+
+- 旧普通正文和 `f4/1` 继续可读，按通信消息呈现；注册、能力查询、广播、answer/ack/report 等回执不能进入执行入口。
+- 明确的新版本执行请求才可进入授权检查，至少绑定签名发件人、目标身份、request_id、能力及版本、参数摘要、有效期；开放 intent 仍可用于沟通，但不决定权限。
+- 以发件人/目标/request_id 持久化去重。同 ID 不同参数拒绝；run 已开始后崩溃必须先核对执行状态，不能按收件重放直接重做。
+- 返回结果与回执待发记录独立持久化；回执失败只重发回执。进程重启、重复 answer、对端自动回复均不得形成执行循环。
+- T01 冻结时同时更新 Hyphae 权威协议和 Agent24 F4 契约，并提供共用正反例。具体新版本、kind、字段格式尚未冻结，本轮 CLI 改动不静默转换旧 content。
+
+至少加入三个跨仓断言：普通文本/answer 入站的 run 数为零；相同授权请求重启重放的副作用计数为一；同 request_id 修改参数后拒绝且原结果保持。单靠 Hyphae 消息行数不能证明 Agent24 没有重复执行。
+
 ## 验收
 
 - Agent24 CLI 驱动真实 Hyphae 二进制，经本地标准 relay 双向加密收发，无 UI/模型依赖。
