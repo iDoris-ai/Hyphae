@@ -324,19 +324,21 @@ Profile 字段分三类：
 
 ---
 
-## 8. Relay 软件 — fork khatru
+## 8. Relay 软件 — 跟踪 khatru 新模块
 
-- 原仓库：[`fiatjaf/khatru`](https://github.com/fiatjaf/khatru)
+- 当前上游：[`fiatjaf.com/nostr/khatru`](https://pkg.go.dev/fiatjaf.com/nostr/khatru)，与客户端 `fiatjaf.com/nostr` 同属一个 Go module。旧 [`fiatjaf/khatru`](https://github.com/fiatjaf/khatru) 已归档；不再从旧仓库示例构建。
 - 选择理由：
   - Go 编写，与本项目同语言
-  - fiatjaf 官方维护，活跃
+  - 跟踪上游维护的 Go module，通过升级 PR 验证变化
   - 中间件/插件机制清晰
-  - 已完整实现 Nostr NIP
+  - 提供 Nostr relay 能力；具体 NIP 支持以固定版本和实际测试为准
 
 **约束**：
 - 严格遵守 khatru 的 middleware / event-handler 约定
 - L2 路由插件以 plugin 形式叠加，不动 core
-- 这样可以持续 `git fetch upstream` 跟进官方更新
+- 本仓库维护薄适配层，通过 `go.mod/go.sum` 固定版本；自动发现更新、验证并提 PR，保留回退能力
+- 源码仓库拆分和邀请策略按 [relay-khatru 协作提案](cooperation/relay-khatru.md) 推进；不阻塞基础部署迁移
+- 完整更新规则见 [上游跟踪与组件边界](upstream-maintenance.md)
 
 ---
 
