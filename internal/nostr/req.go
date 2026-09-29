@@ -32,7 +32,6 @@ Example: hyphae req --kinds 1 --authors <npub> --limit 10`,
 			Name:    "relay",
 			Aliases: []string{"r"},
 			Usage:   "Relay URLs to query",
-			Value:   []string{"wss://relay.aastar.io"},
 		},
 		&cli.IntFlag{
 			Name:    "limit",
@@ -67,7 +66,10 @@ Example: hyphae req --kinds 1 --authors <npub> --limit 10`,
 			}
 		}
 
-		relays := c.StringSlice("relay")
+		relays, err := common.ResolveRelays(c)
+		if err != nil {
+			return err
+		}
 		fmt.Printf("Querying %d relay(s)...\n", len(relays))
 
 		allEvents := make([]nostr.Event, 0)

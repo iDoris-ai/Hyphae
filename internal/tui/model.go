@@ -18,13 +18,14 @@ import (
 	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/internal/messaging"
+	"github.com/iDoris-ai/hyphae/internal/relayconfig"
 	"github.com/iDoris-ai/hyphae/internal/storage"
 	"github.com/iDoris-ai/hyphae/pkg/crypto"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 )
 
 const (
-	defaultRelay     = "wss://relay.aastar.io"
+	defaultRelay     = relayconfig.DefaultRelay
 	maxMessageLen    = 500
 	relayDialTimeout = 5 * time.Second
 )

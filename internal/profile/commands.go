@@ -79,7 +79,6 @@ var profilePublishCmd = &cli.Command{
 			Name:    "relay",
 			Aliases: []string{"r"},
 			Usage:   "Relay URLs",
-			Value:   []string{"wss://relay.aastar.io"},
 		},
 		&cli.StringFlag{
 			Name:  "json-file",
@@ -199,7 +198,10 @@ var profilePublishCmd = &cli.Command{
 		}
 
 		// Publish
-		relays := c.StringSlice("relay")
+		relays, err := common.ResolveRelays(c)
+		if err != nil {
+			return err
+		}
 		jsonMode := common.JSONMode(c)
 		type relayResult struct {
 			URL   string `json:"url"`
@@ -395,7 +397,6 @@ var profileDiscoverCmd = &cli.Command{
 			Name:    "relay",
 			Aliases: []string{"r"},
 			Usage:   "Relay URLs",
-			Value:   []string{"wss://relay.aastar.io"},
 		},
 		&cli.IntFlag{
 			Name:  "limit",
@@ -430,7 +431,10 @@ var profileDiscoverCmd = &cli.Command{
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
 		npub := c.String("npub")
-		relays := c.StringSlice("relay")
+		relays, err := common.ResolveRelays(c)
+		if err != nil {
+			return err
+		}
 		limit := int(c.Int("limit"))
 		timeoutSec := time.Duration(c.Int("timeout")) * time.Second
 		jsonMode := common.JSONMode(c)
