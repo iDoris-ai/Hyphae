@@ -40,6 +40,13 @@
 
 2026-09-29，在 main `d44b3c8010a4c587e5909bc708e454c9ac3c756c`（已合并 #68/#69/#74/#77）上，主代理使用独立 worktree、临时 HOME、macOS arm64 和 Go 1.27.1 完成 `go test ./...`、`go vet ./...` 与 `./build.sh`，全部通过。本次验证不包含尚未合入 main 的 CLI 功能链，也不覆盖待修复的 #72。
 
+同日完成新版依赖与功能链的组合验收。输入按顺序为 `f46744a`（原 CLI 验收）、`d44b3c8`（新主线依赖）、`69e4875`（#72 CLI 兼容实现）、`c4e54c9`（#59 interval 类型兼容）。临时本地组合提交为 `59803c0`，没有推送或创建汇总 PR。合并冲突仅处理模块依赖以及 relay 的 `StringArg.Max` 删除，保留 list/set/timeout 功能。
+
+- Luna 使用 Go 1.27.1、临时 HOME、显式 GOPATH/GOCACHE，运行 `go test -tags integration ./... -count=1`、`go vet ./...`、`./build.sh`，全部通过。
+- 主代理检查合并解法，并独立通过 `go test -tags integration ./tests -run TestOfflineCLIOutboxRetryAndDaemonSignal -count=1 -v`，验证真实断线重试和 daemon 退出。
+- #72 自身 `72e2aaf` 另有真实二进制 JSON/帮助/位置参数回归测试、全量测试及相关包 race；主代理独立复验新命令测试。该测试增量没有混入上述固定组合。
+- 上述结果证明新依赖与已验收 CLI 功能链兼容，仍不代表功能链全部合入 main 或跨仓 E-M1 完成。验证后清理临时组合 worktree 和本地分支，保留原 PR 分支。
+
 ## 接线边界与下一步
 
 1. Agent24 按 [协作 PR #41](https://github.com/iDoris-ai/Hyphae/pull/41) 接 CLI，再完成身份/联系人/relay 管理及基础消息 UI；回填实际 PR、固定提交和验收结果。
