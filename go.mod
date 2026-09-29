@@ -1,20 +1,21 @@
 module github.com/iDoris-ai/hyphae
 
-go 1.25.0
+go 1.26.0
 
 require (
 	fiatjaf.com/nostr v0.0.0-20260928115942-58e4c715304e
-	github.com/btcsuite/btcd/btcutil v1.1.5
+	github.com/btcsuite/btcd/btcutil v1.2.0
 	github.com/charmbracelet/bubbles v0.18.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/coder/websocket v1.8.14
 	github.com/fatih/color v1.19.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/klauspost/compress v1.18.0
 	github.com/stretchr/testify v1.12.1
 	github.com/urfave/cli/v3 v3.13.0
-	golang.org/x/crypto v0.50.0
-	golang.org/x/term v0.42.0
+	golang.org/x/crypto v0.57.0
+	golang.org/x/term v0.46.0
 	modernc.org/sqlite v1.48.2
 )
 
@@ -31,7 +32,6 @@ require (
 	github.com/charmbracelet/x/ansi v0.10.1 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.13-0.20250311204145-2c3ea96c31dd // indirect
 	github.com/charmbracelet/x/term v0.2.1 // indirect
-	github.com/coder/websocket v1.8.14 // indirect
 	github.com/decred/dcrd/crypto/blake256 v1.1.0 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
@@ -68,10 +68,10 @@ require (
 	go.etcd.io/bbolt v1.4.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/exp v0.0.0-20251113190631-e25ba8c21ef6 // indirect
-	golang.org/x/net v0.52.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.43.0 // indirect
-	golang.org/x/text v0.36.0 // indirect
+	golang.org/x/net v0.58.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 	modernc.org/libc v1.70.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
