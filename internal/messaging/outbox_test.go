@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -314,6 +315,301 @@ func TestAttemptSend_RelayUnreachable_MarksFailedAtMaxRetries(t *testing.T) {
 	ob2, _ := LoadOutbox()
 	assert.Equal(t, "failed", ob2.Entries[0].Status)
 	assert.Equal(t, 10, ob2.Entries[0].RetryCount)
+}
+
+func TestAttemptSend_LegacySnapshotCannotMatchNormalizedQueueID(t *testing.T) {
+	setupTempOutbox(t)
+	eventJSON := `{"kind":1,"content":"same"}`
+	entry := types.OutboxEntry{ID: "legacy", EventJSON: eventJSON, Status: "pending", CreatedAt: 42, MaxRetries: 5}
+	require.NoError(t, SaveOutbox(&types.Outbox{Entries: []types.OutboxEntry{entry}}))
+
+	current, err := currentOutboxAttempt(entry)
+	require.NoError(t, err)
+	require.NotEmpty(t, current.entry.QueueID)
+
+	var published bool
+	result, err := attemptSend(context.Background(), nil, entry, nil, time.Second,
+		func(context.Context, []string, nostr.Event, time.Duration) bool {
+			published = true
+			return false
+		}, func(*nostr.Event, string, string, bool) error { return nil })
+	require.ErrorIs(t, err, errOutboxEntrySuperseded)
+	assert.True(t, result.Superseded)
+	assert.False(t, result.Attempted)
+	assert.False(t, published, "a legacy snapshot must not act on a queue item after identity normalization")
+}
+
+func TestAttemptSend_FailureUsesLatestRetryCount(t *testing.T) {
+	setupTempOutbox(t)
+	entry := testOutboxAttemptEntry("latest-count", 1, 10)
+	require.NoError(t, SaveOutbox(&types.Outbox{Entries: []types.OutboxEntry{entry}}))
+	ob, err := LoadOutbox()
+	require.NoError(t, err)
+
+	started, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
+	done := make(chan SendResult, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		result, err := attemptSend(context.Background(), ob, ob.Entries[0], nil, time.Second,
+			func(context.Context, []string, nostr.Event, time.Duration) bool {
+				close(started)
+				<-release
+				return false
+			}, func(*nostr.Event, string, string, bool) error { return nil })
+		done <- result
+		errCh <- err
+	}()
+	waitForOutboxSignal(t, started)
+	_, err = UpdateOutbox(func(latest *types.Outbox) error {
+		latest.Entries[0].RetryCount = 9
+		return nil
+	})
+	require.NoError(t, err)
+	unblock()
+	result := <-done
+	require.NoError(t, <-errCh)
+	assert.True(t, result.MarkedFailed)
+	assert.False(t, result.Queued)
+
+	latest, err := LoadOutbox()
+	require.NoError(t, err)
+	require.Len(t, latest.Entries, 1)
+	assert.Equal(t, 10, latest.Entries[0].RetryCount)
+	assert.Equal(t, "failed", latest.Entries[0].Status)
+}
+
+func TestAttemptSend_SuccessDoesNotRemoveReenqueuedSameID(t *testing.T) {
+	setupTempOutbox(t)
+	entry := testOutboxAttemptEntry("requeued", 0, 5)
+	require.NoError(t, SaveOutbox(&types.Outbox{Entries: []types.OutboxEntry{entry}}))
+	ob, err := LoadOutbox()
+	require.NoError(t, err)
+
+	started, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
+	done := make(chan SendResult, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		result, err := attemptSend(context.Background(), ob, ob.Entries[0], nil, time.Second,
+			func(context.Context, []string, nostr.Event, time.Duration) bool {
+				close(started)
+				<-release
+				return true
+			}, func(*nostr.Event, string, string, bool) error { return nil })
+		done <- result
+		errCh <- err
+	}()
+	waitForOutboxSignal(t, started)
+	newEntry := testOutboxAttemptEntry("requeued", 0, 5)
+	newEntry.QueueID = "new-queue-id"
+	_, err = UpdateOutbox(func(latest *types.Outbox) error {
+		latest.Entries[0] = newEntry
+		return nil
+	})
+	require.NoError(t, err)
+	unblock()
+	result := <-done
+	require.NoError(t, <-errCh)
+	assert.True(t, result.Sent)
+	assert.True(t, result.HistoryStored)
+	assert.True(t, result.Superseded)
+
+	latest, err := LoadOutbox()
+	require.NoError(t, err)
+	require.Len(t, latest.Entries, 1)
+	assert.Equal(t, "new-queue-id", latest.Entries[0].QueueID)
+}
+
+func TestAttemptSend_FailureAfterConcurrentSuccessDoesNotRestoreQueue(t *testing.T) {
+	setupTempOutbox(t)
+	entry := testOutboxAttemptEntry("overlap", 0, 5)
+	require.NoError(t, SaveOutbox(&types.Outbox{Entries: []types.OutboxEntry{entry}}))
+	ob, err := LoadOutbox()
+	require.NoError(t, err)
+	entry = ob.Entries[0]
+	failureSnapshot, err := LoadOutbox()
+	require.NoError(t, err)
+
+	successStarted, failureStarted := make(chan struct{}), make(chan struct{})
+	releaseSuccess, releaseFailure := make(chan struct{}), make(chan struct{})
+	var releaseSuccessOnce, releaseFailureOnce sync.Once
+	unblockSuccess := func() { releaseSuccessOnce.Do(func() { close(releaseSuccess) }) }
+	unblockFailure := func() { releaseFailureOnce.Do(func() { close(releaseFailure) }) }
+	defer unblockSuccess()
+	defer unblockFailure()
+	successDone := make(chan SendResult, 1)
+	failureDone := make(chan SendResult, 1)
+	errCh := make(chan error, 2)
+	go func() {
+		result, err := attemptSend(context.Background(), failureSnapshot, entry, nil, time.Second,
+			func(context.Context, []string, nostr.Event, time.Duration) bool {
+				close(successStarted)
+				<-releaseSuccess
+				return true
+			}, func(*nostr.Event, string, string, bool) error { return nil })
+		successDone <- result
+		errCh <- err
+	}()
+	waitForOutboxSignal(t, successStarted)
+	go func() {
+		result, err := attemptSend(context.Background(), ob, entry, nil, time.Second,
+			func(context.Context, []string, nostr.Event, time.Duration) bool {
+				close(failureStarted)
+				<-releaseFailure
+				return false
+			}, func(*nostr.Event, string, string, bool) error { return nil })
+		failureDone <- result
+		errCh <- err
+	}()
+	waitForOutboxSignal(t, failureStarted)
+
+	unblockSuccess()
+	success := <-successDone
+	require.NoError(t, <-errCh)
+	assert.True(t, success.Sent)
+	assert.True(t, success.HistoryStored)
+	unblockFailure()
+	failure := <-failureDone
+	require.NoError(t, <-errCh)
+	assert.False(t, failure.Sent)
+	assert.True(t, failure.Superseded)
+	assert.False(t, failure.Queued)
+
+	latest, err := LoadOutbox()
+	require.NoError(t, err)
+	assert.Empty(t, latest.Entries)
+}
+
+func waitForOutboxSignal(t *testing.T, signal <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for blocked outbox attempt")
+	}
+}
+
+func TestAttemptSend_HistoryFailureKeepsQueue(t *testing.T) {
+	setupTempOutbox(t)
+	entry := testOutboxAttemptEntry("history-error", 0, 5)
+	require.NoError(t, SaveOutbox(&types.Outbox{Entries: []types.OutboxEntry{entry}}))
+	ob, err := LoadOutbox()
+	require.NoError(t, err)
+
+	result, err := attemptSend(context.Background(), ob, ob.Entries[0], nil, time.Second,
+		func(context.Context, []string, nostr.Event, time.Duration) bool { return true },
+		func(*nostr.Event, string, string, bool) error { return errors.New("history unavailable") })
+	require.Error(t, err)
+	assert.True(t, result.Sent)
+	assert.False(t, result.HistoryStored)
+	assert.True(t, result.Queued)
+
+	latest, err := LoadOutbox()
+	require.NoError(t, err)
+	require.Len(t, latest.Entries, 1)
+	assert.Equal(t, entry.QueueID, latest.Entries[0].QueueID)
+}
+
+func TestAttemptSend_QueuePersistenceFailureIsVisible(t *testing.T) {
+	setupTempOutbox(t)
+	entry := testOutboxAttemptEntry("queue-error", 0, 5)
+	require.NoError(t, SaveOutbox(&types.Outbox{Entries: []types.OutboxEntry{entry}}))
+	ob, err := LoadOutbox()
+	require.NoError(t, err)
+
+	originalPersist := persistOutbox
+	persistOutbox = func(string, *types.Outbox) error { return errors.New("disk unavailable") }
+	t.Cleanup(func() { persistOutbox = originalPersist })
+	result, err := attemptSend(context.Background(), ob, ob.Entries[0], nil, time.Second,
+		func(context.Context, []string, nostr.Event, time.Duration) bool { return true },
+		func(*nostr.Event, string, string, bool) error { return nil })
+	require.Error(t, err)
+	assert.True(t, result.Sent)
+	assert.True(t, result.HistoryStored)
+	assert.True(t, result.Queued)
+	assert.False(t, result.QueueStateUnknown, "pre-rename failures leave the prior queue state intact")
+
+	latest, err := LoadOutbox()
+	require.NoError(t, err)
+	require.Len(t, latest.Entries, 1)
+	assert.Equal(t, entry.QueueID, latest.Entries[0].QueueID)
+}
+
+func TestAttemptSend_PostRenameSuccessRemovalReportsUnknown(t *testing.T) {
+	setupTempOutbox(t)
+	entry := testOutboxAttemptEntry("uncertain-success", 0, 5)
+	require.NoError(t, SaveOutbox(&types.Outbox{Entries: []types.OutboxEntry{entry}}))
+	ob, err := LoadOutbox()
+	require.NoError(t, err)
+
+	originalPersist := persistOutbox
+	persistOutbox = func(file string, updated *types.Outbox) error {
+		if err := originalPersist(file, updated); err != nil {
+			return err
+		}
+		return &outboxCommitUncertainError{errors.New("directory sync failed after rename")}
+	}
+	t.Cleanup(func() { persistOutbox = originalPersist })
+	result, err := attemptSend(context.Background(), ob, ob.Entries[0], nil, time.Second,
+		func(context.Context, []string, nostr.Event, time.Duration) bool { return true },
+		func(*nostr.Event, string, string, bool) error { return nil })
+	require.Error(t, err)
+	assert.True(t, result.Sent)
+	assert.True(t, result.HistoryStored)
+	assert.True(t, result.QueueStateUnknown)
+	assert.False(t, result.Queued)
+	assert.False(t, result.MarkedFailed)
+	assert.False(t, result.Superseded)
+
+	latest, err := LoadOutbox()
+	require.NoError(t, err)
+	assert.Empty(t, latest.Entries, "the post-rename state must not be rolled back")
+}
+
+func TestAttemptSend_PostRenameFailureIncrementReportsUnknown(t *testing.T) {
+	setupTempOutbox(t)
+	entry := testOutboxAttemptEntry("uncertain-failure", 4, 5)
+	require.NoError(t, SaveOutbox(&types.Outbox{Entries: []types.OutboxEntry{entry}}))
+	ob, err := LoadOutbox()
+	require.NoError(t, err)
+
+	originalPersist := persistOutbox
+	persistOutbox = func(file string, updated *types.Outbox) error {
+		if err := originalPersist(file, updated); err != nil {
+			return err
+		}
+		return &outboxCommitUncertainError{errors.New("directory sync failed after rename")}
+	}
+	t.Cleanup(func() { persistOutbox = originalPersist })
+	result, err := attemptSend(context.Background(), ob, ob.Entries[0], nil, time.Second,
+		func(context.Context, []string, nostr.Event, time.Duration) bool { return false },
+		func(*nostr.Event, string, string, bool) error { return nil })
+	require.Error(t, err)
+	assert.False(t, result.Sent)
+	assert.True(t, result.QueueStateUnknown)
+	assert.False(t, result.Queued)
+	assert.False(t, result.MarkedFailed)
+
+	latest, err := LoadOutbox()
+	require.NoError(t, err)
+	require.Len(t, latest.Entries, 1)
+	assert.Equal(t, 5, latest.Entries[0].RetryCount)
+	assert.Equal(t, "failed", latest.Entries[0].Status)
+}
+
+func testOutboxAttemptEntry(id string, retryCount, maxRetries int) types.OutboxEntry {
+	event := nostr.Event{Kind: 1, Content: "test"}
+	event.ID[31] = byte(len(id))
+	eventJSON, _ := json.Marshal(event)
+	return types.OutboxEntry{
+		QueueID: id + "-queue", ID: hex.EncodeToString(event.ID[:]), EventJSON: string(eventJSON),
+		Status: "pending", RetryCount: retryCount, MaxRetries: maxRetries,
+	}
 }
 
 func TestCleanupOutbox(t *testing.T) {
