@@ -19,6 +19,8 @@ import (
 	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/internal/messaging"
+	"github.com/iDoris-ai/hyphae/internal/storage"
+	"github.com/iDoris-ai/hyphae/pkg/crypto"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -414,6 +416,204 @@ func TestWatchInbox_ReceivesEventMarksSeenAndAutoReplies(t *testing.T) {
 		}
 	}
 	assert.True(t, foundAutoReply, "the outgoing message in the conversation must be the auto-reply")
+}
+
+func signedIncomingEvent(t *testing.T, sender nostr.SecretKey, recipient nostr.PubKey, content string, tags nostr.Tags) *nostr.Event {
+	t.Helper()
+	eventTags := nostr.Tags{{"p", common.PubKeyToHex(recipient)}}
+	eventTags = append(eventTags, tags...)
+	event := &nostr.Event{CreatedAt: nostr.Now(), Kind: messaging.AgentKind, Tags: eventTags, Content: content, PubKey: sender.Public()}
+	require.NoError(t, event.Sign(sender))
+	return event
+}
+
+func runWatchWithFakeEvent(t *testing.T, event *nostr.Event, myIdentity *types.Identity, ks *types.KeyStore, recipientSK nostr.SecretKey, seen *seenSet, useNotify, autoReply bool, hooks incomingReceiveHooks, stored chan error) int {
+	t.Helper()
+	eventJSON, err := json.Marshal(event)
+	require.NoError(t, err)
+	release := make(chan struct{})
+	releaseRelay := sync.OnceFunc(func() { close(release) })
+	defer releaseRelay()
+	relayURL := startFakeRelay(t, eventJSON, release)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	done := make(chan int, 1)
+	go func() {
+		done <- watchOneRelayWithHooks(ctx, relayURL, nostr.Filter{}, ks, recipientSK, seen, useNotify, autoReply, myIdentity, []string{relayURL}, hooks)
+	}()
+	select {
+	case storeErr := <-stored:
+		releaseRelay()
+		stored <- storeErr
+	case <-time.After(2 * time.Second):
+		t.Fatal("fake relay event was not processed")
+	}
+	select {
+	case count := <-done:
+		return count
+	case <-time.After(2 * time.Second):
+		t.Fatal("watch did not finish after fake relay closed")
+		return 0
+	}
+}
+
+func TestWatchOneRelay_DurableDuplicateAcrossFreshSeenSets(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	messaging.ResetStoreForTest()
+	t.Cleanup(messaging.ResetStoreForTest)
+	require.NoError(t, messaging.InitStorage())
+	ks := &types.KeyStore{Identities: make(map[string]*types.Identity), Contacts: make(map[string]*types.Contact)}
+	myIdentity, err := identity.CreateIdentity(ks, "alice")
+	require.NoError(t, err)
+	mySK, err := identity.GetSecretKey(ks, "alice")
+	require.NoError(t, err)
+	sender := nostr.Generate()
+	compressed, err := messaging.CompressText("arrive once")
+	require.NoError(t, err)
+	event := signedIncomingEvent(t, sender, mySK.Public(), compressed, nostr.Tags{{"z", messaging.CompressTag}})
+	var notifications, replies int
+	storedResult := make(chan error, 1)
+	store := func(event *nostr.Event, recipient, body string, encrypted bool) (bool, error) {
+		first, err := messaging.StoreIncomingMessageOnce(event, recipient, body, encrypted)
+		storedResult <- err
+		return first, err
+	}
+	hooks := incomingReceiveHooks{
+		store:  store,
+		notify: func(string, string) { notifications++ },
+		reply:  func(string, string) { replies++ },
+	}
+	firstSeen := newSeenSet()
+	count := runWatchWithFakeEvent(t, event, myIdentity, ks, mySK, firstSeen, true, true, hooks, storedResult)
+	require.NoError(t, <-storedResult)
+	assert.Equal(t, 1, count)
+	assert.True(t, firstSeen.Has(hex.EncodeToString(event.ID[:])))
+	assert.Equal(t, 1, notifications)
+	assert.Equal(t, 1, replies)
+
+	secondSeen := newSeenSet() // models a process restart with no warm cache
+	count = runWatchWithFakeEvent(t, event, myIdentity, ks, mySK, secondSeen, true, true, hooks, storedResult)
+	require.NoError(t, <-storedResult)
+	assert.Equal(t, 0, count)
+	assert.True(t, secondSeen.Has(hex.EncodeToString(event.ID[:])))
+	assert.Equal(t, 1, notifications, "a durable duplicate must not notify again")
+	assert.Equal(t, 1, replies, "a durable duplicate must not auto-reply again")
+}
+
+func TestWatchOneRelay_StorageFailureCanRecoverWithoutRestart(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	messaging.ResetStoreForTest()
+	t.Cleanup(messaging.ResetStoreForTest)
+	ks := &types.KeyStore{Identities: make(map[string]*types.Identity), Contacts: make(map[string]*types.Contact)}
+	myIdentity, err := identity.CreateIdentity(ks, "alice")
+	require.NoError(t, err)
+	mySK, err := identity.GetSecretKey(ks, "alice")
+	require.NoError(t, err)
+	dbPath, err := storage.GetDBPath()
+	require.NoError(t, err)
+	require.NoError(t, os.Mkdir(dbPath, 0700))
+	compressed, err := messaging.CompressText("retry after disk repair")
+	require.NoError(t, err)
+	event := signedIncomingEvent(t, nostr.Generate(), mySK.Public(), compressed, nostr.Tags{{"z", messaging.CompressTag}})
+	storeAttempt := make(chan error, 1)
+	hooks := incomingReceiveHooks{
+		store: func(event *nostr.Event, recipient, body string, encrypted bool) (bool, error) {
+			first, err := messaging.StoreIncomingMessageOnce(event, recipient, body, encrypted)
+			storeAttempt <- err
+			return first, err
+		},
+	}
+	seen := newSeenSet()
+	count := runWatchWithFakeEvent(t, event, myIdentity, ks, mySK, seen, true, true, hooks, storeAttempt)
+	require.Error(t, <-storeAttempt)
+	assert.Equal(t, 0, count)
+	assert.False(t, seen.Has(hex.EncodeToString(event.ID[:])), "failed persistence must leave the event retryable")
+	assert.NoError(t, os.Remove(dbPath))
+
+	var notified, replied int
+	hooks.notify = func(string, string) { notified++ }
+	hooks.reply = func(string, string) { replied++ }
+	count = runWatchWithFakeEvent(t, event, myIdentity, ks, mySK, seen, true, true, hooks, storeAttempt)
+	require.NoError(t, <-storeAttempt)
+	assert.Equal(t, 1, count)
+	assert.True(t, seen.Has(hex.EncodeToString(event.ID[:])))
+	assert.Equal(t, 1, notified)
+	assert.Equal(t, 1, replied)
+	inbox, err := messaging.GetInbox(nil, myIdentity.Npub, 10)
+	require.NoError(t, err)
+	require.Len(t, inbox, 1)
+}
+
+func TestProcessIncomingEventRejectsDecodeFailuresBeforeStorage(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	messaging.ResetStoreForTest()
+	t.Cleanup(messaging.ResetStoreForTest)
+	require.NoError(t, messaging.InitStorage())
+	ks := &types.KeyStore{Identities: make(map[string]*types.Identity), Contacts: make(map[string]*types.Contact)}
+	myIdentity, err := identity.CreateIdentity(ks, "alice")
+	require.NoError(t, err)
+	mySK, err := identity.GetSecretKey(ks, "alice")
+	require.NoError(t, err)
+	cases := []struct {
+		name    string
+		content string
+		tags    nostr.Tags
+	}{
+		{name: "invalid compression", content: "bad data", tags: nostr.Tags{{"z", messaging.CompressTag}}},
+		{name: "failed decryption", content: "not NIP-44", tags: nostr.Tags{{"enc", "nip44"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			event := signedIncomingEvent(t, nostr.Generate(), mySK.Public(), tc.content, tc.tags)
+			seen := newSeenSet()
+			stored := 0
+			hooks := incomingReceiveHooks{store: func(*nostr.Event, string, string, bool) (bool, error) { stored++; return true, nil }}
+			_, err := processIncomingEvent(event, mySK, seen, true, true, myIdentity, ks, hooks)
+			require.Error(t, err)
+			assert.False(t, seen.Has(hex.EncodeToString(event.ID[:])))
+			assert.Zero(t, stored)
+			msg, err := messaging.GetStore()
+			require.NoError(t, err)
+			got, err := msg.GetMessage(hex.EncodeToString(event.ID[:]))
+			require.NoError(t, err)
+			assert.Nil(t, got)
+		})
+	}
+}
+
+func TestWatchOneRelay_UpgradesSelfSentOutgoingEvent(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	messaging.ResetStoreForTest()
+	t.Cleanup(messaging.ResetStoreForTest)
+	require.NoError(t, messaging.InitStorage())
+	ks := &types.KeyStore{Identities: make(map[string]*types.Identity), Contacts: make(map[string]*types.Contact)}
+	myIdentity, err := identity.CreateIdentity(ks, "alice")
+	require.NoError(t, err)
+	mySK, err := identity.GetSecretKey(ks, "alice")
+	require.NoError(t, err)
+	ciphertext, err := crypto.EncryptMessage("self receipt", mySK, mySK.Public())
+	require.NoError(t, err)
+	compressed, err := messaging.CompressText(ciphertext)
+	require.NoError(t, err)
+	event := signedIncomingEvent(t, mySK, mySK.Public(), compressed, nostr.Tags{{"enc", "nip44"}, {"z", messaging.CompressTag}})
+	require.NoError(t, messaging.StoreOutgoingMessage(event, myIdentity.Npub, "self receipt", true))
+	storedResult := make(chan error, 1)
+	hooks := incomingReceiveHooks{store: func(event *nostr.Event, recipient, body string, encrypted bool) (bool, error) {
+		first, err := messaging.StoreIncomingMessageOnce(event, recipient, body, encrypted)
+		storedResult <- err
+		return first, err
+	}}
+	seen := newSeenSet()
+	count := runWatchWithFakeEvent(t, event, myIdentity, ks, mySK, seen, false, false, hooks, storedResult)
+	require.NoError(t, <-storedResult)
+	assert.Equal(t, 1, count)
+	msg, err := messaging.GetStore()
+	require.NoError(t, err)
+	got, err := msg.GetMessage(hex.EncodeToString(event.ID[:]))
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.True(t, got.IsIncoming)
+	assert.Equal(t, "self receipt", got.Plaintext)
 }
 
 func TestIsAutoReplyMessage(t *testing.T) {
