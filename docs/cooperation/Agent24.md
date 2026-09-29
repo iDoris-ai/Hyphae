@@ -10,7 +10,7 @@
 
 ### 本轮可接线接口
 
-这些变更仍在 PR 分支，不能把当前 main 当成已支持全部接口。最新已验收的组合开发基线为 `integration/em1-cli-reliability` / `6e64aaa`；正式打包版本须在合并后重新固定。它是依赖组合分支，各项修改仍由单独小 PR 评审。
+这些变更仍在 PR 分支，不能把当前 main 当成已支持全部接口。最新已验收的组合开发基线为 `integration/em1-cli-runtime` / `b1cbaaa`，隔离 HOME 的全量 integration 测试通过；正式打包版本须在合并后重新固定。它是依赖组合分支，各项修改仍由单独小 PR 评审。
 
 | 能力 | Hyphae 接口与状态 |
 |---|---|
@@ -18,14 +18,33 @@
 | relay 配置 | PR [#50](https://github.com/iDoris-ai/Hyphae/pull/50)：`relay set --relay URL` 可重复、完整替换；`relay list` 返回 relays/source；`relay info [URL] --timeout 5` 返回 url/connected |
 | 配置优先级 | 显式 --relay > `~/.hyphae/relays.json` > 既有默认；坏配置报错，不静默换公共 relay。已入队事件保持原地址 |
 | 消息可靠性 | 重试事务 #48、历史明文 #49、发布前可靠入队 [#54](https://github.com/iDoris-ai/Hyphae/pull/54) 已验收；`published_to=0` 且 `queued_for_retry=true` 表示已提交待发 |
-| 待发管理 | [#53](https://github.com/iDoris-ai/Hyphae/pull/53)：`storage outbox list --json` 为安全数组；`clear --failed --yes --json` 返回 removed/remaining。retry JSON 仍在实现 |
-| 收件 | 原子首次收件 #51 和 daemon 接线 [#55](https://github.com/iDoris-ai/Hyphae/pull/55) 已验收；inbox 查询错误和 daemon 离线分页仍在实现 |
+| 待发管理 | [#53](https://github.com/iDoris-ai/Hyphae/pull/53)：list 为安全数组，clear 返回 removed/remaining；[#56](https://github.com/iDoris-ai/Hyphae/pull/56)：retry JSON 已验收 |
+| 收件 | 原子首次收件 #51、daemon 接线 [#55](https://github.com/iDoris-ai/Hyphae/pull/55)、inbox 单次查询 [#58](https://github.com/iDoris-ai/Hyphae/pull/58) 已验收；分页模块 #60 已验收，daemon 接线与积压验收仍在实现 |
+| 加密身份 | [#63](https://github.com/iDoris-ai/Hyphae/pull/63)：msg/inbox/daemon 的 `--password-stdin` 已验收。创建身份的 stdin 通道另行补齐，不能把密码放进 UI 生成的命令参数 |
+| 生命周期 | [#59](https://github.com/iDoris-ai/Hyphae/pull/59)：SIGINT/SIGTERM 取消当前网络等待；[#61](https://github.com/iDoris-ai/Hyphae/pull/61) 覆盖真实二进制退出与离线重试 |
 
-机器模式成功在 stdout 输出一份 `{"ok":true,"data":...}`；错误在 stderr 输出错误信封，退出码沿用 1 用户输入、2 网络、3 身份解锁、4 其他、5 写冲突。UI 不解析人工提示文字。`connected=true` 只表示一次 WebSocket 握手成功，不能当持续在线、已订阅或已送达。各项字段及补收门槛见规划 PR [#39](https://github.com/iDoris-ai/Hyphae/pull/39) 的 CLI 通信契约。
+表内单次管理/收发命令的机器模式成功在 stdout 输出一份 `{"ok":true,"data":...}`；错误在 stderr 输出错误信封，退出码沿用 1 用户输入、2 网络、3 身份解锁、4 其他、5 写冲突。UI 不解析人工提示文字。`connected=true` 只表示一次 WebSocket 握手成功，不能当持续在线、已订阅或已送达。各项字段及补收门槛见规划 PR [#39](https://github.com/iDoris-ai/Hyphae/pull/39) 的 CLI 通信契约。
+
+daemon 是长驻进程，当前输出运行日志，并未提供 JSON 消息流或健康状态 API。Agent24 管理其启动/退出和日志展示，通过单次 history JSON 查询获取持久化消息。进程存在不等于 relay 连通，relay 探测成功也不等于全部历史同步完成；暂不生成这些未提供证据的状态。
 
 发送错误的信封可含 `data`：沿用 event_id、published_to、queued_for_retry，并增加 history_stored、superseded、queue_state_unknown。Agent24 即使收到非零退出码也要读取这些字段；relay 已接受而本地记账失败时，按原 event_id 核对，不创建新消息自动重发。队列状态未知时 UI 显示待核对。
 
 配置在命令或 daemon 启动时解析。`relay set` 或默认身份变化不会自动重配已运行的 daemon；Agent24 应由同一进程管理入口重新启动相应实例，并继续保留旧待发记录的 relay 地址。`agent inbox` 是有 limit 的单次 relay 查询；持续收件由 daemon 写入本地历史，UI 从 history 读取，不把一次 inbox 返回当成所有历史已同步。
+
+### 调用与 UI 状态映射
+
+统一以进程参数数组调用固定版本的 Hyphae，避免拼接 shell。加密 msg/inbox/daemon 使用 `--password-stdin`，通过专用 stdin 写入密码后关闭管道；不把密码写进参数、日志或持久配置。上限 4096 字节，只移除一组尾随 LF/CRLF，保留密码空格。缺凭据/错误密码返回身份错误，UI 提示解锁后再操作。`inbox --decrypt=false` 不读密码，也不产生解密后的历史。
+
+| CLI 事实 | UI 可显示的状态/动作 |
+|---|---|
+| 发送 `published_to > 0`，或 retry `sent=true` | relay 已接受；没有对端回执时不显示已送达 |
+| 发送 `queued_for_retry=true`，或 retry `queued=true` | 已保存待发；显示重试次数与原 relay |
+| `queue_state_unknown=true` | 待核对；保留 event_id，不生成新消息盲目重发 |
+| `superseded=true` / 退出码 5 | 状态已被并发操作修改；重新读取 outbox |
+| retry `history_stored=false` | 本次未确认写入历史；不能推断旧历史不存在 |
+| 清理 outbox | 先展示范围和数量，经用户确认再传 `--yes`；清理不撤回 relay 已接收事件 |
+
+`storage outbox retry --id EVENT_ID` 返回 event_id/attempted/sent/queued/marked_failed/history_stored/superseded/queue_state_unknown。全部 relay 失败但重试结果可靠保存时，命令仍可成功，必须检查 sent/queued。`clear --failed` 还可搭配 `--min-failures`，以本次读取的候选集合清理，不删除确认期间新加入的条目。
 
 ## 双方分工
 
