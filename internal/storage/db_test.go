@@ -63,7 +63,7 @@ func TestInitDBPragmasApplyToEveryConnection(t *testing.T) {
 	require.NoError(t, err, "a child row with an existing parent must be accepted")
 	_, err = third.ExecContext(ctx, `INSERT INTO pragma_child (parent_id) VALUES (100)`)
 	require.Error(t, err)
-	require.Contains(strings.ToLower(err.Error()), "foreign key constraint failed",
+	require.Contains(t, strings.ToLower(err.Error()), "foreign key constraint failed",
 		"the failed insert must be rejected by SQLite's foreign-key constraint")
 
 	require.NoError(t, third.Close())
