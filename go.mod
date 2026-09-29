@@ -1,6 +1,6 @@
 module github.com/iDoris-ai/hyphae
 
-go 1.25.0
+go 1.26.0
 
 require (
 	fiatjaf.com/nostr v0.0.0-20260928115942-58e4c715304e
@@ -13,8 +13,8 @@ require (
 	github.com/klauspost/compress v1.18.0
 	github.com/stretchr/testify v1.12.1
 	github.com/urfave/cli/v3 v3.13.0
-	golang.org/x/crypto v0.50.0
-	golang.org/x/term v0.42.0
+	golang.org/x/crypto v0.57.0
+	golang.org/x/term v0.46.0
 	modernc.org/sqlite v1.48.2
 )
 
@@ -59,8 +59,8 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/exp v0.0.0-20251113190631-e25ba8c21ef6 // indirect
-	golang.org/x/sys v0.43.0 // indirect
-	golang.org/x/text v0.36.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 	modernc.org/libc v1.70.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
