@@ -37,6 +37,8 @@ type StoredMessage struct {
 
 // OutboxEntry 表示待发送的消息
 type OutboxEntry struct {
+	// QueueID distinguishes enqueues with the same event ID and is omitted for legacy entries.
+	QueueID       string   `json:"queue_id,omitempty"`
 	ID            string   `json:"id"`
 	EventJSON     string   `json:"event_json"`
 	RecipientNpub string   `json:"recipient_npub"`

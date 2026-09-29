@@ -2,12 +2,14 @@ package messaging
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"time"
 
 	"fiatjaf.com/nostr"
@@ -30,7 +32,10 @@ func LoadOutbox() (*types.Outbox, error) {
 	if err != nil {
 		return nil, err
 	}
+	return readOutbox(file)
+}
 
+func readOutbox(file string) (*types.Outbox, error) {
 	ob := &types.Outbox{
 		Entries: make([]types.OutboxEntry, 0),
 	}
@@ -50,7 +55,10 @@ func LoadOutbox() (*types.Outbox, error) {
 	return ob, nil
 }
 
-// SaveOutbox saves outbox to disk atomically.
+// SaveOutbox replaces the complete outbox atomically. Production read-modify-
+// write operations must use UpdateOutbox so they cannot overwrite another
+// process's changes with a stale snapshot. This function is for explicit
+// whole-file replacement and test fixtures.
 //
 // The write path is: marshal → open sibling temp file → write → fsync →
 // close → rename. POSIX guarantees rename() within the same directory is
@@ -63,34 +71,75 @@ func SaveOutbox(ob *types.Outbox) error {
 	if err != nil {
 		return err
 	}
+	return withOutboxLock(file, func() error { return writeOutbox(file, ob) })
+}
 
+// UpdateOutbox serializes a read-modify-write transaction across processes.
+// The callback receives the latest disk state while the stable sibling lock
+// file is held. Do not perform network I/O in the callback.
+func UpdateOutbox(update func(*types.Outbox) error) (*types.Outbox, error) {
+	file, err := GetOutboxPath()
+	if err != nil {
+		return nil, err
+	}
+	var updated *types.Outbox
+	err = withOutboxLock(file, func() error {
+		ob, err := readOutbox(file)
+		if err != nil {
+			return err
+		}
+		if err := update(ob); err != nil {
+			return err
+		}
+		if err := writeOutbox(file, ob); err != nil {
+			return err
+		}
+		updated = ob
+		return nil
+	})
+	return updated, err
+}
+
+func writeOutbox(file string, ob *types.Outbox) error {
 	data, err := json.MarshalIndent(ob, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	tmp := file + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	f, err := os.CreateTemp(filepath.Dir(file), ".outbox-*.tmp")
 	if err != nil {
 		return fmt.Errorf("open temp outbox: %w", err)
 	}
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	if err := f.Chmod(0600); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("chmod temp outbox: %w", err)
+	}
 	if _, err := f.Write(data); err != nil {
-		f.Close()
-		_ = os.Remove(tmp)
+		_ = f.Close()
 		return fmt.Errorf("write temp outbox: %w", err)
 	}
 	if err := f.Sync(); err != nil {
-		f.Close()
-		_ = os.Remove(tmp)
+		_ = f.Close()
 		return fmt.Errorf("fsync temp outbox: %w", err)
 	}
 	if err := f.Close(); err != nil {
-		_ = os.Remove(tmp)
 		return fmt.Errorf("close temp outbox: %w", err)
 	}
 	if err := os.Rename(tmp, file); err != nil {
-		_ = os.Remove(tmp)
 		return fmt.Errorf("rename outbox: %w", err)
+	}
+	dir, err := os.Open(filepath.Dir(file))
+	if err != nil {
+		return fmt.Errorf("open outbox directory after rename: %w", err)
+	}
+	if err := dir.Sync(); err != nil {
+		_ = dir.Close()
+		return fmt.Errorf("fsync outbox directory after rename: %w", err)
+	}
+	if err := dir.Close(); err != nil {
+		return fmt.Errorf("close outbox directory after rename: %w", err)
 	}
 	return nil
 }
@@ -107,8 +156,13 @@ func AddToOutbox(ob *types.Outbox, event *nostr.Event, recipientNpub string, rel
 	if err != nil {
 		return err
 	}
+	queueID, err := newOutboxQueueID()
+	if err != nil {
+		return err
+	}
 
 	entry := types.OutboxEntry{
+		QueueID:       queueID,
 		ID:            hex.EncodeToString(event.ID[:]),
 		EventJSON:     string(eventJSON),
 		RecipientNpub: recipientNpub,
@@ -119,8 +173,22 @@ func AddToOutbox(ob *types.Outbox, event *nostr.Event, recipientNpub string, rel
 		Status:        "pending",
 	}
 
-	ob.Entries = append(ob.Entries, entry)
-	return SaveOutbox(ob)
+	updated, err := UpdateOutbox(func(latest *types.Outbox) error {
+		latest.Entries = append(latest.Entries, entry)
+		return nil
+	})
+	if err == nil {
+		refreshOutbox(ob, updated)
+	}
+	return err
+}
+
+func newOutboxQueueID() (string, error) {
+	var id [16]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return "", fmt.Errorf("generate outbox queue id: %w", err)
+	}
+	return hex.EncodeToString(id[:]), nil
 }
 
 // GetPendingOutbox returns pending entries
@@ -136,25 +204,40 @@ func GetPendingOutbox(ob *types.Outbox) []types.OutboxEntry {
 
 // UpdateOutboxStatus updates entry status
 func UpdateOutboxStatus(ob *types.Outbox, id string, status string) error {
-	for i := range ob.Entries {
-		if ob.Entries[i].ID == id {
-			ob.Entries[i].Status = status
-			return SaveOutbox(ob)
+	updated, err := UpdateOutbox(func(latest *types.Outbox) error {
+		for i := range latest.Entries {
+			if latest.Entries[i].ID == id {
+				latest.Entries[i].Status = status
+				return nil
+			}
 		}
-	}
-	return fmt.Errorf("entry not found")
+		return fmt.Errorf("entry not found")
+	})
+	refreshOutbox(ob, updated)
+	return err
 }
 
 // IncrementOutboxRetry increments retry count
 func IncrementOutboxRetry(ob *types.Outbox, id string) error {
-	for i := range ob.Entries {
-		if ob.Entries[i].ID == id {
-			ob.Entries[i].RetryCount++
-			ob.Entries[i].LastAttempt = time.Now().Unix()
-			return SaveOutbox(ob)
+	updated, _, err := incrementOutboxRetry(id)
+	refreshOutbox(ob, updated)
+	return err
+}
+
+func incrementOutboxRetry(id string) (*types.Outbox, int, error) {
+	var retryCount int
+	updated, err := UpdateOutbox(func(latest *types.Outbox) error {
+		for i := range latest.Entries {
+			if latest.Entries[i].ID == id {
+				latest.Entries[i].RetryCount++
+				latest.Entries[i].LastAttempt = time.Now().Unix()
+				retryCount = latest.Entries[i].RetryCount
+				return nil
+			}
 		}
-	}
-	return fmt.Errorf("entry not found")
+		return fmt.Errorf("entry not found")
+	})
+	return updated, retryCount, err
 }
 
 // RemoveFromOutbox removes the single entry with the given ID.
@@ -169,17 +252,27 @@ func IncrementOutboxRetry(ob *types.Outbox, id string) error {
 // send path cleans up a stale outbox entry after a successful publish), so
 // the check belongs here too, not only in one caller.
 func RemoveFromOutbox(ob *types.Outbox, id string) error {
-	if n := countByID(ob.Entries, id); n > 1 {
-		return fmt.Errorf("%d outbox entries share id %q -- refusing to remove any of them", n, id)
-	}
-	newEntries := make([]types.OutboxEntry, 0)
-	for _, entry := range ob.Entries {
-		if entry.ID != id {
-			newEntries = append(newEntries, entry)
+	updated, err := UpdateOutbox(func(latest *types.Outbox) error {
+		if n := countByID(latest.Entries, id); n > 1 {
+			return fmt.Errorf("%d outbox entries share id %q -- refusing to remove any of them", n, id)
 		}
+		newEntries := make([]types.OutboxEntry, 0, len(latest.Entries))
+		for _, entry := range latest.Entries {
+			if entry.ID != id {
+				newEntries = append(newEntries, entry)
+			}
+		}
+		latest.Entries = newEntries
+		return nil
+	})
+	refreshOutbox(ob, updated)
+	return err
+}
+
+func refreshOutbox(dst, src *types.Outbox) {
+	if dst != nil && src != nil {
+		dst.Entries = src.Entries
 	}
-	ob.Entries = newEntries
-	return SaveOutbox(ob)
 }
 
 // SendResult describes the outcome of a single AttemptSend call.
@@ -287,7 +380,9 @@ func AttemptSend(ctx context.Context, ob *types.Outbox, entry types.OutboxEntry,
 	// Same independent-attempt shape on the failure side: a failure to
 	// persist the incremented retry count must not skip the "did retries
 	// just get exhausted" check below.
-	if err := IncrementOutboxRetry(ob, entry.ID); err != nil {
+	updated, _, err := incrementOutboxRetry(entry.ID)
+	refreshOutbox(ob, updated)
+	if err != nil {
 		errs = append(errs, fmt.Errorf("increment retry: %w", err))
 	}
 	if entry.RetryCount >= entry.MaxRetries-1 {
@@ -302,13 +397,39 @@ func AttemptSend(ctx context.Context, ob *types.Outbox, entry types.OutboxEntry,
 // CleanupOutbox removes old sent entries
 func CleanupOutbox(ob *types.Outbox, maxAge time.Duration) error {
 	cutoff := time.Now().Add(-maxAge).Unix()
-	newEntries := make([]types.OutboxEntry, 0)
-	for _, entry := range ob.Entries {
-		// Keep pending entries, remove old sent/failed entries
-		if entry.Status == "pending" || entry.LastAttempt > cutoff {
-			newEntries = append(newEntries, entry)
+	updated, err := UpdateOutbox(func(latest *types.Outbox) error {
+		newEntries := make([]types.OutboxEntry, 0)
+		for _, entry := range latest.Entries {
+			// Keep pending entries, remove old sent/failed entries
+			if entry.Status == "pending" || entry.LastAttempt > cutoff {
+				newEntries = append(newEntries, entry)
+			}
 		}
+		latest.Entries = newEntries
+		return nil
+	})
+	refreshOutbox(ob, updated)
+	return err
+}
+
+// removeConfirmedOutboxEntries removes only snapshots captured before a user
+// confirmed a clear operation. QueueID distinguishes identical events that
+// were enqueued again while the confirmation prompt was open.
+func removeConfirmedOutboxEntries(latest *types.Outbox, confirmed []types.OutboxEntry) int {
+	matched := make([]bool, len(confirmed))
+	kept := make([]types.OutboxEntry, 0, len(latest.Entries))
+	removed := 0
+	for _, entry := range latest.Entries {
+		for i, snapshot := range confirmed {
+			if !matched[i] && reflect.DeepEqual(entry, snapshot) {
+				matched[i] = true
+				removed++
+				goto nextEntry
+			}
+		}
+		kept = append(kept, entry)
+	nextEntry:
 	}
-	ob.Entries = newEntries
-	return SaveOutbox(ob)
+	latest.Entries = kept
+	return removed
 }
