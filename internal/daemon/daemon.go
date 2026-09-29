@@ -5,7 +5,7 @@ import (
 	cryptorand "crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"os"
+	"math"
 	"os/signal"
 	"strings"
 	"sync"
@@ -111,6 +111,11 @@ Run this in a separate terminal or as a system service.`,
 		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
+		retryInterval, watchInterval, err := validateDaemonIntervals(c.Int("retry-interval"), c.Int("watch-interval"))
+		if err != nil {
+			return common.NewExitError(common.ErrCodeUser, err)
+		}
+
 		ks, err := identity.LoadAndUnlockKeyStore()
 		if err != nil {
 			return fmt.Errorf("failed to load keystore: %w", err)
@@ -128,8 +133,8 @@ Run this in a separate terminal or as a system service.`,
 		if len(relays) == 0 {
 			relays = []string{relayconfig.DefaultRelay}
 		}
-		retryInterval := time.Duration(c.Int("retry-interval")) * time.Second
-		watchInterval := time.Duration(c.Int("watch-interval")) * time.Second
+		daemonCtx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
 		useNotify := c.Bool("notify")
 		autoReply := c.Bool("auto-reply")
 
@@ -141,10 +146,6 @@ Run this in a separate terminal or as a system service.`,
 		fmt.Printf("   Auto-reply: %v\n", autoReply)
 		fmt.Println("   Press Ctrl+C to stop")
 
-		// Setup signal handling
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
 		// Create tickers
 		retryTicker := time.NewTicker(retryInterval)
 		watchTicker := time.NewTicker(watchInterval)
@@ -153,46 +154,72 @@ Run this in a separate terminal or as a system service.`,
 		defer watchTicker.Stop()
 		defer cleanupTicker.Stop()
 
-		// Track seen messages for this watch session. Bounded size to avoid
-		// unbounded growth on long-running daemons. Cross-restart dedup is
-		// handled by `since` below (filter only fetches events newer than
-		// daemon start) plus storage.MessageStore's INSERT OR REPLACE guard.
+		// The in-memory set avoids repeated work during this process. The
+		// atomic SQLite incoming-once write is the durable duplicate guard
+		// when events are delivered again after a restart.
 		seen := newSeenSet()
 		preloadRecentSeen(seen, myIdentity.Npub)
 
-		// Only fetch events strictly newer than daemon start, so a restart
-		// does not re-pull every historical event the relay still holds.
+		// The relay's since filter limits this session's initial scan; durable
+		// duplicate suppression comes from StoreIncomingMessageOnce, not since.
 		since := nostr.Now()
 
 		// Run immediately
-		processOutbox(ctx, myIdentity, relays)
-		watchInbox(ctx, myIdentity, ks, seen, since, relays, useNotify, autoReply)
+		processOutbox(daemonCtx, myIdentity, relays)
+		if daemonCtx.Err() != nil {
+			fmt.Println("\n👋 Stopping daemon...")
+			return nil
+		}
+		watchInbox(daemonCtx, myIdentity, ks, seen, since, relays, useNotify, autoReply)
+		if daemonCtx.Err() != nil {
+			fmt.Println("\n👋 Stopping daemon...")
+			return nil
+		}
 
 		for {
 			select {
 			case <-retryTicker.C:
-				processOutbox(ctx, myIdentity, relays)
+				processOutbox(daemonCtx, myIdentity, relays)
 			case <-watchTicker.C:
-				watchInbox(ctx, myIdentity, ks, seen, since, relays, useNotify, autoReply)
+				watchInbox(daemonCtx, myIdentity, ks, seen, since, relays, useNotify, autoReply)
 			case <-cleanupTicker.C:
 				cleanupOutbox()
-			case <-sigChan:
+			case <-daemonCtx.Done():
 				fmt.Println("\n👋 Stopping daemon...")
-				return nil
-			case <-ctx.Done():
 				return nil
 			}
 		}
 	},
 }
 
+func validateDaemonIntervals(retrySeconds, watchSeconds int64) (time.Duration, time.Duration, error) {
+	convert := func(name string, seconds int64) (time.Duration, error) {
+		if seconds <= 0 || seconds > math.MaxInt64/int64(time.Second) {
+			return 0, fmt.Errorf("%s must be a positive number of seconds within range", name)
+		}
+		return time.Duration(seconds) * time.Second, nil
+	}
+	retry, err := convert("retry-interval", retrySeconds)
+	if err != nil {
+		return 0, 0, err
+	}
+	watch, err := convert("watch-interval", watchSeconds)
+	if err != nil {
+		return 0, 0, err
+	}
+	return retry, watch, nil
+}
+
 // processOutbox retries failed messages. Each relay attempt gets its own
 // timeout so a slow relay does not starve the rest.
 //
-// Note on persistence: messaging.UpdateOutboxStatus, IncrementOutboxRetry,
-// and RemoveFromOutbox all call SaveOutbox internally, so a daemon crash
-// after a successful publish does not double-send.
+// Outbox transitions are saved as they occur. A crash after a relay ACK but
+// before the matching entry is removed can still cause a later retry; this
+// loop does not claim exactly-once delivery.
 func processOutbox(ctx context.Context, myIdentity *types.Identity, relays []string) {
+	if ctx.Err() != nil {
+		return
+	}
 	outbox, err := messaging.LoadOutbox()
 	if err != nil {
 		fmt.Printf("[%s] ⚠️  Failed to load outbox: %v\n", time.Now().Format("15:04:05"), err)
@@ -211,6 +238,9 @@ func processOutbox(ctx context.Context, myIdentity *types.Identity, relays []str
 	failCount := 0
 
 	for _, entry := range pending {
+		if ctx.Err() != nil {
+			return
+		}
 		// Check if it's time to retry (exponential backoff)
 		if entry.LastAttempt > 0 {
 			backoff := time.Duration(entry.RetryCount*entry.RetryCount) * time.Second
@@ -264,6 +294,9 @@ func watchInbox(
 	useNotify bool,
 	autoReply bool,
 ) {
+	if ctx.Err() != nil {
+		return
+	}
 	recipientPK, err := identity.GetPublicKey(ks, myIdentity.Nickname)
 	if err != nil {
 		fmt.Printf("[%s] ⚠️  Failed to get public key: %v\n", time.Now().Format("15:04:05"), err)
@@ -285,6 +318,9 @@ func watchInbox(
 	newCount := 0
 
 	for _, url := range relays {
+		if ctx.Err() != nil {
+			return
+		}
 		newCount += watchOneRelay(ctx, url, filter, ks, recipientSK, seen, useNotify, autoReply, myIdentity, relays)
 	}
 
@@ -367,18 +403,28 @@ func watchOneRelayWithHooks(
 	defer timeout.Stop()
 
 	newCount := 0
-	for evt := range sub.Events {
-		eventID := hex.EncodeToString(evt.ID[:])
-		processed, err := processIncomingEvent(&evt, recipientSK, seen, useNotify, autoReply, myIdentity, ks, hooks)
-		if err != nil {
-			fmt.Printf("   ⚠️  Event %s: %v\n", eventID, err)
-			continue
-		}
-		if processed {
-			newCount++
+	for {
+		select {
+		case <-ctx.Done():
+			return newCount
+		case evt, ok := <-sub.Events:
+			if !ok {
+				return newCount
+			}
+			if ctx.Err() != nil {
+				return newCount
+			}
+			eventID := hex.EncodeToString(evt.ID[:])
+			processed, err := processIncomingEvent(&evt, recipientSK, seen, useNotify, autoReply, myIdentity, ks, hooks)
+			if err != nil {
+				fmt.Printf("   ⚠️  Event %s: %v\n", eventID, err)
+				continue
+			}
+			if processed {
+				newCount++
+			}
 		}
 	}
-	return newCount
 }
 
 func processIncomingEvent(
