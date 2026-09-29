@@ -10,9 +10,8 @@ import (
 )
 
 var (
-	store    *storage.MessageStore
-	storeMu  sync.Mutex
-	storeErr error
+	store   *storage.MessageStore
+	storeMu sync.Mutex
 )
 
 // InitStorage initializes the SQLite storage
@@ -23,20 +22,16 @@ func InitStorage() error {
 	if store != nil {
 		return nil
 	}
-	if storeErr != nil {
-		return storeErr
-	}
-
 	// Initialize database
 	db, err := storage.InitDB()
 	if err != nil {
-		storeErr = err
 		return err
 	}
 
 	// Migrate from JSON if needed
 	if err := storage.MigrateFromJSON(db); err != nil {
-		storeErr = err
+		_ = db.Close()
+		storage.DB = nil
 		return err
 	}
 
@@ -65,7 +60,6 @@ func ResetStoreForTest() {
 		storage.DB = nil
 	}
 	store = nil
-	storeErr = nil
 }
 
 // GetStore returns the message store instance
