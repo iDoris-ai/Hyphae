@@ -24,7 +24,7 @@ var RelayCmd = &cli.Command{
 		}, Action: relaySet},
 		{
 			Name: "info", Usage: "Test a bounded WebSocket connection",
-			Arguments: []cli.Argument{&cli.StringArg{Name: "relay_url", Max: 1, Destination: &relayInfoURLArg}},
+			Arguments: []cli.Argument{&cli.StringArg{Name: "relay_url", Destination: &relayInfoURLArg}},
 			Flags:     []cli.Flag{&cli.IntFlag{Name: "timeout", Usage: "Connection timeout in seconds", Value: 5}},
 			Action:    relayInfo,
 		},

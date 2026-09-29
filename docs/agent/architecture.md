@@ -18,7 +18,7 @@ L1  标准 Nostr    WebSocket / Event / Sig / NIP-44 / NIP-11 —— 兼容层,�
 ## 不可破的边界
 
 1. **L1 保持标准**。普通 Nostr 客户端必须能读我们 relay 上的 Kind 0 / Kind 1 / 我们的 behavior kind。任何让标准客户端**报错**的改动都不许做(读不懂 JSON 是允许的,报错不行)。见 `protocol-v2.md` §11。
-2. **L2 以插件形式叠加在 khatru 之上,不动 core**。目的是能持续 `git fetch upstream` 跟进官方更新。
+2. **L2 以插件形式叠加在 khatru 之上,不动 core**。跟踪 `fiatjaf.com/nostr/khatru` 新模块，固定版本并通过升级 PR 验证；不再从已归档的旧 GitHub 仓库构建。见 [上游维护规则](../upstream-maintenance.md)。
 3. **不新增 kind 来表达新功能**。新 behavior 一律进统一信封的 `["b","<behavior>"]` tag —— 这是我们与 Buzz 明确不同的设计决策(Buzz 走「新功能=新 kind+新 NIP 草案」的路子),不要跟风。
 4. **私钥永不出本机**。`private` 字段永不出本机,`match-only` 只出向量摘要,`public` 才上花名册。
 5. **支付走 AAstar Point(ERC-20)+ SuperPaymaster gasless,不用 Lightning**。理由:Lightning 是比特币 L2,与本生态无关联;AAstar 已有 gasless 代付 + ERC-4337 抽象账户。见 `protocol-v2.md` §7。

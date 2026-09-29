@@ -36,6 +36,10 @@ Fork → 新建分支 → 写代码 → 提交 PR → 签 CLA → Review → Mer
 - 分支命名：`feat/xxx` · `fix/xxx` · `docs/xxx`
 - Commit 规范：[Conventional Commits](https://www.conventionalcommits.org/)
 - 问题反馈：在本仓库提 Issue
+- 功能和修复在独立 worktree、工作分支开发，及时 commit、push 和提 PR，保留主工作树的未提交修改。
+- PR 的实现、脚本和配置改动原则上控制在 300～500 行以内；测试和设计文档单独计算。特殊情况可酌情处理，例如不可分割的接口迁移或生成的依赖锁文件，并在 PR 中说明实际规模与原因。
+- PR 说明应包含行为变化、兼容影响、实际验证命令和结果；依赖其他 PR 时写明 base 与合并顺序。
+- 上游依赖维护见 [上游跟踪规则](docs/upstream-maintenance.md)，跨仓接线见 [协作清单](docs/cooperation/README.md)。
 
 ## License
 
