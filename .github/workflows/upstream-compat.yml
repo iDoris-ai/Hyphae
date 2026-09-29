@@ -1,0 +1,66 @@
+name: Upstream compatibility
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - go.mod
+      - go.sum
+      - cmd/hyphae-relay/**
+      - internal/relay/**
+      - .gitmodules
+      - third_party/nak
+      - .github/dependabot.yml
+      - .github/workflows/nostr-upstream.yml
+      - .github/workflows/upstream-compat.yml
+      - tests/test_nostr_upstream_workflow.py
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Build and test dependency candidate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out pull request merge commit
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Prepare isolated test home
+        env:
+          TEST_HOME: ${{ runner.temp }}/hyphae-test-home
+        run: |
+          mkdir -p "$TEST_HOME"
+          printf 'GOPATH=%s\n' "$(go env GOPATH)" >> "$GITHUB_ENV"
+          printf 'GOCACHE=%s\n' "$(go env GOCACHE)" >> "$GITHUB_ENV"
+          printf 'HOME=%s\n' "$TEST_HOME" >> "$GITHUB_ENV"
+
+      - name: Test all packages
+        run: go test ./...
+
+      - name: Build CLI
+        run: go build -o "$RUNNER_TEMP/hyphae" ./cmd/hyphae
+
+      - name: Exercise updater Git workflow
+        run: python3 tests/test_nostr_upstream_workflow.py
+
+      - name: Build and test relay command when present
+        if: ${{ hashFiles('cmd/hyphae-relay/**') != '' }}
+        run: |
+          go test ./cmd/hyphae-relay
+          go build -o "$RUNNER_TEMP/hyphae-relay" ./cmd/hyphae-relay
+
+      - name: Run core race tests
+        run: go test -race ./internal/identity ./internal/messaging ./internal/storage ./pkg/crypto
+
+      - name: Run relay race tests when present
+        if: ${{ hashFiles('internal/relay/**') != '' }}
+        run: go test -race ./internal/relay

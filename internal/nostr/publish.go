@@ -36,7 +36,6 @@ Example: hyphae publish '{"kind":1,"content":"Hello"}'`,
 	Arguments: []cli.Argument{
 		&cli.StringArg{
 			Name:        "json",
-			Max:         1,
 			Destination: &publishJSONArg,
 		},
 	},
