@@ -1,8 +1,16 @@
 # E-M1 PR 依赖与合并顺序
 
-更新：2026-09-29。下表是本轮已验收实现的依赖关系；验收通过不代表已进入 main。主代理不自动合并 PR。
+更新：2026-09-29。下表是本轮已验收实现的依赖关系；验收通过不代表已进入 main。用户已授权主代理按依赖顺序合并；每项仍需有效批准、main 基线和通过的 CI。
 
 后台 PR-daemon 可以并行评审这些 PR，包括 draft。评审范围是各 PR 相对其 base 的差异；draft 在这里表示等待前置合入 main，不等于尚未实现。自动 review 与合并是两个步骤，review 结论不自动解除依赖门槛。
+
+## 本轮合并进度
+
+2026-09-29：#37（CI）、#38（SQLite）、#40（Nostr 上游）已通过双平台 CI 并以 merge commit 合入 main。
+
+下一批：#42、#43、#45、#46、#50、#51、#52 已改为 main；逐项比较 retarget 前后补丁，差异完全一致，head 未改。GitHub 因 base 变化撤销了旧批准，需要 PR-daemon 在新 base 上复审；这些 PR 已重新打开以触发新增的 CI。不要因旧 review 内容仍可见而直接合并。
+
+这批之后依次推进 #47（等 #42）、#48（等 #43）、#49（等 #48）。#53～#67 继续按下表等待全部前置完成，保持独立小 PR。
 
 ## 前置 PR
 
@@ -13,7 +21,7 @@
 - 本轮是堆叠 PR。若使用 merge commit，前置提交的祖先关系能保留；若使用 squash/rebase merge，后续分支通常还需重新整理到最新 main，不能只改 base。重新整理时只迁移本任务提交，核对差异和测试后再推送；不要把组合基线变成大 PR。
 - 每次 review 记录所审查的 head commit。新提交、冲突解决或基线变化后，旧结论不能直接代表新版本；重新核查有影响的部分。
 - PR-daemon 优先检查持久化事务、重复收件与副作用、加密失败、取消和部分成功结果。CLA 通过只说明贡献流程检查通过；本地测试证据和 GitHub CI 结果分别记录。
-- 当前仓库开启了合并后自动删除分支。有后续 PR 依赖的分支须在删除前完成后续 PR 的基线迁移；临时 integration 分支待全部依赖迁移完再清理。
+- 当前仓库开启了合并后自动删除分支。GitHub 可能随分支删除自动调整下游 base；每次合并后检查实际 base、差异及批准状态。临时 integration 分支待全部依赖迁移完再清理。
 
 | PR | 内容 | 前置 |
 |---|---|---|
@@ -64,5 +72,5 @@
 
 - [#39](https://github.com/iDoris-ai/Hyphae/pull/39) 是规划与验收记录；[#41](https://github.com/iDoris-ai/Hyphae/pull/41) 是按仓库命名的协作约定。
 - [#44](https://github.com/iDoris-ai/Hyphae/pull/44) 是经测试后创建依赖更新 PR 的工作流。定时任务需合入默认分支才运行；Actions 创建/审批 PR 的仓库权限开关仍等待用户确认，不因 CLA 通过而开启。
-- 建议优先处理已有 [#37](https://github.com/iDoris-ai/Hyphae/pull/37) CI PR，再推进业务链。2026-09-29 查询确认其当前 head `21b3fd7` 已获 review，Linux/macOS 测试和 `ci-ok` 通过；本轮未重新审查其全部实现，也未合并。当前 main 的 `required_status_checks` 为 null，新增功能 PR 主要只有 CLA 检查。CI workflow 合入后仍需把 `ci-ok` 配成必需检查才形成合并门槛；此建议不表示已经修改仓库设置。
+- [#37](https://github.com/iDoris-ai/Hyphae/pull/37) CI 已合入 main，Linux/macOS 检查已生效。当前 main 的 `required_status_checks` 仍为 null，本轮由主代理逐项核对 CI，不绕过 review；尚未修改仓库保护设置。
 - retarget 或解决冲突后若代码变化，运行相应测试；全部前置实现进入 main 后，运行一次隔离 HOME 的 `go test -tags integration ./... -count=1`。CLI/UI/四仓验收状态仍以任务台账为准。

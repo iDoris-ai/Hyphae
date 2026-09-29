@@ -1,6 +1,6 @@
 # E-M1-A：Hyphae CLI 验收记录
 
-2026-09-29，主代理独立验收。**Hyphae 侧基础 CLI 通信通过；Agent24 CLI 接线、基础 UI 和完整 E-M1 尚未通过。** 所有实现仍在独立 PR，未合入 main。
+2026-09-29，主代理独立验收。**Hyphae 侧基础 CLI 通信通过；Agent24 CLI 接线、基础 UI 和完整 E-M1 尚未通过。** 实现以独立小 PR 交付；#37/#38/#40 已合入 main，其余合并状态见 [PR 依赖表](em1-pr-order.md)。
 
 ## 固定版本
 
