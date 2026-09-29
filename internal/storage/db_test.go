@@ -1,8 +1,11 @@
 package storage
 
 import (
+	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,10 +13,112 @@ import (
 )
 
 func TestGetDBPath(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	path, err := GetDBPath()
 	require.NoError(t, err)
 	assert.NotEmpty(t, path)
 	assert.Contains(t, path, "messages.db")
+}
+
+func TestInitDBPragmasApplyToEveryConnection(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home with ?hash#percent%")
+	require.NoError(t, os.MkdirAll(home, 0700))
+	t.Setenv("HOME", home)
+
+	db, err := InitDB()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	dbPath := filepath.Join(home, ".hyphae", "messages.db")
+	info, err := os.Stat(dbPath)
+	require.NoError(t, err, "InitDB must create the database at the expected path")
+	require.True(t, info.Mode().IsRegular(), "database path must be a regular file")
+	db.SetMaxOpenConns(2)
+	db.SetMaxIdleConns(0)
+
+	ctx := context.Background()
+	first, err := db.Conn(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = first.Close() })
+	second, err := db.Conn(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = second.Close() })
+	assertPragmas(t, first, 5000, 1, 1)
+	assertPragmas(t, second, 5000, 1, 1)
+
+	// With no idle connections allowed, closing first discards its physical
+	// connection. Opening another while second remains held forces a new one.
+	require.NoError(t, first.Close())
+	third, err := db.Conn(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = third.Close() })
+	assertPragmas(t, third, 5000, 1, 1)
+
+	_, err = third.ExecContext(ctx, `CREATE TABLE pragma_parent (id INTEGER PRIMARY KEY)`)
+	require.NoError(t, err)
+	_, err = third.ExecContext(ctx, `CREATE TABLE pragma_child (parent_id INTEGER REFERENCES pragma_parent(id))`)
+	require.NoError(t, err)
+	_, err = third.ExecContext(ctx, `INSERT INTO pragma_parent (id) VALUES (99)`)
+	require.NoError(t, err)
+	_, err = third.ExecContext(ctx, `INSERT INTO pragma_child (parent_id) VALUES (99)`)
+	require.NoError(t, err, "a child row with an existing parent must be accepted")
+	_, err = third.ExecContext(ctx, `INSERT INTO pragma_child (parent_id) VALUES (100)`)
+	require.Error(t, err)
+	require.Contains(strings.ToLower(err.Error()), "foreign key constraint failed",
+		"the failed insert must be rejected by SQLite's foreign-key constraint")
+
+	require.NoError(t, third.Close())
+	require.NoError(t, second.Close())
+}
+
+func TestConnectionLocalExecPragmasOnlyAffectOneHeldConnection(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "isolated home")
+	require.NoError(t, os.MkdirAll(home, 0700))
+	t.Setenv("HOME", home)
+	dbPath := filepath.Join(home, "legacy-control.db")
+
+	db, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	db.SetMaxOpenConns(2)
+	db.SetMaxIdleConns(1)
+	for _, statement := range []string{
+		"PRAGMA busy_timeout = 5000",
+		"PRAGMA foreign_keys = ON",
+		"PRAGMA synchronous = NORMAL",
+	} {
+		_, err := db.Exec(statement)
+		require.NoError(t, err)
+	}
+
+	ctx := context.Background()
+	configured, err := db.Conn(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = configured.Close() })
+	untouched, err := db.Conn(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = untouched.Close() })
+	assertPragmas(t, configured, 5000, 1, 1)
+	assertPragmas(t, untouched, 0, 0, 2)
+	require.NoError(t, configured.Close())
+	require.NoError(t, untouched.Close())
+}
+
+func assertPragmas(t *testing.T, conn *sql.Conn, busyTimeout, foreignKeys, synchronous int) {
+	t.Helper()
+	var gotBusy, gotForeignKeys, gotSynchronous int
+	for _, check := range []struct {
+		query string
+		dest  *int
+	}{
+		{"PRAGMA busy_timeout", &gotBusy},
+		{"PRAGMA foreign_keys", &gotForeignKeys},
+		{"PRAGMA synchronous", &gotSynchronous},
+	} {
+		require.NoError(t, conn.QueryRowContext(context.Background(), check.query).Scan(check.dest))
+	}
+	assert.Equal(t, busyTimeout, gotBusy, "busy_timeout")
+	assert.Equal(t, foreignKeys, gotForeignKeys, "foreign_keys")
+	assert.Equal(t, synchronous, gotSynchronous, "synchronous")
 }
 
 func TestInitDB(t *testing.T) {
