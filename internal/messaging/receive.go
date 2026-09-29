@@ -24,35 +24,11 @@ var zstdFrameMagic = []byte{0x28, 0xb5, 0x2f, 0xfd}
 // decompressed/ciphertext/plaintext bodies are limited to 1 MiB and zstd
 // decoder windows to 8 MiB.
 func DecodeMessageContent(event *nostr.Event, recipientSK nostr.SecretKey) (plaintext string, isEncrypted bool, err error) {
-	if event == nil {
-		return "", false, fmt.Errorf("event is required")
-	}
-	if len(event.Content) > maxIncomingContentBytes {
-		return "", false, fmt.Errorf("encoded content exceeds 2 MiB limit")
-	}
-	encryption, hasEncryption, err := outboxTagValue(event.Tags, "enc")
+	body, isEncrypted, err := decodeIncomingMessageBody(event)
 	if err != nil {
-		return "", false, err
+		return "", isEncrypted, err
 	}
-	compression, hasCompression, err := outboxTagValue(event.Tags, "z")
-	if err != nil {
-		return "", false, err
-	}
-	if hasEncryption && encryption != "nip44" {
-		return "", false, fmt.Errorf("unsupported encryption tag")
-	}
-	if hasCompression && compression != CompressTag {
-		return "", false, fmt.Errorf("unsupported compression tag")
-	}
-
-	body, err := decodeIncomingBody(event.Content, hasCompression)
-	if err != nil {
-		return "", hasEncryption, err
-	}
-	if len(body) > maxIncomingBodyBytes {
-		return "", hasEncryption, fmt.Errorf("message body exceeds 1 MiB limit")
-	}
-	if !hasEncryption {
+	if !isEncrypted {
 		return string(body), false, nil
 	}
 	plaintext, err = crypto.DecryptMessage(string(body), recipientSK, event.PubKey)
@@ -63,6 +39,62 @@ func DecodeMessageContent(event *nostr.Event, recipientSK nostr.SecretKey) (plai
 		return "", true, fmt.Errorf("decrypted message exceeds 1 MiB limit")
 	}
 	return plaintext, true, nil
+}
+
+// decodeInboxContent validates tags and decompresses content, while allowing
+// encrypted messages to be displayed without requiring a key or validating
+// the ciphertext when the user disabled decryption.
+func decodeInboxContent(event *nostr.Event, recipientSK nostr.SecretKey, decrypt bool) (content string, encrypted, decrypted bool, err error) {
+	body, encrypted, err := decodeIncomingMessageBody(event)
+	if err != nil {
+		return "", encrypted, false, err
+	}
+	if !encrypted {
+		return string(body), false, false, nil
+	}
+	if !decrypt {
+		return "[encrypted message]", true, false, nil
+	}
+	content, err = crypto.DecryptMessage(string(body), recipientSK, event.PubKey)
+	if err != nil {
+		return "", true, false, fmt.Errorf("decrypt NIP-44 content: %w", err)
+	}
+	if len(content) > maxIncomingBodyBytes {
+		return "", true, false, fmt.Errorf("decrypted message exceeds 1 MiB limit")
+	}
+	return content, true, true, nil
+}
+
+func decodeIncomingMessageBody(event *nostr.Event) ([]byte, bool, error) {
+	if event == nil {
+		return nil, false, fmt.Errorf("event is required")
+	}
+	if len(event.Content) > maxIncomingContentBytes {
+		return nil, false, fmt.Errorf("encoded content exceeds 2 MiB limit")
+	}
+	encryption, hasEncryption, err := outboxTagValue(event.Tags, "enc")
+	if err != nil {
+		return nil, false, err
+	}
+	compression, hasCompression, err := outboxTagValue(event.Tags, "z")
+	if err != nil {
+		return nil, false, err
+	}
+	if hasEncryption && encryption != "nip44" {
+		return nil, false, fmt.Errorf("unsupported encryption tag")
+	}
+	if hasCompression && compression != CompressTag {
+		return nil, false, fmt.Errorf("unsupported compression tag")
+	}
+
+	body, err := decodeIncomingBody(event.Content, hasCompression)
+	if err != nil {
+		return nil, hasEncryption, err
+	}
+	if len(body) > maxIncomingBodyBytes {
+		return nil, hasEncryption, fmt.Errorf("message body exceeds 1 MiB limit")
+	}
+	return body, hasEncryption, nil
 }
 
 func decodeIncomingBody(content string, taggedCompressed bool) ([]byte, error) {
