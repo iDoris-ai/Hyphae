@@ -40,6 +40,8 @@
 | [#57](https://github.com/iDoris-ai/Hyphae/pull/57) | 可靠自动回复 | reliability |
 | [#58](https://github.com/iDoris-ai/Hyphae/pull/58) | inbox 查询与部分错误结果 | reliability |
 | [#59](https://github.com/iDoris-ai/Hyphae/pull/59) | daemon 参数校验与退出取消 | #57 分支；#57 合入后改回 main |
+| [#60](https://github.com/iDoris-ai/Hyphae/pull/60) | 有界历史分页模块 | reliability |
+| [#61](https://github.com/iDoris-ai/Hyphae/pull/61) | 实际 CLI 离线重试与退出验收 | recovery |
 
 后续 inbox、分页、daemon 生命周期和加密身份解锁继续分别提交小 PR；依赖已发布的分支时，在 PR 描述固定前置提交，不把其余任务的代码混进差异。
 
