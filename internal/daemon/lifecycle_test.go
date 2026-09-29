@@ -117,8 +117,10 @@ func TestDaemonProcessStopsOnSIGTERMWhileRelayIsStalled(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	ks := &types.KeyStore{Identities: make(map[string]*types.Identity), Contacts: make(map[string]*types.Contact)}
-	_, err := identity.CreateIdentity(ks, "alice")
+	_, err := identity.CreateIdentityWithPassword(ks, "alice", "daemon-test-password")
 	require.NoError(t, err)
+	ks.MasterKey = nil
+	require.NoError(t, identity.SaveKeyStore(ks))
 
 	reqReceived := make(chan struct{}, 1)
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
@@ -149,6 +151,7 @@ func TestDaemonProcessStopsOnSIGTERMWhileRelayIsStalled(t *testing.T) {
 	relayURL := "ws" + strings.TrimPrefix(server.URL, "http")
 
 	command := exec.Command(os.Args[0], "-test.run=^TestDaemonSignalChild$")
+	command.Stdin = strings.NewReader("daemon-test-password\n")
 	command.Env = append(os.Environ(),
 		"HOME="+home,
 		"HYPHAE_DAEMON_SIGNAL_CHILD=1",
@@ -183,7 +186,7 @@ func TestDaemonSignalChild(t *testing.T) {
 	}
 	relayURL := os.Getenv("HYPHAE_DAEMON_SIGNAL_RELAY")
 	app := &cli.Command{Name: "hyphae", Commands: []*cli.Command{DaemonCmd}}
-	args := []string{"hyphae", "daemon", "--relay", relayURL, "--retry-interval", "3600", "--watch-interval", "3600", "--notify=false"}
+	args := []string{"hyphae", "daemon", "--relay", relayURL, "--retry-interval", "3600", "--watch-interval", "3600", "--notify=false", "--password-stdin"}
 	if err := app.Run(context.Background(), args); err != nil {
 		t.Fatalf("daemon command failed: %v", err)
 	}

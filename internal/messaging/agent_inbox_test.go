@@ -402,6 +402,7 @@ func runAgentInboxCLI(ctx context.Context, args []string) error {
 			&cli.StringSliceFlag{Name: "relay"},
 			&cli.IntFlag{Name: "limit", Value: 10},
 			&cli.BoolFlag{Name: "decrypt", Value: true},
+			&cli.BoolFlag{Name: "password-stdin"},
 			&cli.BoolFlag{Name: "json"},
 		},
 	}
