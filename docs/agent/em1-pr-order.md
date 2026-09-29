@@ -6,11 +6,11 @@
 
 ## 本轮合并进度
 
-2026-09-29：#37（CI）、#38（SQLite）、#40（Nostr 上游）已通过双平台 CI 并以 merge commit 合入 main。
+2026-09-29：#37（CI）、#38（SQLite）、#40（Nostr 上游）、#41（跨仓协作约定）、#44（上游更新工作流）已通过双平台 CI 并以 merge commit 合入 main。#44 的依赖兼容性检查也已通过。
 
-下一批：#42、#43、#45、#46、#50、#51、#52 已改为 main；逐项比较 retarget 前后补丁，差异完全一致，head 未改。GitHub 因 base 变化撤销了旧批准，需要 PR-daemon 在新 base 上复审；这些 PR 已重新打开以触发新增的 CI。不要因旧 review 内容仍可见而直接合并。
+下一批：#42、#43、#45、#46、#50、#51、#52 已改为 main；逐项比较 retarget 前后补丁，差异完全一致，head 未改。GitHub 因 base 变化撤销了旧批准，需要 PR-daemon 在新 base 上复审；这些 PR 的 Linux/macOS 测试及 `ci-ok` 均已通过。不要因旧 review 内容仍可见而直接合并。
 
-这批之后依次推进 #47（等 #42）、#48（等 #43）、#49（等 #48）。#53～#67 继续按下表等待全部前置完成，保持独立小 PR。
+这批之后依次推进 #47（等 #42）、#48（等 #43）、#49（等 #48）；三项在现有 feature base 上已有批准，迁移后仍须核对批准是否有效。#53～#67 继续按下表等待全部前置完成，保持独立小 PR。
 
 ## 前置 PR
 
@@ -71,6 +71,6 @@
 ## 独立事项
 
 - [#39](https://github.com/iDoris-ai/Hyphae/pull/39) 是规划与验收记录；[#41](https://github.com/iDoris-ai/Hyphae/pull/41) 是按仓库命名的协作约定。
-- [#44](https://github.com/iDoris-ai/Hyphae/pull/44) 是经测试后创建依赖更新 PR 的工作流。定时任务需合入默认分支才运行；Actions 创建/审批 PR 的仓库权限开关仍等待用户确认，不因 CLA 通过而开启。
+- [#44](https://github.com/iDoris-ai/Hyphae/pull/44) 是经测试后创建依赖更新 PR 的工作流，已合入默认分支。Actions 创建/审批 PR 的仓库权限开关仍等待用户确认，不因 CLA 通过或工作流合入而开启；尚未验收自动创建更新 PR 的线上闭环。
 - [#37](https://github.com/iDoris-ai/Hyphae/pull/37) CI 已合入 main，Linux/macOS 检查已生效。当前 main 的 `required_status_checks` 仍为 null，本轮由主代理逐项核对 CI，不绕过 review；尚未修改仓库保护设置。
 - retarget 或解决冲突后若代码变化，运行相应测试；全部前置实现进入 main 后，运行一次隔离 HOME 的 `go test -tags integration ./... -count=1`。CLI/UI/四仓验收状态仍以任务台账为准。
