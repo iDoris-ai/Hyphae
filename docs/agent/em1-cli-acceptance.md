@@ -1,13 +1,13 @@
 # E-M1-A：Hyphae CLI 验收记录
 
-2026-09-29，主代理独立验收。**Hyphae 侧基础 CLI 通信通过；Agent24 CLI 接线、基础 UI 和完整 E-M1 尚未通过。** 实现以独立小 PR 交付；#37/#38/#40/#41/#44 已合入 main，其余合并状态见 [PR 依赖表](em1-pr-order.md)。
+2026-09-29，主代理独立验收。**Hyphae 侧基础 CLI 通信在下述固定组合提交上通过；Agent24 CLI 接线、基础 UI 和完整 E-M1 尚未通过。** 实现以独立小 PR 交付；最新合并状态见 [PR 依赖表](em1-pr-order.md)。后续依赖升级和修复需要另行验证，不能把这一结果当作当前 main 的完整功能验收。
 
 ## 固定版本
 
 - 组合验收提交：[`f46744aa519937ed38832e75395591b7200d9520`](https://github.com/iDoris-ai/Hyphae/commit/f46744aa519937ed38832e75395591b7200d9520)，分支 `integration/em1-cli-acceptance`。
 - 该分支仅供构建与联调，不创建汇总 PR。各项实现的前置与合并顺序见 [PR 依赖表](em1-pr-order.md)。
 - 环境：macOS arm64、Go 1.25.0；临时 HOME、临时身份、回环地址及独立 relay 数据。未以用户生产身份或公共 relay 作为验收夹具。
-- 单项修改另有相关包的 race 验证；本记录不表示全部新 PR 已在 Linux CI 上运行。当前功能 PR 的 GitHub 检查主要为 CLA。
+- 单项修改另有相关包的 race 验证；本记录不表示全部新 PR 已在 Linux CI 上运行。#37 合并后，以 main 为基线的 PR 已运行 Linux/macOS CI；仍以旧 integration 分支为基线的 PR 需要在迁移后重新确认检查覆盖。
 
 ## 已验证行为
 
@@ -35,6 +35,10 @@
 - `go mod tidy` 后无剩余模块差异；#66 只把已有 websocket 测试依赖改为 direct，版本未变。
 
 `test.sh` 的 E2E 段仅提示脚本入口，不能计作真实 E2E 通过；上述真实二进制证据来自 integration 标签的测试。
+
+## 后续主线验证
+
+2026-09-29，在 main `d44b3c8010a4c587e5909bc708e454c9ac3c756c`（已合并 #68/#69/#74/#77）上，主代理使用独立 worktree、临时 HOME、macOS arm64 和 Go 1.27.1 完成 `go test ./...`、`go vet ./...` 与 `./build.sh`，全部通过。本次验证不包含尚未合入 main 的 CLI 功能链，也不覆盖待修复的 #72。
 
 ## 接线边界与下一步
 
