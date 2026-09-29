@@ -174,6 +174,8 @@ T19 必交矩阵：正常语音链路、未授权发送者、能力越权、审�
 - inbox 查询接线：`77f5806` / [PR #58](https://github.com/iDoris-ai/Hyphae/pull/58) 验收通过。单页真实 EOSE、全失败与部分结果、事件去重/排序/limit、错误不写占位明文；关闭解密时锁定身份仍可只读。主代理独立 messaging/relayquery race 通过；实际二进制错误输出也已验证。此命令不承诺全量历史分页。
 - daemon 生命周期：`561af2c` / [PR #59](https://github.com/iDoris-ai/Hyphae/pull/59) 验收通过。interval 非正值/溢出在触盘前拒绝；SIGINT/SIGTERM 取消当前网络等待，取消后不继续重试后续队列项。主代理独立 daemon race 通过；test-helper 子进程在停滞 WS 上收到 SIGTERM 后两秒内退出。
 - `integration/em1-cli-recovery` / `c2f3651` 再组合 #56～#59，主代理隔离 HOME 的全量 `-tags integration` 测试通过。实际断线发送/重试 fixture、加密身份解锁与离线分页继续独立实现。
+- 有界分页：`082f5fd` / [PR #60](https://github.com/iDoris-ai/Hyphae/pull/60) 验收通过；包含边界秒、去重、NIP-67 提示、取消、100 页/10000 事件/30 秒上限，以及无法前进时的未完成结果。主代理独立 relayquery race 通过。此 PR 尚未接入 daemon。
+- 离线真实 CLI：`376a48c` / [PR #61](https://github.com/iDoris-ai/Hyphae/pull/61) 验收通过；实际发送入队、relay 重启后按原签名重试、对端解密与重复查询、两端历史明文核对。实际 daemon 二进制的停滞网络 SIGTERM 退出也通过；主代理独立 integration tests 通过。
 
 ### T04/T06 验收记录
 
