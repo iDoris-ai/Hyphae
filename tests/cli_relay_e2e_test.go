@@ -50,34 +50,17 @@ func TestEncryptedCLIRelayFlow(t *testing.T) {
 	relay := startRelay(t, relayBin, dataDir, port)
 	relayURL := fmt.Sprintf("ws://127.0.0.1:%d", port)
 
-	const plaintext = "private relay integration message"
-	sendOutput := runCLI(t, cliBin, aliceHome,
-		"agent", "msg", "--from", "alice", "--to", "bob", "--content", plaintext,
-		"--relay", relayURL, "--json")
-	var sent struct {
-		OK   bool `json:"ok"`
-		Data struct {
-			EventID     string `json:"event_id"`
-			Encrypted   bool   `json:"encrypted"`
-			PublishedTo int    `json:"published_to"`
-			RelayCount  int    `json:"relay_count"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(sendOutput, &sent); err != nil {
-		t.Fatalf("decode send result: %v", err)
-	}
-	if !sent.OK || !sent.Data.Encrypted || sent.Data.PublishedTo != 1 || sent.Data.RelayCount != 1 || sent.Data.EventID == "" {
-		t.Fatalf("send result did not report one encrypted publish: %s", safeJSON(sendOutput))
-	}
+	const aliceMessage = "private relay integration message"
+	firstEventID := sendEncryptedMessage(t, cliBin, aliceHome, "alice", "bob", aliceMessage, relayURL)
 
 	// Restart the actual relay process, keeping only its on-disk Bolt store.
 	relay.stop()
 	relay = startRelay(t, relayBin, dataDir, port)
-	storedEvent := queryRelayEvent(t, relayURL, sent.Data.EventID)
+	storedEvent := queryRelayEvent(t, relayURL, firstEventID)
 	if !storedEvent.VerifySignature() {
 		t.Fatal("relay returned an event with an invalid signature")
 	}
-	if strings.Contains(storedEvent.Content, plaintext) {
+	if strings.Contains(storedEvent.Content, aliceMessage) {
 		t.Fatal("relay event content unexpectedly contains plaintext")
 	}
 
@@ -94,16 +77,81 @@ func TestEncryptedCLIRelayFlow(t *testing.T) {
 	if err := json.Unmarshal(inboxOutput, &inbox); err != nil {
 		t.Fatalf("decode inbox result: %v", err)
 	}
-	if !inbox.OK || len(inbox.Data) != 1 || inbox.Data[0].Content != plaintext || !inbox.Data[0].Encrypted || !inbox.Data[0].Decrypted {
+	if !inbox.OK || len(inbox.Data) != 1 || inbox.Data[0].Content != aliceMessage || !inbox.Data[0].Encrypted || !inbox.Data[0].Decrypted {
 		t.Fatalf("inbox did not decrypt the published message: %s", safeJSON(inboxOutput))
 	}
 
 	historyOutput := runCLI(t, cliBin, bobHome, "history", "conversation", "--with", "alice", "--limit", "10")
-	if !strings.Contains(string(historyOutput), plaintext) {
+	if !strings.Contains(string(historyOutput), aliceMessage) {
 		t.Fatalf("history conversation did not show message text: %q", safeText(historyOutput))
 	}
-	assertHistoryRow(t, aliceHome, sent.Data.EventID, aliceNPub, bobNPub, plaintext, false)
-	assertHistoryRow(t, bobHome, sent.Data.EventID, aliceNPub, bobNPub, plaintext, true)
+	assertHistoryRow(t, aliceHome, firstEventID, aliceNPub, bobNPub, aliceMessage, false)
+	assertHistoryRow(t, bobHome, firstEventID, aliceNPub, bobNPub, aliceMessage, true)
+
+	// Only begin the reverse direction after the first inbox count and history
+	// row have been checked, so the two message flows stay independently clear.
+	const bobMessage = "reply from bob to alice"
+	secondEventID := sendEncryptedMessage(t, cliBin, bobHome, "bob", "alice", bobMessage, relayURL)
+	if secondEventID == firstEventID {
+		t.Fatal("reverse-direction message reused the first event ID")
+	}
+	secondEvent := queryRelayEvent(t, relayURL, secondEventID)
+	if !secondEvent.VerifySignature() {
+		t.Fatal("relay returned an invalid reverse-direction event signature")
+	}
+	if strings.Contains(secondEvent.Content, bobMessage) {
+		t.Fatal("reverse-direction relay event content unexpectedly contains plaintext")
+	}
+
+	aliceInboxOutput := runCLI(t, cliBin, aliceHome,
+		"agent", "inbox", "--as", "alice", "--relay", relayURL, "--json")
+	var aliceInbox struct {
+		OK   bool `json:"ok"`
+		Data []struct {
+			Content   string `json:"content"`
+			Encrypted bool   `json:"encrypted"`
+			Decrypted bool   `json:"decrypted"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(aliceInboxOutput, &aliceInbox); err != nil {
+		t.Fatalf("decode Alice inbox result: %v", err)
+	}
+	if !aliceInbox.OK || len(aliceInbox.Data) != 1 || aliceInbox.Data[0].Content != bobMessage || !aliceInbox.Data[0].Encrypted || !aliceInbox.Data[0].Decrypted {
+		t.Fatalf("Alice inbox did not decrypt Bob's reply: %s", safeJSON(aliceInboxOutput))
+	}
+
+	aliceHistory := runCLI(t, cliBin, aliceHome, "history", "conversation", "--with", "bob", "--limit", "10")
+	bobHistory := runCLI(t, cliBin, bobHome, "history", "conversation", "--with", "alice", "--limit", "10")
+	for name, output := range map[string][]byte{"Alice": aliceHistory, "Bob": bobHistory} {
+		if !strings.Contains(string(output), aliceMessage) || !strings.Contains(string(output), bobMessage) {
+			t.Fatalf("%s history did not show both message bodies: %q", name, safeText(output))
+		}
+	}
+	assertHistoryRow(t, bobHome, secondEventID, bobNPub, aliceNPub, bobMessage, false)
+	assertHistoryRow(t, aliceHome, secondEventID, bobNPub, aliceNPub, bobMessage, true)
+}
+
+func sendEncryptedMessage(t *testing.T, cliBin, home, from, to, plaintext, relayURL string) string {
+	t.Helper()
+	output := runCLI(t, cliBin, home,
+		"agent", "msg", "--from", from, "--to", to, "--content", plaintext,
+		"--relay", relayURL, "--json")
+	var result struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			EventID     string `json:"event_id"`
+			Encrypted   bool   `json:"encrypted"`
+			PublishedTo int    `json:"published_to"`
+			RelayCount  int    `json:"relay_count"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatalf("decode send result: %v", err)
+	}
+	if !result.OK || !result.Data.Encrypted || result.Data.PublishedTo != 1 || result.Data.RelayCount != 1 || result.Data.EventID == "" {
+		t.Fatalf("send result did not report one encrypted publish: %s", safeJSON(output))
+	}
+	return result.Data.EventID
 }
 
 func projectRoot(t *testing.T) string {
@@ -229,7 +277,9 @@ func startRelay(t *testing.T, binary, dataDir string, port int) *relayProcess {
 			t.Fatalf("test relay exited before becoming ready: %v", process.waitErr)
 		default:
 		}
-		conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf("ws://127.0.0.1:%d", port), nil)
+		dialCtx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		conn, _, err := websocket.DefaultDialer.DialContext(dialCtx, fmt.Sprintf("ws://127.0.0.1:%d", port), nil)
+		cancel()
 		if err == nil {
 			_ = conn.Close()
 			return process
@@ -259,12 +309,15 @@ func (p *relayProcess) stop() {
 
 func queryRelayEvent(t *testing.T, relayURL, eventID string) nostr.Event {
 	t.Helper()
-	conn, _, err := websocket.DefaultDialer.Dial(relayURL, nil)
+	dialCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	conn, _, err := websocket.DefaultDialer.DialContext(dialCtx, relayURL, nil)
 	if err != nil {
 		t.Fatalf("connect to restarted relay: %v", err)
 	}
 	defer conn.Close()
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
 	if err := conn.WriteJSON([]any{"REQ", "hyphae-e2e", map[string]any{"kinds": []int{30078}}}); err != nil {
 		t.Fatalf("query restarted relay: %v", err)
 	}
