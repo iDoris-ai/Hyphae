@@ -9,7 +9,7 @@
 - 同时最多三位 Luna。每项实现使用独立分支/工作树；同一文件的修改串行，依赖通过验收后才派发。
 - 每次派工固定：目标、基线 commit、允许修改的文件、输入/输出契约、依赖、验收命令、边界用例和交付物。
 - 状态为 `WAITING → READY → IN_PROGRESS → IN_REVIEW → DONE`。`DONE` 需主代理验收；测试通过不等于整个里程碑通过。环境缺失单独记录，不能计作通过。
-- 当前轮次交付任务拆分，并启动一个独立的存储修复。其余任务按下述门槛逐批派发。
+- 当前推进上游迁移、存储修复和 CLI 通信接口；基础 UI 与跨仓执行由协作文档约定后交对应仓库推进。
 
 ### 已核对基线
 
@@ -53,8 +53,8 @@ T01 的交付包括：权威协议修改、字段/错误码表、跨仓共享正
 | ID | 任务与文件范围 | 依赖 | 验收出口 | 当前状态 |
 |---|---|---|---|---|
 | T01 | 主代理冻结四仓契约；Hyphae `docs/protocol-v2.md`、`docs/agent/spec.md`，Agent24 bridge 协议及模型/附着接口声明 | — | 上述七项设计收口；两端共享样例可明确判定接受/拒绝 | READY |
-| T02 | SQLite 每连接 PRAGMA；`internal/storage/db.go` 与专门回归测试；承接 `M2-F5-T1` | — | 同时持有多条连接及重建连接均为 5000/1/1；真实外键拒绝；特殊路径正确；旧实现对照会暴露缺陷 | IN_REVIEW |
-| T03 | outbox 原子更新 API；`internal/messaging/outbox.go`、全部写入调用点；承接 `M2-F5-T2` | T02 | 独立锁文件覆盖完整读改写，唯一临时文件；多进程增删改不丢更新、JSON 可解析；不再保存过期快照 | WAITING |
+| T02 | SQLite 每连接 PRAGMA；`internal/storage/db.go` 与专门回归测试；承接 `M2-F5-T1` | — | 同时持有多条连接及重建连接均为 5000/1/1；真实外键拒绝；特殊路径正确；旧实现对照会暴露缺陷 | DONE（PR #38 待合并） |
+| T03 | outbox 原子更新 API；`internal/messaging/outbox.go`、全部写入调用点；承接 `M2-F5-T2` | T02 | 独立锁文件覆盖完整读改写，唯一临时文件；多进程增删改不丢更新、JSON 可解析；不再保存过期快照 | IN_PROGRESS |
 | T04 | outbox 重试并发与错误传播；outbox、命令及 daemon 调用点 | T03 | 重试的网络 I/O 不持有全局文件锁；写回只改目标记录；并发新增不丢、删除不复活；落盘失败不得报告已入队 | WAITING |
 | T05 | 重试保留明文与真实加密标记；outbox/store/daemon；承接 `M2-F5-T3/T6` | T04 | 先存解密明文再重试不覆盖；加密和未加密事件均准确；发布失败不改变加密属性 | WAITING |
 | T06 | group UPSERT 保留字段；`internal/group/db.go`；承接 `M2-F5-T4` | T02 | 同 ID 空值更新不清明文；event_id 冲突行为有测试；群消息旧数据可读 | WAITING |
@@ -129,15 +129,18 @@ T19 必交矩阵：正常语音链路、未授权发送者、能力越权、审�
 
 ## 本轮派工记录
 
-- `luna_storage`：T02 已提交工作区改动供评审；工作树 `../Hyphae-em1-sqlite`，分支 `fix/em1-sqlite-pragmas`。仅改 `internal/storage/db.go` 和 `db_test.go`，未创建 git commit。
+- `luna_storage` 初始实现、`luna_nostr_update` 补齐验证：T02 位于 `../Hyphae-em1-sqlite`，分支 `fix/em1-sqlite-pragmas`，提交 `1269744`、`a31b075`，见 [PR #38](https://github.com/iDoris-ai/Hyphae/pull/38)。
 - `luna_network`：已完成通信线只读核查，结论已纳入 T03～T09/T18。
 - `luna_integrations`：已完成 Agent24/AgentEar/iDoris 只读核查，正式 Rust 入口和接口缺口已纳入 T10～T17。
-- 本轮不修改其他仓库的生产代码；后续实现先为对应任务建立工作树。设计和验收材料由主代理维护。
+- `luna_nostr_update`：上游依赖更新见 [PR #40](https://github.com/iDoris-ai/Hyphae/pull/40)；当前在独立 `Hyphae-em1-outbox` 工作树实现 T03。
+- `luna_relay_migration`：独立 `Hyphae-khatru-upstream` 工作树实现维护中的 khatru relay 与部署脚本；`luna_upstream_ci` 在 `Hyphae-upstream-tracking` 实现测试后自动提依赖 PR。
+- 本轮不修改其他仓库的生产代码；对应仓库的协作约定见 [PR #41](https://github.com/iDoris-ai/Hyphae/pull/41)。设计和验收材料由主代理维护。
 
 ### T02 验收记录
 
 - 实现：`net/url` 构造 file URI，通过重复 `_pragma` 参数逐连接设置；WAL 保持初始化时设置，不改 schema。
 - 主代理已静态审阅实现和连接替换/旧写法对照测试；Luna 已按评审意见补充合法外键插入、外键约束错误断言及实际数据库路径检查。
 - `git diff --check` 已通过。
-- **环境阻塞**：当前 shell 找不到 `go`/`gofmt`；常见 Go/Homebrew 安装位置也未找到可用工具。`gofmt`、聚焦 `go test ./internal/storage/... -race -count=1`、`go test ./...` 均未完成。
-- 结论：保持 `IN_REVIEW`，尚未验收通过，T03 不解锁。待工具链可用后由 Luna 格式化并跑测试，主代理复核结果。此修复仍在独立工作树，未合入主线。
+- 工具链问题已解决：使用校验过官方 SHA256 的临时 Go 1.27.1，不修改用户全局安装。Luna 已完成格式化与测试。
+- 主代理在隔离 HOME 下独立复跑 `go test ./internal/storage/... -race -count=1`、`go test ./...`，均通过。
+- 结论：T02 本仓验收通过，T03 已解锁。PR #38 已提交待评审，尚未合入主线；CLA 属于独立合并检查，不替代测试结论。
