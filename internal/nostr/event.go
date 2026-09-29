@@ -43,7 +43,6 @@ Example: hyphae event --kind 1 --content "Hello world!"`,
 			Name:    "relay",
 			Aliases: []string{"r"},
 			Usage:   "Relay URLs to publish to",
-			Value:   []string{"wss://relay.aastar.io"},
 		},
 		&cli.BoolFlag{
 			Name:  "json",
@@ -97,7 +96,10 @@ Example: hyphae event --kind 1 --content "Hello world!"`,
 		}
 
 		// Publish
-		relays := c.StringSlice("relay")
+		relays, err := common.ResolveRelays(c)
+		if err != nil {
+			return err
+		}
 		fmt.Printf("Publishing Kind %d event to %d relay(s)...\n", event.Kind, len(relays))
 
 		results := common.PublishToRelays(ctx, event, relays)

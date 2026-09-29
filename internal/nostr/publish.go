@@ -31,7 +31,6 @@ Example: hyphae publish '{"kind":1,"content":"Hello"}'`,
 			Name:    "relay",
 			Aliases: []string{"r"},
 			Usage:   "Relay URLs",
-			Value:   []string{"wss://relay.aastar.io"},
 		},
 	},
 	Arguments: []cli.Argument{
@@ -61,7 +60,10 @@ Example: hyphae publish '{"kind":1,"content":"Hello"}'`,
 		event.PubKey = pubKey
 		event.Sign(secKey)
 
-		relays := c.StringSlice("relay")
+		relays, err := common.ResolveRelays(c)
+		if err != nil {
+			return err
+		}
 		results := common.PublishToRelays(ctx, &event, relays)
 
 		success := 0
