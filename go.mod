@@ -3,7 +3,7 @@ module github.com/iDoris-ai/hyphae
 go 1.25.0
 
 require (
-	fiatjaf.com/nostr v0.0.0-20260402062956-72a5be58d755
+	fiatjaf.com/nostr v0.0.0-20260928115942-58e4c715304e
 	github.com/btcsuite/btcd/btcutil v1.1.5
 	github.com/charmbracelet/bubbles v0.18.0
 	github.com/charmbracelet/bubbletea v1.3.10
@@ -20,9 +20,9 @@ require (
 
 require (
 	github.com/ImVexed/fasturl v0.0.0-20230304231329-4e41488060f3 // indirect
-	github.com/btcsuite/btcd/btcec/v2 v2.3.6 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
+	github.com/btcsuite/btcd/btcec/v2 v2.3.6 // indirect
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0 // indirect
 	github.com/charmbracelet/colorprofile v0.2.3-0.20250311203215-f60798e515dc // indirect
 	github.com/charmbracelet/x/ansi v0.10.1 // indirect
