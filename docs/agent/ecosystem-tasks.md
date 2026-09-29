@@ -164,6 +164,10 @@ T19 必交矩阵：正常语音链路、未授权发送者、能力越权、审�
 - 首次收件登记：`b913bd9` / PR #51 验收通过，主代理独立 storage/messaging race 通过。SQLite 原子条件写入覆盖并发、重新打开数据库、发件升级为收件和收件人冲突；daemon 调用点仍在实现。
 - 单次 relay 查询：`d70b751` / PR #52 验收通过，主代理独立 relayquery race 通过。关闭 SDK 本地伪 EOSE，处理真实 EOSE/CLOSED、取消/断线竞态及 NIP-67 提示；不能确认完整时返回错误。inbox 和 daemon 的调用点、历史分页另行接入。
 - 基线追加 #51/#52 后为 `317fb82`；新的可靠发送、daemon 收件接线、outbox list/clear JSON 分别在独立工作树推进。
+- outbox list/clear JSON：`073574c` / [PR #53](https://github.com/iDoris-ai/Hyphae/pull/53) 验收通过。真实 CLI 子进程覆盖安全字段、空数组、清理确认和输入校验；主代理独立 messaging race 通过。
+- 可靠发送：`7c6876a` / [PR #54](https://github.com/iDoris-ai/Hyphae/pull/54) 验收通过。先存历史和已签名待发记录，再发布；错误保留事件 ID、relay ACK 和队列状态。主代理独立 messaging/common/daemon/storage race 通过。
+- daemon 收件接线：`45d80ca` / [PR #55](https://github.com/iDoris-ai/Hyphae/pull/55) 验收通过。有界解压与解密失败不写明文，SQLite 成功后才记 seen/触发效果；初始化数据库失败后可在同一进程恢复。主代理独立 daemon/messaging/storage race 通过。它不保证落盘后崩溃仍会通知或自动回复。
+- 新组合基线 `integration/em1-cli-reliability` / `6e64aaa` 包含上述三项；隔离 HOME 的 `go test -tags integration ./... -count=1` 通过。#53～#55 的 base 仍为 foundation，未把 PR 自身合入其 base，也未创建汇总大 PR。新的 retry JSON、inbox 查询接线、可靠自动回复使用 reliability 为 base，各自独立 worktree。
 
 ### T04/T06 验收记录
 

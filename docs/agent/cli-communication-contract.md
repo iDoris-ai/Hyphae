@@ -6,7 +6,7 @@
 
 Hyphae 独立提供通信 CLI/daemon，Agent24 提供统一 CLI/UI 入口并调用它；AgentEar/iDoris 不参与基础文本传输。GUI 使用同一份身份/联系人/relay 配置、历史和 outbox。
 
-`--json` 或 `HYPHAE_OUTPUT=json` 沿用现有成功信封 `{"ok":true,"data":...}` 与错误信封 `{"ok":false,"error":"...","message":"..."}`。成功写 stdout，诊断写 stderr；失败使用既有语义退出码。机器模式不混入提示文字或等待交互确认。
+`--json` 或 `HYPHAE_OUTPUT=json` 沿用现有成功信封 `{"ok":true,"data":...}` 与错误信封 `{"ok":false,"error":"...","message":"..."}`。错误可增加 `data` 保留已发生的部分结果，消费者不能仅按非零退出码推断完全未发送。成功写 stdout，诊断写 stderr；失败使用既有语义退出码。机器模式不混入提示文字或等待交互确认。
 
 ### 管理和收发
 
@@ -15,7 +15,7 @@ Hyphae 独立提供通信 CLI/daemon，Agent24 提供统一 CLI/UI 入口并调�
 | `identity create/list/use` | 身份创建、列出、默认身份；list 已有 JSON | create/use 补安全 JSON；不序列化 nsec；显式 --as/--from 不改变默认身份 |
 | `contact add/list` | 联系人及角色 | JSON 返回完整 npub、nickname、role；空列表为 []；保留人工输出 |
 | `relay info` | WebSocket 连接测试 | 有界超时和 JSON；表述为连接结果，不冒充已订阅/已投递/持续在线 |
-| `relay list/set`（待新增） | 暂无持久 relay 配置入口 | 完整替换式 set 和 list；只接受 ws/wss、拒绝用户密码和 fragment；原子写配置；显式 --relay 覆盖配置；无配置才回退既有默认 |
+| `relay list/set` | PR #50 已提供持久 relay 配置入口 | 完整替换式 set 和 list；只接受 ws/wss、拒绝用户密码和 fragment；原子写配置；显式 --relay 覆盖配置；无配置才回退既有默认 |
 | `agent msg` | NIP-44 加密发送、各 relay 结果、失败入队 | 所有入队/历史写入错误可见；发布前可靠入队，重试复用事件 ID；响应准确区分 relay 接受和本地入队 |
 | `history inbox/conversation` | 本地历史及完整发送者/事件 ID | 作为 UI/bridge 的稳定数据源，保持当前字段；不依赖 `agent inbox` 人工显示用昵称 |
 | `storage outbox list/retry/clear` | 人工诊断与操作 | JSON 列表/重试结果/清理计数；list 不输出 EventJSON 或消息正文；clear 在 JSON 模式要求明确 --yes，确认后并发新增项保留 |
@@ -35,6 +35,7 @@ Hyphae 独立提供通信 CLI/daemon，Agent24 提供统一 CLI/UI 入口并调�
 - `queued_for_retry=true`：待发状态已经可靠保存。磁盘写入失败不能报告为已入队。
 - 所有 relay 失败但可靠入队：可报告成功完成“提交发送请求”，同时保留 published_to=0 和每 relay 错误，消费者不得显示已送达。
 - relay 接受后，本地状态/历史写入失败：返回可诊断错误，说明可能已发布；不得伪装成完全未发送，也不得生成新事件盲目重发。
+- `agent msg` 错误的 data 保留已有收发字段，并提供 `history_stored`、`superseded`、`queue_state_unknown`。目录同步失败可能已经替换文件，不能将这种状态声称为可靠入队或可靠删除；使用原事件 ID 核对。
 - `storage outbox retry` 的 command success 表示返回了一次重试结果；结果字段明确 sent/published、是否仍待发和 bookkeeping error。错误路径不输出虚假的 Sent。
 - 没有对端应用回执时，不提供“已送达/已读/已执行”的推测状态。这些字段在高层协议阶段扩展。
 
