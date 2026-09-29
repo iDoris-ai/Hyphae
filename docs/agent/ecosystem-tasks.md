@@ -168,6 +168,9 @@ T19 必交矩阵：正常语音链路、未授权发送者、能力越权、审�
 - 可靠发送：`7c6876a` / [PR #54](https://github.com/iDoris-ai/Hyphae/pull/54) 验收通过。先存历史和已签名待发记录，再发布；错误保留事件 ID、relay ACK 和队列状态。主代理独立 messaging/common/daemon/storage race 通过。
 - daemon 收件接线：`45d80ca` / [PR #55](https://github.com/iDoris-ai/Hyphae/pull/55) 验收通过。有界解压与解密失败不写明文，SQLite 成功后才记 seen/触发效果；初始化数据库失败后可在同一进程恢复。主代理独立 daemon/messaging/storage race 通过。它不保证落盘后崩溃仍会通知或自动回复。
 - 新组合基线 `integration/em1-cli-reliability` / `6e64aaa` 包含上述三项；隔离 HOME 的 `go test -tags integration ./... -count=1` 通过。#53～#55 的 base 仍为 foundation，未把 PR 自身合入其 base，也未创建汇总大 PR。新的 retry JSON、inbox 查询接线、可靠自动回复使用 reliability 为 base，各自独立 worktree。
+- retry JSON：`f98f820` / [PR #56](https://github.com/iDoris-ai/Hyphae/pull/56) 验收通过；真实 CLI 与 khatru 覆盖 ACK 后清队列、原签名 ID、配置回退、不可达仍排队及历史落盘失败的部分结果。主代理独立 messaging race 通过；并发替换统一返回 write_conflict。
+- 自动回复：`bbd2ac0` / [PR #57](https://github.com/iDoris-ai/Hyphae/pull/57) 验收通过；加密失败停止，独立随机 d，复用发送前持久化与精确队列事务，断线后重试同一签名事件。主代理独立 daemon/messaging/storage race 通过。
+- #53～#57 保持 draft 供后台 PR-daemon 评审；前置合入 main 后 retarget，不合入临时 integration。顺序与门槛见 [PR 依赖表](em1-pr-order.md)。
 
 ### T04/T06 验收记录
 
