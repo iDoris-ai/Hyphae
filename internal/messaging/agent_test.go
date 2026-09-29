@@ -334,6 +334,7 @@ func runAgentMsgCLICommand(ctx context.Context, args []string) error {
 			&cli.StringFlag{Name: "content"},
 			&cli.StringSliceFlag{Name: "relay"},
 			&cli.BoolFlag{Name: "encrypt", Value: true},
+			&cli.BoolFlag{Name: "password-stdin"},
 		},
 	}
 	return cmd.Run(ctx, args)

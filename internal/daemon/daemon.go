@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math"
+	"os"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -108,6 +109,10 @@ Run this in a separate terminal or as a system service.`,
 			Usage:   "Automatically reply to incoming messages",
 			Value:   false,
 		},
+		&cli.BoolFlag{
+			Name:  "password-stdin",
+			Usage: "Read an encrypted keystore password from stdin",
+		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
 		retryInterval, watchInterval, err := validateDaemonIntervals(c.Int("retry-interval"), c.Int("watch-interval"))
@@ -115,9 +120,11 @@ Run this in a separate terminal or as a system service.`,
 			return common.NewExitError(common.ErrCodeUser, err)
 		}
 
-		ks, err := identity.LoadAndUnlockKeyStore()
+		ks, err := identity.LoadKeyStoreForCommand(identity.KeyStoreCommandOptions{
+			JSONMode: common.JSONMode(c), RequireSecret: true, PasswordStdin: c.Bool("password-stdin"), Stdin: os.Stdin,
+		})
 		if err != nil {
-			return fmt.Errorf("failed to load keystore: %w", err)
+			return err
 		}
 
 		myIdentity, err := identity.GetIdentity(ks, c.String("identity"))
