@@ -46,6 +46,13 @@ Hyphae 独立提供通信 CLI/daemon，Agent24 提供统一 CLI/UI 入口并调�
 4. outbox 的每次生产读改写在跨进程事务内读最新值；网络请求在锁外。持久化失败、并发删除和过期快照都不能复活已删除项。
 5. 补收在 relay 的可用历史和保留策略范围内进行；不能承诺 relay 已删除的消息可恢复。验收至少覆盖超过旧 limit=10 的离线积压和重启重复投递。
 
+### 查询完成与上游兼容
+
+- 单次查询收到真实 EOSE 才能报告查询完成；CLOSED、连接中断、超时均不是空收件箱。维护中的 SDK 默认会在七秒后产生本地 EOSE，可靠查询必须关闭这个默认行为，并用独立 context 限时。
+- [NIP-67](https://github.com/nostr-protocol/nips/blob/master/67.md) 的 `finish`、`more`、`auth` 提示区分完整历史、仍有分页和授权限制。普通 EOSE 只表示本次历史响应结束，不能证明 relay 没有截断。分页必须处理时间戳相同的边界；无法前进时报告补收未完成，不跳过整个时间戳。
+- 本轮固定的 SDK 已提供 `EndOfStoredEvent.Hint`；本仓 khatru relay 目前发送普通 EOSE，查询上限为 500。验收要分别记录单次查询和积压补收，不能用单条收发证明无限历史恢复。
+- 当前 [NIP-78](https://github.com/nostr-protocol/nips/blob/master/78.md) 将 78/30078 定义为应用数据，并建议 relay 对这类数据限制为已认证的作者读取。因此旧 30078 通信不能承诺兼容所有公共 relay。本阶段保持旧事件读取并验收本生态 relay；T01 高层协议须选择专用 kind 和明确迁移策略，不直接改用 78，也不静默改变旧消息格式。
+
 ## A 段验收
 
 使用临时目录、Alice/Bob 两身份和真实本地 khatru relay，构建实际二进制，机器判断 JSON 与退出码：
