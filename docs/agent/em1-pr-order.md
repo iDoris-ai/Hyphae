@@ -8,11 +8,13 @@
 
 2026-09-29：#37（CI）、#38（SQLite）、#40（Nostr 上游）、#41（跨仓协作约定）、#44（上游更新工作流）已通过双平台 CI 并以 merge commit 合入 main。#44 的依赖兼容性检查也已通过。
 
-同日继续合并 #68（nak）、#69（upload-artifact）、#74（testify）、#77（color），再次尝试后合并 #71（setup-go）；合并前逐项确认有效批准和 CI。#75/#76 随主线变化由 Dependabot 更新，冲突已消除，新 head 的 CI 已通过，等待复审。#70/#73 已批准；本次 #70 返回分支策略限制（`mergeStateStatus=BLOCKED`），#73 明确报 OAuth 凭据没有 `workflow` scope。需账户持有人完成 `gh auth refresh -h github.com -s workflow` 的浏览器授权；本地文件、终端和网络权限正常。#71 远程分支已自动删除，失效远程引用已清理，本地 main 已快进到 `3237f81`。
+同日继续合并 #68（nak）、#69（upload-artifact）、#74（testify）、#77（color）和 #71（setup-go）。用户通过 SSH 将已授权凭据传至执行机器后，确认 `workflow` scope 生效，#70（checkout）、#73（download-artifact）和已获新批准的 #72（CLI v3.13）也已合并；合并前逐项确认有效批准和 CI。先前的权限阻塞已解除，无需修改分支保护。已合并远程分支及失效引用已清理，本地 main 快进到 `6bc16ee`。
+
+#75/#76 仍等待复审。新依赖合入后的冲突已解决：#42 更新为 `649bff0`，#50 更新为 `f69d05a`，均在独立 worktree 通过全量测试和相关包 race 后推送；#50 的实际 CLI list/info JSON 也通过验证。#76 由 Dependabot 更新至 `6c7b4a6`，仅模块差异，tidy 无变更，全量测试、crypto race、vet 及新 head 的 CI 均通过，无需额外提交。#76 会把最低 Go 版本提高至 1.26，已写入 PR 描述，所有 Go workflow 均从 go.mod 读取版本。#62 的新增回归测试已获批准，仍按原有依赖顺序等待主线迁移。
 
 下一批：#42、#43、#45、#46、#50、#51、#52 已改为 main；逐项比较 retarget 前后补丁，差异完全一致，head 未改。GitHub 因 base 变化撤销了旧批准，需要 PR-daemon 在新 base 上复审；这些 PR 的 Linux/macOS 测试及 `ci-ok` 均已通过。不要因旧 review 内容仍可见而直接合并。
 
-依赖更新合入后，#42 的模块冲突已在独立 worktree 修复并推送 `9cef808`，全量测试、relay race 和双平台 CI 通过。#62 已推送连接清理回归测试 `13eb491`；移除清理时失败，恢复后通过，全量测试和 nostr race 也通过。#72 已推送 `72e2aaf`，适配新版 CLI 参数 API，并修复缺少必填参数时 JSON 输出混入普通帮助文本的问题；真实二进制回归测试、全量测试、vet、构建和相关包 race 均通过，移除 JSON 修复时回归测试失败。这些更新均需新 head 的复审。
+上一轮依赖更新中，#42 的模块冲突已修复并推送 `9cef808`，全量测试、relay race 和双平台 CI 通过。#62 的连接清理回归测试提交为 `13eb491`；移除清理时失败，恢复后通过，全量测试和 nostr race 也通过。#72 的 `72e2aaf` 适配新版 CLI 参数 API，并修复缺少必填参数时 JSON 输出混入普通帮助文本的问题；真实二进制回归测试、全量测试、vet、构建和相关包 race 均通过，移除 JSON 修复时回归测试失败；#72 已通过复审并合并。
 
 新版 CLI 与完整功能链的组合验收发现 #59 的 `c.Int()` 返回类型兼容问题；`c4e54c9` 用一行显式转换同时兼容新旧版本，原分支全量测试与参数边界测试通过。修复后的临时组合通过全量 integration、vet 和构建，未推送汇总分支；详见 [CLI 验收记录](em1-cli-acceptance.md)。#59 的新 head 同样需要复审。
 
