@@ -44,7 +44,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # third_party/nak is a submodule that no package imports (see README);
           # leaving it unfetched keeps CI honest about what actually builds.
