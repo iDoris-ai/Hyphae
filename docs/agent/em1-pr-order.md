@@ -53,10 +53,12 @@
 | [#63](https://github.com/iDoris-ai/Hyphae/pull/63) | 加密身份的 CLI stdin 解锁 | recovery |
 | [#64](https://github.com/iDoris-ai/Hyphae/pull/64) | 创建加密身份的 stdin 通道 | runtime |
 | [#65](https://github.com/iDoris-ai/Hyphae/pull/65) | daemon 历史分页接线 | runtime |
+| [#66](https://github.com/iDoris-ai/Hyphae/pull/66) | 真实 CLI 125 条积压与重启验收 | backfill |
+| [#67](https://github.com/iDoris-ai/Hyphae/pull/67) | 空历史统计归零 | backfill |
 
-`integration/em1-cli-runtime` / `b1cbaaa` 再组合 #60～#63，主代理已通过隔离 HOME 的全量 integration 测试。后续 daemon 历史分页接线与真实积压验收继续分别提交小 PR；依赖已发布的分支时，在 PR 描述固定前置提交，不把其余任务的代码混进差异。
+`integration/em1-cli-runtime` / `b1cbaaa` 再组合 #60～#63，主代理已通过隔离 HOME 的全量 integration 测试。后续 daemon 历史分页接线与真实积压验收分别提交小 PR；依赖已发布的分支时，在 PR 描述固定前置提交，不把其余任务的代码混进差异。
 
-`integration/em1-cli-backfill` / `916fc1f` 再组合 #64/#65。主代理已用 Go 1.25.0 通过全量 integration、vet 和构建；`test.sh` 暴露新身份空历史统计的 NULL 扫描错误，正在独立修复。真实 125 条积压验收仍是单独测试 PR，不把组合分支作为交付 PR。
+`integration/em1-cli-backfill` / `916fc1f` 再组合 #64/#65；`integration/em1-cli-acceptance` / `f46744a` 再组合 #66/#67。最终版本在 Go 1.25.0 下通过全量 integration、vet、构建及带临时身份的 `test.sh`。详见 [CLI 验收记录](em1-cli-acceptance.md)。不把组合分支作为交付 PR。
 
 ## 独立事项
 

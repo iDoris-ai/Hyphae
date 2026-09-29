@@ -2,6 +2,8 @@
 
 更新：2026-09-29。范围依据 [生态里程碑草案](ecosystem-roadmap.md)。保留历史 M1～M5 编号；本表用 E-M 编号关联旧任务，不覆盖旧台账。
 
+**当前出口：Hyphae 侧 A 段 CLI 已通过，见 [最终验收记录](em1-cli-acceptance.md)。** 固定组合提交 `f46744a`；各项仍是待合并的小 PR。T20 的 Agent24 CLI 接线、T21/T22 基础 UI、T01 高层契约和 C 段四仓链路尚未完成，整体 E-M1 不记通过。下文早期组合记录只描述对应提交当时的状态。
+
 ## 工作方式
 
 - **主代理**：架构、契约、任务拆分、依赖协调、代码评审和验收；生产代码与测试实现交给 **GPT-6 Luna**。
@@ -182,6 +184,8 @@ T19 必交矩阵：正常语音链路、未授权发送者、能力越权、审�
 - 创建身份的 stdin：`cefebc8` / [PR #64](https://github.com/iDoris-ai/Hyphae/pull/64) 验收通过；首次加密创建、向加密库追加、错误不改原文件、输入方式冲突和机器模式禁止提示均有真实 CLI 测试。主代理独立 identity race 通过。
 - daemon 分页接线：`eb79c30` / [PR #65](https://github.com/iDoris-ai/Hyphae/pull/65) 验收通过；移除启动时间下界和 limit=10，坏事件不阻塞后续有效消息，查询错误报告未完成。103 条同秒积压、数据库重开去重、写盘失败恢复和取消均通过；主代理独立 daemon/relayquery/messaging race 通过。
 - `integration/em1-cli-backfill` / `916fc1f` 组合 #64/#65；Go 1.25.0 全量 integration、vet、build 通过。smoke 脚本发现空历史统计的 SQL NULL 错误，修复与最终 125 条积压验收仍在推进，不能据此提前记 A 段通过。
+- 最终收尾：[#66](https://github.com/iDoris-ai/Hyphae/pull/66) / `fab7be3` 通过真实 CLI 125 条积压与重启去重；旧版在线 relay 对照仅导入 10 条。[#67](https://github.com/iDoris-ai/Hyphae/pull/67) / `5f4b9ee` 修复无匹配消息时的零统计，主代理独立 Go 1.25 storage race 通过。
+- 最终组合 `integration/em1-cli-acceptance` / `f46744a`：主代理以 Go 1.25.0 通过全量 integration、vet、build、创建临时默认身份后的 `test.sh`，模块整理后工作树干净。Hyphae 侧 A 段通过，T20 的跨仓接线和 T18/T19 的四仓验收仍待完成。
 
 ### T04/T06 验收记录
 
