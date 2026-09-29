@@ -23,6 +23,12 @@ Hyphae 独立提供通信 CLI/daemon，Agent24 提供统一 CLI/UI 入口并调�
 
 `relay set` 作为完整配置写入，不自动探测或连接新 relay；只读 `list` 不探网。relay 参数优先级为显式 `--relay` > 本地配置 > 既有默认。已入队事件继续使用入队时记录的 relay，避免修改配置后将待发私有消息投向新的公开 relay。
 
+配置接口固定为 `relay set --relay <URL>`（可重复）和 `relay list`；保存到 `~/.hyphae/relays.json`，格式为 `{"version":1,"relays":["wss://relay.example"]}`。列表及保存成功的 JSON data 为 `{"relays":[...],"source":"config"}`，未配置时 source 为 `default`。空集合、非法 URL、未知配置版本和损坏文件明确报错；只有文件不存在才使用既有默认。使用权限 0600 的唯一临时文件、同步和同目录替换，目录权限 0700。
+
+`relay info [URL] --timeout <秒>` 是一次有界 WebSocket 连接探测；URL 缺省时探测有效配置中的首个地址。成功 data 为 `{"url":"...","connected":true}`；失败走网络错误信封和退出码 2。timeout 必须大于零且不能溢出，连接成功不代表持续在线。
+
+`agent inbox` 保留既有 JSON 数组形状。所有 relay 查询均失败时返回网络错误，不能报告成功的空收件箱；部分 relay 成功可返回已取得的事件，同时在 stderr 说明未完成的查询。空收件箱必须来自成功完成的查询。显式订阅错误和连接超时均需处理。
+
 ## 状态语义
 
 - `published_to > 0`：至少一个 relay 接受该事件；不证明收件人读到或执行。
