@@ -8,6 +8,7 @@
 - **Luna**：按任务单实现、补测试、提供可复现证据；接口变化先交主代理评审。
 - 同时最多三位 Luna。每项实现使用独立分支/工作树；同一文件的修改串行，依赖通过验收后才派发。
 - 每次派工固定：目标、基线 commit、允许修改的文件、输入/输出契约、依赖、验收命令、边界用例和交付物。
+- 多个前置 PR 的共同开发基线为 `integration/em1-cli-foundation`（`60715f3`），仅组合已验收改动，不为它创建汇总大 PR。后续跨依赖的小 PR 暂以此为 base；前置 PR 合入主线后逐项改回 main，并核对差异及回归。主线尚未合并本轮 PR。
 - 状态为 `WAITING → READY → IN_PROGRESS → IN_REVIEW → DONE`。`DONE` 需主代理验收；测试通过不等于整个里程碑通过。环境缺失单独记录，不能计作通过。
 - 当前推进上游迁移、存储修复和 CLI 通信接口；基础 UI 与跨仓执行由协作文档约定后交对应仓库推进。
 
@@ -56,7 +57,7 @@ T01 的交付包括：权威协议修改、字段/错误码表、跨仓共享正
 | T02 | SQLite 每连接 PRAGMA；`internal/storage/db.go` 与专门回归测试；承接 `M2-F5-T1` | — | 同时持有多条连接及重建连接均为 5000/1/1；真实外键拒绝；特殊路径正确；旧实现对照会暴露缺陷 | DONE（PR #38 待合并） |
 | T03 | outbox 原子更新 API；`internal/messaging/outbox.go`、全部写入调用点；承接 `M2-F5-T2` | T02 | 独立锁文件覆盖完整读改写，唯一临时文件；多进程增删改不丢更新、JSON 可解析；不再保存过期快照 | DONE（PR #43 待合并） |
 | T04 | outbox 重试并发与错误传播；outbox、命令及 daemon 调用点 | T03 | 重试的网络 I/O 不持有全局文件锁；写回只改目标记录；并发新增不丢、删除不复活；落盘失败不得报告已入队 | IN_PROGRESS |
-| T05 | 重试保留明文与真实加密标记；outbox/store/daemon；承接 `M2-F5-T3/T6` | T04 | 先存解密明文再重试不覆盖；加密和未加密事件均准确；发布失败不改变加密属性 | WAITING |
+| T05 | 重试保留明文与真实加密标记；outbox/store/daemon；承接 `M2-F5-T3/T6` | T04 | 先存解密明文再重试不覆盖；加密和未加密事件均准确；发布失败不改变加密属性 | IN_PROGRESS（重试历史已通过，daemon 待补） |
 | T06 | group UPSERT 保留字段；`internal/group/db.go`；承接 `M2-F5-T4` | T02 | 同 ID 空值更新不清明文；event_id 冲突行为有测试；群消息旧数据可读 | DONE（PR #46 待合并） |
 | T07 | behavior 编解码与兼容读取；新增 `internal/behavior/`、`pkg/types/`；承接 `M2-F5-T5/M2-F1-T1` | T01 | 正反例跨语言一致；验签、版本、重复 tag、截断、解压上限、未知行为；旧 30078 不误解析 | WAITING |
 | T08 | register/publish 收发与 CLI；behavior、profile、`cmd/hyphae/` | T07、T05 | 三种注册模式、能力版本可发现；广播只带允许公开的字段；CLI JSON 稳定；真实 relay 可查询 | WAITING |
@@ -158,15 +159,18 @@ T19 必交矩阵：正常语音链路、未授权发送者、能力越权、审�
 
 - 身份/联系人 JSON：`36b8641` / PR #45 验收通过。Luna 全量测试通过，主代理独立 `go test -race ./internal/identity -count=1` 通过，含实际 CLI 子进程测试；覆盖创建、默认身份、联系人列表和规范化公钥、空数组、环境开关、非交互密码错误与磁盘失败。
 - 加密库新增身份保持加密；已有未加密身份的库须先使用 `identity change-password` 完成整库加密。JSON 管理输出使用公开字段白名单。
-- relay 配置/探测与消费入口接线进行中；outbox JSON/可靠入队、inbox 错误传播、daemon 离线补收仍待后续小 PR，不能据此宣称 Agent24 CLI/UI 已接线。
+- outbox JSON/可靠入队、inbox 错误传播、daemon 离线补收仍待后续小 PR，不能据此宣称 Agent24 CLI/UI 已接线。
+- relay 配置/探测：`f2c62e2` / PR #50 验收通过。主代理独立 relayconfig/common/nostr race 通过；组合后的实际 CLI 在临时 HOME 保存本地 relay 后，无显式 --relay 的 info、加密发送和收件均使用该配置并通过。outbox 旧空地址条目的回退接线仍待完成。
 
 ### T04/T06 验收记录
 
 - T04a 重试结果事务：主代理静态复核及独立 messaging/daemon/storage race 通过。网络调用前锁内确认 QueueID，失败使用最新重试次数，成功只移除相同队列项；并发删除不恢复，新入队项不被旧操作删除。relay ACK、历史落盘、队列状态分别报告；rename 后目录同步失败报告状态不确定。T04 的发布前入队和 CLI 错误传播仍待完成。
 - T06 `a8a1a0b` / PR #46：使用按主键 UPSERT 保留空值更新前的正文和事件 ID；缺失事件 ID 存 NULL，不同消息的重复非空事件 ID 明确失败并保留旧记录。Luna 全量测试通过，主代理独立 group race 通过。
+- T05a `09b869b` / PR #49：NIP-44 重试用空 plaintext 保留已有明文，未加密事件按压缩标签还原正文，未知编码或损坏压缩明确失败。实际 SQLite 回归、主代理独立 messaging/storage race 均通过；daemon 自动回复的加密错误处理与属性修复尚未包含。
 
 ### T18 本仓夹具与组合验证
 
 - PR #47 `289e539`：构建实际 CLI 与 relay，使用两套临时 HOME、临时 relay 数据、回环端口；双向 NIP-44 收发、签名校验、relay 重启后事件仍可查询、双方历史的事件 ID/正文均通过。主代理独立运行 `go test -tags integration ./tests -count=1` 通过。
 - 本地 `review/em1-cli` 已组合 #38/#40/#42/#43/#45/#46/#47/#48；主代理隔离 HOME 执行 `go test -tags integration ./... -count=1` 通过。该分支只用于组合验收，没有创建合并这些改动的大 PR，也没有合入远端主线。
+- 加入 #49/#50 后，`60715f3` 再次通过上述全量与 integration 检查，作为共同开发基线；可靠发送、原子首次收件和查询完成判定分别在独立工作树继续实现。
 - 待补：断线入队/重试、daemon 离线积压与重启去重、Agent24 基础 CLI/UI 和四仓高层链路。T18/T19 保持未完成。
