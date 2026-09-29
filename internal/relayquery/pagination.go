@@ -32,7 +32,11 @@ type pageFetcher func(context.Context, string, nostr.Filter) (Page, error)
 // invokes callback once for each unique event. Walk manages Filter.Limit,
 // using 100 events initially and raising it to 500 when a page makes no
 // progress. Other filters are preserved. An Until of zero is fixed to the
-// current time once at the start of the walk.
+// current time once at the start of the walk. The callback runs synchronously;
+// Walk checks its context between fetches and callbacks, but cannot interrupt a
+// callback that is already blocked. Callbacks must return promptly or handle
+// cancellation themselves, so the 30-second context is not a hard wall-clock
+// bound for arbitrary callback code.
 func Walk(ctx context.Context, url string, filter nostr.Filter, callback func(nostr.Event) error) (Stats, error) {
 	return walk(ctx, url, filter, callback, Fetch)
 }
