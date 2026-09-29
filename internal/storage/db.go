@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -32,7 +33,7 @@ func InitDB() (*sql.DB, error) {
 		return nil, err
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sql.Open("sqlite", sqliteDSN(dbPath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -43,29 +44,10 @@ func InitDB() (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	// Every command-line invocation calls InitDB() and re-runs migrate()
-	// (CREATE TABLE IF NOT EXISTS / ALTER TABLE ADD COLUMN), so concurrent
-	// processes can race on the same DDL. busy_timeout makes SQLite retry
-	// for a bit instead of immediately failing with "database is locked".
-	if _, err := db.Exec("PRAGMA busy_timeout = 5000"); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("failed to set busy timeout: %w", err)
-	}
-
 	// Enable WAL mode for better concurrency
 	if _, err := db.Exec("PRAGMA journal_mode = WAL"); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("failed to enable WAL mode: %w", err)
-	}
-	if _, err := db.Exec("PRAGMA synchronous = NORMAL"); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("failed to set synchronous mode: %w", err)
-	}
-
-	// Enable foreign keys
-	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
 	}
 
 	// Run migrations
@@ -76,6 +58,18 @@ func InitDB() (*sql.DB, error) {
 
 	DB = db
 	return db, nil
+}
+
+// sqliteDSN encodes the database path as a file URL and configures settings
+// that SQLite applies independently to every connection opened by database/sql.
+func sqliteDSN(dbPath string) string {
+	u := &url.URL{Scheme: "file", Path: filepath.ToSlash(dbPath)}
+	query := url.Values{}
+	query.Add("_pragma", "busy_timeout(5000)")
+	query.Add("_pragma", "foreign_keys(ON)")
+	query.Add("_pragma", "synchronous(NORMAL)")
+	u.RawQuery = query.Encode()
+	return u.String()
 }
 
 // CloseDB closes the database connection
