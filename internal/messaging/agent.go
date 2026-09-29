@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/iDoris-ai/hyphae/internal/audit"
 	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/identity"
+	"github.com/iDoris-ai/hyphae/internal/relayquery"
 	"github.com/iDoris-ai/hyphae/pkg/crypto"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/klauspost/compress/zstd"
@@ -404,6 +406,11 @@ var AgentInboxCmd = &cli.Command{
 		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
+		limit := int(c.Int("limit"))
+		if limit <= 0 {
+			return common.NewExitError(common.ErrCodeUser, fmt.Errorf("limit must be positive"))
+		}
+
 		ks, err := identity.LoadKeyStore()
 		if err != nil {
 			return err
@@ -425,56 +432,55 @@ var AgentInboxCmd = &cli.Command{
 			return common.NewExitError(common.ErrCodeAuth, fmt.Errorf("failed to load recipient key (is the keystore unlocked?): %w", err))
 		}
 
-		filter := nostr.Filter{
-			Kinds: []nostr.Kind{AgentKind},
-			Tags:  nostr.TagMap{"p": []string{common.PubKeyToHex(recipientPK)}},
-			Limit: int(c.Int("limit")),
-		}
-
 		relays, err := common.ResolveRelays(c)
 		if err != nil {
 			return err
 		}
 		jsonMode := common.JSONMode(c)
-		if !jsonMode {
-			fmt.Printf("📬 Inbox for '%s'\n\n", recipient.Nickname)
+		filter := nostr.Filter{
+			Kinds: []nostr.Kind{AgentKind},
+			Tags:  nostr.TagMap{"p": []string{common.PubKeyToHex(recipientPK)}},
+			Limit: limit,
 		}
 
-		allEvents := make([]nostr.Event, 0)
+		allEvents := make(map[string]nostr.Event)
+		successfulRelays := 0
+		var relayErrors []string
+		var eventErrors []string
+		recipientHex := common.PubKeyToHex(recipientPK)
 		for _, url := range relays {
-			relay, err := nostr.RelayConnect(ctx, url, nostr.RelayOptions{})
-			if err != nil {
-				if !jsonMode {
-					fmt.Printf("   ⚠️  Failed to connect to %s: %v\n", url, err)
+			page, fetchErr := relayquery.Fetch(ctx, url, filter)
+			if fetchErr != nil {
+				relayErrors = append(relayErrors, fmt.Sprintf("%s: %v", url, fetchErr))
+			} else {
+				successfulRelays++
+			}
+			for _, evt := range page.Events {
+				if err := validateInboxEvent(evt, recipientHex); err != nil {
+					eventErrors = append(eventErrors, fmt.Sprintf("event %s: %v", evt.ID.Hex(), err))
+					continue
 				}
-				continue
+				allEvents[evt.ID.Hex()] = evt
 			}
-			defer relay.Close()
-			sub, _ := relay.Subscribe(ctx, filter, nostr.SubscriptionOptions{})
-			timeout := time.AfterFunc(5*time.Second, func() { sub.Unsub() })
-			for evt := range sub.Events {
-				allEvents = append(allEvents, evt)
-			}
-			timeout.Stop()
 		}
 
-		if len(allEvents) == 0 {
-			common.Emit(jsonMode, []any{}, func() {
-				fmt.Println("   Empty")
-			})
-			return nil
-		}
-
-		type inboxEntry struct {
-			Time      string `json:"time"`
-			From      string `json:"from"`
-			Content   string `json:"content"`
-			Encrypted bool   `json:"encrypted"`
-			Decrypted bool   `json:"decrypted"`
-		}
-		entries := make([]inboxEntry, 0, len(allEvents))
-
+		events := make([]nostr.Event, 0, len(allEvents))
 		for _, evt := range allEvents {
+			events = append(events, evt)
+		}
+		sort.Slice(events, func(i, j int) bool {
+			if events[i].CreatedAt != events[j].CreatedAt {
+				return events[i].CreatedAt > events[j].CreatedAt
+			}
+			return events[i].ID.Hex() < events[j].ID.Hex()
+		})
+		if len(events) > limit {
+			events = events[:limit]
+		}
+
+		entries := make([]agentInboxEntry, 0, len(events))
+		var auditWarnings []string
+		for _, evt := range events {
 			senderNpub := common.EncodeNpub(evt.PubKey)
 			senderName := senderNpub[:16] + "..."
 			for _, contact := range identity.ListContacts(ks) {
@@ -484,49 +490,57 @@ var AgentInboxCmd = &cli.Command{
 				}
 			}
 
-			// Check if encrypted
-			isEncrypted := false
-			for _, tag := range evt.Tags {
-				if len(tag) >= 2 && tag[0] == "enc" && tag[1] == "nip44" {
-					isEncrypted = true
-					break
+			content, isEncrypted, decrypted, err := decodeInboxContent(&evt, recipientSK, autoDecrypt)
+			if err != nil {
+				eventErrors = append(eventErrors, fmt.Sprintf("event %s: decode message: %v", evt.ID.Hex(), err))
+				continue
+			}
+
+			first := false
+			if !isEncrypted || autoDecrypt {
+				first, err = StoreIncomingMessageOnce(&evt, recipient.Npub, content, isEncrypted)
+				if err != nil {
+					eventErrors = append(eventErrors, fmt.Sprintf("event %s: store received message: %v", evt.ID.Hex(), err))
+					continue
+				}
+			}
+			if first {
+				if err := audit.LogAction(recipient.Nickname, audit.ActionMessageReceived, map[string]any{
+					"from": senderNpub, "encrypted": isEncrypted, "event_id": evt.ID.Hex(),
+				}); err != nil {
+					auditWarnings = append(auditWarnings, fmt.Sprintf("audit log failed for event %s: %v", evt.ID.Hex(), err))
 				}
 			}
 
-			content, _ := DecompressText(evt.Content)
-			decrypted := false
-
-			// Decrypt if needed
-			if isEncrypted && autoDecrypt {
-				plain, err := crypto.DecryptMessage(content, recipientSK, evt.PubKey)
-				if err == nil {
-					content = plain
-					decrypted = true
-				} else {
-					content = "[encrypted - cannot decrypt]"
-				}
-			} else if isEncrypted {
-				content = "[encrypted message]"
-			}
-
-			// Store in local history
-			StoreIncomingMessage(&evt, content, isEncrypted)
-			if err := audit.LogAction(recipient.Nickname, audit.ActionMessageReceived, map[string]any{
-				"from": senderNpub, "encrypted": isEncrypted,
-			}); err != nil {
-				fmt.Fprintf(os.Stderr, "⚠️  audit log failed: %v\n", err)
-			}
-
-			entries = append(entries, inboxEntry{
-				Time:      evt.CreatedAt.Time().Format("15:04"),
-				From:      senderName,
-				Content:   content,
-				Encrypted: isEncrypted,
-				Decrypted: decrypted,
+			entries = append(entries, agentInboxEntry{
+				Time: evt.CreatedAt.Time().Format("15:04"), From: senderName, Content: content,
+				Encrypted: isEncrypted, Decrypted: decrypted, EventID: evt.ID.Hex(), SenderNpub: senderNpub,
 			})
 		}
 
+		if len(eventErrors) > 0 || successfulRelays == 0 {
+			messageParts := make([]string, 0, len(relayErrors)+len(eventErrors)+1)
+			if successfulRelays == 0 {
+				messageParts = append(messageParts, "all relays failed")
+			}
+			messageParts = append(messageParts, relayErrors...)
+			messageParts = append(messageParts, eventErrors...)
+			messageParts = append(messageParts, auditWarnings...)
+			code := common.ErrCodeOther
+			if successfulRelays == 0 {
+				code = common.ErrCodeNetwork
+			}
+			return common.NewExitErrorWithData(code, fmt.Errorf("%s", strings.Join(messageParts, "; ")), entries)
+		}
+		for _, warning := range append(relayErrors, auditWarnings...) {
+			fmt.Fprintf(os.Stderr, "⚠️  %s\n", warning)
+		}
+
 		common.Emit(jsonMode, entries, func() {
+			fmt.Printf("📬 Inbox for '%s'\n\n", recipient.Nickname)
+			if len(entries) == 0 {
+				fmt.Println("   Empty")
+			}
 			for _, e := range entries {
 				prefix := ""
 				switch {
@@ -540,6 +554,40 @@ var AgentInboxCmd = &cli.Command{
 		})
 		return nil
 	},
+}
+
+type agentInboxEntry struct {
+	Time       string `json:"time"`
+	From       string `json:"from"`
+	Content    string `json:"content"`
+	Encrypted  bool   `json:"encrypted"`
+	Decrypted  bool   `json:"decrypted"`
+	EventID    string `json:"event_id"`
+	SenderNpub string `json:"sender_npub"`
+}
+
+func validateInboxEvent(event nostr.Event, recipientHex string) error {
+	if event.Kind != AgentKind {
+		return fmt.Errorf("unexpected event kind %d", event.Kind)
+	}
+	if !event.CheckID() || !event.VerifySignature() {
+		return fmt.Errorf("invalid event ID or signature")
+	}
+	pTags := 0
+	matchedRecipient := false
+	for _, tag := range event.Tags {
+		if len(tag) > 0 && tag[0] == "p" {
+			pTags++
+			if len(tag) < 2 {
+				return fmt.Errorf("recipient filter tag is malformed")
+			}
+			matchedRecipient = tag[1] == recipientHex
+		}
+	}
+	if pTags != 1 || !matchedRecipient {
+		return fmt.Errorf("event does not match recipient filter with exactly one p tag")
+	}
+	return nil
 }
 
 // AgentCmd - Main agent command
