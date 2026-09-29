@@ -175,13 +175,18 @@ func (e *outboxCommitUncertainError) Unwrap() error { return e.err }
 // task 8's outbox-diagnostics work (see specs/m1.5/README.md). Hex-encoding
 // keeps the stored ID both round-trip-safe through JSON and human-readable.
 func AddToOutbox(ob *types.Outbox, event *nostr.Event, recipientNpub string, relays []string) error {
+	_, err := enqueueOutboxEntry(ob, event, recipientNpub, relays)
+	return err
+}
+
+func enqueueOutboxEntry(ob *types.Outbox, event *nostr.Event, recipientNpub string, relays []string) (types.OutboxEntry, error) {
 	eventJSON, err := json.Marshal(event)
 	if err != nil {
-		return err
+		return types.OutboxEntry{}, err
 	}
 	queueID, err := newOutboxQueueID()
 	if err != nil {
-		return err
+		return types.OutboxEntry{}, err
 	}
 
 	entry := types.OutboxEntry{
@@ -203,7 +208,7 @@ func AddToOutbox(ob *types.Outbox, event *nostr.Event, recipientNpub string, rel
 	if err == nil {
 		refreshOutbox(ob, updated)
 	}
-	return err
+	return entry, err
 }
 
 func newOutboxQueueID() (string, error) {
@@ -608,6 +613,9 @@ func publishToRelays(ctx context.Context, targets []string, event nostr.Event, d
 		relayCtx, cancel := context.WithTimeout(ctx, dialTimeout)
 		relay, err := nostr.RelayConnect(relayCtx, url, nostr.RelayOptions{})
 		if err != nil {
+			if relay != nil {
+				relay.Close()
+			}
 			cancel()
 			continue
 		}

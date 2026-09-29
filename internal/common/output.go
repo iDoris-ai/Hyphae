@@ -37,6 +37,7 @@ const (
 type ExitError struct {
 	Code string // one of the ErrCode* constants
 	Err  error
+	Data any // optional controlled command result included in JSON error output
 }
 
 func (e *ExitError) Error() string { return e.Err.Error() }
@@ -45,6 +46,12 @@ func (e *ExitError) Unwrap() error { return e.Err }
 // NewExitError wraps err with a machine-readable error code.
 func NewExitError(code string, err error) *ExitError {
 	return &ExitError{Code: code, Err: err}
+}
+
+// NewExitErrorWithData wraps err with a machine-readable code and public
+// result data to preserve partial command outcomes in JSON error responses.
+func NewExitErrorWithData(code string, err error, data any) *ExitError {
+	return &ExitError{Code: code, Err: err, Data: data}
 }
 
 // JSONMode resolves whether --json output is active for the current command:
@@ -115,9 +122,11 @@ func Emit(jsonMode bool, data any, humanFn func()) {
 // passed where an npub was expected).
 func EmitError(jsonMode bool, err error) int {
 	code := ErrCodeOther
+	var data any
 	var exitErr *ExitError
 	if errors.As(err, &exitErr) {
 		code = exitErr.Code
+		data = exitErr.Data
 	} else {
 		code = classifyUnwrappedError(err)
 	}
@@ -127,7 +136,7 @@ func EmitError(jsonMode bool, err error) int {
 	if !jsonMode {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", message)
 	} else {
-		writeResult(os.Stderr, Result{OK: false, Error: code, Message: message})
+		writeResult(os.Stderr, Result{OK: false, Error: code, Message: message, Data: data})
 	}
 	return exitCodeFor(code)
 }
