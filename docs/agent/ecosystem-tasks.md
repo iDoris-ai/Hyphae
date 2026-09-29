@@ -57,7 +57,7 @@ T01 的交付包括：权威协议修改、字段/错误码表、跨仓共享正
 | T03 | outbox 原子更新 API；`internal/messaging/outbox.go`、全部写入调用点；承接 `M2-F5-T2` | T02 | 独立锁文件覆盖完整读改写，唯一临时文件；多进程增删改不丢更新、JSON 可解析；不再保存过期快照 | DONE（PR #43 待合并） |
 | T04 | outbox 重试并发与错误传播；outbox、命令及 daemon 调用点 | T03 | 重试的网络 I/O 不持有全局文件锁；写回只改目标记录；并发新增不丢、删除不复活；落盘失败不得报告已入队 | IN_PROGRESS |
 | T05 | 重试保留明文与真实加密标记；outbox/store/daemon；承接 `M2-F5-T3/T6` | T04 | 先存解密明文再重试不覆盖；加密和未加密事件均准确；发布失败不改变加密属性 | WAITING |
-| T06 | group UPSERT 保留字段；`internal/group/db.go`；承接 `M2-F5-T4` | T02 | 同 ID 空值更新不清明文；event_id 冲突行为有测试；群消息旧数据可读 | WAITING |
+| T06 | group UPSERT 保留字段；`internal/group/db.go`；承接 `M2-F5-T4` | T02 | 同 ID 空值更新不清明文；event_id 冲突行为有测试；群消息旧数据可读 | IN_PROGRESS |
 | T07 | behavior 编解码与兼容读取；新增 `internal/behavior/`、`pkg/types/`；承接 `M2-F5-T5/M2-F1-T1` | T01 | 正反例跨语言一致；验签、版本、重复 tag、截断、解压上限、未知行为；旧 30078 不误解析 | WAITING |
 | T08 | register/publish 收发与 CLI；behavior、profile、`cmd/hyphae/` | T07、T05 | 三种注册模式、能力版本可发现；广播只带允许公开的字段；CLI JSON 稳定；真实 relay 可查询 | WAITING |
 | T09 | inquire/subscribe 收发与 CLI；behavior 及测试 | T07、T05 | 查询/回复关联正确，订阅过滤与退出正确；重复事件不重复通知；查询不触发执行 | WAITING |
@@ -133,7 +133,8 @@ T19 必交矩阵：正常语音链路、未授权发送者、能力越权、审�
 - `luna_network`：已完成通信线只读核查，结论已纳入 T03～T09/T18。
 - `luna_integrations`：已完成 Agent24/AgentEar/iDoris 只读核查，正式 Rust 入口和接口缺口已纳入 T10～T17。
 - `luna_nostr_update`：上游依赖更新见 [PR #40](https://github.com/iDoris-ai/Hyphae/pull/40)；T03 见 [PR #43](https://github.com/iDoris-ai/Hyphae/pull/43)，当前在独立 `Hyphae-em1-retry` 工作树实现 T04 的重试结果事务。
-- `luna_relay_migration`：维护中的 khatru relay 与部署脚本见 [PR #42](https://github.com/iDoris-ai/Hyphae/pull/42)，现转入 `Hyphae-cli-identity` 实现身份/联系人 JSON；`luna_upstream_ci` 在 `Hyphae-upstream-tracking` 实现测试后自动提依赖 PR。
+- `luna_relay_migration`：维护中的 khatru relay 与部署脚本见 [PR #42](https://github.com/iDoris-ai/Hyphae/pull/42)，身份/联系人 JSON 见 [PR #45](https://github.com/iDoris-ai/Hyphae/pull/45)，当前转入独立 `Hyphae-em1-group` 修复 T06。
+- `luna_upstream_ci`：测试后自动提依赖 PR 的配置见 [PR #44](https://github.com/iDoris-ai/Hyphae/pull/44)，已通过 GitHub 全量、构建、实际工作流脚本回归与 core race 检查；当前转入 `Hyphae-cli-relays` 做 relay 配置与入口接线。定时任务尚未上线，需配置合入默认分支并确认 Actions 创建 PR 权限。
 - 本轮不修改其他仓库的生产代码；对应仓库的协作约定见 [PR #41](https://github.com/iDoris-ai/Hyphae/pull/41)。设计和验收材料由主代理维护。
 
 ### T02 验收记录
@@ -152,3 +153,9 @@ T19 必交矩阵：正常语音链路、未授权发送者、能力越权、审�
 - 本地 `review/em1-cli` 工作树组合 `29b36fd`、`5eb9e03`、`a31b075`、`3ff4771` 后，`go test ./...` 与 CLI 构建通过。此分支用于验收，未合入远端主线。
 - 使用实际 CLI 与本地 khatru 二进制、临时 Alice/Bob HOME 和 relay 存储，双向 NIP-44 加密发送、relay 接受和收件解密均通过；未使用公共 relay 或生产身份。
 - 这只证明组合后的基础双向收发。T04/T05、管理接口、断线重试、超过十条离线积压补收与重启去重仍待验收，A 段尚未整体通过。
+
+### T20 管理接口进度
+
+- 身份/联系人 JSON：`36b8641` / PR #45 验收通过。Luna 全量测试通过，主代理独立 `go test -race ./internal/identity -count=1` 通过，含实际 CLI 子进程测试；覆盖创建、默认身份、联系人列表和规范化公钥、空数组、环境开关、非交互密码错误与磁盘失败。
+- 加密库新增身份保持加密；已有未加密身份的库须先使用 `identity change-password` 完成整库加密。JSON 管理输出使用公开字段白名单。
+- relay 配置/探测与消费入口接线进行中；outbox JSON/可靠入队、inbox 错误传播、daemon 离线补收仍待后续小 PR，不能据此宣称 Agent24 CLI/UI 已接线。
