@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -488,76 +489,114 @@ func safePrefix(s string, n int) string {
 }
 
 func sendAutoReply(ctx context.Context, myIdentity *types.Identity, ks *types.KeyStore, toNpub string, originalContent string, relays []string) {
+	result, err := sendAutoReplyWithEncryptor(ctx, myIdentity, ks, toNpub, originalContent, relays, crypto.EncryptMessage)
+	for _, line := range autoReplyOutcomeLines(result, err) {
+		fmt.Println(line)
+	}
+}
+
+func autoReplyOutcomeLines(result messaging.QueuedAgentMessageResult, sendErr error) []string {
+	var lines []string
+	if result.PublishedTo > 0 {
+		lines = append(lines, fmt.Sprintf("🤖 Auto-reply relay ACKs: %d/%d (relay acceptance does not confirm recipient receipt)", result.PublishedTo, result.RelayCount))
+	}
+	switch {
+	case result.QueueStateUnknown:
+		lines = append(lines, "   ⚠️  Auto-reply outbox state is unknown")
+	case result.Superseded:
+		lines = append(lines, "   ⚠️  Auto-reply outbox entry was superseded")
+	case result.QueuedForRetry:
+		lines = append(lines, "   📝 Auto-reply is queued for retry")
+	case result.PublishedTo > 0:
+		lines = append(lines, "   ✅ Auto-reply ACK recorded and outbox entry removed")
+	case sendErr != nil:
+		lines = append(lines, "   ⚠️  Auto-reply was not confirmed queued")
+	case result.EventID != "":
+		lines = append(lines, "   ⚠️  Auto-reply received no relay ACK and is not queued")
+	}
+	for _, relay := range result.Relays {
+		if !relay.OK && relay.Error != "" {
+			lines = append(lines, fmt.Sprintf("   ❌ %s: %s", relay.URL, relay.Error))
+		}
+	}
+	if sendErr != nil {
+		if result.EventID == "" {
+			lines = append(lines, fmt.Sprintf("   ⚠️  Auto-reply failed: %v", sendErr))
+		} else {
+			lines = append(lines, fmt.Sprintf("   ⚠️  Auto-reply event %s: %v", result.EventID, sendErr))
+		}
+	}
+	return lines
+}
+
+type autoReplyEncryptor func(string, nostr.SecretKey, nostr.PubKey) (string, error)
+
+func buildAutoReplyEvent(myIdentity *types.Identity, senderSK nostr.SecretKey, recipientPK nostr.PubKey, originalContent string, encrypt autoReplyEncryptor) (string, *nostr.Event, error) {
+	replyText := buildAutoReplyText(myIdentity.Nickname, originalContent)
+	ciphertext, err := encrypt(replyText, senderSK, recipientPK)
+	if err != nil {
+		return "", nil, fmt.Errorf("encrypt NIP-44 auto-reply: %w", err)
+	}
+	compressed, err := messaging.CompressText(ciphertext)
+	if err != nil {
+		return "", nil, fmt.Errorf("compress auto-reply: %w", err)
+	}
+	var nonce [16]byte
+	if _, err := cryptorand.Read(nonce[:]); err != nil {
+		return "", nil, fmt.Errorf("generate auto-reply d tag: %w", err)
+	}
+	createdAt := nostr.Now()
+	event := &nostr.Event{
+		CreatedAt: createdAt,
+		Kind:      messaging.AgentKind,
+		Tags: nostr.Tags{
+			{"p", common.PubKeyToHex(recipientPK)},
+			{"c", messaging.AgentTag},
+			{"z", messaging.CompressTag},
+			{"v", messaging.AgentVersion},
+			{"d", hex.EncodeToString(nonce[:])},
+			{"enc", "nip44"},
+		},
+		Content: compressed,
+		PubKey:  senderSK.Public(),
+	}
+	if err := event.Sign(senderSK); err != nil {
+		return "", nil, fmt.Errorf("sign auto-reply event: %w", err)
+	}
+	return replyText, event, nil
+}
+
+func sendAutoReplyWithEncryptor(ctx context.Context, myIdentity *types.Identity, ks *types.KeyStore, toNpub string, originalContent string, relays []string, encrypt autoReplyEncryptor) (messaging.QueuedAgentMessageResult, error) {
 	mySK, err := identity.GetSecretKey(ks, myIdentity.Nickname)
 	if err != nil {
-		return
+		return messaging.QueuedAgentMessageResult{}, fmt.Errorf("load sender key: %w", err)
 	}
 
 	toPK, err := common.ParsePublicKey(toNpub)
 	if err != nil {
-		return
+		return messaging.QueuedAgentMessageResult{}, fmt.Errorf("parse recipient key: %w", err)
 	}
 
-	replyText := buildAutoReplyText(myIdentity.Nickname, originalContent)
-
-	var messageContent string
-	encrypted, encErr := crypto.EncryptMessage(replyText, mySK, toPK)
-	if encErr == nil {
-		messageContent = encrypted
-	} else {
-		messageContent = replyText
+	replyText, event, err := buildAutoReplyEvent(myIdentity, mySK, toPK, originalContent, encrypt)
+	if err != nil {
+		return messaging.QueuedAgentMessageResult{}, err
 	}
-
-	compressed, _ := messaging.CompressText(messageContent)
-	tags := nostr.Tags{
-		{"p", common.PubKeyToHex(toPK)},
-		{"c", messaging.AgentTag},
-		{"z", messaging.CompressTag},
-		{"v", messaging.AgentVersion},
-	}
-	if encErr == nil {
-		tags = append(tags, nostr.Tag{"enc", "nip44"})
-	}
-
-	event := &nostr.Event{
-		CreatedAt: nostr.Now(),
-		Kind:      messaging.AgentKind,
-		Tags:      tags,
-		Content:   compressed,
-		PubKey:    mySK.Public(),
-	}
-	event.Sign(mySK)
 
 	if len(relays) == 0 {
 		relays = []string{relayconfig.DefaultRelay}
 	}
-	success := false
-	for _, url := range relays {
-		relayCtx, cancel := context.WithTimeout(ctx, relayDialTimeout)
-		relay, err := nostr.RelayConnect(relayCtx, url, nostr.RelayOptions{})
-		if err != nil {
-			if relay != nil {
-				relay.Close()
+	result, sendErr := messaging.SendQueuedAgentMessage(ctx, event, toNpub, replyText, true, relays, relayDialTimeout)
+	if result.PublishedTo > 0 {
+		if err := audit.LogAction(myIdentity.Nickname, audit.ActionAutoReplySent, map[string]any{
+			"to": toNpub, "relay_acknowledged": true, "relay_acks": result.PublishedTo,
+			"relay_count": result.RelayCount, "event_id": result.EventID,
+		}); err != nil {
+			if sendErr == nil {
+				sendErr = fmt.Errorf("audit auto-reply ACK: %w", err)
+			} else {
+				sendErr = fmt.Errorf("%w; audit auto-reply ACK: %v", sendErr, err)
 			}
-			cancel()
-			continue
-		}
-		err = relay.Publish(relayCtx, *event)
-		relay.Close()
-		cancel()
-		if err == nil {
-			success = true
-			break
 		}
 	}
-
-	if err := messaging.StoreOutgoingMessage(event, toNpub, replyText, success); err != nil {
-		fmt.Printf("   ⚠️  Store auto-reply: %v\n", err)
-	}
-	if err := audit.LogAction(myIdentity.Nickname, audit.ActionAutoReplySent, map[string]any{
-		"to": toNpub, "published": success, "event_id": event.ID.Hex(),
-	}); err != nil {
-		fmt.Printf("   ⚠️  audit log failed: %v\n", err)
-	}
-	fmt.Printf("🤖 Auto-replied to %s\n", safePrefix(toNpub, 20)+"...")
+	return result, sendErr
 }
