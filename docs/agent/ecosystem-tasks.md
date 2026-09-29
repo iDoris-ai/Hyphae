@@ -54,8 +54,8 @@ T01 的交付包括：权威协议修改、字段/错误码表、跨仓共享正
 |---|---|---|---|---|
 | T01 | 主代理冻结四仓契约；Hyphae `docs/protocol-v2.md`、`docs/agent/spec.md`，Agent24 bridge 协议及模型/附着接口声明 | — | 上述七项设计收口；两端共享样例可明确判定接受/拒绝 | READY |
 | T02 | SQLite 每连接 PRAGMA；`internal/storage/db.go` 与专门回归测试；承接 `M2-F5-T1` | — | 同时持有多条连接及重建连接均为 5000/1/1；真实外键拒绝；特殊路径正确；旧实现对照会暴露缺陷 | DONE（PR #38 待合并） |
-| T03 | outbox 原子更新 API；`internal/messaging/outbox.go`、全部写入调用点；承接 `M2-F5-T2` | T02 | 独立锁文件覆盖完整读改写，唯一临时文件；多进程增删改不丢更新、JSON 可解析；不再保存过期快照 | IN_PROGRESS |
-| T04 | outbox 重试并发与错误传播；outbox、命令及 daemon 调用点 | T03 | 重试的网络 I/O 不持有全局文件锁；写回只改目标记录；并发新增不丢、删除不复活；落盘失败不得报告已入队 | WAITING |
+| T03 | outbox 原子更新 API；`internal/messaging/outbox.go`、全部写入调用点；承接 `M2-F5-T2` | T02 | 独立锁文件覆盖完整读改写，唯一临时文件；多进程增删改不丢更新、JSON 可解析；不再保存过期快照 | DONE（PR #43 待合并） |
+| T04 | outbox 重试并发与错误传播；outbox、命令及 daemon 调用点 | T03 | 重试的网络 I/O 不持有全局文件锁；写回只改目标记录；并发新增不丢、删除不复活；落盘失败不得报告已入队 | IN_PROGRESS |
 | T05 | 重试保留明文与真实加密标记；outbox/store/daemon；承接 `M2-F5-T3/T6` | T04 | 先存解密明文再重试不覆盖；加密和未加密事件均准确；发布失败不改变加密属性 | WAITING |
 | T06 | group UPSERT 保留字段；`internal/group/db.go`；承接 `M2-F5-T4` | T02 | 同 ID 空值更新不清明文；event_id 冲突行为有测试；群消息旧数据可读 | WAITING |
 | T07 | behavior 编解码与兼容读取；新增 `internal/behavior/`、`pkg/types/`；承接 `M2-F5-T5/M2-F1-T1` | T01 | 正反例跨语言一致；验签、版本、重复 tag、截断、解压上限、未知行为；旧 30078 不误解析 | WAITING |
@@ -88,7 +88,7 @@ T14 需为 Agent24 既有 `version/intent/thread_id/reply_to/topic/payload/expir
 3. T01 高层契约冻结后：T07→T08/T09→T14→T15→T16→T17，完成 C 段。空闲槽位完成 T06/T18。
 4. T18/T19 分别记录 A/B/C 验收证据；完整 E-M1 仍需四仓、真实 relay 和设备链路的原有出口通过。
 
-T20 在 Hyphae 侧进一步拆小 PR：身份/联系人 JSON、outbox JSON 与错误传播、relay 配置/连接诊断、daemon 重启补收及持久化去重。每项有独立错误/边界用例和真实 CLI 验收；Agent24 的命令名与 UI 不在本仓假实现。
+T20 在 Hyphae 侧进一步拆小 PR：身份/联系人 JSON、outbox JSON 与错误传播、relay 配置/连接诊断、inbox 查询错误传播、daemon 重启补收及持久化去重。每项有独立错误/边界用例和真实 CLI 验收；Agent24 的命令名与 UI 不在本仓假实现。T04 再拆为重试结果事务与发布前可靠入队两步，避免一次 PR 同时改所有收发路径。
 
 ### 验收命令与证据
 
@@ -132,8 +132,8 @@ T19 必交矩阵：正常语音链路、未授权发送者、能力越权、审�
 - `luna_storage` 初始实现、`luna_nostr_update` 补齐验证：T02 位于 `../Hyphae-em1-sqlite`，分支 `fix/em1-sqlite-pragmas`，提交 `1269744`、`a31b075`，见 [PR #38](https://github.com/iDoris-ai/Hyphae/pull/38)。
 - `luna_network`：已完成通信线只读核查，结论已纳入 T03～T09/T18。
 - `luna_integrations`：已完成 Agent24/AgentEar/iDoris 只读核查，正式 Rust 入口和接口缺口已纳入 T10～T17。
-- `luna_nostr_update`：上游依赖更新见 [PR #40](https://github.com/iDoris-ai/Hyphae/pull/40)；当前在独立 `Hyphae-em1-outbox` 工作树实现 T03。
-- `luna_relay_migration`：独立 `Hyphae-khatru-upstream` 工作树实现维护中的 khatru relay 与部署脚本；`luna_upstream_ci` 在 `Hyphae-upstream-tracking` 实现测试后自动提依赖 PR。
+- `luna_nostr_update`：上游依赖更新见 [PR #40](https://github.com/iDoris-ai/Hyphae/pull/40)；T03 见 [PR #43](https://github.com/iDoris-ai/Hyphae/pull/43)，当前在独立 `Hyphae-em1-retry` 工作树实现 T04 的重试结果事务。
+- `luna_relay_migration`：维护中的 khatru relay 与部署脚本见 [PR #42](https://github.com/iDoris-ai/Hyphae/pull/42)，现转入 `Hyphae-cli-identity` 实现身份/联系人 JSON；`luna_upstream_ci` 在 `Hyphae-upstream-tracking` 实现测试后自动提依赖 PR。
 - 本轮不修改其他仓库的生产代码；对应仓库的协作约定见 [PR #41](https://github.com/iDoris-ai/Hyphae/pull/41)。设计和验收材料由主代理维护。
 
 ### T02 验收记录
@@ -144,3 +144,11 @@ T19 必交矩阵：正常语音链路、未授权发送者、能力越权、审�
 - 工具链问题已解决：使用校验过官方 SHA256 的临时 Go 1.27.1，不修改用户全局安装。Luna 已完成格式化与测试。
 - 主代理在隔离 HOME 下独立复跑 `go test ./internal/storage/... -race -count=1`、`go test ./...`，均通过。
 - 结论：T02 本仓验收通过，T03 已解锁。PR #38 已提交待评审，尚未合入主线；CLA 属于独立合并检查，不替代测试结论。
+
+### T03 与组合验收记录
+
+- T03 提交 `3ff4771`：跨进程锁、唯一临时文件、文件与目录 fsync；所有生产读改写走最新磁盘状态。可选 `queue_id` 区分同一事件重新入队，清理确认保留新项。Linux/macOS 支持锁；升级须先停止旧版写入进程。
+- Luna 全量测试与 Linux/arm64 编译检查通过；主代理独立复跑 `go test -race ./internal/messaging ./internal/daemon ./internal/storage -count=1` 通过。
+- 本地 `review/em1-cli` 工作树组合 `29b36fd`、`5eb9e03`、`a31b075`、`3ff4771` 后，`go test ./...` 与 CLI 构建通过。此分支用于验收，未合入远端主线。
+- 使用实际 CLI 与本地 khatru 二进制、临时 Alice/Bob HOME 和 relay 存储，双向 NIP-44 加密发送、relay 接受和收件解密均通过；未使用公共 relay 或生产身份。
+- 这只证明组合后的基础双向收发。T04/T05、管理接口、断线重试、超过十条离线积压补收与重启去重仍待验收，A 段尚未整体通过。
