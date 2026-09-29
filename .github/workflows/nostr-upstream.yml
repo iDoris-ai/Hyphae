@@ -1,0 +1,456 @@
+name: Nostr upstream tracking
+
+on:
+  schedule:
+    - cron: '23 8 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nostr-upstream-tracking
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    name: Resolve and validate candidate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      changed: ${{ steps.resolve.outputs.changed }}
+      candidate: ${{ steps.resolve.outputs.candidate }}
+      base_sha: ${{ steps.resolve.outputs.base_sha }}
+      branch_sha: ${{ steps.resolve.outputs.branch_sha }}
+      tree_sha: ${{ steps.resolve.outputs.tree_sha }}
+      commit_sha: ${{ steps.resolve.outputs.commit_sha }}
+    env:
+      BASE_REF: ${{ github.event.repository.default_branch }}
+      BOT_BRANCH: automation/nostr-upstream
+    steps:
+      - name: Check out the default branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Prepare isolated test home
+        env:
+          TEST_HOME: ${{ runner.temp }}/hyphae-test-home
+        run: |
+          mkdir -p "$TEST_HOME"
+          printf 'GOPATH=%s\n' "$(go env GOPATH)" >> "$GITHUB_ENV"
+          printf 'GOCACHE=%s\n' "$(go env GOCACHE)" >> "$GITHUB_ENV"
+          printf 'HOME=%s\n' "$TEST_HOME" >> "$GITHUB_ENV"
+
+      - name: Resolve, update, and validate Nostr
+        id: resolve
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          log="$RUNNER_TEMP/nostr-upstream-validation.log"
+          state="$RUNNER_TEMP/nostr-upstream-state"
+          : > "$log"
+          : > "$state"
+          record() { printf '%s=%s\n' "$1" "$2" >> "$state"; }
+          fail_step="initialization"
+          record candidate '(not resolved)'
+
+          finish() {
+            result=$?
+            {
+              echo '## Nostr upstream candidate'
+              echo
+              echo "- Result: $([[ $result -eq 0 ]] && echo passed || echo failed)"
+              echo "- Candidate: $(sed -n 's/^candidate=//p' "$state" | tail -n 1)"
+              echo "- Step: $fail_step"
+              if [[ -s "$log" ]]; then
+                echo
+                echo '<details><summary>Validation log (last 100 lines)</summary>'
+                echo
+                echo '```text'
+                tail -n 100 "$log"
+                echo '```'
+                echo '</details>'
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+            if [[ $result -ne 0 ]]; then
+              echo "Candidate validation failed at: $fail_step" >&2
+            fi
+            return "$result"
+          }
+          trap finish EXIT
+
+          run_logged() {
+            fail_step="$1"
+            shift
+            echo "+ $*" | tee -a "$log"
+            "$@" 2>&1 | tee -a "$log"
+          }
+
+          run_logged 'fetch default branch' git fetch origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
+          base_sha="$(git rev-parse "refs/remotes/origin/$BASE_REF")"
+          echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
+          record base_sha "$base_sha"
+
+          branch_sha=''
+          git switch --detach "$base_sha" 2>&1 | tee -a "$log"
+          git switch -c hyphae-nostr-upstream-candidate 2>&1 | tee -a "$log"
+          if branch_listing="$(git ls-remote --exit-code --heads origin "refs/heads/$BOT_BRANCH" 2>&1)"; then
+            run_logged 'fetch existing bot branch' git fetch origin "+refs/heads/$BOT_BRANCH:refs/remotes/origin/$BOT_BRANCH"
+            branch_sha="$(git rev-parse "refs/remotes/origin/$BOT_BRANCH")"
+            # Keep this automation branch limited to dependency manifest changes.
+            branch_merge_base="$(git merge-base "$base_sha" "$branch_sha")"
+            while IFS= read -r -d '' path; do
+              if [[ "$path" != go.mod && "$path" != go.sum ]]; then
+                echo "Existing bot branch contains an unexpected path: $path" | tee -a "$log"
+                fail_step='existing branch safety check'
+                exit 1
+              fi
+            done < <(git diff --name-only -z "$branch_merge_base" "$branch_sha")
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            run_logged 'merge existing bot branch onto current default branch' git merge --no-ff --no-edit "$branch_sha"
+          else
+            ls_status=$?
+            if [[ "$ls_status" -ne 2 ]]; then
+              echo "Could not check the bot branch: $branch_listing" | tee -a "$log"
+              fail_step='check existing bot branch'
+              exit 1
+            fi
+          fi
+          echo "branch_sha=$branch_sha" >> "$GITHUB_OUTPUT"
+          record branch_sha "${branch_sha:-none}"
+          merge_sha="$(git rev-parse HEAD)"
+
+          fail_step='resolve fiatjaf.com/nostr@latest'
+          echo '+ go list -m -json fiatjaf.com/nostr@latest' | tee -a "$log"
+          module_json="$(go list -m -json fiatjaf.com/nostr@latest 2>&1 | tee -a "$log")"
+          candidate="$(printf '%s\n' "$module_json" | sed -n 's/^[[:space:]]*"Version": "\([^"]*\)".*/\1/p' | head -n 1)"
+          if [[ -z "$candidate" ]]; then
+            echo 'go list did not return a resolved module version' | tee -a "$log"
+            exit 1
+          fi
+          if [[ ! "$candidate" =~ ^v[0-9][0-9A-Za-z.+-]*$ ]]; then
+            echo "Resolved version has an unexpected format: $candidate" | tee -a "$log"
+            fail_step='candidate version validation'
+            exit 1
+          fi
+          echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
+          record candidate "$candidate"
+
+          run_logged 'go get exact resolved Nostr version' go get "fiatjaf.com/nostr@$candidate"
+          run_logged 'go mod tidy' go mod tidy
+
+          # The updater may only propose module manifest changes.
+          while IFS= read -r -d '' path; do
+            if [[ "$path" != go.mod && "$path" != go.sum ]]; then
+              echo "Candidate changed an unexpected path: $path" | tee -a "$log"
+              fail_step='candidate diff safety check'
+              exit 1
+            fi
+          done < <(git status --porcelain -z | while IFS= read -r -d '' entry; do
+            path="${entry:3}"
+            printf '%s\0' "$path"
+          done)
+
+          if git diff --quiet && git diff --cached --quiet; then
+            if [[ -z "$branch_sha" ]] \
+              || git merge-base --is-ancestor "$base_sha" "$branch_sha" \
+              || git merge-base --is-ancestor "$branch_sha" "$base_sha"; then
+              echo 'changed=false' >> "$GITHUB_OUTPUT"
+              fail_step='no dependency change'
+              record result 'no dependency change; no PR update needed'
+              exit 0
+            fi
+          elif git diff --quiet "$merge_sha" -- go.mod go.sum && [[ -z "$branch_sha" || "$base_sha" == "$(git merge-base "$base_sha" "$branch_sha")" ]]; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            fail_step='no new Nostr candidate'
+            record result 'the existing branch already has this candidate; no PR update needed'
+            exit 0
+          fi
+
+          git add -A
+          tested_tree="$(git write-tree)"
+          fail_step='go test ./...'
+          run_logged 'go test ./...' go test ./...
+          fail_step='build ./cmd/hyphae'
+          run_logged 'go build ./cmd/hyphae' go build -o "$RUNNER_TEMP/hyphae" ./cmd/hyphae
+          if [[ -d cmd/hyphae-relay ]]; then
+            fail_step='go test ./cmd/hyphae-relay'
+            run_logged 'go test ./cmd/hyphae-relay' go test ./cmd/hyphae-relay
+            fail_step='build ./cmd/hyphae-relay'
+            run_logged 'go build ./cmd/hyphae-relay' go build -o "$RUNNER_TEMP/hyphae-relay" ./cmd/hyphae-relay
+          fi
+          fail_step='core race tests'
+          run_logged 'go test -race core packages' go test -race ./internal/identity ./internal/messaging ./internal/storage ./pkg/crypto
+          if [[ -d internal/relay ]]; then
+            fail_step='relay race tests'
+            run_logged 'go test -race ./internal/relay' go test -race ./internal/relay
+          fi
+
+          # Ensure the exact tree tested above is the tree that will be proposed.
+          while IFS= read -r -d '' path; do
+            if [[ "$path" != go.mod && "$path" != go.sum ]]; then
+              echo "Validation changed an unexpected path: $path" | tee -a "$log"
+              fail_step='post-test worktree safety check'
+              exit 1
+            fi
+          done < <(git status --porcelain -z | while IFS= read -r -d '' entry; do
+            path="${entry:3}"
+            printf '%s\0' "$path"
+          done)
+          git add -A
+          actual_tree="$(git write-tree)"
+          if [[ "$actual_tree" != "$tested_tree" ]]; then
+            echo "Candidate tree changed during validation ($tested_tree -> $actual_tree)" | tee -a "$log"
+            fail_step='post-test tree verification'
+            exit 1
+          fi
+
+          git diff --quiet "$base_sha" -- . ':!go.mod' ':!go.sum' || {
+            echo 'Final proposal contains changes outside go.mod and go.sum' | tee -a "$log"
+            fail_step='final diff safety check'
+            exit 1
+          }
+          if ! git diff --cached --quiet; then
+            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "chore(deps): update fiatjaf.com/nostr to $candidate" 2>&1 | tee -a "$log"
+          fi
+          commit_sha="$(git rev-parse HEAD)"
+          tree_sha="$(git rev-parse "$commit_sha^{tree}")"
+          if [[ "$tree_sha" != "$tested_tree" ]]; then
+            echo 'Created commit does not contain the tested tree' | tee -a "$log"
+            fail_step='commit tree verification'
+            exit 1
+          fi
+          echo "tree_sha=$tree_sha" >> "$GITHUB_OUTPUT"
+          echo "commit_sha=$commit_sha" >> "$GITHUB_OUTPUT"
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+          record result 'validation passed'
+          record tree_sha "$tree_sha"
+          record commit_sha "$commit_sha"
+          fail_step='create candidate bundle'
+          git update-ref refs/heads/nostr-candidate "$commit_sha"
+          git bundle create "$RUNNER_TEMP/nostr-candidate.bundle" refs/heads/nostr-candidate "^$base_sha" 2>&1 | tee -a "$log"
+
+      - name: Upload validated candidate
+        if: steps.resolve.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nostr-upstream-candidate
+          path: ${{ runner.temp }}/nostr-candidate.bundle
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    name: Publish validated candidate PR
+    needs: candidate
+    if: needs.candidate.result == 'success' && needs.candidate.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      BASE_REF: ${{ github.event.repository.default_branch }}
+      BOT_BRANCH: automation/nostr-upstream
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out the current default branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Download validated candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: nostr-upstream-candidate
+          path: ${{ runner.temp }}/candidate
+
+      - name: Verify and push tested commit
+        id: push
+        shell: bash
+        env:
+          EXPECTED_BASE: ${{ needs.candidate.outputs.base_sha }}
+          EXPECTED_BRANCH: ${{ needs.candidate.outputs.branch_sha }}
+          EXPECTED_TREE: ${{ needs.candidate.outputs.tree_sha }}
+          CANDIDATE_COMMIT: ${{ needs.candidate.outputs.commit_sha }}
+          CANDIDATE_VERSION: ${{ needs.candidate.outputs.candidate }}
+        run: |
+          set -Eeuo pipefail
+          {
+            echo '## Nostr upstream publish'
+            echo
+            echo "- Candidate: $CANDIDATE_VERSION"
+            echo "- Tested commit: $CANDIDATE_COMMIT"
+            echo "- Tested tree: $EXPECTED_TREE"
+          } >> "$GITHUB_STEP_SUMMARY"
+          log="$RUNNER_TEMP/nostr-upstream-publish.log"
+          : > "$log"
+          fail_step='verify default branch'
+          finish() {
+            result=$?
+            {
+              echo "- Publish result: $([[ $result -eq 0 ]] && echo passed || echo failed)"
+              echo "- Step: $fail_step"
+              if [[ -s "$log" ]]; then
+                echo
+                echo '<details><summary>Publish log (last 100 lines)</summary>'
+                echo
+                echo '```text'
+                tail -n 100 "$log"
+                echo '```'
+                echo '</details>'
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+            return "$result"
+          }
+          trap finish EXIT
+          run_logged() {
+            fail_step="$1"
+            shift
+            echo "+ $*" | tee -a "$log"
+            "$@" 2>&1 | tee -a "$log"
+          }
+
+          run_logged 'fetch current default branch' git fetch origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
+          current_base="$(git rev-parse "refs/remotes/origin/$BASE_REF")"
+          if [[ "$current_base" != "$EXPECTED_BASE" ]]; then
+            echo "Default branch moved after validation: expected $EXPECTED_BASE, found $current_base" | tee -a "$log"
+            fail_step='default branch changed during validation'
+            exit 1
+          fi
+
+          fail_step='import tested candidate bundle'
+          if [[ ! "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ || ! "$EXPECTED_TREE" =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'Candidate commit or tree SHA has an unexpected format' | tee -a "$log"
+            fail_step='candidate metadata validation'
+            exit 1
+          fi
+          if [[ ! "$EXPECTED_BASE" =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'Expected default branch SHA has an unexpected format' | tee -a "$log"
+            fail_step='base metadata validation'
+            exit 1
+          fi
+          if [[ ! "$CANDIDATE_VERSION" =~ ^v[0-9][0-9A-Za-z.+-]*$ ]]; then
+            echo 'Candidate version has an unexpected format' | tee -a "$log"
+            fail_step='candidate version validation'
+            exit 1
+          fi
+          git fetch "$RUNNER_TEMP/candidate/nostr-candidate.bundle" refs/heads/nostr-candidate 2>&1 | tee -a "$log"
+          candidate_commit="$CANDIDATE_COMMIT"
+          candidate_tree="$(git rev-parse "$candidate_commit^{tree}")"
+          if [[ "$candidate_tree" != "$EXPECTED_TREE" ]]; then
+            echo "Candidate tree hash mismatch: $candidate_tree" | tee -a "$log"
+            exit 1
+          fi
+          git diff --quiet "$current_base" "$candidate_commit" -- . ':!go.mod' ':!go.sum' || {
+            echo 'Tested commit contains changes outside go.mod and go.sum' | tee -a "$log"
+            exit 1
+          }
+          if ! git merge-base --is-ancestor "$current_base" "$candidate_commit"; then
+            echo 'Tested commit is not based on the current default branch' | tee -a "$log"
+            exit 1
+          fi
+
+          fail_step='verify bot branch has not changed'
+          expected_branch="$EXPECTED_BRANCH"
+          if [[ -n "$expected_branch" ]]; then
+            if [[ ! "$expected_branch" =~ ^[0-9a-f]{40}$ ]]; then
+              echo 'Expected bot branch SHA has an unexpected format' | tee -a "$log"
+              fail_step='bot branch metadata validation'
+              exit 1
+            fi
+            run_logged 'fetch existing bot branch' git fetch origin "+refs/heads/$BOT_BRANCH:refs/remotes/origin/$BOT_BRANCH"
+            actual_branch="$(git rev-parse "refs/remotes/origin/$BOT_BRANCH")"
+            if [[ "$actual_branch" != "$expected_branch" ]]; then
+              echo "Bot branch changed after validation: expected $expected_branch, found $actual_branch" | tee -a "$log"
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$actual_branch" "$candidate_commit"; then
+              echo 'Tested commit does not fast-forward the existing bot branch' | tee -a "$log"
+              exit 1
+            fi
+          else
+            if branch_listing="$(git ls-remote --exit-code --heads origin "refs/heads/$BOT_BRANCH" 2>&1)"; then
+              echo 'Bot branch appeared after validation; refusing to overwrite it' | tee -a "$log"
+              exit 1
+            else
+              ls_status=$?
+              if [[ "$ls_status" -ne 2 ]]; then
+                echo "Could not check whether the bot branch appeared: $branch_listing" | tee -a "$log"
+                exit 1
+              fi
+            fi
+          fi
+
+          fail_step='push validated bot branch'
+          run_logged 'push tested commit without force' git push origin "$candidate_commit:refs/heads/$BOT_BRANCH"
+          echo 'branch_pushed=true' >> "$GITHUB_OUTPUT"
+
+      - name: Create or retain the single upstream PR
+        id: pull_request
+        shell: bash
+        env:
+          CANDIDATE: ${{ needs.candidate.outputs.candidate }}
+        run: |
+          set -Eeuo pipefail
+          if pr_number="$(gh pr list --state open --head "$BOT_BRANCH" --json number --jq '.[0].number' 2>&1)" && [[ -n "$pr_number" && "$pr_number" != null ]]; then
+            pr_url="$(gh pr view "$pr_number" --json url --jq .url)"
+            echo "url=$pr_url" >> "$GITHUB_OUTPUT"
+            echo "Existing upstream PR updated: $pr_url"
+          else
+            body="$RUNNER_TEMP/nostr-upstream-pr-body.md"
+            {
+              printf 'This PR updates the untagged fiatjaf.com/nostr pseudo-version to %s.\n\n' "$CANDIDATE"
+              cat <<'EOF'
+          The candidate was resolved with `go list -m -json fiatjaf.com/nostr@latest` and validated before this PR was created:
+
+          - `go test ./...`
+          - `go build ./cmd/hyphae`
+          - core package race tests
+
+          Review the dependency diff and compatibility workflow before merging. This automation does not merge PRs.
+
+          The workflow must be merged into the default branch before scheduled runs are available. Repository settings must also allow GitHub Actions to create pull requests with GITHUB_TOKEN (Settings → Actions → General → Workflow permissions → “Allow GitHub Actions to create and approve pull requests”).
+          EOF
+            } > "$body"
+            if ! pr_url="$(gh pr create --base "$BASE_REF" --head "$BOT_BRANCH" --title "chore(deps): update fiatjaf.com/nostr to $CANDIDATE" --body-file "$body" 2>&1)"; then
+              echo "$pr_url" >&2
+              {
+                echo
+                echo 'Creating the PR failed. Check whether repository Actions settings allow GitHub Actions to create pull requests with GITHUB_TOKEN (Settings → Actions → General → Workflow permissions).'
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+            echo "url=$pr_url" >> "$GITHUB_OUTPUT"
+            echo "Created upstream PR: $pr_url"
+          fi
+          {
+            echo
+            echo "- Pull request: $pr_url"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report publish outcome
+        if: always()
+        run: |
+          if [[ '${{ steps.pull_request.outcome }}' != success ]]; then
+            {
+              echo
+              if [[ '${{ steps.push.outputs.branch_pushed }}' == true ]]; then
+                echo 'The candidate was validated and pushed, but creating or locating the PR failed. See the step log above; the candidate version and tested commit are listed in this summary.'
+              else
+                echo 'The candidate was validated, but publishing failed before the branch push. See the step log above; the candidate version and tested commit are listed in this summary.'
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
