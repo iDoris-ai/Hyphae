@@ -132,8 +132,8 @@ T19 必交矩阵：正常语音链路、未授权发送者、能力越权、审�
 - `luna_storage` 初始实现、`luna_nostr_update` 补齐验证：T02 位于 `../Hyphae-em1-sqlite`，分支 `fix/em1-sqlite-pragmas`，提交 `1269744`、`a31b075`，见 [PR #38](https://github.com/iDoris-ai/Hyphae/pull/38)。
 - `luna_network`：已完成通信线只读核查，结论已纳入 T03～T09/T18。
 - `luna_integrations`：已完成 Agent24/AgentEar/iDoris 只读核查，正式 Rust 入口和接口缺口已纳入 T10～T17。
-- `luna_nostr_update`：上游依赖更新见 [PR #40](https://github.com/iDoris-ai/Hyphae/pull/40)；T03 见 [PR #43](https://github.com/iDoris-ai/Hyphae/pull/43)，当前在独立 `Hyphae-em1-retry` 工作树实现 T04 的重试结果事务。
-- `luna_relay_migration`：维护中的 khatru relay 与部署脚本见 [PR #42](https://github.com/iDoris-ai/Hyphae/pull/42)，身份/联系人 JSON 见 [PR #45](https://github.com/iDoris-ai/Hyphae/pull/45)，T06 见 [PR #46](https://github.com/iDoris-ai/Hyphae/pull/46)；真实 CLI/relay 集成夹具见 [PR #47](https://github.com/iDoris-ai/Hyphae/pull/47)，正在补齐双向断言。
+- `luna_nostr_update`：上游依赖更新见 [PR #40](https://github.com/iDoris-ai/Hyphae/pull/40)；T03 见 [PR #43](https://github.com/iDoris-ai/Hyphae/pull/43)，T04a 重试结果事务见 [PR #48](https://github.com/iDoris-ai/Hyphae/pull/48)。当前转入独立工作树修复 T05 的重试历史明文与加密标记。
+- `luna_relay_migration`：维护中的 khatru relay 与部署脚本见 [PR #42](https://github.com/iDoris-ai/Hyphae/pull/42)，身份/联系人 JSON 见 [PR #45](https://github.com/iDoris-ai/Hyphae/pull/45)，T06 见 [PR #46](https://github.com/iDoris-ai/Hyphae/pull/46)；真实 CLI/relay 集成夹具见 [PR #47](https://github.com/iDoris-ai/Hyphae/pull/47)，双向验收已通过。当前转入独立 relay-query 工作树实现真实 EOSE、超时与断线的共用查询模块。
 - `luna_upstream_ci`：测试后自动提依赖 PR 的配置见 [PR #44](https://github.com/iDoris-ai/Hyphae/pull/44)，已通过 GitHub 全量、构建、实际工作流脚本回归与 core race 检查；当前转入 `Hyphae-cli-relays` 做 relay 配置与入口接线。定时任务尚未上线，需配置合入默认分支并确认 Actions 创建 PR 权限。
 - 本轮不修改其他仓库的生产代码；对应仓库的协作约定见 [PR #41](https://github.com/iDoris-ai/Hyphae/pull/41)。设计和验收材料由主代理维护。
 
@@ -164,3 +164,9 @@ T19 必交矩阵：正常语音链路、未授权发送者、能力越权、审�
 
 - T04a 重试结果事务：主代理静态复核及独立 messaging/daemon/storage race 通过。网络调用前锁内确认 QueueID，失败使用最新重试次数，成功只移除相同队列项；并发删除不恢复，新入队项不被旧操作删除。relay ACK、历史落盘、队列状态分别报告；rename 后目录同步失败报告状态不确定。T04 的发布前入队和 CLI 错误传播仍待完成。
 - T06 `a8a1a0b` / PR #46：使用按主键 UPSERT 保留空值更新前的正文和事件 ID；缺失事件 ID 存 NULL，不同消息的重复非空事件 ID 明确失败并保留旧记录。Luna 全量测试通过，主代理独立 group race 通过。
+
+### T18 本仓夹具与组合验证
+
+- PR #47 `289e539`：构建实际 CLI 与 relay，使用两套临时 HOME、临时 relay 数据、回环端口；双向 NIP-44 收发、签名校验、relay 重启后事件仍可查询、双方历史的事件 ID/正文均通过。主代理独立运行 `go test -tags integration ./tests -count=1` 通过。
+- 本地 `review/em1-cli` 已组合 #38/#40/#42/#43/#45/#46/#47/#48；主代理隔离 HOME 执行 `go test -tags integration ./... -count=1` 通过。该分支只用于组合验收，没有创建合并这些改动的大 PR，也没有合入远端主线。
+- 待补：断线入队/重试、daemon 离线积压与重启去重、Agent24 基础 CLI/UI 和四仓高层链路。T18/T19 保持未完成。
