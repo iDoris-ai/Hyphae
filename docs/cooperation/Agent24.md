@@ -10,16 +10,20 @@
 
 ### 本轮可接线接口
 
-这些变更仍在 PR 分支，不能把当前 main 当成已支持全部接口。组合开发基线为 `integration/em1-cli-foundation` / `60715f3`；正式打包版本须在合并后重新固定。
+这些变更仍在 PR 分支，不能把当前 main 当成已支持全部接口。最新已验收的组合开发基线为 `integration/em1-cli-reliability` / `6e64aaa`；正式打包版本须在合并后重新固定。它是依赖组合分支，各项修改仍由单独小 PR 评审。
 
 | 能力 | Hyphae 接口与状态 |
 |---|---|
 | 身份/联系人 | PR [#45](https://github.com/iDoris-ai/Hyphae/pull/45)：create/list/use、contact add/list 的 JSON 已验收；只输出公开身份字段 |
 | relay 配置 | PR [#50](https://github.com/iDoris-ai/Hyphae/pull/50)：`relay set --relay URL` 可重复、完整替换；`relay list` 返回 relays/source；`relay info [URL] --timeout 5` 返回 url/connected |
 | 配置优先级 | 显式 --relay > `~/.hyphae/relays.json` > 既有默认；坏配置报错，不静默换公共 relay。已入队事件保持原地址 |
-| 消息可靠性 | 重试事务 #48、历史明文 #49 已验收；发布前入队、outbox JSON、inbox 查询错误和 daemon 补收仍在实现 |
+| 消息可靠性 | 重试事务 #48、历史明文 #49、发布前可靠入队 [#54](https://github.com/iDoris-ai/Hyphae/pull/54) 已验收；`published_to=0` 且 `queued_for_retry=true` 表示已提交待发 |
+| 待发管理 | [#53](https://github.com/iDoris-ai/Hyphae/pull/53)：`storage outbox list --json` 为安全数组；`clear --failed --yes --json` 返回 removed/remaining。retry JSON 仍在实现 |
+| 收件 | 原子首次收件 #51 和 daemon 接线 [#55](https://github.com/iDoris-ai/Hyphae/pull/55) 已验收；inbox 查询错误和 daemon 离线分页仍在实现 |
 
 机器模式成功在 stdout 输出一份 `{"ok":true,"data":...}`；错误在 stderr 输出错误信封，退出码沿用 1 用户输入、2 网络、3 身份解锁、4 其他、5 写冲突。UI 不解析人工提示文字。`connected=true` 只表示一次 WebSocket 握手成功，不能当持续在线、已订阅或已送达。各项字段及补收门槛见规划 PR [#39](https://github.com/iDoris-ai/Hyphae/pull/39) 的 CLI 通信契约。
+
+发送错误的信封可含 `data`：沿用 event_id、published_to、queued_for_retry，并增加 history_stored、superseded、queue_state_unknown。Agent24 即使收到非零退出码也要读取这些字段；relay 已接受而本地记账失败时，按原 event_id 核对，不创建新消息自动重发。队列状态未知时 UI 显示待核对。
 
 ## 双方分工
 
