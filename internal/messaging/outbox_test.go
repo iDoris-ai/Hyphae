@@ -4,7 +4,11 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,7 +20,23 @@ import (
 
 func setupTempOutbox(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
+}
+
+func TestOutboxProcessHelper(t *testing.T) {
+	id := os.Getenv("HYPHAE_OUTBOX_HELPER_ID")
+	if id == "" {
+		return
+	}
+	ob, err := LoadOutbox()
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := &nostr.Event{Kind: 1, Content: id}
+	event.ID[31] = byte(id[len(id)-1])
+	if err := AddToOutbox(ob, event, id, nil); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestGetOutboxPath_Error(t *testing.T) {
@@ -53,7 +73,18 @@ func TestAddToOutbox(t *testing.T) {
 	assert.Len(t, ob2.Entries, 1)
 	assert.Equal(t, hex.EncodeToString(event.ID[:]), ob2.Entries[0].ID,
 		"AddToOutbox must store the ID hex-encoded, not as raw bytes (see specs/m1.5/README.md's UTF-8-corruption known issue)")
+	assert.NotEmpty(t, ob2.Entries[0].QueueID, "each enqueue gets a stable identity for snapshot-based cleanup")
 	assert.Equal(t, "pending", ob2.Entries[0].Status)
+}
+
+func TestAddToOutboxWithNilSnapshot(t *testing.T) {
+	setupTempOutbox(t)
+	event := &nostr.Event{Kind: 1, Content: "test"}
+	event.ID[31] = 42
+	require.NoError(t, AddToOutbox(nil, event, "npub1test", nil))
+	ob, err := LoadOutbox()
+	require.NoError(t, err)
+	require.Len(t, ob.Entries, 1)
 }
 
 // TestAddToOutbox_IDRoundTripsThroughJSONWithoutCorruption is the
@@ -302,4 +333,135 @@ func TestCleanupOutbox(t *testing.T) {
 
 	ob2, _ := LoadOutbox()
 	assert.Len(t, ob2.Entries, 2)
+}
+
+func TestOutboxConcurrentStaleMutationsPreserveAddsAndRemovals(t *testing.T) {
+	setupTempOutbox(t)
+	const count = 24
+	seed := &types.Outbox{Entries: make([]types.OutboxEntry, count)}
+	snapshots := make([]*types.Outbox, count)
+	for i := range seed.Entries {
+		seed.Entries[i] = types.OutboxEntry{ID: fmt.Sprintf("old-%d", i), Status: "failed"}
+	}
+	require.NoError(t, SaveOutbox(seed))
+	for i := range snapshots {
+		var err error
+		snapshots[i], err = LoadOutbox()
+		require.NoError(t, err)
+	}
+
+	start := make(chan struct{})
+	errs := make(chan error, count)
+	var wg sync.WaitGroup
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			if err := RemoveFromOutbox(snapshots[i], fmt.Sprintf("old-%d", i)); err != nil {
+				errs <- err
+				return
+			}
+			event := &nostr.Event{Kind: 1, Content: fmt.Sprintf("new-%d", i)}
+			event.ID[31] = byte(i + 1)
+			if err := AddToOutbox(snapshots[i], event, "recipient", nil); err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	got, err := LoadOutbox()
+	require.NoError(t, err)
+	require.Len(t, got.Entries, count)
+	for _, entry := range got.Entries {
+		assert.Contains(t, entry.ID, "00000000000000000000000000000000000000000000000000000000000000")
+	}
+}
+
+func TestOutboxUpdatesAcrossProcesses(t *testing.T) {
+	setupTempOutbox(t)
+	const count = 6
+	var wg sync.WaitGroup
+	errs := make(chan error, count)
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			cmd := exec.Command(os.Args[0], "-test.run=^TestOutboxProcessHelper$")
+			cmd.Env = append(os.Environ(), "HYPHAE_OUTBOX_HELPER_ID=process-"+fmt.Sprint(i))
+			if output, err := cmd.CombinedOutput(); err != nil {
+				errs <- fmt.Errorf("child %d: %w: %s", i, err, output)
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	ob, err := LoadOutbox()
+	require.NoError(t, err)
+	require.Len(t, ob.Entries, count)
+	queueIDs := make(map[string]struct{}, count)
+	for _, entry := range ob.Entries {
+		require.NotEmpty(t, entry.QueueID)
+		_, exists := queueIDs[entry.QueueID]
+		assert.False(t, exists, "each enqueue must get a unique queue id")
+		queueIDs[entry.QueueID] = struct{}{}
+	}
+}
+
+func TestUpdateOutboxDoesNotOverwriteCorruptJSON(t *testing.T) {
+	setupTempOutbox(t)
+	path, err := GetOutboxPath()
+	require.NoError(t, err)
+	corrupt := []byte(`{"entries":[`)
+	require.NoError(t, os.WriteFile(path, corrupt, 0600))
+
+	_, err = UpdateOutbox(func(ob *types.Outbox) error {
+		ob.Entries = append(ob.Entries, types.OutboxEntry{ID: "must-not-write"})
+		return nil
+	})
+	require.Error(t, err)
+	got, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, corrupt, got)
+}
+
+func TestSaveOutboxCleansTemporaryFileAfterRenameFailure(t *testing.T) {
+	setupTempOutbox(t)
+	path, err := GetOutboxPath()
+	require.NoError(t, err)
+	require.NoError(t, os.Mkdir(path, 0700))
+	require.Error(t, SaveOutbox(&types.Outbox{}), "renaming over a directory should fail")
+	temps, err := filepath.Glob(filepath.Join(filepath.Dir(path), ".outbox-*.tmp"))
+	require.NoError(t, err)
+	assert.Empty(t, temps)
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.True(t, info.IsDir(), "failed replacement must preserve the existing path")
+}
+
+func TestClearSnapshotLeavesNewMatchingIDEntry(t *testing.T) {
+	setupTempOutbox(t)
+	confirmed := types.OutboxEntry{QueueID: "old-key", ID: "same-id", Status: "failed", EventJSON: `{"content":"same"}`}
+	require.NoError(t, SaveOutbox(&types.Outbox{Entries: []types.OutboxEntry{confirmed}}))
+	_, err := UpdateOutbox(func(ob *types.Outbox) error {
+		ob.Entries = []types.OutboxEntry{{QueueID: "new-key", ID: "same-id", Status: "failed", EventJSON: `{"content":"same"}`}}
+		return nil
+	})
+	require.NoError(t, err)
+	_, removed, err := clearConfirmedOutboxEntries([]types.OutboxEntry{confirmed})
+	require.NoError(t, err)
+	assert.Zero(t, removed, "the old snapshot no longer exists")
+	latest, err := LoadOutbox()
+	require.NoError(t, err)
+	require.Len(t, latest.Entries, 1)
+	assert.Equal(t, "new-key", latest.Entries[0].QueueID)
 }
