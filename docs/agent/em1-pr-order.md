@@ -51,8 +51,12 @@
 | [#61](https://github.com/iDoris-ai/Hyphae/pull/61) | 实际 CLI 离线重试与退出验收 | recovery |
 | [#62](https://github.com/iDoris-ai/Hyphae/pull/62) | relay 探测失败连接清理 | recovery |
 | [#63](https://github.com/iDoris-ai/Hyphae/pull/63) | 加密身份的 CLI stdin 解锁 | recovery |
+| [#64](https://github.com/iDoris-ai/Hyphae/pull/64) | 创建加密身份的 stdin 通道 | runtime |
+| [#65](https://github.com/iDoris-ai/Hyphae/pull/65) | daemon 历史分页接线 | runtime |
 
 `integration/em1-cli-runtime` / `b1cbaaa` 再组合 #60～#63，主代理已通过隔离 HOME 的全量 integration 测试。后续 daemon 历史分页接线与真实积压验收继续分别提交小 PR；依赖已发布的分支时，在 PR 描述固定前置提交，不把其余任务的代码混进差异。
+
+`integration/em1-cli-backfill` / `916fc1f` 再组合 #64/#65。主代理已用 Go 1.25.0 通过全量 integration、vet 和构建；`test.sh` 暴露新身份空历史统计的 NULL 扫描错误，正在独立修复。真实 125 条积压验收仍是单独测试 PR，不把组合分支作为交付 PR。
 
 ## 独立事项
 

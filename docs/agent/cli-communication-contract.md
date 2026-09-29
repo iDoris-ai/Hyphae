@@ -51,6 +51,8 @@ Hyphae 独立提供通信 CLI/daemon，Agent24 提供统一 CLI/UI 入口并调�
 
 该入口采用显式 `--password-stdin`，调用方通过子进程 stdin 传密码后关闭输入，不把密码放进命令参数或配置文件。读取到 EOF，最多 4096 字节，只移除末尾一组 LF/CRLF，保留密码本身的空格。加密身份在 JSON 模式缺少此输入时立即返回身份错误；人工模式仍可交互解锁。`inbox --decrypt=false` 只用公钥，无需解锁，不能消费密码提示或登记解密成功。密码不进入错误、日志、审计或命令结果。
 
+[PR #64](https://github.com/iDoris-ai/Hyphae/pull/64) 为 `identity create` 复用同一 stdin 输入规则，已验收、待合并。可首次创建加密库，或向已加密库追加身份；拒绝密码输入方式冲突，JSON 模式拒绝交互提示，错误密码不改变原库。保留原 `--password` 兼容性，但 Agent24 使用 stdin。已有未加密身份的库仍需先通过 `identity change-password` 完成整库加密，追加操作不做隐式部分迁移。
+
 ### 查询完成与上游兼容
 
 - 单次查询收到真实 EOSE 才能报告查询完成；CLOSED、连接中断、超时均不是空收件箱。维护中的 SDK 默认会在七秒后产生本地 EOSE，可靠查询必须关闭这个默认行为，并用独立 context 限时。

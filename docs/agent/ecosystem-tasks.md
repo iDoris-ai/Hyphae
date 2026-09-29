@@ -179,6 +179,9 @@ T19 必交矩阵：正常语音链路、未授权发送者、能力越权、审�
 - relay 连接清理：`a9aebe1` / [PR #62](https://github.com/iDoris-ai/Hyphae/pull/62) 验收通过；探测失败时也关闭 SDK 返回的非空连接。主代理独立 nostr race 通过。
 - 加密身份解锁：`1bdf7bb` / [PR #63](https://github.com/iDoris-ai/Hyphae/pull/63) 验收通过；实际 CLI 测试覆盖显式 stdin、错误或缺失凭据、加密发送与收件，以及不解密时不读密码。主代理独立 identity/messaging/daemon race 通过。
 - `integration/em1-cli-runtime` / `b1cbaaa` 再组合 #60～#63，主代理隔离 HOME 的全量 `go test -tags integration ./... -count=1` 通过。daemon 历史分页接线与实际 125 条积压/重启验收待完成。
+- 创建身份的 stdin：`cefebc8` / [PR #64](https://github.com/iDoris-ai/Hyphae/pull/64) 验收通过；首次加密创建、向加密库追加、错误不改原文件、输入方式冲突和机器模式禁止提示均有真实 CLI 测试。主代理独立 identity race 通过。
+- daemon 分页接线：`eb79c30` / [PR #65](https://github.com/iDoris-ai/Hyphae/pull/65) 验收通过；移除启动时间下界和 limit=10，坏事件不阻塞后续有效消息，查询错误报告未完成。103 条同秒积压、数据库重开去重、写盘失败恢复和取消均通过；主代理独立 daemon/relayquery/messaging race 通过。
+- `integration/em1-cli-backfill` / `916fc1f` 组合 #64/#65；Go 1.25.0 全量 integration、vet、build 通过。smoke 脚本发现空历史统计的 SQL NULL 错误，修复与最终 125 条积压验收仍在推进，不能据此提前记 A 段通过。
 
 ### T04/T06 验收记录
 
