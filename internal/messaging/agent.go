@@ -142,6 +142,10 @@ Example: hyphae agent msg --from alice --to bob --content "Hello!"`,
 			Usage:   "Enable NIP-44 end-to-end encryption",
 			Value:   true,
 		},
+		&cli.BoolFlag{
+			Name:  "password-stdin",
+			Usage: "Read an encrypted keystore password from stdin",
+		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
 		to := c.String("to")
@@ -153,7 +157,10 @@ Example: hyphae agent msg --from alice --to bob --content "Hello!"`,
 			return common.NewExitError(common.ErrCodeUser, fmt.Errorf("message content is required"))
 		}
 
-		ks, err := identity.LoadKeyStore()
+		jsonMode := common.JSONMode(c)
+		ks, err := identity.LoadKeyStoreForCommand(identity.KeyStoreCommandOptions{
+			JSONMode: jsonMode, RequireSecret: true, PasswordStdin: c.Bool("password-stdin"), Stdin: os.Stdin,
+		})
 		if err != nil {
 			return err
 		}
@@ -232,7 +239,6 @@ Example: hyphae agent msg --from alice --to bob --content "Hello!"`,
 		if err != nil {
 			return err
 		}
-		jsonMode := common.JSONMode(c)
 		result, sendErr := sendQueuedAgentMessage(ctx, event, recipientNpub, content, sender.Nickname, to, isEncrypted, relays, 5*time.Second, StoreOutgoingMessage, enqueueOutboxEntry, publishAgentMessageRelays)
 		if !jsonMode {
 			printAgentMessageRelays(result.Relays)
@@ -404,6 +410,10 @@ var AgentInboxCmd = &cli.Command{
 			Usage:   "Auto-decrypt NIP-44 messages",
 			Value:   true,
 		},
+		&cli.BoolFlag{
+			Name:  "password-stdin",
+			Usage: "Read an encrypted keystore password from stdin",
+		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
 		limit := int(c.Int("limit"))
@@ -411,7 +421,10 @@ var AgentInboxCmd = &cli.Command{
 			return common.NewExitError(common.ErrCodeUser, fmt.Errorf("limit must be positive"))
 		}
 
-		ks, err := identity.LoadKeyStore()
+		autoDecrypt := c.Bool("decrypt")
+		ks, err := identity.LoadKeyStoreForCommand(identity.KeyStoreCommandOptions{
+			JSONMode: common.JSONMode(c), RequireSecret: autoDecrypt, PasswordStdin: c.Bool("password-stdin"), Stdin: os.Stdin,
+		})
 		if err != nil {
 			return err
 		}
@@ -421,15 +434,16 @@ var AgentInboxCmd = &cli.Command{
 			return common.NewExitError(common.ErrCodeUser, err)
 		}
 
-		autoDecrypt := c.Bool("decrypt")
-
 		recipientPK, err := identity.GetPublicKey(ks, recipient.Nickname)
 		if err != nil {
 			return common.NewExitError(common.ErrCodeOther, fmt.Errorf("failed to load recipient public key: %w", err))
 		}
-		recipientSK, err := identity.GetSecretKey(ks, recipient.Nickname)
-		if err != nil && autoDecrypt {
-			return common.NewExitError(common.ErrCodeAuth, fmt.Errorf("failed to load recipient key (is the keystore unlocked?): %w", err))
+		var recipientSK nostr.SecretKey
+		if autoDecrypt {
+			recipientSK, err = identity.GetSecretKey(ks, recipient.Nickname)
+			if err != nil {
+				return common.NewExitError(common.ErrCodeAuth, fmt.Errorf("failed to load recipient key: %w", err))
+			}
 		}
 
 		relays, err := common.ResolveRelays(c)
