@@ -24,14 +24,14 @@ type GroupMember struct {
 
 // GroupMessage represents a message in a group
 type GroupMessage struct {
-	ID        string `json:"id"`
-	EventID   string `json:"event_id"`
-	GroupID   string `json:"group_id"`
-	Sender    string `json:"sender"` // Sender npub
-	Content   string `json:"content"`
-	Plaintext string `json:"plaintext,omitempty"`
-	CreatedAt int64  `json:"created_at"`
-	IsEncrypted bool `json:"is_encrypted"`
+	ID          string `json:"id"`
+	EventID     string `json:"event_id"`
+	GroupID     string `json:"group_id"`
+	Sender      string `json:"sender"` // Sender npub
+	Content     string `json:"content"`
+	Plaintext   string `json:"plaintext,omitempty"`
+	CreatedAt   int64  `json:"created_at"`
+	IsEncrypted bool   `json:"is_encrypted"`
 }
 
 // IsMember checks if an npub is a group member
