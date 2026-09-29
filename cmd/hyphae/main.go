@@ -31,9 +31,8 @@ func main() {
 		Usage:   "A nostr-based agent communication CLI",
 		Version: version,
 		Flags: []cli.Flag{
-			// Local defaults to false in urfave/cli v3.0.0-beta1, which means
-			// this flag is already inherited by every subcommand (see
-			// TestPersistentFlag in the vendored library) — no extra opt-in needed.
+			// Local defaults to false, which makes this flag available to every
+			// subcommand — no extra opt-in is needed.
 			&cli.BoolFlag{
 				Name:  "json",
 				Usage: "Machine-readable output: stdout is a JSON envelope, stderr is a JSON error, exit code is semantic (also settable via HYPHAE_OUTPUT=json, or the legacy AGENT_SPEAKER_OUTPUT=json)",
@@ -67,6 +66,9 @@ func main() {
 			daemon.DaemonCmd,
 		},
 	}
+	if common.JSONModeFromArgs(os.Args) {
+		setJSONUsageErrorHandler(app)
+	}
 
 	if err := app.Run(context.Background(), os.Args); err != nil {
 		// Scan raw argv rather than trusting any *cli.Command flag state: the
@@ -76,5 +78,18 @@ func main() {
 		// JSONModeFromArgs's doc comment for why a value latched earlier via
 		// a Before hook doesn't work here.
 		os.Exit(common.EmitError(common.JSONModeFromArgs(os.Args), err))
+	}
+}
+
+// setJSONUsageErrorHandler prevents urfave/cli's usage-error handler from
+// writing human-readable usage text before main emits the JSON error envelope.
+// OnUsageError is checked on the command that failed, so install it throughout
+// the command tree. Human mode keeps the library's default behavior.
+func setJSONUsageErrorHandler(cmd *cli.Command) {
+	cmd.OnUsageError = func(_ context.Context, _ *cli.Command, err error, _ bool) error {
+		return err
+	}
+	for _, child := range cmd.Commands {
+		setJSONUsageErrorHandler(child)
 	}
 }
