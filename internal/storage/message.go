@@ -325,9 +325,9 @@ func (s *MessageStore) GetStats(userNpub string) (map[string]int, error) {
 	query := `
 		SELECT
 			COUNT(*) AS total,
-			SUM(CASE WHEN recipient_npub = ? THEN 1 ELSE 0 END) AS incoming,
-			SUM(CASE WHEN sender_npub = ? THEN 1 ELSE 0 END) AS outgoing,
-			SUM(CASE WHEN is_encrypted = 1 THEN 1 ELSE 0 END) AS encrypted
+			COALESCE(SUM(CASE WHEN recipient_npub = ? THEN 1 ELSE 0 END), 0) AS incoming,
+			COALESCE(SUM(CASE WHEN sender_npub = ? THEN 1 ELSE 0 END), 0) AS outgoing,
+			COALESCE(SUM(CASE WHEN is_encrypted = 1 THEN 1 ELSE 0 END), 0) AS encrypted
 		FROM messages
 		WHERE sender_npub = ? OR recipient_npub = ?
 	`

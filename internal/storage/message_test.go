@@ -257,6 +257,30 @@ func TestGetStats(t *testing.T) {
 	assert.Equal(t, 2, stats["encrypted"])
 }
 
+func TestGetStatsReturnsZeroForUsersWithoutMessages(t *testing.T) {
+	t.Run("empty database", func(t *testing.T) {
+		store, cleanup := setupTestDB(t)
+		defer cleanup()
+
+		stats, err := store.GetStats("npub1empty")
+		require.NoError(t, err)
+		assert.Equal(t, map[string]int{"total": 0, "incoming": 0, "outgoing": 0, "encrypted": 0}, stats)
+	})
+
+	t.Run("only other users messages", func(t *testing.T) {
+		store, cleanup := setupTestDB(t)
+		defer cleanup()
+		require.NoError(t, store.StoreMessage(&types.StoredMessage{
+			ID: "other-user-message", SenderNpub: "npub1sender", RecipientNpub: "npub1recipient",
+			Plaintext: "not for this user", CreatedAt: 1000, IsEncrypted: true, IsIncoming: true,
+		}))
+
+		stats, err := store.GetStats("npub1empty")
+		require.NoError(t, err)
+		assert.Equal(t, map[string]int{"total": 0, "incoming": 0, "outgoing": 0, "encrypted": 0}, stats)
+	})
+}
+
 func TestDeleteMessage(t *testing.T) {
 	store, cleanup := setupTestDB(t)
 	defer cleanup()
