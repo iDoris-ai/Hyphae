@@ -171,6 +171,9 @@ T19 必交矩阵：正常语音链路、未授权发送者、能力越权、审�
 - retry JSON：`f98f820` / [PR #56](https://github.com/iDoris-ai/Hyphae/pull/56) 验收通过；真实 CLI 与 khatru 覆盖 ACK 后清队列、原签名 ID、配置回退、不可达仍排队及历史落盘失败的部分结果。主代理独立 messaging race 通过；并发替换统一返回 write_conflict。
 - 自动回复：`bbd2ac0` / [PR #57](https://github.com/iDoris-ai/Hyphae/pull/57) 验收通过；加密失败停止，独立随机 d，复用发送前持久化与精确队列事务，断线后重试同一签名事件。主代理独立 daemon/messaging/storage race 通过。
 - #53～#57 保持 draft 供后台 PR-daemon 评审；前置合入 main 后 retarget，不合入临时 integration。顺序与门槛见 [PR 依赖表](em1-pr-order.md)。
+- inbox 查询接线：`77f5806` / [PR #58](https://github.com/iDoris-ai/Hyphae/pull/58) 验收通过。单页真实 EOSE、全失败与部分结果、事件去重/排序/limit、错误不写占位明文；关闭解密时锁定身份仍可只读。主代理独立 messaging/relayquery race 通过；实际二进制错误输出也已验证。此命令不承诺全量历史分页。
+- daemon 生命周期：`561af2c` / [PR #59](https://github.com/iDoris-ai/Hyphae/pull/59) 验收通过。interval 非正值/溢出在触盘前拒绝；SIGINT/SIGTERM 取消当前网络等待，取消后不继续重试后续队列项。主代理独立 daemon race 通过；test-helper 子进程在停滞 WS 上收到 SIGTERM 后两秒内退出。
+- `integration/em1-cli-recovery` / `c2f3651` 再组合 #56～#59，主代理隔离 HOME 的全量 `-tags integration` 测试通过。实际断线发送/重试 fixture、加密身份解锁与离线分页继续独立实现。
 
 ### T04/T06 验收记录
 

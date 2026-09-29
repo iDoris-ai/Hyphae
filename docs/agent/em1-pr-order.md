@@ -27,6 +27,8 @@
 
 `integration/em1-cli-foundation` / `317fb82` 包含上表所有实现。`integration/em1-cli-reliability` / `6e64aaa` 再组合 #53～#55。两者仅用于开发和测试，不开汇总 PR。
 
+下一层 `integration/em1-cli-recovery` / `c2f3651` 再组合 #56～#59，同样不直接作为汇总 PR 合并。
+
 **以下 PR 保持 draft，不合入它们当前指向的临时 integration 分支。** 当前基线的全部前置 PR 进入 main 后，再逐项 retarget 到 main，检查差异与测试，再标记 ready。这样保留每个小 PR 的独立审阅记录。
 
 | PR | 内容 | 当前评审基线 |
@@ -36,6 +38,8 @@
 | [#55](https://github.com/iDoris-ai/Hyphae/pull/55) | daemon 持久化收件接线 | foundation |
 | [#56](https://github.com/iDoris-ai/Hyphae/pull/56) | outbox retry JSON | reliability |
 | [#57](https://github.com/iDoris-ai/Hyphae/pull/57) | 可靠自动回复 | reliability |
+| [#58](https://github.com/iDoris-ai/Hyphae/pull/58) | inbox 查询与部分错误结果 | reliability |
+| [#59](https://github.com/iDoris-ai/Hyphae/pull/59) | daemon 参数校验与退出取消 | #57 分支；#57 合入后改回 main |
 
 后续 inbox、分页、daemon 生命周期和加密身份解锁继续分别提交小 PR；依赖已发布的分支时，在 PR 描述固定前置提交，不把其余任务的代码混进差异。
 
