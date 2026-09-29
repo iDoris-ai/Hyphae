@@ -8,6 +8,13 @@
 
 同一组中没有依赖关系的 PR 可以分别评审。前置 PR 合入 main 后，后续 PR 先改 base 为 main，确认只剩本任务差异，再合并。
 
+### 合并与复审规则
+
+- 本轮是堆叠 PR。若使用 merge commit，前置提交的祖先关系能保留；若使用 squash/rebase merge，后续分支通常还需重新整理到最新 main，不能只改 base。重新整理时只迁移本任务提交，核对差异和测试后再推送；不要把组合基线变成大 PR。
+- 每次 review 记录所审查的 head commit。新提交、冲突解决或基线变化后，旧结论不能直接代表新版本；重新核查有影响的部分。
+- PR-daemon 优先检查持久化事务、重复收件与副作用、加密失败、取消和部分成功结果。CLA 通过只说明贡献流程检查通过；本地测试证据和 GitHub CI 结果分别记录。
+- 当前仓库开启了合并后自动删除分支。有后续 PR 依赖的分支须在删除前完成后续 PR 的基线迁移；临时 integration 分支待全部依赖迁移完再清理。
+
 | PR | 内容 | 前置 |
 |---|---|---|
 | [#38](https://github.com/iDoris-ai/Hyphae/pull/38) | SQLite 每连接配置 | main |
@@ -42,12 +49,14 @@
 | [#59](https://github.com/iDoris-ai/Hyphae/pull/59) | daemon 参数校验与退出取消 | #57 分支；#57 合入后改回 main |
 | [#60](https://github.com/iDoris-ai/Hyphae/pull/60) | 有界历史分页模块 | reliability |
 | [#61](https://github.com/iDoris-ai/Hyphae/pull/61) | 实际 CLI 离线重试与退出验收 | recovery |
+| [#62](https://github.com/iDoris-ai/Hyphae/pull/62) | relay 探测失败连接清理 | recovery |
+| [#63](https://github.com/iDoris-ai/Hyphae/pull/63) | 加密身份的 CLI stdin 解锁 | recovery |
 
-后续 inbox、分页、daemon 生命周期和加密身份解锁继续分别提交小 PR；依赖已发布的分支时，在 PR 描述固定前置提交，不把其余任务的代码混进差异。
+`integration/em1-cli-runtime` / `b1cbaaa` 再组合 #60～#63，主代理已通过隔离 HOME 的全量 integration 测试。后续 daemon 历史分页接线与真实积压验收继续分别提交小 PR；依赖已发布的分支时，在 PR 描述固定前置提交，不把其余任务的代码混进差异。
 
 ## 独立事项
 
 - [#39](https://github.com/iDoris-ai/Hyphae/pull/39) 是规划与验收记录；[#41](https://github.com/iDoris-ai/Hyphae/pull/41) 是按仓库命名的协作约定。
 - [#44](https://github.com/iDoris-ai/Hyphae/pull/44) 是经测试后创建依赖更新 PR 的工作流。定时任务需合入默认分支才运行；Actions 创建/审批 PR 的仓库权限开关仍等待用户确认，不因 CLA 通过而开启。
-- 现有 #37 是先前的 CI PR，本轮没有合并或替它确认验收。
+- 建议优先处理已有 [#37](https://github.com/iDoris-ai/Hyphae/pull/37) CI PR，再推进业务链。2026-09-29 查询确认其当前 head `21b3fd7` 已获 review，Linux/macOS 测试和 `ci-ok` 通过；本轮未重新审查其全部实现，也未合并。当前 main 的 `required_status_checks` 为 null，新增功能 PR 主要只有 CLA 检查。CI workflow 合入后仍需把 `ci-ok` 配成必需检查才形成合并门槛；此建议不表示已经修改仓库设置。
 - retarget 或解决冲突后若代码变化，运行相应测试；全部前置实现进入 main 后，运行一次隔离 HOME 的 `go test -tags integration ./... -count=1`。CLI/UI/四仓验收状态仍以任务台账为准。

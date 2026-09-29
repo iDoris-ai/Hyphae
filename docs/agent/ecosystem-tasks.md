@@ -176,6 +176,9 @@ T19 必交矩阵：正常语音链路、未授权发送者、能力越权、审�
 - `integration/em1-cli-recovery` / `c2f3651` 再组合 #56～#59，主代理隔离 HOME 的全量 `-tags integration` 测试通过。实际断线发送/重试 fixture、加密身份解锁与离线分页继续独立实现。
 - 有界分页：`082f5fd` / [PR #60](https://github.com/iDoris-ai/Hyphae/pull/60) 验收通过；包含边界秒、去重、NIP-67 提示、取消、100 页/10000 事件/30 秒上限，以及无法前进时的未完成结果。主代理独立 relayquery race 通过。此 PR 尚未接入 daemon。
 - 离线真实 CLI：`376a48c` / [PR #61](https://github.com/iDoris-ai/Hyphae/pull/61) 验收通过；实际发送入队、relay 重启后按原签名重试、对端解密与重复查询、两端历史明文核对。实际 daemon 二进制的停滞网络 SIGTERM 退出也通过；主代理独立 integration tests 通过。
+- relay 连接清理：`a9aebe1` / [PR #62](https://github.com/iDoris-ai/Hyphae/pull/62) 验收通过；探测失败时也关闭 SDK 返回的非空连接。主代理独立 nostr race 通过。
+- 加密身份解锁：`1bdf7bb` / [PR #63](https://github.com/iDoris-ai/Hyphae/pull/63) 验收通过；实际 CLI 测试覆盖显式 stdin、错误或缺失凭据、加密发送与收件，以及不解密时不读密码。主代理独立 identity/messaging/daemon race 通过。
+- `integration/em1-cli-runtime` / `b1cbaaa` 再组合 #60～#63，主代理隔离 HOME 的全量 `go test -tags integration ./... -count=1` 通过。daemon 历史分页接线与实际 125 条积压/重启验收待完成。
 
 ### T04/T06 验收记录
 
