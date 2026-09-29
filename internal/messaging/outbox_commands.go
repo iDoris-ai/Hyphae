@@ -259,14 +259,12 @@ var outboxRetryCmd = &cli.Command{
 	Usage: "Manually retry a single outbox entry now, bypassing the daemon's backoff wait",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
-			Name:     "id",
-			Usage:    "Outbox entry ID (see `storage outbox list`)",
-			Required: true,
+			Name:  "id",
+			Usage: "Outbox entry ID (see `storage outbox list`)",
 		},
 		&cli.StringSliceFlag{
 			Name:  "relay",
 			Usage: "Fallback relay URLs, used only if the entry has none of its own",
-			Value: []string{"wss://relay.aastar.io"},
 		},
 		&cli.IntFlag{
 			Name:  "timeout",
@@ -275,6 +273,17 @@ var outboxRetryCmd = &cli.Command{
 		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
+		jsonMode := common.JSONMode(c)
+		id := c.String("id")
+		if id == "" {
+			return common.NewExitError(common.ErrCodeUser, fmt.Errorf("--id is required"))
+		}
+		timeoutSeconds := int64(c.Int("timeout"))
+		const maxTimeoutSeconds = int64((1<<63 - 1) / int64(time.Second))
+		if timeoutSeconds <= 0 || timeoutSeconds > maxTimeoutSeconds {
+			return common.NewExitError(common.ErrCodeUser, fmt.Errorf("--timeout must be between 1 and %d seconds", maxTimeoutSeconds))
+		}
+
 		ob, err := LoadOutbox()
 		if err != nil {
 			return fmt.Errorf("failed to load outbox: %w", err)
@@ -288,40 +297,109 @@ var outboxRetryCmd = &cli.Command{
 		// value that happens to be valid hex but was meant literally must
 		// still be
 		// reachable.
-		id := c.String("id")
 		matches := findOutboxMatches(ob.Entries, id)
 		if len(matches) == 0 {
 			return common.NewExitError(common.ErrCodeUser, fmt.Errorf("no outbox entry with id %q", id))
 		}
 		if len(matches) > 1 {
-			// AttemptSend's RemoveFromOutbox removes every entry sharing an
-			// ID, not just the one retried -- with duplicates, a successful
-			// send would silently delete the OTHER (still-unsent) entries
-			// too. Refuse rather than risk that; `list` is how to see and
-			// understand this pre-existing data issue.
+			// An ID alone cannot distinguish entries that share it. Refuse
+			// rather than guess which queued payload the caller intended;
+			// `list` marks these entries so they can be inspected.
 			return common.NewExitError(common.ErrCodeUser, fmt.Errorf(
-				"%d entries share id %q (pre-existing outbox data issue, see specs/m1.5/README.md) -- refusing to retry, since a successful send would remove all of them, not just one; use `storage outbox list` to inspect", len(matches), id))
+				"%d entries share id %q -- refusing to guess which one to retry; use `storage outbox list` to inspect", len(matches), id))
 		}
 
-		timeout := time.Duration(c.Int("timeout")) * time.Second
-		result, err := AttemptSend(ctx, ob, matches[0], c.StringSlice("relay"), timeout)
+		entry := matches[0]
+		relays := entry.Relays
+		if len(relays) == 0 {
+			relays, err = common.ResolveRelays(c)
+			if err != nil {
+				return err
+			}
+		}
+		result, sendErr := AttemptSend(ctx, ob, entry, relays, time.Duration(timeoutSeconds)*time.Second)
+		output := retryResult(entry.ID, result)
+		if !result.Attempted && !result.Superseded && !result.QueueStateUnknown {
+			// A pre-publish failure can leave the selected snapshot stale; do not
+			// claim that it remains queued unless AttemptSend confirmed that.
+			output.QueueStateUnknown = true
+		}
+		if sendErr != nil {
+			err := fmt.Errorf("%s: %w", retryStatusMessage(output), sendErr)
+			if result.Superseded {
+				return common.NewExitErrorWithData(common.ErrCodeWriteConflict, err, output)
+			}
+			return common.NewExitErrorWithData(common.ErrCodeOther, err, output)
+		}
+		if result.Superseded {
+			err := fmt.Errorf("%s: queue entry changed or was removed during retry", retryStatusMessage(output))
+			return common.NewExitErrorWithData(common.ErrCodeWriteConflict, err, output)
+		}
 		if !result.Attempted {
-			return fmt.Errorf("retry failed: %w", err)
+			err := fmt.Errorf("%s: retry did not attempt a relay publish", retryStatusMessage(output))
+			return common.NewExitErrorWithData(common.ErrCodeOther, err, output)
 		}
-		if err != nil {
-			fmt.Printf("⚠️  %v\n", err)
-		}
-
-		switch {
-		case result.Sent:
-			fmt.Println("✅ Sent")
-		case result.MarkedFailed:
-			fmt.Println("❌ Still failing and retries are now exhausted -- marked failed")
-		default:
-			fmt.Println("❌ Still failing -- will be retried again by the daemon (or run this command again)")
-		}
+		common.Emit(jsonMode, output, func() { printOutboxRetryResult(output) })
 		return nil
 	},
+}
+
+type outboxRetryResult struct {
+	EventID           string `json:"event_id"`
+	Attempted         bool   `json:"attempted"`
+	Sent              bool   `json:"sent"`
+	Queued            bool   `json:"queued"`
+	MarkedFailed      bool   `json:"marked_failed"`
+	HistoryStored     bool   `json:"history_stored"`
+	Superseded        bool   `json:"superseded"`
+	QueueStateUnknown bool   `json:"queue_state_unknown"`
+}
+
+func retryResult(id string, result SendResult) outboxRetryResult {
+	return outboxRetryResult{
+		EventID: displayOutboxID(id), Attempted: result.Attempted, Sent: result.Sent,
+		Queued: result.Queued, MarkedFailed: result.MarkedFailed,
+		HistoryStored: result.HistoryStored, Superseded: result.Superseded,
+		QueueStateUnknown: result.QueueStateUnknown,
+	}
+}
+
+func retryStatusMessage(result outboxRetryResult) string {
+	ack := "relay ACK not received"
+	if result.Sent {
+		ack = "relay ACK received"
+	} else if !result.Attempted {
+		ack = "relay publish not attempted"
+	}
+	queue := "queue status not confirmed"
+	switch {
+	case result.QueueStateUnknown:
+		queue = "queue state unknown"
+	case result.Superseded:
+		queue = "queue entry superseded"
+	case result.Queued:
+		queue = "queued for retry"
+	case result.MarkedFailed:
+		queue = "marked failed"
+	case result.Sent:
+		queue = "queue entry removed"
+	}
+	history := "this retry did not confirm a history write"
+	if result.HistoryStored {
+		history = "history stored by this retry"
+	}
+	return fmt.Sprintf("event %s; %s; %s; %s", result.EventID, ack, queue, history)
+}
+
+func printOutboxRetryResult(result outboxRetryResult) {
+	switch {
+	case result.Sent:
+		fmt.Println("✅ Sent")
+	case result.MarkedFailed:
+		fmt.Println("❌ Still failing and retries are now exhausted -- marked failed")
+	default:
+		fmt.Println("❌ Still failing -- will be retried again by the daemon (or run this command again)")
+	}
 }
 
 // findOutboxMatches resolves a user-supplied ID (copy-pasted from `list`,
