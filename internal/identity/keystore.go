@@ -1,9 +1,12 @@
 package identity
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -15,9 +18,72 @@ import (
 )
 
 const (
-	KeyStoreDirName = ".hyphae"
-	KeyStoreFile    = "keystore.json"
+	KeyStoreDirName       = ".hyphae"
+	KeyStoreFile          = "keystore.json"
+	maxPasswordStdinBytes = 4096
 )
+
+// KeyStoreCommandOptions controls command-specific keystore unlocking without
+// changing the behavior of other existing keystore consumers.
+type KeyStoreCommandOptions struct {
+	JSONMode      bool
+	RequireSecret bool
+	PasswordStdin bool
+	Stdin         io.Reader
+}
+
+// LoadKeyStoreForCommand loads the keystore and unlocks it only when a command
+// needs secret keys. JSON commands never prompt; callers must opt in to stdin.
+func LoadKeyStoreForCommand(options KeyStoreCommandOptions) (*types.KeyStore, error) {
+	ks, err := LoadKeyStore()
+	if err != nil {
+		return nil, err
+	}
+	if !options.RequireSecret || !ks.Encrypted || ks.MasterKey != nil {
+		return ks, nil
+	}
+
+	var password string
+	if options.PasswordStdin {
+		password, err = readPasswordStdin(options.Stdin)
+		if err != nil {
+			return nil, common.NewExitError(common.ErrCodeAuth, err)
+		}
+	} else if options.JSONMode {
+		return nil, common.NewExitError(common.ErrCodeAuth, errors.New("encrypted keystore requires --password-stdin in JSON mode"))
+	} else {
+		password, err = PromptPassword("Keystore password: ")
+		if err != nil {
+			return nil, common.NewExitError(common.ErrCodeAuth, errors.New("failed to read keystore password"))
+		}
+	}
+	if err := UnlockKeyStore(ks, password); err != nil {
+		return nil, common.NewExitError(common.ErrCodeAuth, errors.New("failed to unlock keystore"))
+	}
+	return ks, nil
+}
+
+func readPasswordStdin(reader io.Reader) (string, error) {
+	if reader == nil {
+		return "", errors.New("password stdin is unavailable")
+	}
+	data, err := io.ReadAll(io.LimitReader(reader, maxPasswordStdinBytes+1))
+	if err != nil {
+		return "", errors.New("failed to read password from stdin")
+	}
+	if len(data) > maxPasswordStdinBytes {
+		return "", errors.New("password from stdin exceeds 4096 bytes")
+	}
+	if bytes.HasSuffix(data, []byte("\r\n")) {
+		data = data[:len(data)-2]
+	} else if bytes.HasSuffix(data, []byte("\n")) {
+		data = data[:len(data)-1]
+	}
+	if len(data) == 0 {
+		return "", errors.New("password from stdin is empty")
+	}
+	return string(data), nil
+}
 
 // GetKeyStorePath returns the path to keystore directory
 func GetKeyStorePath() string {

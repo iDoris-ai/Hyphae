@@ -409,6 +409,28 @@ func TestWatchInbox_ReceivesEventMarksSeenAndAutoReplies(t *testing.T) {
 	}, 2*time.Second, 20*time.Millisecond,
 		"the plaintext (undecrypted, not enc=nip44-tagged) message should have triggered an auto-reply, recorded in local history")
 
+	// The conversation history is written before the auto-reply publish attempt.
+	// Wait for the failed attempt's retry count to reach disk before t.TempDir
+	// removes HOME; otherwise the background send can still be updating the
+	// outbox while cleanup removes its directory (visible under -race).
+	require.Eventually(t, func() bool {
+		outbox, err := messaging.LoadOutbox()
+		if err != nil {
+			return false
+		}
+		for _, entry := range outbox.Entries {
+			var reply nostr.Event
+			if err := json.Unmarshal([]byte(entry.EventJSON), &reply); err != nil {
+				continue
+			}
+			if reply.Kind == messaging.AgentKind && reply.PubKey == myPK && entry.RetryCount >= 1 {
+				return true
+			}
+		}
+		return false
+	}, 2*time.Second, 20*time.Millisecond,
+		"the failed auto-reply publish attempt must finish and persist its retry count before temporary HOME cleanup")
+
 	foundAutoReply := false
 	for _, m := range convo {
 		if !m.IsIncoming && isAutoReplyMessage(m.Plaintext) {
