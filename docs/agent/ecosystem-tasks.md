@@ -8,7 +8,7 @@
 - **Luna**：按任务单实现、补测试、提供可复现证据；接口变化先交主代理评审。
 - 同时最多三位 Luna。每项实现使用独立分支/工作树；同一文件的修改串行，依赖通过验收后才派发。
 - 每次派工固定：目标、基线 commit、允许修改的文件、输入/输出契约、依赖、验收命令、边界用例和交付物。
-- 多个前置 PR 的共同开发基线为 `integration/em1-cli-foundation`（`60715f3`），仅组合已验收改动，不为它创建汇总大 PR。后续跨依赖的小 PR 暂以此为 base；前置 PR 合入主线后逐项改回 main，并核对差异及回归。主线尚未合并本轮 PR。
+- 多个前置 PR 的共同开发基线使用 `integration/em1-cli-foundation`，仅组合已验收改动，不为它创建汇总大 PR。最初的组合验收快照为 `60715f3`，每次派工固定具体 commit。后续跨依赖的小 PR 暂以此分支为 base；不能把这些 PR 自身的改动提前合入其 base。前置 PR 合入主线后逐项改回 main，并核对差异及回归。主线尚未合并本轮 PR。
 - 状态为 `WAITING → READY → IN_PROGRESS → IN_REVIEW → DONE`。`DONE` 需主代理验收；测试通过不等于整个里程碑通过。环境缺失单独记录，不能计作通过。
 - 当前推进上游迁移、存储修复和 CLI 通信接口；基础 UI 与跨仓执行由协作文档约定后交对应仓库推进。
 
@@ -161,6 +161,9 @@ T19 必交矩阵：正常语音链路、未授权发送者、能力越权、审�
 - 加密库新增身份保持加密；已有未加密身份的库须先使用 `identity change-password` 完成整库加密。JSON 管理输出使用公开字段白名单。
 - outbox JSON/可靠入队、inbox 错误传播、daemon 离线补收仍待后续小 PR，不能据此宣称 Agent24 CLI/UI 已接线。
 - relay 配置/探测：`f2c62e2` / PR #50 验收通过。主代理独立 relayconfig/common/nostr race 通过；组合后的实际 CLI 在临时 HOME 保存本地 relay 后，无显式 --relay 的 info、加密发送和收件均使用该配置并通过。outbox 旧空地址条目的回退接线仍待完成。
+- 首次收件登记：`b913bd9` / PR #51 验收通过，主代理独立 storage/messaging race 通过。SQLite 原子条件写入覆盖并发、重新打开数据库、发件升级为收件和收件人冲突；daemon 调用点仍在实现。
+- 单次 relay 查询：`d70b751` / PR #52 验收通过，主代理独立 relayquery race 通过。关闭 SDK 本地伪 EOSE，处理真实 EOSE/CLOSED、取消/断线竞态及 NIP-67 提示；不能确认完整时返回错误。inbox 和 daemon 的调用点、历史分页另行接入。
+- 基线追加 #51/#52 后为 `317fb82`；新的可靠发送、daemon 收件接线、outbox list/clear JSON 分别在独立工作树推进。
 
 ### T04/T06 验收记录
 
