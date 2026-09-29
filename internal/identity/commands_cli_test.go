@@ -214,6 +214,9 @@ func TestEncryptedIdentityJSONPasswordHandling(t *testing.T) {
 	if missing.code != 3 || strings.TrimSpace(missing.stdout) != "" || strings.Contains(missing.stderr, "Keystore password:") || missing.spent > 2*time.Second {
 		t.Fatalf("password-less JSON create did not fail promptly with auth_error: %#v", missing)
 	}
+	if !strings.Contains(missing.stderr, "--password-stdin") {
+		t.Fatalf("missing-password guidance does not mention stdin: %s", missing.stderr)
+	}
 	var failure map[string]any
 	if err := json.Unmarshal([]byte(missing.stderr), &failure); err != nil || failure["error"] != "auth_error" {
 		t.Fatalf("unexpected password error envelope: %s", missing.stderr)
@@ -222,6 +225,127 @@ func TestEncryptedIdentityJSONPasswordHandling(t *testing.T) {
 	prompt := runIdentityCLI(t, t.TempDir(), stdin, nil, "identity", "create", "--nickname", "prompted", "--password-prompt", "--json")
 	if prompt.code != 3 || strings.TrimSpace(prompt.stdout) != "" || strings.Contains(prompt.stderr, "Enter password:") {
 		t.Fatalf("password prompt ran in JSON mode: %#v", prompt)
+	}
+}
+
+func TestEncryptedIdentityCreateWithPasswordStdinAndAgentUnlock(t *testing.T) {
+	home := t.TempDir()
+	password := " secret with spaces "
+	firstResult := runIdentityCLI(t, home, strings.NewReader(password+"\r\n"), nil,
+		"identity", "create", "--nickname", "alice", "--password-stdin", "--json")
+	first := decodeSuccess(t, firstResult)["data"].(map[string]any)
+	if first["nickname"] != "alice" || first["encrypted"] != true || strings.Contains(firstResult.stdout, password) {
+		t.Fatalf("unexpected stdin-created identity response: %#v", firstResult)
+	}
+
+	secondResult := runIdentityCLI(t, home, strings.NewReader(password+"\n"), nil,
+		"identity", "create", "--nickname", "bob", "--password-stdin", "--json")
+	second := decodeSuccess(t, secondResult)["data"].(map[string]any)
+	if second["nickname"] != "bob" || second["encrypted"] != true || strings.Contains(secondResult.stdout, password) {
+		t.Fatalf("unexpected appended identity response: %#v", secondResult)
+	}
+
+	if result := runIdentityCLI(t, home, nil, nil, "contact", "add", "--nickname", "bob", "--npub", second["npub"].(string), "--role", "agent", "--json"); result.code != 0 {
+		t.Fatalf("add recipient contact: %#v", result)
+	}
+	message := runIdentityCLI(t, home, strings.NewReader(password+"\n"), nil,
+		"agent", "msg", "--from", "alice", "--to", "bob", "--content", "stdin unlock check",
+		"--relay", "ws://127.0.0.1:1", "--password-stdin", "--json")
+	data := decodeSuccess(t, message)["data"].(map[string]any)
+	if data["event_id"] == "" || data["encrypted"] != true || data["history_stored"] != true || data["queued_for_retry"] != true {
+		t.Fatalf("agent msg did not unlock and durably queue the encrypted event: %#v", data)
+	}
+}
+
+func TestIdentityCreatePasswordStdinErrorsAndFlagConflicts(t *testing.T) {
+	conflictHome := t.TempDir()
+	conflicts := [][]string{
+		{"--password=secret", "--password-stdin"},
+		{"--password-stdin", "--password-prompt"},
+		{"--password=", "--password-prompt"},
+	}
+	for _, flags := range conflicts {
+		args := append([]string{"identity", "create", "--nickname", "alice"}, flags...)
+		args = append(args, "--json")
+		result := runIdentityCLI(t, conflictHome, strings.NewReader("secret\n"), nil, args...)
+		if result.code != 1 || strings.TrimSpace(result.stdout) != "" || strings.Contains(result.stderr, "secret") {
+			t.Fatalf("conflicting password flags were not rejected safely: args=%v result=%#v", flags, result)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(conflictHome, ".hyphae")); !os.IsNotExist(err) {
+		t.Fatalf("conflicting flags touched the keystore path: stat err=%v", err)
+	}
+
+	prompt := runIdentityCLI(t, t.TempDir(), nil, nil,
+		"identity", "create", "--nickname", "alice", "--password-prompt", "--json")
+	if prompt.code != 3 || strings.TrimSpace(prompt.stdout) != "" || strings.Contains(prompt.stderr, "Enter password:") {
+		t.Fatalf("JSON password prompt was not rejected immediately: %#v", prompt)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "empty", input: "", want: "empty"},
+		{name: "oversized", input: strings.Repeat("x", maxPasswordStdinBytes+1), want: "4096 bytes"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := runIdentityCLI(t, t.TempDir(), strings.NewReader(tc.input), nil,
+				"identity", "create", "--nickname", "alice", "--password-stdin", "--json")
+			if result.code != 3 || strings.TrimSpace(result.stdout) != "" || !strings.Contains(result.stderr, `"error":"auth_error"`) {
+				t.Fatalf("invalid stdin password did not produce auth_error: %#v", result)
+			}
+			if strings.Contains(result.stderr, tc.input) && tc.input != "" {
+				t.Fatalf("password input leaked to stderr: %s", result.stderr)
+			}
+			if !strings.Contains(result.stderr, tc.want) {
+				t.Fatalf("error does not identify %s input: %s", tc.name, result.stderr)
+			}
+		})
+	}
+
+	home := t.TempDir()
+	created := runIdentityCLI(t, home, strings.NewReader("correct\n"), nil,
+		"identity", "create", "--nickname", "alice", "--password-stdin", "--json")
+	decodeSuccess(t, created)
+	storePath := filepath.Join(home, ".hyphae", "keystore.json")
+	beforeWrongPassword, err := os.ReadFile(storePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrong := runIdentityCLI(t, home, strings.NewReader("wrong-secret\n"), nil,
+		"identity", "create", "--nickname", "bob", "--password-stdin", "--json")
+	if wrong.code != 3 || strings.TrimSpace(wrong.stdout) != "" || !strings.Contains(wrong.stderr, `"error":"auth_error"`) || strings.Contains(wrong.stderr, "wrong-secret") {
+		t.Fatalf("wrong stdin password was not safely reported as auth_error: %#v", wrong)
+	}
+	afterWrongPassword, err := os.ReadFile(storePath)
+	if err != nil || !bytes.Equal(afterWrongPassword, beforeWrongPassword) {
+		t.Fatalf("wrong password changed the encrypted keystore: readErr=%v", err)
+	}
+	identities := decodeSuccess(t, runIdentityCLI(t, home, nil, nil, "identity", "list", "--json"))["data"].([]any)
+	if len(identities) != 1 {
+		t.Fatalf("wrong password unexpectedly appended an identity: %#v", identities)
+	}
+}
+
+func TestIdentityCreatePasswordStdinCannotPartiallyEncryptExistingStore(t *testing.T) {
+	home := t.TempDir()
+	result := runIdentityCLI(t, home, nil, nil, "identity", "create", "--nickname", "alice", "--json")
+	decodeSuccess(t, result)
+	storePath := filepath.Join(home, ".hyphae", "keystore.json")
+	before, err := os.ReadFile(storePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result = runIdentityCLI(t, home, strings.NewReader("new-password\n"), nil,
+		"identity", "create", "--nickname", "bob", "--password-stdin", "--json")
+	if result.code != 1 || strings.TrimSpace(result.stdout) != "" || !strings.Contains(result.stderr, "identity change-password") {
+		t.Fatalf("stdin password silently encrypted an existing unencrypted keystore: %#v", result)
+	}
+	after, err := os.ReadFile(storePath)
+	if err != nil || !bytes.Equal(after, before) {
+		t.Fatalf("rejected append changed the existing keystore: readErr=%v", err)
 	}
 }
 
