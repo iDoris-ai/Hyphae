@@ -20,7 +20,7 @@
 | 消息可靠性 | 重试事务 #48、历史明文 #49、发布前可靠入队 [#54](https://github.com/iDoris-ai/Hyphae/pull/54) 已验收；`published_to=0` 且 `queued_for_retry=true` 表示已提交待发 |
 | 待发管理 | [#53](https://github.com/iDoris-ai/Hyphae/pull/53)：list 为安全数组，clear 返回 removed/remaining；[#56](https://github.com/iDoris-ai/Hyphae/pull/56)：retry JSON 已验收 |
 | 收件 | 原子首次收件 #51、daemon 接线 [#55](https://github.com/iDoris-ai/Hyphae/pull/55)、inbox 单次查询 [#58](https://github.com/iDoris-ai/Hyphae/pull/58) 已验收；分页模块 #60 已验收，daemon 接线与积压验收仍在实现 |
-| 加密身份 | [#63](https://github.com/iDoris-ai/Hyphae/pull/63)：msg/inbox/daemon 的 `--password-stdin` 已验收。创建身份的 stdin 通道另行补齐，不能把密码放进 UI 生成的命令参数 |
+| 加密身份 | [#63](https://github.com/iDoris-ai/Hyphae/pull/63)：msg/inbox/daemon 的 `--password-stdin` 已验收；[#64](https://github.com/iDoris-ai/Hyphae/pull/64)：创建身份的 stdin 已验收，支持首次加密创建与向加密库追加。#64 尚未进入上文 runtime 基线 |
 | 生命周期 | [#59](https://github.com/iDoris-ai/Hyphae/pull/59)：SIGINT/SIGTERM 取消当前网络等待；[#61](https://github.com/iDoris-ai/Hyphae/pull/61) 覆盖真实二进制退出与离线重试 |
 
 表内单次管理/收发命令的机器模式成功在 stdout 输出一份 `{"ok":true,"data":...}`；错误在 stderr 输出错误信封，退出码沿用 1 用户输入、2 网络、3 身份解锁、4 其他、5 写冲突。UI 不解析人工提示文字。`connected=true` 只表示一次 WebSocket 握手成功，不能当持续在线、已订阅或已送达。各项字段及补收门槛见规划 PR [#39](https://github.com/iDoris-ai/Hyphae/pull/39) 的 CLI 通信契约。
@@ -34,6 +34,8 @@ daemon 是长驻进程，当前输出运行日志，并未提供 JSON 消息流�
 ### 调用与 UI 状态映射
 
 统一以进程参数数组调用固定版本的 Hyphae，避免拼接 shell。加密 msg/inbox/daemon 使用 `--password-stdin`，通过专用 stdin 写入密码后关闭管道；不把密码写进参数、日志或持久配置。上限 4096 字节，只移除一组尾随 LF/CRLF，保留密码空格。缺凭据/错误密码返回身份错误，UI 提示解锁后再操作。`inbox --decrypt=false` 不读密码，也不产生解密后的历史。
+
+上述解锁支持仅覆盖列出的命令。当前 `profile publish` 仍直接加载密钥库，未接入 stdin 解锁；加密身份不能据此视为已支持 headless 默认注册。基础通信阶段不要为了注册成功改建未加密身份；注册接线与凭据通道在后续 T08 一并验收。
 
 | CLI 事实 | UI 可显示的状态/动作 |
 |---|---|
