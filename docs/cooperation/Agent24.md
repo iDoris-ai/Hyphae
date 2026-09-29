@@ -8,6 +8,19 @@
 
 继续使用已存在的 `identity`、`profile publish/discover`、`agent msg`、`history inbox --as`、`storage outbox`、`daemon` 能力及 `--json` 输出。入站必须保留完整发送者公钥和事件 ID，禁止依赖显示用截断名称。
 
+### 本轮可接线接口
+
+这些变更仍在 PR 分支，不能把当前 main 当成已支持全部接口。组合开发基线为 `integration/em1-cli-foundation` / `60715f3`；正式打包版本须在合并后重新固定。
+
+| 能力 | Hyphae 接口与状态 |
+|---|---|
+| 身份/联系人 | PR [#45](https://github.com/iDoris-ai/Hyphae/pull/45)：create/list/use、contact add/list 的 JSON 已验收；只输出公开身份字段 |
+| relay 配置 | PR [#50](https://github.com/iDoris-ai/Hyphae/pull/50)：`relay set --relay URL` 可重复、完整替换；`relay list` 返回 relays/source；`relay info [URL] --timeout 5` 返回 url/connected |
+| 配置优先级 | 显式 --relay > `~/.hyphae/relays.json` > 既有默认；坏配置报错，不静默换公共 relay。已入队事件保持原地址 |
+| 消息可靠性 | 重试事务 #48、历史明文 #49 已验收；发布前入队、outbox JSON、inbox 查询错误和 daemon 补收仍在实现 |
+
+机器模式成功在 stdout 输出一份 `{"ok":true,"data":...}`；错误在 stderr 输出错误信封，退出码沿用 1 用户输入、2 网络、3 身份解锁、4 其他、5 写冲突。UI 不解析人工提示文字。`connected=true` 只表示一次 WebSocket 握手成功，不能当持续在线、已订阅或已送达。各项字段及补收门槛见规划 PR [#39](https://github.com/iDoris-ai/Hyphae/pull/39) 的 CLI 通信契约。
+
 ## 双方分工
 
 - Hyphae：保持 CLI 参数、JSON/退出码、Nostr 事件兼容；修复存储与可靠投递；提供可构建、固定依赖的客户端与 relay。
