@@ -25,10 +25,9 @@ Identities are stored in ~/.hyphae/ with 600 permissions.`,
 			Usage: "Create a new identity",
 			Flags: []cli.Flag{
 				&cli.StringFlag{
-					Name:     "nickname",
-					Aliases:  []string{"n"},
-					Usage:    "Nickname for this identity",
-					Required: true,
+					Name:    "nickname",
+					Aliases: []string{"n"},
+					Usage:   "Nickname for this identity",
 				},
 				&cli.BoolFlag{
 					Name:    "default",
@@ -46,36 +45,46 @@ Identities are stored in ~/.hyphae/ with 600 permissions.`,
 				},
 			},
 			Action: func(ctx context.Context, c *cli.Command) error {
+				nickname := c.String("nickname")
+				if nickname == "" {
+					return common.NewExitError(common.ErrCodeUser, fmt.Errorf("--nickname is required"))
+				}
 				ks, err := LoadKeyStore()
 				if err != nil {
 					return fmt.Errorf("failed to load keystore: %w", err)
 				}
 
-				nickname := c.String("nickname")
-				var identity interface{}
+				var identity *types.Identity
+				password := c.String("password")
 
 				if ks.Encrypted {
-					// Must unlock existing keystore first
-					pw, err := PromptPassword("Keystore password: ")
-					if err != nil {
-						return fmt.Errorf("failed to read password: %w", err)
+					if password == "" {
+						if common.JSONMode(c) {
+							return common.NewExitError(common.ErrCodeAuth, fmt.Errorf("encrypted keystore requires --password in JSON mode"))
+						}
+						password, err = PromptPassword("Keystore password: ")
+						if err != nil {
+							return fmt.Errorf("failed to read password: %w", err)
+						}
 					}
-					if err := UnlockKeyStore(ks, pw); err != nil {
-						return fmt.Errorf("failed to unlock keystore: %w", err)
+					if err := UnlockKeyStore(ks, password); err != nil {
+						return common.NewExitError(common.ErrCodeAuth, fmt.Errorf("failed to unlock keystore: %w", err))
 					}
-					identity, err = CreateIdentityWithPassword(ks, nickname, "")
+					identity, err = CreateIdentityWithPassword(ks, nickname, password)
 					if err != nil {
 						return err
 					}
-				} else if c.String("password") != "" || c.Bool("password-prompt") {
-					pw := c.String("password")
-					if pw == "" {
-						pw, err = PromptPasswordWithConfirm()
+				} else if password != "" || c.Bool("password-prompt") {
+					if len(ks.Identities) > 0 {
+						return common.NewExitError(common.ErrCodeUser, fmt.Errorf("encrypt the existing keystore with 'identity change-password' before creating another identity with a password"))
+					}
+					if password == "" {
+						password, err = PromptPasswordWithConfirm()
 						if err != nil {
 							return fmt.Errorf("failed to set password: %w", err)
 						}
 					}
-					identity, err = CreateIdentityWithPassword(ks, nickname, pw)
+					identity, err = CreateIdentityWithPassword(ks, nickname, password)
 					if err != nil {
 						return err
 					}
@@ -96,17 +105,27 @@ Identities are stored in ~/.hyphae/ with 600 permissions.`,
 				yellow := color.New(color.FgYellow).SprintFunc()
 				cyan := color.New(color.FgCyan).SprintFunc()
 
-				id := identity.(*types.Identity)
-				if err := audit.LogAction(nickname, audit.ActionIdentityCreated, map[string]any{"npub": id.Npub}); err != nil {
+				if err := audit.LogAction(nickname, audit.ActionIdentityCreated, map[string]any{"npub": identity.Npub}); err != nil {
 					fmt.Fprintf(os.Stderr, "⚠️  audit log failed: %v\n", err)
 				}
-				fmt.Printf("✅ Created identity '%s'\n", green(nickname))
-				fmt.Printf("   Npub: %s\n", yellow(id.Npub))
-				fmt.Printf("   Nsec: %s (stored securely)\n", yellow("[hidden]"))
-				if ks.Encrypted {
-					fmt.Printf("   Encryption: %s\n", cyan("AES-256-GCM + scrypt"))
+				type identityOutput struct {
+					Nickname  string `json:"nickname"`
+					Npub      string `json:"npub"`
+					Default   bool   `json:"default"`
+					Encrypted bool   `json:"encrypted"`
 				}
-				fmt.Printf("\n🔐 Keys stored in ~/.hyphae/ (permissions: 600)\n")
+				common.Emit(common.JSONMode(c), identityOutput{
+					Nickname: nickname, Npub: identity.Npub,
+					Default: ks.DefaultIdentity == nickname, Encrypted: ks.Encrypted,
+				}, func() {
+					fmt.Printf("✅ Created identity '%s'\n", green(nickname))
+					fmt.Printf("   Npub: %s\n", yellow(identity.Npub))
+					fmt.Printf("   Nsec: %s (stored securely)\n", yellow("[hidden]"))
+					if ks.Encrypted {
+						fmt.Printf("   Encryption: %s\n", cyan("AES-256-GCM + scrypt"))
+					}
+					fmt.Printf("\n🔐 Keys stored in ~/.hyphae/ (permissions: 600)\n")
+				})
 
 				return nil
 			},
@@ -176,24 +195,35 @@ Identities are stored in ~/.hyphae/ with 600 permissions.`,
 			Usage: "Set default identity",
 			Flags: []cli.Flag{
 				&cli.StringFlag{
-					Name:     "nickname",
-					Aliases:  []string{"n"},
-					Usage:    "Nickname to set as default",
-					Required: true,
+					Name:    "nickname",
+					Aliases: []string{"n"},
+					Usage:   "Nickname to set as default",
 				},
 			},
 			Action: func(ctx context.Context, c *cli.Command) error {
+				jsonMode := common.JSONMode(c)
+				nickname := c.String("nickname")
+				if nickname == "" {
+					return common.NewExitError(common.ErrCodeUser, fmt.Errorf("--nickname is required"))
+				}
 				ks, err := LoadKeyStore()
 				if err != nil {
 					return fmt.Errorf("failed to load keystore: %w", err)
 				}
 
-				nickname := c.String("nickname")
+				if _, exists := ks.Identities[nickname]; !exists {
+					return common.NewExitError(common.ErrCodeUser, fmt.Errorf("identity '%s' not found", nickname))
+				}
 				if err := SetDefault(ks, nickname); err != nil {
 					return err
 				}
 
-				fmt.Printf("✅ Default identity set to '%s'\n", nickname)
+				common.Emit(jsonMode, map[string]any{
+					"nickname":  nickname,
+					"npub":      ks.Identities[nickname].Npub,
+					"default":   true,
+					"encrypted": ks.Encrypted,
+				}, func() { fmt.Printf("✅ Default identity set to '%s'\n", nickname) })
 				return nil
 			},
 		},
@@ -315,16 +345,14 @@ Contacts are stored locally and mapped to their npubs.`,
 			Usage: "Add a contact",
 			Flags: []cli.Flag{
 				&cli.StringFlag{
-					Name:     "nickname",
-					Aliases:  []string{"n"},
-					Usage:    "Nickname for this contact",
-					Required: true,
+					Name:    "nickname",
+					Aliases: []string{"n"},
+					Usage:   "Nickname for this contact",
 				},
 				&cli.StringFlag{
-					Name:     "npub",
-					Aliases:  []string{"p"},
-					Usage:    "Contact's npub",
-					Required: true,
+					Name:    "npub",
+					Aliases: []string{"p"},
+					Usage:   "Contact's npub",
 				},
 				&cli.StringFlag{
 					Name:  "role",
@@ -333,13 +361,16 @@ Contacts are stored locally and mapped to their npubs.`,
 				},
 			},
 			Action: func(ctx context.Context, c *cli.Command) error {
+				jsonMode := common.JSONMode(c)
+				nickname := c.String("nickname")
+				npub := c.String("npub")
+				if nickname == "" || npub == "" {
+					return common.NewExitError(common.ErrCodeUser, fmt.Errorf("--nickname and --npub are required"))
+				}
 				ks, err := LoadKeyStore()
 				if err != nil {
 					return fmt.Errorf("failed to load keystore: %w", err)
 				}
-
-				nickname := c.String("nickname")
-				npub := c.String("npub")
 
 				role := types.Role(c.String("role"))
 				if role != types.RoleHuman && role != types.RoleAgent {
@@ -354,15 +385,21 @@ Contacts are stored locally and mapped to their npubs.`,
 				if actor == "" {
 					actor = "unknown"
 				}
-				if err := audit.LogAction(actor, audit.ActionContactAdded, map[string]any{"nickname": nickname, "npub": npub}); err != nil {
+				if err := audit.LogAction(actor, audit.ActionContactAdded, map[string]any{"nickname": nickname, "npub": ks.Contacts[nickname].Npub}); err != nil {
 					fmt.Fprintf(os.Stderr, "⚠️  audit log failed: %v\n", err)
 				}
 
 				green := color.New(color.FgGreen).SprintFunc()
 				yellow := color.New(color.FgYellow).SprintFunc()
 
-				fmt.Printf("✅ Added contact '%s'\n", green(nickname))
-				fmt.Printf("   Npub: %s\n", yellow(npub))
+				common.Emit(jsonMode, map[string]string{
+					"nickname": nickname,
+					"npub":     ks.Contacts[nickname].Npub,
+					"role":     role.String(),
+				}, func() {
+					fmt.Printf("✅ Added contact '%s'\n", green(nickname))
+					fmt.Printf("   Npub: %s\n", yellow(npub))
+				})
 
 				return nil
 			},
@@ -371,27 +408,44 @@ Contacts are stored locally and mapped to their npubs.`,
 			Name:  "list",
 			Usage: "List all contacts",
 			Action: func(ctx context.Context, c *cli.Command) error {
+				jsonMode := common.JSONMode(c)
 				ks, err := LoadKeyStore()
 				if err != nil {
 					return fmt.Errorf("failed to load keystore: %w", err)
 				}
 
 				contacts := ListContacts(ks)
-				if len(contacts) == 0 {
-					fmt.Println("No contacts found. Add one with:")
-					fmt.Println("  hyphae contact add --nickname <name> --npub <npub>")
-					return nil
+				type contactEntry struct {
+					Nickname string `json:"nickname"`
+					Npub     string `json:"npub"`
+					Role     string `json:"role"`
 				}
-
-				fmt.Println("📇 Contacts:")
-				w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-				fmt.Fprintln(w, "NICKNAME\tNPUB\tROLE")
-
+				entries := make([]contactEntry, 0, len(contacts))
 				for _, contact := range contacts {
-					npubShort := contact.Npub[:20] + "..."
-					fmt.Fprintf(w, "%s\t%s\t%s\n", contact.Nickname, npubShort, contact.Role.String())
+					entries = append(entries, contactEntry{
+						Nickname: contact.Nickname,
+						Npub:     contact.Npub,
+						Role:     contact.Role.String(),
+					})
 				}
-				w.Flush()
+
+				common.Emit(jsonMode, entries, func() {
+					if len(contacts) == 0 {
+						fmt.Println("No contacts found. Add one with:")
+						fmt.Println("  hyphae contact add --nickname <name> --npub <npub>")
+						return
+					}
+
+					fmt.Println("📇 Contacts:")
+					w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+					fmt.Fprintln(w, "NICKNAME\tNPUB\tROLE")
+
+					for _, contact := range contacts {
+						npubShort := contact.Npub[:20] + "..."
+						fmt.Fprintf(w, "%s\t%s\t%s\n", contact.Nickname, npubShort, contact.Role.String())
+					}
+					w.Flush()
+				})
 
 				return nil
 			},
