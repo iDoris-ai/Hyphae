@@ -55,7 +55,7 @@ jobs:
           # auth after checkout, so there is no reason to leave it lying around.
           persist-credentials: false
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
