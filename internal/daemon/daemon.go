@@ -111,7 +111,7 @@ Run this in a separate terminal or as a system service.`,
 		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
-		retryInterval, watchInterval, err := validateDaemonIntervals(c.Int("retry-interval"), c.Int("watch-interval"))
+		retryInterval, watchInterval, err := validateDaemonIntervals(int64(c.Int("retry-interval")), int64(c.Int("watch-interval")))
 		if err != nil {
 			return common.NewExitError(common.ErrCodeUser, err)
 		}
