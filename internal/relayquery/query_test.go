@@ -226,6 +226,92 @@ func TestFetchPreservesUnknownEOSEHints(t *testing.T) {
 	fixture.requireClosed(t)
 }
 
+func TestFetchIgnoresWrongSubscriptionAndInvalidEvents(t *testing.T) {
+	valid := signedEvent(t)
+	wrongSubscription := signedEvent(t)
+	badSignature := signedEvent(t)
+	badSignature.Sig[0] ^= 1
+	badID := signedEvent(t)
+	badID.ID[0] ^= 1
+	wrongKind := signedEvent(t)
+	wrongKind.Kind = 2
+	if err := wrongKind.Sign([32]byte{1, 2, 3}); err != nil {
+		t.Fatal(err)
+	}
+	fixture := newRelayFixture(t, relayPlan{
+		rawMessages: [][]byte{
+			marshalRelayMessage(t, []any{"EOSE", "another-query"}),
+			marshalRelayMessage(t, []any{"CLOSED", "another-query", "unrelated"}),
+			marshalRelayMessage(t, []any{"EVENT", "another-query", wrongSubscription}),
+			marshalRelayMessage(t, []any{"EVENT", querySubID, badSignature}),
+			marshalRelayMessage(t, []any{"EVENT", querySubID, badID}),
+			marshalRelayMessage(t, []any{"EVENT", querySubID, wrongKind}),
+			marshalRelayMessage(t, []any{"EVENT", querySubID, valid}),
+		},
+		eose: true,
+	})
+	page, err := Fetch(context.Background(), fixture.url, nostr.Filter{Kinds: []nostr.Kind{1}})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if !sameEvents(page.Events, []nostr.Event{valid}) {
+		t.Fatalf("got events %#v, want only valid matching event %s", page.Events, valid.ID)
+	}
+	fixture.requireClosed(t)
+}
+
+func TestFetchRejectsMalformedEOSEHints(t *testing.T) {
+	fixture := newRelayFixture(t, relayPlan{
+		rawMessages: [][]byte{[]byte(`["EOSE","hyphae-fetch","auth"]`)},
+	})
+	page, err := Fetch(context.Background(), fixture.url, nostr.Filter{})
+	if err == nil || !strings.Contains(err.Error(), "EOSE hints must be an array") {
+		t.Fatalf("Fetch error = %v, want malformed EOSE hints error", err)
+	}
+	if len(page.Events) != 0 || len(page.Hints) != 0 {
+		t.Fatalf("got page %#v for malformed EOSE", page)
+	}
+	fixture.requireClosed(t)
+}
+
+func TestFetchIgnoresAuthChallengeUntilEOSE(t *testing.T) {
+	fixture := newRelayFixture(t, relayPlan{
+		authChallenge: "optional challenge",
+		rawMessages:   [][]byte{[]byte(`["NOTICE","optional relay notice"]`)},
+		events:        []nostr.Event{signedEvent(t)},
+		eose:          true,
+	})
+	page, err := Fetch(context.Background(), fixture.url, nostr.Filter{Kinds: []nostr.Kind{1}})
+	if err != nil {
+		t.Fatalf("optional AUTH challenge should not fail an otherwise public query: %v", err)
+	}
+	if len(page.Events) != 1 {
+		t.Fatalf("got %d events, want one", len(page.Events))
+	}
+	fixture.requireClosed(t)
+}
+
+func TestFetchRejectsOversizedRelayFrame(t *testing.T) {
+	fixture := newRelayFixture(t, relayPlan{oversizedFrame: queryReadLimit + 1})
+	page, err := Fetch(context.Background(), fixture.url, nostr.Filter{})
+	if err == nil || !strings.Contains(err.Error(), "too big") {
+		t.Fatalf("Fetch error = %v, want oversized-frame error", err)
+	}
+	if len(page.Events) != 0 {
+		t.Fatalf("got unexpected events: %#v", page.Events)
+	}
+	fixture.requireClosed(t)
+}
+
+func marshalRelayMessage(t *testing.T, value any) []byte {
+	t.Helper()
+	message, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return message
+}
+
 func signedEvent(t *testing.T) nostr.Event {
 	t.Helper()
 	event := nostr.Event{CreatedAt: nostr.Now(), Kind: 1, Content: "signed fixture event"}
@@ -272,12 +358,15 @@ func sameEvents(got, want []nostr.Event) bool {
 }
 
 type relayPlan struct {
-	events     []nostr.Event
-	eose       bool
-	hints      []string
-	closed     string
-	disconnect bool
-	requests   int
+	events         []nostr.Event
+	rawMessages    [][]byte
+	eose           bool
+	hints          []string
+	closed         string
+	disconnect     bool
+	authChallenge  string
+	oversizedFrame int
+	requests       int
 }
 
 type relayFixture struct {
@@ -320,6 +409,16 @@ func newRelayFixture(t *testing.T, plan relayPlan) *relayFixture {
 		if err := json.Unmarshal(envelope[1], &label); err != nil {
 			return
 		}
+		if plan.authChallenge != "" {
+			if err := conn.WriteJSON([]any{"AUTH", plan.authChallenge}); err != nil {
+				return
+			}
+		}
+		for _, message := range plan.rawMessages {
+			if err := conn.WriteMessage(websocket.TextMessage, message); err != nil {
+				return
+			}
+		}
 		for _, event := range plan.events {
 			if err := conn.WriteJSON([]any{"EVENT", label, event}); err != nil {
 				return
@@ -327,6 +426,11 @@ func newRelayFixture(t *testing.T, plan relayPlan) *relayFixture {
 			select {
 			case fixture.eventSent <- struct{}{}:
 			default:
+			}
+		}
+		if plan.oversizedFrame > 0 {
+			if err := conn.WriteMessage(websocket.TextMessage, make([]byte, plan.oversizedFrame)); err != nil {
+				return
 			}
 		}
 		if plan.eose {
