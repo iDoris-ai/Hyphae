@@ -32,9 +32,13 @@ func reqRelay(t *testing.T, handler func(*websocket.Conn)) string {
 }
 
 func reqSignedEvent(t *testing.T) nostr.Event {
+	return reqSignedEventWithContent(t, "req fixture event")
+}
+
+func reqSignedEventWithContent(t *testing.T, content string) nostr.Event {
 	t.Helper()
 	sk := nostr.Generate()
-	event := nostr.Event{CreatedAt: nostr.Now(), Kind: 1, Content: "req fixture event"}
+	event := nostr.Event{CreatedAt: nostr.Now(), Kind: 1, Content: content}
 	require.NoError(t, event.Sign(sk))
 	return event
 }
@@ -69,8 +73,8 @@ func TestReqCmdReturnsOnEOSE(t *testing.T) {
 	assert.Less(t, time.Since(started), time.Second)
 	select {
 	case <-eoseWritten:
-	default:
-		t.Fatal("query returned before the relay sent EOSE")
+	case <-time.After(time.Second):
+		t.Fatal("relay did not send EOSE within the test bound")
 	}
 	select {
 	case <-clientClosed:
@@ -83,7 +87,7 @@ func TestReqCmdReturnsOnEOSE(t *testing.T) {
 
 func TestReqCmdKeepsPartialEventsAndReturnsRelayFailure(t *testing.T) {
 	event := reqSignedEvent(t)
-	secondEvent := reqSignedEvent(t)
+	secondEvent := reqSignedEventWithContent(t, "second relay fixture event")
 	first := reqRelay(t, func(conn *websocket.Conn) {
 		_, _, _ = conn.ReadMessage()
 		reqWriteEvent(t, conn, event)
