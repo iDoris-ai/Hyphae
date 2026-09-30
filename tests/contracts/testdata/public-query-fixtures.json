@@ -366,6 +366,34 @@
         "suffix": "]}}}"
       },
       "expected": "body_limit"
+    },
+    {
+      "id": "response-capabilities-array-rejected",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"ok\",\"scope\":\"capabilities\",\"declaration_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"declaration_issued_at\":90,\"declaration_expires_at\":190,\"data\":[{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"}]}}",
+      "query_context": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"capabilities\"}}",
+      "expected": "schema"
+    },
+    {
+      "id": "response-error-missing-context",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"error\",\"error\":{\"code\":\"NOT_DECLARED\",\"message\":\"none\"}}}",
+      "expected": "payload_semantic"
+    },
+    {
+      "id": "response-invalid-query-context",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"ok\",\"scope\":\"profile\",\"declaration_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"declaration_issued_at\":90,\"declaration_expires_at\":190,\"data\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+      "query_context": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"NOT-LOWER-HEX\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"profile\"}}",
+      "expected": "payload_semantic"
+    },
+    {
+      "id": "response-query-context-over-limit",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"ok\",\"scope\":\"profile\",\"declaration_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"declaration_issued_at\":90,\"declaration_expires_at\":190,\"data\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+      "query_context_recipe": {
+        "prefix": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"profile\"}}",
+        "fill": " ",
+        "repeat": 32539,
+        "suffix": ""
+      },
+      "expected": "payload_semantic"
     }
   ]
 }
