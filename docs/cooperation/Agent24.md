@@ -1,6 +1,6 @@
 # Agent24 × Hyphae
 
-状态：Hyphae 侧协作提案，待 Agent24 确认。基线：Agent24 `32072b0`。
+状态：Hyphae 侧协作提案，待 Agent24 确认。2026-09-30 通过 GitHub API 固定的远端 main 审阅基线：Agent24 `879d77eee5eafac3e45641ae4cde8762481b1bc2`。本地旧 checkout 未更新；以下代码结论来自该固定远端版本。
 
 ## 已有接口
 
@@ -34,9 +34,11 @@ daemon 是长驻进程，当前输出运行日志，并未提供 JSON 消息流�
 
 ### 主线交付与接线次序（2026-09-30）
 
-截至 2026-09-30 05:41 UTC，main `8874b8e` 已包含身份/联系人 JSON、relay 配置、outbox list/clear/retry JSON、发送前持久化、可靠自动回复、inbox 查询和 daemon 首次收件登记，以及底层查询和 profile discover 的查询修复；最低构建版本为 Go 1.26。正式的完整接线二进制须在 #59、#61～#67 收口并重新验收后固定。
+2026-09-30 本轮核对，Hyphae main `e753e6f` 已包含身份/联系人 JSON、relay 配置、outbox list/clear/retry JSON、发送前持久化、可靠自动回复、inbox 查询和 daemon 首次收件登记、历史分页补收、取消恢复，以及 msg/inbox/daemon/create 的 stdin 凭据通道；最低构建版本为 Go 1.26。#66 的真实 CLI 积压验收与 #67 空统计修复仍待复审合入。正式完整接线二进制须在这两项收口并重新验收后固定。
 
-Agent24 现在可先用固定 main commit 开发第 1 项适配器，并用实际 JSON 建立错误/公开字段契约测试。第 2 项可准备发送/history/outbox 接线；完整离线补收、取消和 stdin 解锁仍等相关 PR 交付。管理 UI 可先做服务接口与状态设计，整段验收仍等 CLI 接线。任何仅在历史组合分支通过的接口都不能按 main 已支持发布。
+Agent24 现在可用固定 main commit 开发第 1 项适配器，并用实际 JSON 建立错误/公开字段契约测试。第 2 项的历史补收、取消和 stdin 解锁实现已进入 Hyphae main，可以接线准备；完整版本验收仍等 #66/#67。管理 UI 可先做服务接口与状态设计，整段验收仍等 Agent24 CLI 接线。任何仅在历史组合分支通过的接口都不能按 main 已支持发布。
+
+上述 Agent24 远端版本的 Rust CLI 仍未提供通信命令；bridge 仍为 `f4/1`、内存 seen 集合和默认 `agent-speaker` 二进制。`agent24-models/src/router.rs` 尚无 `IDORIS_URL`/`idoris-local`/`idoris-any` 接线。它们是当前实现缺口，分别由 T20 和 T10/T11 推进，不能因 iDoris 自身服务已就绪而记为已完成。
 
 Agent24 可按下表准备独立小 PR，由对应仓库推进并回填实现链接：
 
@@ -92,6 +94,8 @@ Agent24 可按下表准备独立小 PR，由对应仓库推进并回填实现链
 - 以发件人/目标/request_id 持久化去重。同 ID 不同参数拒绝；run 已开始后崩溃必须先核对执行状态，不能按收件重放直接重做。
 - 返回结果与回执待发记录独立持久化；回执失败只重发回执。进程重启、重复 answer、对端自动回复均不得形成执行循环。
 - T01 冻结时同时更新 Hyphae 权威协议和 Agent24 F4 契约，并提供共用正反例。具体新版本、kind、字段格式尚未冻结，本轮 CLI 改动不静默转换旧 content。
+
+外部 OS 样例选用 [Sin90](Sin90.md)。Agent24 按现有 OS package 发现与 ME-3 外挂载流程加载；初次高层能力拟限制为获授权的只读 today 查询。这个通信授权须独立绑定请求和 run，不能由模块已挂载或 `model_access` 推断。
 
 至少加入三个跨仓断言：普通文本/answer 入站的 run 数为零；相同授权请求重启重放的副作用计数为一；同 request_id 修改参数后拒绝且原结果保持。单靠 Hyphae 消息行数不能证明 Agent24 没有重复执行。
 

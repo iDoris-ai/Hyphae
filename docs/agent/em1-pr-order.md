@@ -6,16 +6,18 @@
 
 ## 本轮合并进度
 
-2026-09-30 05:41 UTC 核对：主线基线为 `8874b8ebac0419a4572f8c8475f6215e00967d27`。#37～#58、#60、#68～#83 已合并；主线 Linux/macOS CI 通过。最低 Go 版本为 1.26，CI 按 go.mod 选择工具链。编号范围包含规划、CI 和维护 PR，整体 E-M1 仍待跨仓验收。
+2026-09-30 本轮实时核对：主线基线为 `e753e6f5ced27a46a2a6befd20c49c5d4c8d6080`。#37～#65、#68～#84 已合并；该 main 提交的 Linux/macOS CI 通过。最低 Go 版本为 1.26，CI 按 go.mod 选择工具链。编号范围包含规划、CI 和维护 PR，整体 E-M1 仍待跨仓验收。
 
 | 下一项 | 当前门槛 | 后续动作 |
 |---|---|---|
-| #59：daemon 取消 | main，`6e873b9`，本地全量/daemon race 通过，GitHub CI 运行中 | 等当前 head CI 与批准 |
-| #61～#67 | draft，仍在各组合基线上 | #59 合入后推进 recovery 层，再逐层迁移；不得合入 integration 分支 |
+| [#66](https://github.com/iDoris-ai/Hyphae/pull/66)：积压集成验收 | main，`9d16be76`，CI 全绿，含双平台实际 integration 步骤 | 等最新 head 复审；批准后正常合并 |
+| [#67](https://github.com/iDoris-ai/Hyphae/pull/67)：空统计 | main，`d85aa14b`，CI 全绿 | 等最新 head 复审；与 #66 独立 |
+| [#85](https://github.com/iDoris-ai/Hyphae/pull/85)：T01 小交付门槛 | main，`aa6b9bb7`，CI 全绿 | 独立设计文档复审；不解除 T07 门槛 |
+| [#86](https://github.com/iDoris-ai/Hyphae/pull/86)：上游 integration 门禁 | main，`8867ddff`，CI 与兼容工作流全绿 | 独立复审；线上自动建 PR 仍未验收 |
 
 #56 的真实 CI 失败来自测试构建进程把只读 Go 模块缓存写进临时 HOME；已修正构建环境，relay/CLI 运行数据继续隔离。#57 新增 ACK 与父取消回归，确认 watcher 返回前自动回复已结束；旧实现对照会失败。迁移 #65 时要保留该等待逻辑，并适配其查询完成及返回值变化。
 
-独立文档 PR #84 更新这份进度与 Agent24 接线门槛，按自身 CI/审批合并，不阻塞功能链。
+独立文档 PR #84 已合并。#66/#67 合入后，在实际 main 固定提交重新完成全量 integration、vet、构建、隔离身份 CLI smoke 和空统计验收，再固定 Agent24 完整接线二进制。
 
 状态是本次文档提交时的快照。后台 monitor 每 20 分钟读取 GitHub 实际状态，在同一 Codex 会话跟进；本会话有排队任务时不重复入队。它不替代 PR-daemon 的 review，不绕过审批或 CI。脚本在 #80 中交付，本机配置和线程 ID 不进入仓库。
 
@@ -23,7 +25,7 @@
 
 #79 修复了 `relayquery.Fetch` 使用上游异步订阅时，断线触发事件发送与通道关闭的竞争。主代理在旧实现上复现 race；新实现按 WebSocket 线序处理事件和真实 EOSE，保留验签、过滤、NIP-67 提示、帧大小限制与查询 deadline。相关 race 重复测试、真实 CLI/relay 全量 integration 及双平台 CI 通过，详见 [验收记录](em1-cli-acceptance.md)。
 
-#58 已将 inbox 接入该查询层，#60 分页模块已合入；daemon 调用点仍等 #65。底层 `req/query` 和 `profile discover` 已分别通过 #82/#83 迁移并合入。不能把 #79 当成 SDK 全局修复。基础 CLI/UI 接线和高层行为契约的设计可继续，但主线完整功能验收仍等 #59、#61～#67 收口。
+#58 已将 inbox 接入该查询层，#60 分页模块与 #65 daemon 调用点已合入。底层 `req/query` 和 `profile discover` 已分别通过 #82/#83 迁移并合入。不能把 #79 当成 SDK 全局修复。基础 CLI/UI 接线和高层行为契约的设计可继续，但主线完整功能验收仍等 #66/#67 收口。
 
 ## 前置 PR
 
