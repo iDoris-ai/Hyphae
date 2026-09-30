@@ -1,6 +1,6 @@
 # Agent24 × Hyphae
 
-状态：Hyphae 侧协作提案，待 Agent24 确认。2026-09-30 通过 GitHub API 固定的远端 main 审阅基线：Agent24 `879d77eee5eafac3e45641ae4cde8762481b1bc2`。本地旧 checkout 未更新；以下代码结论来自该固定远端版本。
+状态：Hyphae 侧协作提案，待 Agent24 确认。2026-09-30 固定的远端 main 审阅与隔离验证基线：Agent24 `7009294834b2251beac438f3190aae073742c5dd`。本地用户 checkout 未更新；源码核查与实际模块挂载在独立 detached worktree 完成。
 
 ## 已有接口
 
@@ -39,6 +39,12 @@ daemon 是长驻进程，当前输出运行日志，并未提供 JSON 消息流�
 Agent24 现在可用固定 main commit 开发第 1 项适配器，并用实际 JSON 建立错误/公开字段契约测试。第 2 项的历史补收、取消和 stdin 解锁实现已进入 Hyphae main，可以接线准备；完整版本验收仍等 #66/#67。管理 UI 可先做服务接口与状态设计，整段验收仍等 Agent24 CLI 接线。任何仅在历史组合分支通过的接口都不能按 main 已支持发布。
 
 上述 Agent24 远端版本的 Rust CLI 仍未提供通信命令；bridge 仍为 `f4/1`、内存 seen 集合和默认 `agent-speaker` 二进制。`agent24-models/src/router.rs` 尚无 `IDORIS_URL`/`idoris-local`/`idoris-any` 接线。它们是当前实现缺口，分别由 T20 和 T10/T11 推进，不能因 iDoris 自身服务已就绪而记为已完成。
+
+本轮从早期审阅基线 `879d77e` 增量核查到 `7009294`：语音面板安全修复与附着模块修复，通信 CLI、基础消息 UI 和 iDoris 接线结论没有变化。Rust CLI 仍只有 Chat/Models/Service/Daemon/Tui/Os/Mcp；桌面 Chat 调用本地 `/api/v1/chat`，尚无 Nostr 联系人、relay 或收件管理。bridge 的白名单限制和现有 run 审批不能替代新协议的授权绑定，内存 seen 也不能证明跨重启执行去重。
+
+模型路由仍按 Local/Lora/Remote 与 Any/LocalOnly 选择自身 provider；未接通 iDoris 隐私请求头、实际落点响应头及预算核销。自身 loopback 地址不能证明未来 iDoris 的实际模型落点；provider 缺 usage 时默认零值、`cost_usd=0` 也不能作为实际预算结算证据。对应源码固定在 [CLI](https://github.com/iDoris-ai/Agent24/blob/7009294834b2251beac438f3190aae073742c5dd/rust/apps/agent24-cli/src/main.rs)、[入站 bridge](https://github.com/iDoris-ai/Agent24/blob/7009294834b2251beac438f3190aae073742c5dd/packages/nostr-bridge/src/inbound.ts) 和 [模型 router](https://github.com/iDoris-ai/Agent24/blob/7009294834b2251beac438f3190aae073742c5dd/rust/crates/agent24-models/src/router.rs)。
+
+真实 Sin90 外部进程挂载、API 代理和事件转发已在本基线选定黑盒测试中通过，证据见 [Sin90 协作文档](Sin90.md)。该基础机制验证不解除 T12/T13 的授权、停用及恢复门槛。
 
 Agent24 可按下表准备独立小 PR，由对应仓库推进并回填实现链接：
 

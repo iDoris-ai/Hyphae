@@ -1,6 +1,6 @@
 # Sin90 × Hyphae / Agent24
 
-状态：Hyphae 侧选定的真实外部 OS 样例，待对应仓库确认与实现；T12/T13 尚未验收。2026-09-30 本地干净审阅基线：`a61ab99443efe91432487000625dfce437660c85`，仓库 `Sin90`。本轮仅提出约定，由用户推动对应仓库。
+状态：Hyphae 侧选定的真实外部 OS 样例，基础挂载机制已实测通过，完整通信授权与生命周期仍待对应仓库落实；T12/T13 尚未验收。2026-09-30 本地干净审阅基线：`a61ab99443efe91432487000625dfce437660c85`，仓库 `Sin90`。本轮只运行已有测试并记录协作约定；跨仓实现由用户推动。
 
 ## 已有实现
 
@@ -26,7 +26,27 @@
 
 ## 验收证据
 
-Sin90 已有 `tests/standalone_blackbox.rs` 与 `tests/agent24_mount_blackbox.rs`；后者依赖 Agent24 实际构建产物并含 ignored 黑盒入口。首次验证前先读测试前置，固定双方 commit、二进制和 manifest，隔离 HOME/模块数据目录，再选具体测试命令。列出入口不表示本轮运行过。
+2026-09-30 在独立 detached worktree 运行已有 [挂载黑盒测试](https://github.com/iDoris-ai/Sin90/blob/a61ab99443efe91432487000625dfce437660c85/tests/agent24_mount_blackbox.rs#L906)，固定 Sin90 `a61ab99443efe91432487000625dfce437660c85` 与 Agent24 `7009294834b2251beac438f3190aae073742c5dd`，Rust/Cargo 均为 `1.98.1`。设置 `AGENT24_CHECKOUT` 指向隔离 Agent24 树，HOME 和模块数据使用临时目录：
+
+```bash
+cargo test --locked --test agent24_mount_blackbox \
+  sin90_mounts_under_a_real_agent24_daemon \
+  -- --ignored --exact --test-threads=1
+```
+
+实际结果：`1 passed; 0 failed; 0 ignored; 4 filtered out`，测试用时 `65.31s`。测试先启动未安装包的真实 Agent24 daemon，确认没有 Sin90；安装原始 manifest 和真实 Sin90 二进制后重启 daemon，确认模块挂载。经真实代理读取 today，检查 must_do/deep_block/inbox/carryover；以合成数据执行代表性 area/task/capture 调用，验证 capture 缺 actor key 为 403、有效 actor key 为 201，并通过实际 WebSocket 收到对应 task id 的 `task.created`。
+
+| 验证对象 | SHA-256 |
+|---|---|
+| 原始 `domain-os.yml` | `6974521c95413e49890a84720357901314a3433b6c069ff54c837bb232d42576` |
+| 实测 Sin90 二进制 | `5215dd43a8b744bffcd0c9389374f203b80e778f8b9e0263814f9579d121bfca` |
+| 实测 Agent24 daemon 二进制 | `7ac72023a58b55b761578b089164fa0a4b95e31250c1701a81f72e0146f4c0c9` |
+| Sin90 临时验证锁文件 | `4cfc4b8845032858265cbd01ebf2ac1828eda6e252da64dc777523c925e86ac1` |
+| Agent24 已提交 `rust/Cargo.lock` | `a681c67ef28303fe68378601690e13ffe3b5eb2a02afc8a7d148b8ca8697f682` |
+
+Sin90 该提交未提供 Cargo.lock，首次 `--locked` 因此未运行测试；随后仅在验证树生成测试用锁文件，归档摘要后锁定依赖执行。该锁文件不代表上游发布锁文件或发布构建可复现性。测试内部构建 Agent24 daemon 的命令未带 `--locked`，其已提交锁文件前后摘要不变；双方 manifest 和源码未改动。测试后清理临时 HOME、子进程及本轮生成的 Sin90 锁文件，验证树与用户原仓均保持干净。
+
+本次只验收已有挂载/代理/事件机制和一个 actor 权限样例。未使用真实用户数据、模型或外部 API；未验证模块停用、退出重连、版本不兼容、manifest 篡改、Nostr 请求授权或 run 恢复，不能据此记 T12/T13 或四仓闭环完成。
 
 T12/T13 应记录加载、停用、退出后重连、版本不兼容、非法摘要、未授权查询、越权路径、重复请求和结果回传。只读查询可证明真实模块调用及关联，不能单独证明有副作用任务的幂等；T16/T19 仍要用受控副作用计数验证执行恢复。
 
