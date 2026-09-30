@@ -1,0 +1,694 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hyphae.invalid/schemas/public-query-v1.schema.json",
+  "title": "Hyphae public query and profile body candidate v1",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/declarationEnvelope"
+    },
+    {
+      "$ref": "#/$defs/notificationEnvelope"
+    },
+    {
+      "$ref": "#/$defs/queryEnvelope"
+    },
+    {
+      "$ref": "#/$defs/responseEnvelope"
+    }
+  ],
+  "$defs": {
+    "safeInteger": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "capabilityID": {
+      "type": "string",
+      "allOf": [
+        {
+          "pattern": "^[a-z][a-z0-9._/-]{0,127}$"
+        },
+        {
+          "not": {
+            "pattern": "[^a-z0-9._/-]"
+          }
+        }
+      ]
+    },
+    "capabilityVersion": {
+      "type": "string",
+      "allOf": [
+        {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$"
+        },
+        {
+          "not": {
+            "pattern": "[^A-Za-z0-9._+-]"
+          }
+        }
+      ]
+    },
+    "eventID": {
+      "type": "string",
+      "allOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "not": {
+            "pattern": "[^0-9a-f]"
+          }
+        }
+      ]
+    },
+    "requestID": {
+      "type": "string",
+      "allOf": [
+        {
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        {
+          "not": {
+            "pattern": "[^0-9a-f]"
+          }
+        }
+      ]
+    },
+    "simpleProfile": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "const": "simple"
+        },
+        "name": {
+          "type": "string",
+          "format": "hyphae-utf8-1-128"
+        }
+      },
+      "required": [
+        "mode",
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "taggedProfile": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "const": "tagged"
+        },
+        "name": {
+          "type": "string",
+          "format": "hyphae-utf8-1-128"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "^[a-z][a-z0-9._-]{0,63}$"
+              },
+              {
+                "not": {
+                  "pattern": "[^a-z0-9._-]"
+                }
+              }
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "mode",
+        "name",
+        "tags"
+      ],
+      "additionalProperties": false
+    },
+    "structuredProfile": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "const": "structured"
+        },
+        "name": {
+          "type": "string",
+          "format": "hyphae-utf8-1-128"
+        },
+        "description": {
+          "type": "string",
+          "format": "hyphae-utf8-1-1024"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/capabilityDescriptor"
+          },
+          "minItems": 0,
+          "maxItems": 32
+        }
+      },
+      "required": [
+        "mode",
+        "name",
+        "capabilities"
+      ],
+      "additionalProperties": false
+    },
+    "upsertProfile": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/simpleProfile"
+        },
+        {
+          "$ref": "#/$defs/taggedProfile"
+        },
+        {
+          "$ref": "#/$defs/structuredProfile"
+        }
+      ]
+    },
+    "capabilityDescriptor": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^[a-z][a-z0-9._/-]{0,127}$"
+            },
+            {
+              "not": {
+                "pattern": "[^a-z0-9._/-]"
+              }
+            }
+          ]
+        },
+        "version": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$"
+            },
+            {
+              "not": {
+                "pattern": "[^A-Za-z0-9._+-]"
+              }
+            }
+          ]
+        },
+        "description": {
+          "type": "string",
+          "format": "hyphae-utf8-1-1024"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "description"
+      ],
+      "additionalProperties": false
+    },
+    "declarationUpsert": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "upsert"
+        },
+        "profile": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/simpleProfile"
+            },
+            {
+              "$ref": "#/$defs/taggedProfile"
+            },
+            {
+              "$ref": "#/$defs/structuredProfile"
+            }
+          ]
+        }
+      },
+      "required": [
+        "action",
+        "profile"
+      ],
+      "additionalProperties": false
+    },
+    "declarationWithdraw": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "withdraw"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "declarationPayload": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/declarationUpsert"
+        },
+        {
+          "$ref": "#/$defs/declarationWithdraw"
+        }
+      ]
+    },
+    "notificationPayload": {
+      "type": "object",
+      "properties": {
+        "topic": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^[a-z][a-z0-9._-]{0,63}$"
+            },
+            {
+              "not": {
+                "pattern": "[^a-z0-9._-]"
+              }
+            }
+          ]
+        },
+        "text": {
+          "type": "string",
+          "format": "hyphae-utf8-1-4096"
+        }
+      },
+      "required": [
+        "topic",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "queryProfile": {
+      "type": "object",
+      "properties": {
+        "scope": {
+          "const": "profile"
+        }
+      },
+      "required": [
+        "scope"
+      ],
+      "additionalProperties": false
+    },
+    "queryCapabilities": {
+      "type": "object",
+      "properties": {
+        "scope": {
+          "const": "capabilities"
+        }
+      },
+      "required": [
+        "scope"
+      ],
+      "additionalProperties": false
+    },
+    "queryCapability": {
+      "type": "object",
+      "properties": {
+        "scope": {
+          "const": "capability"
+        },
+        "id": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^[a-z][a-z0-9._/-]{0,127}$"
+            },
+            {
+              "not": {
+                "pattern": "[^a-z0-9._/-]"
+              }
+            }
+          ]
+        },
+        "version": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$"
+            },
+            {
+              "not": {
+                "pattern": "[^A-Za-z0-9._+-]"
+              }
+            }
+          ]
+        }
+      },
+      "required": [
+        "scope",
+        "id",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "queryPayload": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/queryProfile"
+        },
+        {
+          "$ref": "#/$defs/queryCapabilities"
+        },
+        {
+          "$ref": "#/$defs/queryCapability"
+        }
+      ]
+    },
+    "capabilitiesData": {
+      "type": "object",
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/capabilityDescriptor"
+          },
+          "minItems": 0,
+          "maxItems": 32
+        }
+      },
+      "required": [
+        "capabilities"
+      ],
+      "additionalProperties": false
+    },
+    "queryError": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "enum": [
+            "NOT_DECLARED",
+            "DECLARATION_INACTIVE",
+            "CAPABILITY_NOT_DECLARED",
+            "EXPIRED",
+            "RATE_LIMITED",
+            "REQUEST_CONFLICT"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "format": "hyphae-utf8-1-256"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "responseOK": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "const": "ok"
+        },
+        "scope": {
+          "enum": [
+            "profile",
+            "capabilities",
+            "capability"
+          ]
+        },
+        "declaration_event": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "not": {
+                "pattern": "[^0-9a-f]"
+              }
+            }
+          ]
+        },
+        "declaration_issued_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "declaration_expires_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "data": {}
+      },
+      "required": [
+        "outcome",
+        "scope",
+        "declaration_event",
+        "declaration_issued_at",
+        "declaration_expires_at",
+        "data"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "scope": {
+                "const": "profile"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/simpleProfile"
+                  },
+                  {
+                    "$ref": "#/$defs/taggedProfile"
+                  },
+                  {
+                    "$ref": "#/$defs/structuredProfile"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "scope": {
+                "const": "capabilities"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/capabilitiesData"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "scope": {
+                "const": "capability"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/capabilityDescriptor"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "responseError": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "const": "error"
+        },
+        "error": {
+          "$ref": "#/$defs/queryError"
+        }
+      },
+      "required": [
+        "outcome",
+        "error"
+      ],
+      "additionalProperties": false
+    },
+    "responsePayload": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/responseOK"
+        },
+        {
+          "$ref": "#/$defs/responseError"
+        }
+      ]
+    },
+    "declarationEnvelope": {
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "const": "hyphae-behavior/1"
+        },
+        "issued_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "type": {
+          "const": "declaration"
+        },
+        "expires_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "$ref": "#/$defs/declarationPayload"
+        }
+      },
+      "required": [
+        "protocol",
+        "issued_at",
+        "type",
+        "expires_at",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "notificationEnvelope": {
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "const": "hyphae-behavior/1"
+        },
+        "issued_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "type": {
+          "const": "notification"
+        },
+        "expires_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "$ref": "#/$defs/notificationPayload"
+        }
+      },
+      "required": [
+        "protocol",
+        "issued_at",
+        "type",
+        "expires_at",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "queryEnvelope": {
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "const": "hyphae-behavior/1"
+        },
+        "issued_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "type": {
+          "const": "query"
+        },
+        "expires_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "request_id": {
+          "$ref": "#/$defs/requestID"
+        },
+        "to": {
+          "$ref": "#/$defs/eventID"
+        },
+        "payload": {
+          "$ref": "#/$defs/queryPayload"
+        }
+      },
+      "required": [
+        "protocol",
+        "issued_at",
+        "type",
+        "expires_at",
+        "request_id",
+        "to",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "responseEnvelope": {
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "const": "hyphae-behavior/1"
+        },
+        "issued_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "type": {
+          "const": "response"
+        },
+        "request_id": {
+          "$ref": "#/$defs/requestID"
+        },
+        "to": {
+          "$ref": "#/$defs/eventID"
+        },
+        "request_event": {
+          "$ref": "#/$defs/eventID"
+        },
+        "payload": {
+          "$ref": "#/$defs/responsePayload"
+        }
+      },
+      "required": [
+        "protocol",
+        "issued_at",
+        "type",
+        "request_id",
+        "to",
+        "request_event",
+        "payload"
+      ],
+      "additionalProperties": false
+    }
+  }
+}
