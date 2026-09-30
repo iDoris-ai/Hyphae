@@ -306,11 +306,45 @@ func watchOneRelay(
 	myIdentity *types.Identity,
 	relays []string,
 ) int {
+	return watchOneRelayWithHooks(ctx, url, filter, ks, recipientSK, seen, useNotify, autoReply, myIdentity, relays, incomingReceiveHooks{
+		store: messaging.StoreIncomingMessageOnce,
+		notify: func(title, message string) {
+			notify.DesktopNotification(title, message)
+			notify.PlaySound()
+		},
+		reply: func(senderNpub, content string) {
+			go sendAutoReply(ctx, myIdentity, ks, senderNpub, content, relays)
+		},
+	})
+}
+
+type incomingReceiveHooks struct {
+	store  func(*nostr.Event, string, string, bool) (bool, error)
+	notify func(title, message string)
+	reply  func(senderNpub, content string)
+}
+
+func watchOneRelayWithHooks(
+	ctx context.Context,
+	url string,
+	filter nostr.Filter,
+	ks *types.KeyStore,
+	recipientSK nostr.SecretKey,
+	seen *seenSet,
+	useNotify bool,
+	autoReply bool,
+	myIdentity *types.Identity,
+	relays []string,
+	hooks incomingReceiveHooks,
+) int {
 	relayCtx, cancel := context.WithTimeout(ctx, relayDialTimeout)
 	defer cancel()
 
 	relay, err := nostr.RelayConnect(relayCtx, url, nostr.RelayOptions{})
 	if err != nil {
+		if relay != nil {
+			relay.Close()
+		}
 		return 0
 	}
 	defer relay.Close()
@@ -325,63 +359,63 @@ func watchOneRelay(
 
 	newCount := 0
 	for evt := range sub.Events {
-		// Hex-encoded to match messaging.RecentIncomingEventIDs, which reads
-		// the same encoding back out of SQLite's "id" column (see
-		// preloadRecentSeen below) -- a mismatched encoding here would make
-		// every preloaded ID a no-op, silently defeating restart dedup.
 		eventID := hex.EncodeToString(evt.ID[:])
-		if seen.Has(eventID) {
+		processed, err := processIncomingEvent(&evt, recipientSK, seen, useNotify, autoReply, myIdentity, ks, hooks)
+		if err != nil {
+			fmt.Printf("   ⚠️  Event %s: %v\n", eventID, err)
 			continue
 		}
-		seen.Add(eventID)
-		newCount++
-
-		// Resolve sender display name
-		senderNpub := common.EncodeNpub(evt.PubKey)
-		senderName := safePrefix(senderNpub, 16) + "..."
-		for _, contact := range identity.ListContacts(ks) {
-			if contact.Npub == senderNpub {
-				senderName = contact.Nickname
-				break
-			}
-		}
-
-		// Decompress, then decrypt if needed. Track decrypt success so we
-		// can refuse to auto-reply against unrecognised ciphertext (which
-		// would otherwise bypass the [auto-reply] guard and storm).
-		content, _ := messaging.DecompressText(evt.Content)
-		isEncrypted := false
-		for _, tag := range evt.Tags {
-			if len(tag) >= 2 && tag[0] == "enc" && tag[1] == "nip44" {
-				isEncrypted = true
-				break
-			}
-		}
-
-		decryptedOK := !isEncrypted
-		if isEncrypted {
-			if decrypted, derr := crypto.DecryptMessage(content, recipientSK, evt.PubKey); derr == nil {
-				content = decrypted
-				decryptedOK = true
-			}
-		}
-
-		if err := messaging.StoreIncomingMessage(&evt, content, isEncrypted); err != nil {
-			fmt.Printf("   ⚠️  Store incoming message: %v\n", err)
-		}
-
-		fmt.Printf("\n📨 New message from %s: %s\n", senderName, common.TruncateString(content, 40))
-
-		if useNotify {
-			notify.DesktopNotification("Hyphae - "+senderName, common.TruncateString(content, 100))
-			notify.PlaySound()
-		}
-
-		if shouldAutoReply(autoReply, decryptedOK, content) {
-			go sendAutoReply(ctx, myIdentity, ks, senderNpub, content, relays)
+		if processed {
+			newCount++
 		}
 	}
 	return newCount
+}
+
+func processIncomingEvent(
+	event *nostr.Event,
+	recipientSK nostr.SecretKey,
+	seen *seenSet,
+	useNotify bool,
+	autoReply bool,
+	myIdentity *types.Identity,
+	ks *types.KeyStore,
+	hooks incomingReceiveHooks,
+) (bool, error) {
+	eventID := hex.EncodeToString(event.ID[:])
+	if seen.Has(eventID) {
+		return false, nil
+	}
+	content, isEncrypted, err := messaging.DecodeMessageContent(event, recipientSK)
+	if err != nil {
+		return false, fmt.Errorf("decode message: %w", err)
+	}
+	first, err := hooks.store(event, myIdentity.Npub, content, isEncrypted)
+	if err != nil {
+		return false, fmt.Errorf("store incoming message: %w", err)
+	}
+	// The durable unique write is authoritative across restarts and processes.
+	seen.Add(eventID)
+	if !first {
+		return false, nil
+	}
+
+	senderNpub := common.EncodeNpub(event.PubKey)
+	senderName := safePrefix(senderNpub, 16) + "..."
+	for _, contact := range identity.ListContacts(ks) {
+		if contact.Npub == senderNpub {
+			senderName = contact.Nickname
+			break
+		}
+	}
+	fmt.Printf("\n📨 New message from %s: %s\n", senderName, common.TruncateString(content, 40))
+	if useNotify && hooks.notify != nil {
+		hooks.notify("Hyphae - "+senderName, common.TruncateString(content, 100))
+	}
+	if shouldAutoReply(autoReply, true, content) && hooks.reply != nil {
+		hooks.reply(senderNpub, content)
+	}
+	return true, nil
 }
 
 func cleanupOutbox() {
@@ -502,6 +536,9 @@ func sendAutoReply(ctx context.Context, myIdentity *types.Identity, ks *types.Ke
 		relayCtx, cancel := context.WithTimeout(ctx, relayDialTimeout)
 		relay, err := nostr.RelayConnect(relayCtx, url, nostr.RelayOptions{})
 		if err != nil {
+			if relay != nil {
+				relay.Close()
+			}
 			cancel()
 			continue
 		}
