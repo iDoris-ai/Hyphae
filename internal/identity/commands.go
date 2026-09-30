@@ -40,27 +40,56 @@ Identities are stored in ~/.hyphae/ with 600 permissions.`,
 					Usage:   "Password to encrypt keystore (recommended)",
 				},
 				&cli.BoolFlag{
+					Name:  "password-stdin",
+					Usage: "Read the keystore password from stdin",
+				},
+				&cli.BoolFlag{
 					Name:  "password-prompt",
 					Usage: "Prompt for password interactively",
 				},
 			},
 			Action: func(ctx context.Context, c *cli.Command) error {
+				passwordProvided := c.IsSet("password")
+				passwordStdin := c.Bool("password-stdin")
+				passwordPrompt := c.Bool("password-prompt")
+				selectedPasswordMethods := 0
+				for _, selected := range []bool{passwordProvided, passwordStdin, passwordPrompt} {
+					if selected {
+						selectedPasswordMethods++
+					}
+				}
+				if selectedPasswordMethods > 1 {
+					return common.NewExitError(common.ErrCodeUser, fmt.Errorf("choose only one of --password, --password-stdin, or --password-prompt"))
+				}
+				if passwordPrompt && common.JSONMode(c) {
+					return common.NewExitError(common.ErrCodeAuth, fmt.Errorf("--password-prompt is unavailable in JSON mode; use --password-stdin"))
+				}
+
 				nickname := c.String("nickname")
 				if nickname == "" {
 					return common.NewExitError(common.ErrCodeUser, fmt.Errorf("--nickname is required"))
 				}
+
+				password := c.String("password")
+				if passwordStdin {
+					var err error
+					password, err = readPasswordStdin(os.Stdin)
+					if err != nil {
+						return common.NewExitError(common.ErrCodeAuth, err)
+					}
+				}
+
 				ks, err := LoadKeyStore()
 				if err != nil {
 					return fmt.Errorf("failed to load keystore: %w", err)
 				}
 
 				var identity *types.Identity
-				password := c.String("password")
 
 				if ks.Encrypted {
 					if password == "" {
 						if common.JSONMode(c) {
-							return common.NewExitError(common.ErrCodeAuth, fmt.Errorf("encrypted keystore requires --password in JSON mode"))
+							return common.NewExitError(common.ErrCodeAuth, fmt.Errorf("encrypted keystore requires --password-stdin or --password in JSON mode (prefer --password-stdin)"))
 						}
 						password, err = PromptPassword("Keystore password: ")
 						if err != nil {
