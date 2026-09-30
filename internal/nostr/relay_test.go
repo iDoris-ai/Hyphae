@@ -4,8 +4,12 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/iDoris-ai/hyphae/internal/common"
@@ -20,6 +24,41 @@ func TestRelayInfoCmd_UnreachableRelayErrors(t *testing.T) {
 	var exitErr *common.ExitError
 	require.ErrorAs(t, err, &exitErr)
 	assert.Equal(t, common.ErrCodeNetwork, exitErr.Code)
+}
+
+func TestRelayInfoClosesCanceledProbeConnections(t *testing.T) {
+	const childEnv = "HYPHAE_RELAY_INFO_LEAK_TEST_CHILD"
+	if os.Getenv(childEnv) == "1" {
+		runtime.GC()
+		time.Sleep(50 * time.Millisecond)
+		runtime.GC()
+		baseline := runtime.NumGoroutine()
+
+		for range 30 {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			err := RelayCmd.Run(ctx, []string{"relay", "info", "--timeout", "2", "ws://127.0.0.1:1"})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "failed to connect")
+		}
+
+		assert.Eventually(t, func() bool {
+			return runtime.NumGoroutine()-baseline < 5
+		}, 3*time.Second, 10*time.Millisecond, "canceled relay probes left goroutines behind")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestRelayInfoClosesCanceledProbeConnections$")
+	cmd.Env = append(os.Environ(), childEnv+"=1", "HOME="+t.TempDir())
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("relay leak test child timed out: %s", output)
+	}
+	if err != nil {
+		t.Fatalf("relay leak test child failed: %v\n%s", err, output)
+	}
 }
 
 func TestRelayInfoRejectsInvalidTimeout(t *testing.T) {

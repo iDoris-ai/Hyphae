@@ -88,10 +88,12 @@ func relayInfo(ctx context.Context, c *cli.Command) error {
 	probeCtx, cancel := context.WithTimeout(ctx, time.Duration(seconds)*time.Second)
 	defer cancel()
 	relay, err := nostr.RelayConnect(probeCtx, url, nostr.RelayOptions{})
+	if relay != nil {
+		defer relay.Close()
+	}
 	if err != nil {
 		return common.NewExitError(common.ErrCodeNetwork, fmt.Errorf("failed to connect: %w", err))
 	}
-	defer relay.Close()
 	common.Emit(common.JSONMode(c), map[string]any{"url": url, "connected": true}, func() { fmt.Printf("Connected to %s\n", url) })
 	return nil
 }
