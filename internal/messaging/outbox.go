@@ -88,16 +88,34 @@ func UpdateOutbox(update func(*types.Outbox) error) (*types.Outbox, error) {
 		if err != nil {
 			return err
 		}
+		before := cloneOutbox(ob)
 		if err := update(ob); err != nil {
 			return err
 		}
-		if err := writeOutbox(file, ob); err != nil {
+		if reflect.DeepEqual(before, ob) {
+			updated = ob
+			return nil
+		}
+		if err := persistOutbox(file, ob); err != nil {
 			return err
 		}
 		updated = ob
 		return nil
 	})
 	return updated, err
+}
+
+var persistOutbox = writeOutbox
+
+func cloneOutbox(ob *types.Outbox) *types.Outbox {
+	clone := &types.Outbox{Entries: make([]types.OutboxEntry, len(ob.Entries))}
+	for i, entry := range ob.Entries {
+		if entry.Relays != nil {
+			entry.Relays = append([]string{}, entry.Relays...)
+		}
+		clone.Entries[i] = entry
+	}
+	return clone
 }
 
 func writeOutbox(file string, ob *types.Outbox) error {
@@ -132,17 +150,22 @@ func writeOutbox(file string, ob *types.Outbox) error {
 	}
 	dir, err := os.Open(filepath.Dir(file))
 	if err != nil {
-		return fmt.Errorf("open outbox directory after rename: %w", err)
+		return &outboxCommitUncertainError{fmt.Errorf("open outbox directory after rename: %w", err)}
 	}
 	if err := dir.Sync(); err != nil {
 		_ = dir.Close()
-		return fmt.Errorf("fsync outbox directory after rename: %w", err)
+		return &outboxCommitUncertainError{fmt.Errorf("fsync outbox directory after rename: %w", err)}
 	}
 	if err := dir.Close(); err != nil {
-		return fmt.Errorf("close outbox directory after rename: %w", err)
+		return &outboxCommitUncertainError{fmt.Errorf("close outbox directory after rename: %w", err)}
 	}
 	return nil
 }
+
+type outboxCommitUncertainError struct{ err error }
+
+func (e *outboxCommitUncertainError) Error() string { return e.err.Error() }
+func (e *outboxCommitUncertainError) Unwrap() error { return e.err }
 
 // AddToOutbox adds a message to outbox. entry.ID is hex-encoded rather than
 // the raw event.ID bytes: a Go string holding arbitrary binary content gets
@@ -277,10 +300,16 @@ func refreshOutbox(dst, src *types.Outbox) {
 
 // SendResult describes the outcome of a single AttemptSend call.
 type SendResult struct {
-	Attempted    bool // false only when the entry never got as far as dialing a relay (e.g. unparseable EventJSON, or a duplicate-ID refusal)
-	Sent         bool // true if the event was successfully published
-	MarkedFailed bool // true if this attempt exhausted retries and the entry was marked "failed"
+	Attempted         bool // true once a relay publish was attempted
+	Sent              bool // true only when a relay acknowledged the event
+	Queued            bool // true when the same entry remains pending and below its retry limit
+	MarkedFailed      bool // true when the same entry is marked failed after this outcome
+	HistoryStored     bool // true when a successful publish was stored in local history
+	Superseded        bool // true when the queue entry was removed or replaced by another operation
+	QueueStateUnknown bool // true when a post-rename durability error prevents confirming queue state
 }
+
+var errOutboxEntrySuperseded = errors.New("outbox entry was removed or replaced")
 
 // countByID reports how many entries in entries share the given ID.
 func countByID(entries []types.OutboxEntry, id string) int {
@@ -293,11 +322,9 @@ func countByID(entries []types.OutboxEntry, id string) int {
 	return n
 }
 
-// AttemptSend tries to publish a single outbox entry to its target relays
-// (falling back to defaultRelays when entry.Relays is empty), then updates
-// and persists ob's status for this entry -- "sent" + removed on success,
-// retry count incremented (and marked "failed" once retries are exhausted)
-// on failure.
+// AttemptSend validates the queued snapshot against the latest disk state,
+// publishes without holding the outbox lock, then records the outcome against
+// that same queue identity.
 //
 // This is the one place that mutates outbox state after a send attempt --
 // both the daemon's automatic retry loop (internal/daemon) and the manual
@@ -308,38 +335,217 @@ func countByID(entries []types.OutboxEntry, id string) int {
 // calling; a manual retry is expected to bypass backoff by design (that's
 // the whole point of "don't wait for the daemon's 60s cycle").
 //
-// The returned error is informational, not a verdict on whether the send
-// itself succeeded -- check Sent/MarkedFailed for that. It surfaces
-// bookkeeping failures (status update/remove/history-store) that happen
-// alongside a send attempt whose own outcome is already reflected in the
-// result; callers should log it but must not treat a non-nil error as "the
-// send failed" when Result.Attempted is true.
+// Sent only reports a relay acknowledgment. HistoryStored and Queued describe
+// separate local bookkeeping outcomes; a bookkeeping error does not change
+// whether the relay acknowledged the event.
 //
 // AttemptSend refuses to process an entry whose ID collides with another
-// entry in ob.Entries (Attempted stays false, matching a parse error): on
-// success it would call RemoveFromOutbox, which deletes every entry sharing
-// that ID, not just this one -- with a pre-existing bug where an unsigned
-// event keeps a zero-value ID (see specs/m1.5/README.md), that would
-// silently delete other, never-actually-sent entries. This check lives here
-// rather than only at each call site so it protects the daemon's automatic
-// retry loop too, not just an interactive CLI command that happens to add
-// its own guard.
+// entry in the latest disk state (Attempted stays false): a retry must never
+// guess which queued payload the caller intended. Checking disk under the
+// transaction lock protects both CLI retries and the daemon retry loop.
 func AttemptSend(ctx context.Context, ob *types.Outbox, entry types.OutboxEntry, defaultRelays []string, dialTimeout time.Duration) (SendResult, error) {
-	if n := countByID(ob.Entries, entry.ID); n > 1 {
-		return SendResult{}, fmt.Errorf("%d outbox entries share this ID -- refusing to send/mutate (see specs/m1.5/README.md's outbox ID-collision note)", n)
+	return attemptSend(ctx, ob, entry, defaultRelays, dialTimeout, publishToRelays, StoreOutgoingMessage)
+}
+
+type outboxPublisher func(context.Context, []string, nostr.Event, time.Duration) bool
+type outgoingMessageStore func(*nostr.Event, string, string, bool) error
+
+func attemptSend(
+	ctx context.Context,
+	ob *types.Outbox,
+	entry types.OutboxEntry,
+	defaultRelays []string,
+	dialTimeout time.Duration,
+	publish outboxPublisher,
+	store outgoingMessageStore,
+) (SendResult, error) {
+	current, err := currentOutboxAttempt(entry)
+	if errors.Is(err, errOutboxEntrySuperseded) {
+		return SendResult{Superseded: true}, err
 	}
+	if err != nil {
+		result := SendResult{}
+		var uncertain *outboxCommitUncertainError
+		if errors.As(err, &uncertain) {
+			result.QueueStateUnknown = true
+		}
+		return result, err
+	}
+	refreshOutbox(ob, current.outbox)
 
 	var event nostr.Event
-	if err := json.Unmarshal([]byte(entry.EventJSON), &event); err != nil {
+	if err := json.Unmarshal([]byte(current.entry.EventJSON), &event); err != nil {
 		return SendResult{}, fmt.Errorf("parse event: %w", err)
 	}
 
-	targets := entry.Relays
+	targets := current.entry.Relays
 	if len(targets) == 0 {
 		targets = defaultRelays
 	}
+	result := SendResult{Attempted: true, Sent: publish(ctx, targets, event, dialTimeout)}
+	if !result.Sent {
+		return recordAttemptFailure(ob, current.entry, result)
+	}
 
-	sent := false
+	if err := store(&event, current.entry.RecipientNpub, event.Content, true); err != nil {
+		result.Queued, result.Superseded, result.QueueStateUnknown = inspectAttemptQueue(current.entry)
+		return result, fmt.Errorf("store outgoing message: %w", err)
+	}
+	result.HistoryStored = true
+	updated, err := UpdateOutbox(func(latest *types.Outbox) error {
+		index := findOutboxQueueEntry(latest, current.entry)
+		if index < 0 || latest.Entries[index].Status == "sent" {
+			return errOutboxEntrySuperseded
+		}
+		latest.Entries = append(latest.Entries[:index], latest.Entries[index+1:]...)
+		return nil
+	})
+	if errors.Is(err, errOutboxEntrySuperseded) {
+		result.Superseded = true
+		return result, nil
+	}
+	if err != nil {
+		result.Queued, result.Superseded, result.QueueStateUnknown = inspectAttemptQueue(current.entry)
+		var uncertain *outboxCommitUncertainError
+		if errors.As(err, &uncertain) {
+			result.QueueStateUnknown = true
+			result.Queued = false
+			result.Superseded = false
+		}
+		return result, fmt.Errorf("remove sent outbox entry: %w", err)
+	}
+	refreshOutbox(ob, updated)
+	return result, nil
+}
+
+type currentAttempt struct {
+	outbox *types.Outbox
+	entry  types.OutboxEntry
+}
+
+func currentOutboxAttempt(snapshot types.OutboxEntry) (currentAttempt, error) {
+	var selected types.OutboxEntry
+	updated, err := UpdateOutbox(func(latest *types.Outbox) error {
+		if n := countByID(latest.Entries, snapshot.ID); n > 1 {
+			return fmt.Errorf("%d outbox entries share this ID -- refusing to send/mutate (see specs/m1.5/README.md's outbox ID-collision note)", n)
+		}
+		index := -1
+		for i := range latest.Entries {
+			if latest.Entries[i].ID == snapshot.ID {
+				index = i
+				break
+			}
+		}
+		if index < 0 || !sameOutboxAttempt(snapshot, latest.Entries[index]) || latest.Entries[index].Status == "sent" {
+			return errOutboxEntrySuperseded
+		}
+		if latest.Entries[index].QueueID == "" {
+			queueID, err := newOutboxQueueID()
+			if err != nil {
+				return err
+			}
+			latest.Entries[index].QueueID = queueID
+		}
+		selected = latest.Entries[index]
+		return nil
+	})
+	if err != nil {
+		return currentAttempt{}, err
+	}
+	return currentAttempt{outbox: updated, entry: selected}, nil
+}
+
+func sameOutboxAttempt(snapshot, current types.OutboxEntry) bool {
+	if snapshot.ID != current.ID || snapshot.EventJSON != current.EventJSON {
+		return false
+	}
+	if snapshot.QueueID != "" {
+		return snapshot.QueueID == current.QueueID
+	}
+	if current.QueueID != "" {
+		return false
+	}
+	return snapshot.CreatedAt == current.CreatedAt &&
+		snapshot.RecipientNpub == current.RecipientNpub &&
+		reflect.DeepEqual(snapshot.Relays, current.Relays)
+}
+
+func findOutboxQueueEntry(ob *types.Outbox, entry types.OutboxEntry) int {
+	for i := range ob.Entries {
+		if ob.Entries[i].QueueID == entry.QueueID && ob.Entries[i].ID == entry.ID && ob.Entries[i].EventJSON == entry.EventJSON {
+			return i
+		}
+	}
+	return -1
+}
+
+func recordAttemptFailure(ob *types.Outbox, entry types.OutboxEntry, result SendResult) (SendResult, error) {
+	result.MarkedFailed = false
+	result.Queued = false
+	updated, err := UpdateOutbox(func(latest *types.Outbox) error {
+		index := findOutboxQueueEntry(latest, entry)
+		if index < 0 || latest.Entries[index].Status == "sent" {
+			return errOutboxEntrySuperseded
+		}
+		current := &latest.Entries[index]
+		current.RetryCount++
+		current.LastAttempt = time.Now().Unix()
+		if current.RetryCount >= current.MaxRetries {
+			current.Status = "failed"
+		}
+		result.MarkedFailed = current.Status == "failed"
+		result.Queued = current.Status == "pending" && current.RetryCount < current.MaxRetries
+		return nil
+	})
+	if errors.Is(err, errOutboxEntrySuperseded) {
+		result.Superseded = true
+		return result, nil
+	}
+	if err != nil {
+		var uncertain *outboxCommitUncertainError
+		if errors.As(err, &uncertain) {
+			result.QueueStateUnknown = true
+		} else {
+			result.Queued, result.Superseded, result.QueueStateUnknown = inspectAttemptQueue(entry)
+		}
+		result.MarkedFailed = false
+		if result.QueueStateUnknown {
+			result.Queued = false
+		}
+		return result, fmt.Errorf("record outbox retry: %w", err)
+	}
+	refreshOutbox(ob, updated)
+	return result, nil
+}
+
+func inspectAttemptQueue(entry types.OutboxEntry) (queued, superseded, unknown bool) {
+	latest, err := loadOutboxLocked()
+	if err != nil {
+		return false, false, true
+	}
+	index := findOutboxQueueEntry(latest, entry)
+	if index < 0 {
+		return false, true, false
+	}
+	current := latest.Entries[index]
+	return current.Status == "pending" && current.RetryCount < current.MaxRetries, false, false
+}
+
+func loadOutboxLocked() (*types.Outbox, error) {
+	file, err := GetOutboxPath()
+	if err != nil {
+		return nil, err
+	}
+	var latest *types.Outbox
+	err = withOutboxLock(file, func() error {
+		var readErr error
+		latest, readErr = readOutbox(file)
+		return readErr
+	})
+	return latest, err
+}
+
+func publishToRelays(ctx context.Context, targets []string, event nostr.Event, dialTimeout time.Duration) bool {
 	for _, url := range targets {
 		relayCtx, cancel := context.WithTimeout(ctx, dialTimeout)
 		relay, err := nostr.RelayConnect(relayCtx, url, nostr.RelayOptions{})
@@ -351,47 +557,10 @@ func AttemptSend(ctx context.Context, ob *types.Outbox, entry types.OutboxEntry,
 		relay.Close()
 		cancel()
 		if pubErr == nil {
-			sent = true
-			break
+			return true
 		}
 	}
-
-	result := SendResult{Attempted: true, Sent: sent}
-	var errs []error
-
-	if sent {
-		// Each of these three is attempted independently, matching the
-		// pre-refactor daemon.go behavior exactly: an error updating status
-		// must not skip removing the entry or storing the outgoing message,
-		// since those are the parts that actually matter once the event has
-		// already been published. Errors are collected, not fatal.
-		if err := UpdateOutboxStatus(ob, entry.ID, "sent"); err != nil {
-			errs = append(errs, fmt.Errorf("update outbox status: %w", err))
-		}
-		if err := RemoveFromOutbox(ob, entry.ID); err != nil {
-			errs = append(errs, fmt.Errorf("remove from outbox: %w", err))
-		}
-		if err := StoreOutgoingMessage(&event, entry.RecipientNpub, event.Content, true); err != nil {
-			errs = append(errs, fmt.Errorf("store outgoing message: %w", err))
-		}
-		return result, errors.Join(errs...)
-	}
-
-	// Same independent-attempt shape on the failure side: a failure to
-	// persist the incremented retry count must not skip the "did retries
-	// just get exhausted" check below.
-	updated, _, err := incrementOutboxRetry(entry.ID)
-	refreshOutbox(ob, updated)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("increment retry: %w", err))
-	}
-	if entry.RetryCount >= entry.MaxRetries-1 {
-		if err := UpdateOutboxStatus(ob, entry.ID, "failed"); err != nil {
-			errs = append(errs, fmt.Errorf("mark failed: %w", err))
-		}
-		result.MarkedFailed = true
-	}
-	return result, errors.Join(errs...)
+	return false
 }
 
 // CleanupOutbox removes old sent entries
