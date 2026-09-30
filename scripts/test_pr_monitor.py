@@ -31,6 +31,12 @@ class MonitorTests(unittest.TestCase):
         self.branch_body = {"commit": {"sha": self.main_sha}}
         self.workflow_runs = None
         self.workflow_returncode = 0
+        self.mixed_workflow_runs = [
+            {"status": "completed", "conclusion": "failure", "headSha": self.main_sha, "url": "current-ci", "workflowName": "CI"},
+            {"status": "completed", "conclusion": "success", "headSha": self.main_sha, "url": "updater-noop", "workflowName": "Update Dependencies"},
+            {"status": "completed", "conclusion": "success", "headSha": "b" * 40, "url": "old-ci", "workflowName": "CI"},
+            None,
+        ]
 
     def tearDown(self):
         self.temp.cleanup()
@@ -142,6 +148,7 @@ class MonitorTests(unittest.TestCase):
     @patch("pr_monitor.subprocess.run")
     def test_current_main_failure_is_not_hidden_by_updater_or_old_green(self, run):
         run.side_effect = self.fake_run
+        self.workflow_runs = self.mixed_workflow_runs
         self.assertEqual(pr_monitor.execute(self.config, scan_only=True), 0)
         snapshot = json.loads((self.state / "latest.json").read_text())
         self.assertEqual(snapshot["main_sha"], self.main_sha)
@@ -154,7 +161,7 @@ class MonitorTests(unittest.TestCase):
     @patch("pr_monitor.subprocess.run")
     def test_current_head_without_ci_is_explicitly_missing(self, run):
         run.side_effect = self.fake_run
-        self.workflow_runs = []
+        self.workflow_runs = self.mixed_workflow_runs[1:]
         self.assertEqual(pr_monitor.execute(self.config, scan_only=True), 0)
         snapshot = json.loads((self.state / "latest.json").read_text())
         self.assertEqual(snapshot["main_sha"], self.main_sha)
