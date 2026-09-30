@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -600,6 +601,177 @@ func TestAttemptSend_PostRenameFailureIncrementReportsUnknown(t *testing.T) {
 	require.Len(t, latest.Entries, 1)
 	assert.Equal(t, 5, latest.Entries[0].RetryCount)
 	assert.Equal(t, "failed", latest.Entries[0].Status)
+}
+
+func TestAttemptSend_EncryptedHistoryDoesNotStoreCiphertextAsPlaintext(t *testing.T) {
+	resetStore(t)
+	t.Cleanup(ResetStoreForTest)
+	event := testHistoryEvent(t, mustCompressText(t, "ciphertext"), nostr.Tags{{"enc", "nip44"}, {"z", CompressTag}})
+	entry, ob := queueHistoryEvent(t, event)
+	// The initial send already recorded local plaintext; a retry must preserve it.
+	require.NoError(t, StoreOutgoingMessage(&event, "npub1recipient", "local secret", true))
+
+	var published nostr.Event
+	result, err := attemptSend(context.Background(), ob, entry, nil, time.Second,
+		func(_ context.Context, _ []string, sent nostr.Event, _ time.Duration) bool {
+			published = sent
+			return true
+		}, StoreOutgoingMessage)
+	require.NoError(t, err)
+	assert.True(t, result.Sent)
+	assert.True(t, result.HistoryStored)
+	assert.True(t, reflect.DeepEqual(event, published), "retry must publish the exact stored signed event")
+
+	store, err := GetStore()
+	require.NoError(t, err)
+	stored, err := store.GetMessage(entry.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.True(t, stored.IsEncrypted)
+	assert.Equal(t, "local secret", stored.Plaintext, "empty retry plaintext must preserve the already stored cleartext")
+	assert.Equal(t, event.Content, stored.Content)
+}
+
+func TestAttemptSend_NewEncryptedHistoryLeavesPlaintextEmpty(t *testing.T) {
+	resetStore(t)
+	t.Cleanup(ResetStoreForTest)
+	event := testHistoryEvent(t, mustCompressText(t, "ciphertext"), nostr.Tags{{"enc", "nip44"}, {"z", CompressTag}})
+	entry, ob := queueHistoryEvent(t, event)
+	result, err := attemptSend(context.Background(), ob, entry, nil, time.Second,
+		func(context.Context, []string, nostr.Event, time.Duration) bool { return true }, StoreOutgoingMessage)
+	require.NoError(t, err)
+	assert.True(t, result.HistoryStored)
+
+	store, err := GetStore()
+	require.NoError(t, err)
+	stored, err := store.GetMessage(entry.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.True(t, stored.IsEncrypted)
+	assert.Empty(t, stored.Plaintext)
+	assert.Equal(t, event.Content, stored.Content)
+}
+
+func TestAttemptSend_UnencryptedHistoryUsesDecodedOrRawContent(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		content   string
+		tags      nostr.Tags
+		plaintext string
+	}{
+		{name: "compressed", content: mustCompressText(t, "decoded plaintext"), tags: nostr.Tags{{"z", CompressTag}}, plaintext: "decoded plaintext"},
+		{name: "raw", content: "raw plaintext", plaintext: "raw plaintext"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetStore(t)
+			t.Cleanup(ResetStoreForTest)
+			event := testHistoryEvent(t, tc.content, tc.tags)
+			entry, ob := queueHistoryEvent(t, event)
+			result, err := attemptSend(context.Background(), ob, entry, nil, time.Second,
+				func(context.Context, []string, nostr.Event, time.Duration) bool { return true }, StoreOutgoingMessage)
+			require.NoError(t, err)
+			assert.True(t, result.HistoryStored)
+
+			store, err := GetStore()
+			require.NoError(t, err)
+			stored, err := store.GetMessage(entry.ID)
+			require.NoError(t, err)
+			require.NotNil(t, stored)
+			assert.False(t, stored.IsEncrypted)
+			assert.Equal(t, tc.plaintext, stored.Plaintext)
+		})
+	}
+}
+
+func TestAttemptSend_FailedPublishDoesNotStoreHistory(t *testing.T) {
+	resetStore(t)
+	t.Cleanup(ResetStoreForTest)
+	event := testHistoryEvent(t, "no acknowledgement", nil)
+	entry, ob := queueHistoryEvent(t, event)
+	calledStore := false
+	result, err := attemptSend(context.Background(), ob, entry, nil, time.Second,
+		func(context.Context, []string, nostr.Event, time.Duration) bool { return false },
+		func(*nostr.Event, string, string, bool) error {
+			calledStore = true
+			return StoreOutgoingMessage(&event, "npub1recipient", "", false)
+		})
+	require.NoError(t, err)
+	assert.False(t, result.Sent)
+	assert.False(t, calledStore)
+
+	store, err := GetStore()
+	require.NoError(t, err)
+	stored, err := store.GetMessage(entry.ID)
+	require.NoError(t, err)
+	assert.Nil(t, stored)
+}
+
+func TestAttemptSend_UnknownEncryptionOrCompressionKeepsQueue(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tags nostr.Tags
+	}{
+		{name: "unknown encryption", tags: nostr.Tags{{"enc", "future-cipher"}}},
+		{name: "unknown compression", tags: nostr.Tags{{"z", "gzip"}}},
+		{name: "corrupt compression", tags: nostr.Tags{{"z", CompressTag}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetStore(t)
+			t.Cleanup(ResetStoreForTest)
+			event := testHistoryEvent(t, "not valid compressed data", tc.tags)
+			entry, ob := queueHistoryEvent(t, event)
+			result, err := attemptSend(context.Background(), ob, entry, nil, time.Second,
+				func(context.Context, []string, nostr.Event, time.Duration) bool { return true }, StoreOutgoingMessage)
+			require.Error(t, err)
+			assert.True(t, result.Sent)
+			assert.False(t, result.HistoryStored)
+			assert.True(t, result.Queued)
+
+			latest, err := LoadOutbox()
+			require.NoError(t, err)
+			require.Len(t, latest.Entries, 1)
+			store, err := GetStore()
+			require.NoError(t, err)
+			stored, err := store.GetMessage(entry.ID)
+			require.NoError(t, err)
+			assert.Nil(t, stored)
+		})
+	}
+}
+
+func testHistoryEvent(t *testing.T, content string, tags nostr.Tags) nostr.Event {
+	t.Helper()
+	secret := nostr.Generate()
+	event := nostr.Event{
+		CreatedAt: nostr.Now(),
+		Kind:      AgentKind,
+		Tags:      tags,
+		Content:   content,
+		PubKey:    secret.Public(),
+	}
+	require.NoError(t, event.Sign(secret))
+	return event
+}
+
+func queueHistoryEvent(t *testing.T, event nostr.Event) (types.OutboxEntry, *types.Outbox) {
+	t.Helper()
+	data, err := json.Marshal(event)
+	require.NoError(t, err)
+	entry := types.OutboxEntry{
+		QueueID: "history-queue", ID: hex.EncodeToString(event.ID[:]), EventJSON: string(data),
+		RecipientNpub: "npub1recipient", Status: "pending", MaxRetries: 5,
+	}
+	require.NoError(t, SaveOutbox(&types.Outbox{Entries: []types.OutboxEntry{entry}}))
+	ob, err := LoadOutbox()
+	require.NoError(t, err)
+	return ob.Entries[0], ob
+}
+
+func mustCompressText(t *testing.T, text string) string {
+	t.Helper()
+	compressed, err := CompressText(text)
+	require.NoError(t, err)
+	return compressed
 }
 
 func testOutboxAttemptEntry(id string, retryCount, maxRetries int) types.OutboxEntry {
