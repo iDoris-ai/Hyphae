@@ -390,6 +390,60 @@
       "local_pubkey": "c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5",
       "event_json": "{\"kind\":8787,\"id\":\"187aa2e65d6ce49f9d2c1937f05008f614946479eda346d4222ea7239e2cbb00\",\"pubkey\":\"79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798\",\"created_at\":1700000000,\"tags\":[[\"c\",\"hyphae-behavior/1\"],[\"b\",\"inquire\"],[\"x\",\"nip44\"],[\"p\",\"c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5\"]],\"content\":\"éAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"sig\":\"af4a1cede7a6d2f385f5515f346e7db9f9c0197376ca81731e1672f34bf6e6dc8a4047a9be2498da6bb4eb4f5bda718a9ff652ebfb546ab111f19d5219da7461\"}",
       "expected_stage": "content_invalid"
+    },
+    {
+      "id": "tag-null-element",
+      "local_pubkey": "c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5",
+      "event_json": "{\"kind\":8787,\"id\":\"ecc1beedc55d4e0304dce4452ec6df5f35c22fbcb1d6e346fbea38761297fd55\",\"pubkey\":\"79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798\",\"created_at\":1700000000,\"tags\":[[\"c\",null],[\"b\",\"register\"],[\"x\",\"json\"]],\"content\":\"{\\\"text\\\":\\\"你好🙂\\\"}\",\"sig\":\"13a0b8e481f5965424f5e63c4ed4a3ef287cb7be0b50f79a74df157ce1e4e3c08036da19d51cb33ba5384746384ddeac45646a959160bc2e623916babb095c1d\"}",
+      "expected_stage": "event_invalid"
+    },
+    {
+      "id": "tag-multibyte-256-bytes",
+      "local_pubkey": "c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5",
+      "event_json_recipe": {
+        "prefix": "{\"kind\":8787,\"id\":\"ecc1beedc55d4e0304dce4452ec6df5f35c22fbcb1d6e346fbea38761297fd55\",\"pubkey\":\"79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798\",\"created_at\":1700000000,\"tags\":[[\"z\",\"",
+        "fill": "界",
+        "repeat": 85,
+        "suffix": "a\"],[\"c\",\"hyphae-behavior/1\"],[\"b\",\"register\"],[\"x\",\"json\"]],\"content\":\"{\\\"text\\\":\\\"你好🙂\\\"}\",\"sig\":\"13a0b8e481f5965424f5e63c4ed4a3ef287cb7be0b50f79a74df157ce1e4e3c08036da19d51cb33ba5384746384ddeac45646a959160bc2e623916babb095c1d\"}"
+      },
+      "expected_bytes": 690,
+      "expected_stage": "route_invalid"
+    },
+    {
+      "id": "tag-multibyte-257-bytes",
+      "local_pubkey": "c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5",
+      "event_json_recipe": {
+        "prefix": "{\"kind\":8787,\"id\":\"ecc1beedc55d4e0304dce4452ec6df5f35c22fbcb1d6e346fbea38761297fd55\",\"pubkey\":\"79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798\",\"created_at\":1700000000,\"tags\":[[\"z\",\"",
+        "fill": "界",
+        "repeat": 85,
+        "suffix": "ab\"],[\"c\",\"hyphae-behavior/1\"],[\"b\",\"register\"],[\"x\",\"json\"]],\"content\":\"{\\\"text\\\":\\\"你好🙂\\\"}\",\"sig\":\"13a0b8e481f5965424f5e63c4ed4a3ef287cb7be0b50f79a74df157ce1e4e3c08036da19d51cb33ba5384746384ddeac45646a959160bc2e623916babb095c1d\"}"
+      },
+      "expected_bytes": 691,
+      "expected_stage": "event_invalid"
+    },
+    {
+      "id": "public-body-multibyte-32768-bytes",
+      "local_pubkey": "c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5",
+      "event_json_recipe": {
+        "prefix": "{\"kind\":8787,\"id\":\"c576eb58cc54228adbb7a62e4dff924d70cd9172e2e6d2d1033b9a5b3941efca\",\"pubkey\":\"79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798\",\"created_at\":1700000000,\"tags\":[[\"c\",\"hyphae-behavior/1\"],[\"b\",\"register\"],[\"x\",\"json\"]],\"content\":\"{\\\"x\\\":\\\"",
+        "fill": "界",
+        "repeat": 10920,
+        "suffix": "\\\"}\",\"sig\":\"3b52dfa18ee0b0b4c4d97a1084331923175c75de0d537f9f2b2775313471a06d3e152e12a463643d908427b2e694348bd65b80cd45d14caf6405831161936de6\"}"
+      },
+      "expected_bytes": 33172,
+      "expected_stage": "outer_valid"
+    },
+    {
+      "id": "public-body-multibyte-32769-bytes",
+      "local_pubkey": "c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5",
+      "event_json_recipe": {
+        "prefix": "{\"kind\":8787,\"id\":\"249939d6eb8839ba6988537ca93160fd10249bb10617c2a8bf02d423cefee7f5\",\"pubkey\":\"79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798\",\"created_at\":1700000000,\"tags\":[[\"c\",\"hyphae-behavior/1\"],[\"b\",\"register\"],[\"x\",\"json\"]],\"content\":\"{\\\"x\\\":\\\"",
+        "fill": "界",
+        "repeat": 10920,
+        "suffix": "a\\\"}\",\"sig\":\"03597cab826d822966813ec3d812a688004a0f59602dcc5e1e3969143e94f0ae33dd7a02cd24069c67f6a529ebe1fb9aaff422dfbcf8652c3744f6b0ec9703e0\"}"
+      },
+      "expected_bytes": 33173,
+      "expected_stage": "content_limit"
     }
   ]
 }

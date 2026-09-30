@@ -206,10 +206,24 @@ func eventTransportParse(raw []byte) (eventTransportParsed, string) {
 	if event.kind, ok = eventTransportUnsignedInteger(object["kind"]); !ok {
 		return event, "event_invalid"
 	}
-	if err := json.Unmarshal(object["tags"], &event.tags); err != nil || event.tags == nil || len(event.tags) > 8 {
+	var rawTags []json.RawMessage
+	if err := json.Unmarshal(object["tags"], &rawTags); err != nil || rawTags == nil || len(rawTags) > 8 {
 		return event, "event_invalid"
 	}
-	for _, tag := range event.tags {
+	event.tags = make([][]string, 0, len(rawTags))
+	for _, rawTag := range rawTags {
+		var rawValues []json.RawMessage
+		if err := json.Unmarshal(rawTag, &rawValues); err != nil || rawValues == nil {
+			return event, "event_invalid"
+		}
+		tag := make([]string, 0, len(rawValues))
+		for _, rawValue := range rawValues {
+			value, ok := eventTransportString(rawValue)
+			if !ok {
+				return event, "event_invalid"
+			}
+			tag = append(tag, value)
+		}
 		if len(tag) < 2 || len(tag) > 3 {
 			return event, "event_invalid"
 		}
@@ -218,6 +232,7 @@ func eventTransportParse(raw []byte) (eventTransportParsed, string) {
 				return event, "event_invalid"
 			}
 		}
+		event.tags = append(event.tags, tag)
 	}
 	if event.content, ok = eventTransportString(object["content"]); !ok {
 		return event, "event_invalid"
@@ -412,6 +427,7 @@ func TestEventTransportSharedFixtures(t *testing.T) {
 		t.Fatalf("unexpected event transport fixture profile/count: %q/%d", fixtures.Profile, len(fixtures.Cases))
 	}
 	ids := map[string]bool{}
+	executedStages := map[string]int{}
 	stages := map[string]bool{"outer_valid": true, "raw_limit": true, "json_invalid": true, "event_invalid": true, "legacy_or_unsupported": true, "route_invalid": true, "content_limit": true, "content_invalid": true, "signature_invalid": true}
 	for _, tc := range fixtures.Cases {
 		if tc.ID == "" || ids[tc.ID] {
@@ -431,12 +447,20 @@ func TestEventTransportSharedFixtures(t *testing.T) {
 		if tc.ExpectedBytes != nil && len(raw) != *tc.ExpectedBytes {
 			t.Fatalf("%s: expanded bytes %d, expected %d", tc.ID, len(raw), *tc.ExpectedBytes)
 		}
-		actual := eventTransportValidate(raw, tc.LocalPubKey)
-		if actual != tc.ExpectedStage {
-			t.Errorf("%s: got %s, want %s", tc.ID, actual, tc.ExpectedStage)
+		t.Run(tc.ID, func(t *testing.T) {
+			actual := eventTransportValidate(raw, tc.LocalPubKey)
+			executedStages[actual]++
+			if actual != tc.ExpectedStage {
+				t.Errorf("got %s, want %s", actual, tc.ExpectedStage)
+			}
+		})
+	}
+	for stage := range stages {
+		if executedStages[stage] == 0 {
+			t.Errorf("fixture suite did not exercise expected stage %q", stage)
 		}
 	}
-	if !stages["outer_valid"] || len(ids) != len(fixtures.Cases) {
+	if len(ids) != len(fixtures.Cases) {
 		t.Fatal("fixture cases did not all execute")
 	}
 }
