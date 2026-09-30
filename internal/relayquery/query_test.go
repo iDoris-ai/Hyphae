@@ -3,6 +3,7 @@ package relayquery
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -141,6 +142,9 @@ func TestFetchDisconnectWithoutEOSEIsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "incomplete") && !strings.Contains(err.Error(), "before EOSE") {
 		t.Fatalf("Fetch error = %v, want explicit incomplete-query error", err)
+	}
+	if errors.Unwrap(err) == nil {
+		t.Fatalf("Fetch error = %v, want underlying relay failure preserved", err)
 	}
 	fixture.requireClosed(t)
 }

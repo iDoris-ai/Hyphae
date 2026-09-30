@@ -38,7 +38,7 @@ func Fetch(ctx context.Context, url string, filter nostr.Filter) (Page, error) {
 		MaxWaitForEOSE: time.Duration(math.MaxInt64),
 	})
 	if err != nil {
-		return page, fmt.Errorf("subscribe to relay %s: %w", url, err)
+		return page, fmt.Errorf("subscribe to relay %s before EOSE: %w", url, err)
 	}
 	defer sub.Unsub()
 
