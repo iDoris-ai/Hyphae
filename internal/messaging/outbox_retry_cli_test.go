@@ -61,7 +61,8 @@ func TestOutboxRetryJSONWithLocalRelay(t *testing.T) {
 	defer cancel()
 	build := exec.CommandContext(buildCtx, "go", "build", "-o", relayBin, "./cmd/hyphae-relay")
 	build.Dir = projectRootFromTest(t)
-	build.Env = isolatedOutboxCLIEnv(os.Environ(), temp, nil)
+	// Keep the Go build in the parent environment so it can use the configured
+	// module cache. The relay process and CLI below still run with isolated HOME.
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build relay: %v: %s", err, output)
 	}
