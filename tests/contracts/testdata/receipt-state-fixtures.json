@@ -1,0 +1,1260 @@
+{
+  "profile": "hyphae-receipt-state-fixtures/1",
+  "direct_cases": [
+    {
+      "id": "edge-received-to-approval_pending",
+      "from": "received",
+      "to": "approval_pending",
+      "expected_direct": true,
+      "expected_reachable": true
+    },
+    {
+      "id": "edge-received-to-ready",
+      "from": "received",
+      "to": "ready",
+      "expected_direct": true,
+      "expected_reachable": true
+    },
+    {
+      "id": "edge-received-to-rejected",
+      "from": "received",
+      "to": "rejected",
+      "expected_direct": true,
+      "expected_reachable": true
+    },
+    {
+      "id": "edge-received-to-expired",
+      "from": "received",
+      "to": "expired",
+      "expected_direct": true,
+      "expected_reachable": true
+    },
+    {
+      "id": "edge-approval_pending-to-ready",
+      "from": "approval_pending",
+      "to": "ready",
+      "expected_direct": true,
+      "expected_reachable": true
+    },
+    {
+      "id": "edge-approval_pending-to-rejected",
+      "from": "approval_pending",
+      "to": "rejected",
+      "expected_direct": true,
+      "expected_reachable": true
+    },
+    {
+      "id": "edge-approval_pending-to-expired",
+      "from": "approval_pending",
+      "to": "expired",
+      "expected_direct": true,
+      "expected_reachable": true
+    },
+    {
+      "id": "edge-ready-to-run_registered",
+      "from": "ready",
+      "to": "run_registered",
+      "expected_direct": true,
+      "expected_reachable": true
+    },
+    {
+      "id": "edge-ready-to-rejected",
+      "from": "ready",
+      "to": "rejected",
+      "expected_direct": true,
+      "expected_reachable": true
+    },
+    {
+      "id": "edge-ready-to-expired",
+      "from": "ready",
+      "to": "expired",
+      "expected_direct": true,
+      "expected_reachable": true
+    },
+    {
+      "id": "edge-run_registered-to-running",
+      "from": "run_registered",
+      "to": "running",
+      "expected_direct": true,
+      "expected_reachable": true
+    },
+    {
+      "id": "edge-run_registered-to-failed",
+      "from": "run_registered",
+      "to": "failed",
+      "expected_direct": true,
+      "expected_reachable": true
+    },
+    {
+      "id": "edge-run_registered-to-expired",
+      "from": "run_registered",
+      "to": "expired",
+      "expected_direct": true,
+      "expected_reachable": true
+    },
+    {
+      "id": "edge-run_registered-to-unknown",
+      "from": "run_registered",
+      "to": "unknown",
+      "expected_direct": true,
+      "expected_reachable": true
+    },
+    {
+      "id": "edge-running-to-succeeded",
+      "from": "running",
+      "to": "succeeded",
+      "expected_direct": true,
+      "expected_reachable": true
+    },
+    {
+      "id": "edge-running-to-failed",
+      "from": "running",
+      "to": "failed",
+      "expected_direct": true,
+      "expected_reachable": true
+    },
+    {
+      "id": "edge-running-to-unknown",
+      "from": "running",
+      "to": "unknown",
+      "expected_direct": true,
+      "expected_reachable": true
+    },
+    {
+      "id": "edge-unknown-to-running",
+      "from": "unknown",
+      "to": "running",
+      "expected_direct": true,
+      "expected_reachable": true
+    },
+    {
+      "id": "edge-unknown-to-succeeded",
+      "from": "unknown",
+      "to": "succeeded",
+      "expected_direct": true,
+      "expected_reachable": true
+    },
+    {
+      "id": "edge-unknown-to-failed",
+      "from": "unknown",
+      "to": "failed",
+      "expected_direct": true,
+      "expected_reachable": true
+    },
+    {
+      "id": "same-nonterminal-reflexive",
+      "from": "received",
+      "to": "received",
+      "expected_direct": false,
+      "expected_reachable": true
+    },
+    {
+      "id": "skip-intermediate-approval-to-success",
+      "from": "approval_pending",
+      "to": "succeeded",
+      "expected_direct": false,
+      "expected_reachable": true
+    },
+    {
+      "id": "running-cannot-return-ready",
+      "from": "running",
+      "to": "ready",
+      "expected_direct": false,
+      "expected_reachable": false
+    },
+    {
+      "id": "terminal-self-reflexive",
+      "from": "succeeded",
+      "to": "succeeded",
+      "expected_direct": false,
+      "expected_reachable": true
+    },
+    {
+      "id": "terminal-cannot-change",
+      "from": "succeeded",
+      "to": "failed",
+      "expected_direct": false,
+      "expected_reachable": false
+    }
+  ],
+  "revision_cases": [
+    {
+      "id": "initial-approval-pending",
+      "prior": {
+        "state": "received",
+        "seq": 0,
+        "run_id": "",
+        "semantic_id": ""
+      },
+      "incoming": {
+        "state": "approval_pending",
+        "seq": 1,
+        "run_id": "",
+        "semantic_id": "sem-A",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "applied",
+      "expected_record": {
+        "state": "approval_pending",
+        "seq": 1,
+        "run_id": "",
+        "semantic_id": "sem-A"
+      }
+    },
+    {
+      "id": "initial-ready-with-direct-authorization",
+      "prior": {
+        "state": "received",
+        "seq": 0,
+        "run_id": "",
+        "semantic_id": ""
+      },
+      "incoming": {
+        "state": "ready",
+        "seq": 2,
+        "run_id": "",
+        "semantic_id": "sem-ready",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "applied",
+      "expected_record": {
+        "state": "ready",
+        "seq": 2,
+        "run_id": "",
+        "semantic_id": "sem-ready"
+      }
+    },
+    {
+      "id": "initial-succeeded-after-missed-states",
+      "prior": {
+        "state": "received",
+        "seq": 0,
+        "run_id": "",
+        "semantic_id": ""
+      },
+      "incoming": {
+        "state": "succeeded",
+        "seq": 7,
+        "run_id": "run-A",
+        "semantic_id": "sem-result",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "applied",
+      "expected_record": {
+        "state": "succeeded",
+        "seq": 7,
+        "run_id": "run-A",
+        "semantic_id": "sem-result"
+      }
+    },
+    {
+      "id": "initial-expired-without-run",
+      "prior": {
+        "state": "received",
+        "seq": 0,
+        "run_id": "",
+        "semantic_id": ""
+      },
+      "incoming": {
+        "state": "expired",
+        "seq": 1,
+        "run_id": "",
+        "semantic_id": "sem-expired",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "applied",
+      "expected_record": {
+        "state": "expired",
+        "seq": 1,
+        "run_id": "",
+        "semantic_id": "sem-expired"
+      }
+    },
+    {
+      "id": "approval-pending-to-succeeded-skips-middle",
+      "prior": {
+        "state": "approval_pending",
+        "seq": 1,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      },
+      "incoming": {
+        "state": "succeeded",
+        "seq": 5,
+        "run_id": "run-A",
+        "semantic_id": "sem-result",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "applied",
+      "expected_record": {
+        "state": "succeeded",
+        "seq": 5,
+        "run_id": "run-A",
+        "semantic_id": "sem-result"
+      }
+    },
+    {
+      "id": "unknown-recovers-to-running",
+      "prior": {
+        "state": "unknown",
+        "seq": 3,
+        "run_id": "run-A",
+        "semantic_id": "sem-unknown"
+      },
+      "incoming": {
+        "state": "running",
+        "seq": 4,
+        "run_id": "run-A",
+        "semantic_id": "sem-running",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "applied",
+      "expected_record": {
+        "state": "running",
+        "seq": 4,
+        "run_id": "run-A",
+        "semantic_id": "sem-running"
+      }
+    },
+    {
+      "id": "unknown-recovers-to-succeeded",
+      "prior": {
+        "state": "unknown",
+        "seq": 3,
+        "run_id": "run-A",
+        "semantic_id": "sem-unknown"
+      },
+      "incoming": {
+        "state": "succeeded",
+        "seq": 5,
+        "run_id": "run-A",
+        "semantic_id": "sem-result",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "applied",
+      "expected_record": {
+        "state": "succeeded",
+        "seq": 5,
+        "run_id": "run-A",
+        "semantic_id": "sem-result"
+      }
+    },
+    {
+      "id": "unknown-recovers-to-failed",
+      "prior": {
+        "state": "unknown",
+        "seq": 3,
+        "run_id": "run-A",
+        "semantic_id": "sem-unknown"
+      },
+      "incoming": {
+        "state": "failed",
+        "seq": 5,
+        "run_id": "run-A",
+        "semantic_id": "sem-error",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "applied",
+      "expected_record": {
+        "state": "failed",
+        "seq": 5,
+        "run_id": "run-A",
+        "semantic_id": "sem-error"
+      }
+    },
+    {
+      "id": "running-to-unknown",
+      "prior": {
+        "state": "running",
+        "seq": 4,
+        "run_id": "run-A",
+        "semantic_id": "sem-running"
+      },
+      "incoming": {
+        "state": "unknown",
+        "seq": 5,
+        "run_id": "run-A",
+        "semantic_id": "sem-unknown",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "applied",
+      "expected_record": {
+        "state": "unknown",
+        "seq": 5,
+        "run_id": "run-A",
+        "semantic_id": "sem-unknown"
+      }
+    },
+    {
+      "id": "run-registered-to-failed-normalized-snapshot",
+      "prior": {
+        "state": "run_registered",
+        "seq": 4,
+        "run_id": "run-A",
+        "semantic_id": "sem-registered"
+      },
+      "incoming": {
+        "state": "failed",
+        "seq": 5,
+        "run_id": "run-A",
+        "semantic_id": "sem-error",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "applied",
+      "expected_record": {
+        "state": "failed",
+        "seq": 5,
+        "run_id": "run-A",
+        "semantic_id": "sem-error"
+      }
+    },
+    {
+      "id": "run-registered-to-expired-retains-run",
+      "prior": {
+        "state": "run_registered",
+        "seq": 4,
+        "run_id": "run-A",
+        "semantic_id": "sem-registered"
+      },
+      "incoming": {
+        "state": "expired",
+        "seq": 5,
+        "run_id": "run-A",
+        "semantic_id": "sem-expired",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "applied",
+      "expected_record": {
+        "state": "expired",
+        "seq": 5,
+        "run_id": "run-A",
+        "semantic_id": "sem-expired"
+      }
+    },
+    {
+      "id": "ready-higher-seq-same-state-same-semantic",
+      "prior": {
+        "state": "ready",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-ready"
+      },
+      "incoming": {
+        "state": "ready",
+        "seq": 5,
+        "run_id": "",
+        "semantic_id": "sem-ready",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "applied",
+      "expected_record": {
+        "state": "ready",
+        "seq": 5,
+        "run_id": "",
+        "semantic_id": "sem-ready"
+      }
+    },
+    {
+      "id": "ready-higher-seq-same-state-new-semantic",
+      "prior": {
+        "state": "ready",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-ready-v1"
+      },
+      "incoming": {
+        "state": "ready",
+        "seq": 5,
+        "run_id": "",
+        "semantic_id": "sem-ready-v2",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "applied",
+      "expected_record": {
+        "state": "ready",
+        "seq": 5,
+        "run_id": "",
+        "semantic_id": "sem-ready-v2"
+      }
+    },
+    {
+      "id": "stale-revision-preserves-current",
+      "prior": {
+        "state": "approval_pending",
+        "seq": 5,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      },
+      "incoming": {
+        "state": "received",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-old",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "stale",
+      "expected_record": {
+        "state": "approval_pending",
+        "seq": 5,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      }
+    },
+    {
+      "id": "running-stale-old-ready-without-run",
+      "prior": {
+        "state": "running",
+        "seq": 8,
+        "run_id": "run-A",
+        "semantic_id": "sem-running"
+      },
+      "incoming": {
+        "state": "ready",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-ready",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "stale",
+      "expected_record": {
+        "state": "running",
+        "seq": 8,
+        "run_id": "run-A",
+        "semantic_id": "sem-running"
+      }
+    },
+    {
+      "id": "stale-different-run-diagnosed-first",
+      "prior": {
+        "state": "running",
+        "seq": 8,
+        "run_id": "run-A",
+        "semantic_id": "sem-running"
+      },
+      "incoming": {
+        "state": "running",
+        "seq": 3,
+        "run_id": "run-B",
+        "semantic_id": "sem-old",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "run_mismatch",
+      "expected_record": {
+        "state": "running",
+        "seq": 8,
+        "run_id": "run-A",
+        "semantic_id": "sem-running"
+      }
+    },
+    {
+      "id": "incomplete-snapshot-before-stale",
+      "prior": {
+        "state": "running",
+        "seq": 8,
+        "run_id": "run-A",
+        "semantic_id": "sem-running"
+      },
+      "incoming": {
+        "state": "ready",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-ready",
+        "correlation_ok": true,
+        "complete_snapshot": false
+      },
+      "expected_decision": "incomplete_snapshot",
+      "expected_record": {
+        "state": "running",
+        "seq": 8,
+        "run_id": "run-A",
+        "semantic_id": "sem-running"
+      }
+    },
+    {
+      "id": "same-seq-identical-revision-is-idempotent",
+      "prior": {
+        "state": "ready",
+        "seq": 4,
+        "run_id": "",
+        "semantic_id": "sem-ready"
+      },
+      "incoming": {
+        "state": "ready",
+        "seq": 4,
+        "run_id": "",
+        "semantic_id": "sem-ready",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "duplicate",
+      "expected_record": {
+        "state": "ready",
+        "seq": 4,
+        "run_id": "",
+        "semantic_id": "sem-ready"
+      }
+    },
+    {
+      "id": "same-seq-normalized-terminal-duplicate",
+      "prior": {
+        "state": "succeeded",
+        "seq": 9,
+        "run_id": "run-A",
+        "semantic_id": "sem-result"
+      },
+      "incoming": {
+        "state": "succeeded",
+        "seq": 9,
+        "run_id": "run-A",
+        "semantic_id": "sem-result",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "duplicate",
+      "expected_record": {
+        "state": "succeeded",
+        "seq": 9,
+        "run_id": "run-A",
+        "semantic_id": "sem-result"
+      }
+    },
+    {
+      "id": "same-seq-different-semantic-conflicts",
+      "prior": {
+        "state": "ready",
+        "seq": 4,
+        "run_id": "",
+        "semantic_id": "sem-ready"
+      },
+      "incoming": {
+        "state": "ready",
+        "seq": 4,
+        "run_id": "",
+        "semantic_id": "sem-other",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "revision_conflict",
+      "expected_record": {
+        "state": "ready",
+        "seq": 4,
+        "run_id": "",
+        "semantic_id": "sem-ready"
+      }
+    },
+    {
+      "id": "same-seq-different-state-even-same-semantic-conflicts",
+      "prior": {
+        "state": "running",
+        "seq": 6,
+        "run_id": "run-A",
+        "semantic_id": "sem-shared"
+      },
+      "incoming": {
+        "state": "succeeded",
+        "seq": 6,
+        "run_id": "run-A",
+        "semantic_id": "sem-shared",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "revision_conflict",
+      "expected_record": {
+        "state": "running",
+        "seq": 6,
+        "run_id": "run-A",
+        "semantic_id": "sem-shared"
+      }
+    },
+    {
+      "id": "same-seq-different-bound-run-is-rejected",
+      "prior": {
+        "state": "run_registered",
+        "seq": 4,
+        "run_id": "run-A",
+        "semantic_id": "sem-registered"
+      },
+      "incoming": {
+        "state": "run_registered",
+        "seq": 4,
+        "run_id": "run-B",
+        "semantic_id": "sem-registered",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "run_mismatch",
+      "expected_record": {
+        "state": "run_registered",
+        "seq": 4,
+        "run_id": "run-A",
+        "semantic_id": "sem-registered"
+      }
+    },
+    {
+      "id": "terminal-same-seq-exact-duplicate",
+      "prior": {
+        "state": "succeeded",
+        "seq": 9,
+        "run_id": "run-A",
+        "semantic_id": "sem-result"
+      },
+      "incoming": {
+        "state": "succeeded",
+        "seq": 9,
+        "run_id": "run-A",
+        "semantic_id": "sem-result",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "duplicate",
+      "expected_record": {
+        "state": "succeeded",
+        "seq": 9,
+        "run_id": "run-A",
+        "semantic_id": "sem-result"
+      }
+    },
+    {
+      "id": "terminal-higher-same-state-and-semantics-locked",
+      "prior": {
+        "state": "succeeded",
+        "seq": 9,
+        "run_id": "run-A",
+        "semantic_id": "sem-result"
+      },
+      "incoming": {
+        "state": "succeeded",
+        "seq": 10,
+        "run_id": "run-A",
+        "semantic_id": "sem-result",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "terminal_locked",
+      "expected_record": {
+        "state": "succeeded",
+        "seq": 9,
+        "run_id": "run-A",
+        "semantic_id": "sem-result"
+      }
+    },
+    {
+      "id": "terminal-higher-changed-content-locked",
+      "prior": {
+        "state": "succeeded",
+        "seq": 9,
+        "run_id": "run-A",
+        "semantic_id": "sem-result-v1"
+      },
+      "incoming": {
+        "state": "succeeded",
+        "seq": 10,
+        "run_id": "run-A",
+        "semantic_id": "sem-result-v2",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "terminal_locked",
+      "expected_record": {
+        "state": "succeeded",
+        "seq": 9,
+        "run_id": "run-A",
+        "semantic_id": "sem-result-v1"
+      }
+    },
+    {
+      "id": "terminal-higher-different-state-locked",
+      "prior": {
+        "state": "failed",
+        "seq": 9,
+        "run_id": "run-A",
+        "semantic_id": "sem-error"
+      },
+      "incoming": {
+        "state": "succeeded",
+        "seq": 10,
+        "run_id": "run-A",
+        "semantic_id": "sem-result",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "terminal_locked",
+      "expected_record": {
+        "state": "failed",
+        "seq": 9,
+        "run_id": "run-A",
+        "semantic_id": "sem-error"
+      }
+    },
+    {
+      "id": "terminal-same-seq-different-content-conflicts",
+      "prior": {
+        "state": "failed",
+        "seq": 9,
+        "run_id": "run-A",
+        "semantic_id": "sem-error"
+      },
+      "incoming": {
+        "state": "failed",
+        "seq": 9,
+        "run_id": "run-A",
+        "semantic_id": "sem-error-v2",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "revision_conflict",
+      "expected_record": {
+        "state": "failed",
+        "seq": 9,
+        "run_id": "run-A",
+        "semantic_id": "sem-error"
+      }
+    },
+    {
+      "id": "higher-expired-cannot-drop-bound-run",
+      "prior": {
+        "state": "running",
+        "seq": 8,
+        "run_id": "run-A",
+        "semantic_id": "sem-running"
+      },
+      "incoming": {
+        "state": "expired",
+        "seq": 9,
+        "run_id": "",
+        "semantic_id": "sem-expired",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "run_mismatch",
+      "expected_record": {
+        "state": "running",
+        "seq": 8,
+        "run_id": "run-A",
+        "semantic_id": "sem-running"
+      }
+    },
+    {
+      "id": "higher-revision-cannot-switch-run",
+      "prior": {
+        "state": "running",
+        "seq": 8,
+        "run_id": "run-A",
+        "semantic_id": "sem-running"
+      },
+      "incoming": {
+        "state": "succeeded",
+        "seq": 9,
+        "run_id": "run-B",
+        "semantic_id": "sem-result",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "run_mismatch",
+      "expected_record": {
+        "state": "running",
+        "seq": 8,
+        "run_id": "run-A",
+        "semantic_id": "sem-running"
+      }
+    },
+    {
+      "id": "unreachable-approval-pending-to-received",
+      "prior": {
+        "state": "approval_pending",
+        "seq": 8,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      },
+      "incoming": {
+        "state": "received",
+        "seq": 9,
+        "run_id": "",
+        "semantic_id": "sem-received",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "unreachable",
+      "expected_record": {
+        "state": "approval_pending",
+        "seq": 8,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      }
+    },
+    {
+      "id": "reachable-multi-edge-ready-to-running",
+      "prior": {
+        "state": "ready",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-ready"
+      },
+      "incoming": {
+        "state": "running",
+        "seq": 7,
+        "run_id": "run-A",
+        "semantic_id": "sem-running",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "applied",
+      "expected_record": {
+        "state": "running",
+        "seq": 7,
+        "run_id": "run-A",
+        "semantic_id": "sem-running"
+      }
+    },
+    {
+      "id": "bad-correlation-rejected-before-incomplete",
+      "prior": {
+        "state": "approval_pending",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      },
+      "incoming": {
+        "state": "ready",
+        "seq": 4,
+        "run_id": "",
+        "semantic_id": "sem-ready",
+        "correlation_ok": false,
+        "complete_snapshot": false
+      },
+      "expected_decision": "correlation_rejected",
+      "expected_record": {
+        "state": "approval_pending",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      }
+    },
+    {
+      "id": "complete-but-correlation-false",
+      "prior": {
+        "state": "approval_pending",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      },
+      "incoming": {
+        "state": "ready",
+        "seq": 4,
+        "run_id": "",
+        "semantic_id": "sem-ready",
+        "correlation_ok": false,
+        "complete_snapshot": true
+      },
+      "expected_decision": "correlation_rejected",
+      "expected_record": {
+        "state": "approval_pending",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      }
+    },
+    {
+      "id": "incomplete-full-correlation",
+      "prior": {
+        "state": "approval_pending",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      },
+      "incoming": {
+        "state": "ready",
+        "seq": 4,
+        "run_id": "",
+        "semantic_id": "sem-ready",
+        "correlation_ok": true,
+        "complete_snapshot": false
+      },
+      "expected_decision": "incomplete_snapshot",
+      "expected_record": {
+        "state": "approval_pending",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      }
+    },
+    {
+      "id": "missing-correlation-prerequisite",
+      "prior": {
+        "state": "approval_pending",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      },
+      "incoming": {
+        "state": "ready",
+        "seq": 4,
+        "run_id": "",
+        "semantic_id": "sem-ready",
+        "complete_snapshot": true
+      },
+      "expected_decision": "invalid_structure",
+      "expected_record": {
+        "state": "approval_pending",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      }
+    },
+    {
+      "id": "missing-completeness-prerequisite",
+      "prior": {
+        "state": "approval_pending",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      },
+      "incoming": {
+        "state": "ready",
+        "seq": 4,
+        "run_id": "",
+        "semantic_id": "sem-ready",
+        "correlation_ok": true
+      },
+      "expected_decision": "invalid_structure",
+      "expected_record": {
+        "state": "approval_pending",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      }
+    },
+    {
+      "id": "unknown-prior-state",
+      "prior": {
+        "state": "not-a-state",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-old"
+      },
+      "incoming": {
+        "state": "ready",
+        "seq": 4,
+        "run_id": "",
+        "semantic_id": "sem-ready",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "invalid_structure",
+      "expected_record": {
+        "state": "not-a-state",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-old"
+      }
+    },
+    {
+      "id": "unknown-incoming-state",
+      "prior": {
+        "state": "approval_pending",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      },
+      "incoming": {
+        "state": "queued",
+        "seq": 4,
+        "run_id": "",
+        "semantic_id": "sem-queued",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "invalid_structure",
+      "expected_record": {
+        "state": "approval_pending",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      }
+    },
+    {
+      "id": "initial-prior-must-be-received-seq-zero-no-run",
+      "prior": {
+        "state": "ready",
+        "seq": 0,
+        "run_id": "",
+        "semantic_id": ""
+      },
+      "incoming": {
+        "state": "ready",
+        "seq": 4,
+        "run_id": "",
+        "semantic_id": "sem-ready",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "invalid_structure",
+      "expected_record": {
+        "state": "ready",
+        "seq": 0,
+        "run_id": "",
+        "semantic_id": ""
+      }
+    },
+    {
+      "id": "incoming-seq-zero-rejected",
+      "prior": {
+        "state": "approval_pending",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      },
+      "incoming": {
+        "state": "ready",
+        "seq": 0,
+        "run_id": "",
+        "semantic_id": "sem-ready",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "invalid_structure",
+      "expected_record": {
+        "state": "approval_pending",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      }
+    },
+    {
+      "id": "incoming-seq-over-safe-integer-rejected",
+      "prior": {
+        "state": "approval_pending",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      },
+      "incoming": {
+        "state": "ready",
+        "seq": 9007199254740992,
+        "run_id": "",
+        "semantic_id": "sem-ready",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "invalid_structure",
+      "expected_record": {
+        "state": "approval_pending",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      }
+    },
+    {
+      "id": "incoming-semantic-required",
+      "prior": {
+        "state": "approval_pending",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      },
+      "incoming": {
+        "state": "ready",
+        "seq": 4,
+        "run_id": "",
+        "semantic_id": "",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "invalid_structure",
+      "expected_record": {
+        "state": "approval_pending",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      }
+    },
+    {
+      "id": "incoming-running-requires-run",
+      "prior": {
+        "state": "ready",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-ready"
+      },
+      "incoming": {
+        "state": "running",
+        "seq": 4,
+        "run_id": "",
+        "semantic_id": "sem-running",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "invalid_structure",
+      "expected_record": {
+        "state": "ready",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-ready"
+      }
+    },
+    {
+      "id": "incoming-ready-forbids-run",
+      "prior": {
+        "state": "approval_pending",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      },
+      "incoming": {
+        "state": "ready",
+        "seq": 4,
+        "run_id": "run-A",
+        "semantic_id": "sem-ready",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "invalid_structure",
+      "expected_record": {
+        "state": "approval_pending",
+        "seq": 3,
+        "run_id": "",
+        "semantic_id": "sem-pending"
+      }
+    },
+    {
+      "id": "prior-seq-over-safe-integer-rejected",
+      "prior": {
+        "state": "ready",
+        "seq": 9007199254740992,
+        "run_id": "",
+        "semantic_id": "sem-ready"
+      },
+      "incoming": {
+        "state": "ready",
+        "seq": 4,
+        "run_id": "",
+        "semantic_id": "sem-ready",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "invalid_structure",
+      "expected_record": {
+        "state": "ready",
+        "seq": 9007199254740992,
+        "run_id": "",
+        "semantic_id": "sem-ready"
+      }
+    }
+  ]
+}
