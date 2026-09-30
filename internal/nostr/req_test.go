@@ -43,9 +43,23 @@ func reqSignedEventWithContent(t *testing.T, content string) nostr.Event {
 	return event
 }
 
-func reqWriteEvent(t *testing.T, conn *websocket.Conn, event nostr.Event) {
+func reqReadSubID(t *testing.T, conn *websocket.Conn) string {
 	t.Helper()
-	data, err := json.Marshal([]any{"EVENT", "hyphae-fetch", event})
+	_, data, err := conn.ReadMessage()
+	require.NoError(t, err)
+	var fields []json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &fields))
+	require.GreaterOrEqual(t, len(fields), 2)
+	var label, subID string
+	require.NoError(t, json.Unmarshal(fields[0], &label))
+	require.NoError(t, json.Unmarshal(fields[1], &subID))
+	require.Equal(t, "REQ", label)
+	return subID
+}
+
+func reqWriteEvent(t *testing.T, conn *websocket.Conn, subID string, event nostr.Event) {
+	t.Helper()
+	data, err := json.Marshal([]any{"EVENT", subID, event})
 	require.NoError(t, err)
 	require.NoError(t, conn.WriteMessage(websocket.TextMessage, data))
 }
@@ -55,9 +69,9 @@ func TestReqCmdReturnsOnEOSE(t *testing.T) {
 	eoseWritten := make(chan struct{})
 	clientClosed := make(chan struct{})
 	url := reqRelay(t, func(conn *websocket.Conn) {
-		_, _, _ = conn.ReadMessage()
-		require.NoError(t, conn.WriteJSON([]any{"EVENT", "hyphae-fetch", event}))
-		require.NoError(t, conn.WriteJSON([]any{"EOSE", "hyphae-fetch"}))
+		subID := reqReadSubID(t, conn)
+		require.NoError(t, conn.WriteJSON([]any{"EVENT", subID, event}))
+		require.NoError(t, conn.WriteJSON([]any{"EOSE", subID}))
 		close(eoseWritten)
 		// Keep the relay connection open until the query client finishes.
 		require.NoError(t, conn.SetReadDeadline(time.Now().Add(2*time.Second)))
@@ -89,14 +103,14 @@ func TestReqCmdKeepsPartialEventsAndReturnsRelayFailure(t *testing.T) {
 	event := reqSignedEvent(t)
 	secondEvent := reqSignedEventWithContent(t, "second relay fixture event")
 	first := reqRelay(t, func(conn *websocket.Conn) {
-		_, _, _ = conn.ReadMessage()
-		reqWriteEvent(t, conn, event)
+		subID := reqReadSubID(t, conn)
+		reqWriteEvent(t, conn, subID, event)
 		// Handler return closes the socket before EOSE.
 	})
 	second := reqRelay(t, func(conn *websocket.Conn) {
-		_, _, _ = conn.ReadMessage()
-		reqWriteEvent(t, conn, secondEvent)
-		require.NoError(t, conn.WriteJSON([]any{"EOSE", "hyphae-fetch"}))
+		subID := reqReadSubID(t, conn)
+		reqWriteEvent(t, conn, subID, secondEvent)
+		require.NoError(t, conn.WriteJSON([]any{"EOSE", subID}))
 	})
 	var runErr error
 	out := captureStdout(t, func() {
@@ -115,8 +129,8 @@ func TestReqCmdCancellationStopsBeforeNextRelay(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	first := reqRelay(t, func(conn *websocket.Conn) {
-		_, _, _ = conn.ReadMessage()
-		reqWriteEvent(t, conn, event)
+		subID := reqReadSubID(t, conn)
+		reqWriteEvent(t, conn, subID, event)
 		cancel()
 		// Wait for Fetch to close the connection after observing cancellation.
 		require.NoError(t, conn.SetReadDeadline(time.Now().Add(2*time.Second)))
