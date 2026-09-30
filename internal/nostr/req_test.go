@@ -2,40 +2,117 @@ package nostr
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"fiatjaf.com/nostr"
-	"github.com/iDoris-ai/hyphae/internal/common"
+	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// TestReqCmd_UnreachableRelayFindsNothing covers filter construction (kinds,
-// authors) and the connect-failure skip path, without needing a live relay.
-func TestReqCmd_UnreachableRelayFindsNothing(t *testing.T) {
-	pk := nostr.Generate().Public()
-
-	out := captureStdout(t, func() {
-		require.NoError(t, ReqCmd.Run(context.Background(), []string{
-			"req",
-			"--relay", "ws://127.0.0.1:1",
-			"--kinds", "1",
-			"--authors", common.EncodeNpub(pk),
-			"--limit", "5",
-		}))
-	})
-	assert.Contains(t, out, "connection failed")
-	assert.Contains(t, out, "Found 0 events")
+func reqRelay(t *testing.T, handler func(*websocket.Conn)) string {
+	t.Helper()
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		handler(conn)
+	}))
+	t.Cleanup(server.Close)
+	return "ws" + strings.TrimPrefix(server.URL, "http")
 }
 
-// TestReqCmd_InvalidAuthorIsSilentlyIgnored covers the "authors" parsing
-// branch's error path: an unparseable author string is dropped rather than
-// erroring out (per req.go's `if err == nil { filter.Authors = append(...) }`).
-func TestReqCmd_InvalidAuthorIsSilentlyIgnored(t *testing.T) {
-	out := captureStdout(t, func() {
-		require.NoError(t, ReqCmd.Run(context.Background(), []string{
-			"req", "--relay", "ws://127.0.0.1:1", "--authors", "not-a-valid-npub",
-		}))
+func reqSignedEvent(t *testing.T) nostr.Event {
+	t.Helper()
+	sk := nostr.Generate()
+	event := nostr.Event{CreatedAt: nostr.Now(), Kind: 1, Content: "req fixture event"}
+	require.NoError(t, event.Sign(sk))
+	return event
+}
+
+func reqWriteEvent(t *testing.T, conn *websocket.Conn, event nostr.Event) {
+	t.Helper()
+	data, err := json.Marshal([]any{"EVENT", "hyphae-fetch", event})
+	require.NoError(t, err)
+	require.NoError(t, conn.WriteMessage(websocket.TextMessage, data))
+}
+
+func TestReqCmdReturnsOnEOSE(t *testing.T) {
+	event := reqSignedEvent(t)
+	url := reqRelay(t, func(conn *websocket.Conn) {
+		_, _, _ = conn.ReadMessage()
+		require.NoError(t, conn.WriteJSON([]any{"EVENT", "hyphae-fetch", event}))
+		require.NoError(t, conn.WriteJSON([]any{"EOSE", "hyphae-fetch"}))
 	})
+	started := time.Now()
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = ReqCmd.Run(context.Background(), []string{"req", "--relay", url})
+	})
+	require.NoError(t, runErr)
+	assert.Less(t, time.Since(started), time.Second)
+	assert.Contains(t, out, "Found 1 events")
+	assert.Contains(t, out, event.Content)
+}
+
+func TestReqCmdKeepsPartialEventsAndReturnsRelayFailure(t *testing.T) {
+	event := reqSignedEvent(t)
+	first := reqRelay(t, func(conn *websocket.Conn) {
+		_, _, _ = conn.ReadMessage()
+		reqWriteEvent(t, conn, event)
+		// Handler return closes the socket before EOSE.
+	})
+	second := reqRelay(t, func(conn *websocket.Conn) {
+		_, _, _ = conn.ReadMessage()
+		require.NoError(t, conn.WriteJSON([]any{"EOSE", "hyphae-fetch"}))
+	})
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = ReqCmd.Run(context.Background(), []string{"req", "--relay", first, "--relay", second})
+	})
+	require.Error(t, runErr)
+	assert.Contains(t, runErr.Error(), first)
+	assert.Contains(t, runErr.Error(), "EOSE")
+	assert.Contains(t, out, "Found 1 events")
+	assert.Contains(t, out, event.Content)
+}
+
+func TestReqCmdCancellationStopsBeforeNextRelay(t *testing.T) {
+	event := reqSignedEvent(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	first := reqRelay(t, func(conn *websocket.Conn) {
+		_, _, _ = conn.ReadMessage()
+		reqWriteEvent(t, conn, event)
+		cancel()
+		// Keep the connection open; Fetch must stop because its parent was canceled.
+		time.Sleep(100 * time.Millisecond)
+	})
+	var secondHit atomic.Bool
+	second := reqRelay(t, func(conn *websocket.Conn) { secondHit.Store(true) })
+	var runErr error
+	captureStdout(t, func() {
+		runErr = ReqCmd.Run(ctx, []string{"req", "--relay", first, "--relay", second})
+	})
+	require.Error(t, runErr)
+	assert.False(t, secondHit.Load(), "must not connect to later relays after cancellation")
+}
+
+func TestReqCmdUnreachableRelayReturnsDiagnostic(t *testing.T) {
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = ReqCmd.Run(context.Background(), []string{"req", "--relay", "ws://127.0.0.1:1"})
+	})
+	require.Error(t, runErr)
+	assert.Contains(t, runErr.Error(), "127.0.0.1:1")
 	assert.Contains(t, out, "Found 0 events")
 }
