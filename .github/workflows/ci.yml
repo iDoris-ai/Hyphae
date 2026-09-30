@@ -108,6 +108,9 @@ jobs:
         # about this commit.
         run: go test ./... -race -count=1
 
+      - name: Test PR monitor
+        run: python3 -m unittest discover -s scripts -p test_pr_monitor.py
+
   # A stable name for branch protection to require.
   #
   # The matrix legs surface as "test (ubuntu-latest)" and "test (macos-latest)",
