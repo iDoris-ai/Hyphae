@@ -61,7 +61,11 @@ func (s *MessageStore) StoreMessage(msg *types.StoredMessage) error {
 	// kind are deliberately last-write-wins, exactly as before this change --
 	// every production caller fills them from the nostr event, so a zero there
 	// would mean the caller is already wrong.
-	query := `
+	_, err := s.upsertMessage(msg, "")
+	return err
+}
+
+const messageUpsertSQL = `
 		INSERT INTO messages (
 			id, event_id, sender_npub, recipient_npub, content, plaintext,
 			created_at, received_at, is_encrypted, is_incoming, relay, kind
@@ -80,12 +84,28 @@ func (s *MessageStore) StoreMessage(msg *types.StoredMessage) error {
 			kind           = excluded.kind
 	`
 
+func (s *MessageStore) upsertMessage(msg *types.StoredMessage, condition string) (int64, error) {
+	query := messageUpsertSQL
+	if condition != "" {
+		query += " WHERE " + condition
+	}
+	result, err := s.db.Exec(query, messageSQLValues(msg)...)
+	if err != nil {
+		return 0, fmt.Errorf("failed to store message: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to inspect message write: %w", err)
+	}
+	return changed, nil
+}
+
+func messageSQLValues(msg *types.StoredMessage) []any {
 	receivedAt := msg.ReceivedAt
 	if receivedAt == 0 {
 		receivedAt = time.Now().Unix()
 	}
-
-	_, err := s.db.Exec(query,
+	return []any{
 		msg.ID,
 		msg.ID, // event_id same as id for now
 		msg.SenderNpub,
@@ -98,13 +118,75 @@ func (s *MessageStore) StoreMessage(msg *types.StoredMessage) error {
 		msg.IsIncoming,
 		msg.Relay,
 		30078, // AgentKind
-	)
+	}
+}
 
+// StoreIncomingMessageOnce atomically records the first arrival for an
+// explicit recipient. The caller must verify the event signature, kind, and
+// filtering conditions first; this method only checks recipient and p-tag
+// consistency. It returns true only for an insert or an outgoing row upgraded
+// to incoming. Duplicate incoming events are left untouched.
+func (s *MessageStore) StoreIncomingMessageOnce(event *nostr.Event, recipientNpub, plaintext string, isEncrypted bool) (bool, error) {
+	recipientKey, err := common.ParsePublicKey(recipientNpub)
 	if err != nil {
-		return fmt.Errorf("failed to store message: %w", err)
+		return false, fmt.Errorf("invalid recipient public key: %w", err)
+	}
+	if event == nil {
+		return false, fmt.Errorf("incoming event is required")
+	}
+	var eventRecipient nostr.PubKey
+	pTags := 0
+	for _, tag := range event.Tags {
+		if len(tag) > 0 && tag[0] == "p" {
+			pTags++
+			if len(tag) < 2 {
+				return false, fmt.Errorf("incoming event must have exactly one valid p tag")
+			}
+			decoded, err := hex.DecodeString(tag[1])
+			if err != nil || len(decoded) != len(eventRecipient) {
+				return false, fmt.Errorf("incoming event p tag must contain a hex public key")
+			}
+			copy(eventRecipient[:], decoded)
+		}
+	}
+	if pTags != 1 {
+		return false, fmt.Errorf("incoming event must have exactly one p tag")
+	}
+	if eventRecipient != recipientKey {
+		return false, fmt.Errorf("incoming event recipient does not match explicit recipient")
 	}
 
-	return nil
+	msg := &types.StoredMessage{
+		ID:            hex.EncodeToString(event.ID[:]),
+		SenderNpub:    common.EncodeNpub(event.PubKey),
+		RecipientNpub: common.EncodeNpub(recipientKey),
+		Content:       event.Content,
+		Plaintext:     plaintext,
+		CreatedAt:     int64(event.CreatedAt),
+		ReceivedAt:    time.Now().Unix(),
+		IsEncrypted:   isEncrypted,
+		IsIncoming:    true,
+	}
+	changed, err := s.upsertMessage(msg, "messages.recipient_npub = excluded.recipient_npub AND messages.is_incoming = 0")
+	if err != nil {
+		return false, fmt.Errorf("failed to store incoming message: %w", err)
+	}
+	if changed != 0 {
+		return true, nil
+	}
+
+	var storedRecipient string
+	err = s.db.QueryRow("SELECT recipient_npub FROM messages WHERE id = ?", msg.ID).Scan(&storedRecipient)
+	if err == sql.ErrNoRows {
+		return false, fmt.Errorf("incoming message disappeared during recipient check")
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to check existing incoming message: %w", err)
+	}
+	if storedRecipient != msg.RecipientNpub {
+		return false, fmt.Errorf("event ID is already stored for a different recipient")
+	}
+	return false, nil
 }
 
 // GetMessage retrieves a message by ID

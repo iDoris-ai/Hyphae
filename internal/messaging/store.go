@@ -135,6 +135,16 @@ func StoreIncomingMessage(event *nostr.Event, plaintext string, isEncrypted bool
 	return s.StoreIncomingMessage(event, plaintext, isEncrypted)
 }
 
+// StoreIncomingMessageOnce persists the first arrival for an explicit recipient.
+// Callers must verify the event signature, kind, and filter conditions first.
+func StoreIncomingMessageOnce(event *nostr.Event, recipientNpub, plaintext string, isEncrypted bool) (bool, error) {
+	s, err := GetStore()
+	if err != nil {
+		return false, err
+	}
+	return s.StoreIncomingMessageOnce(event, recipientNpub, plaintext, isEncrypted)
+}
+
 // GetStats returns message statistics
 func GetStats() (map[string]int, error) {
 	// Get current identity
