@@ -2,6 +2,7 @@ package profile
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/identity"
+	"github.com/iDoris-ai/hyphae/internal/relayquery"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/urfave/cli/v3"
 )
@@ -431,12 +433,15 @@ var profileDiscoverCmd = &cli.Command{
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
 		npub := c.String("npub")
+		timeout, err := discoverTimeout(int64(c.Int("timeout")))
+		if err != nil {
+			return common.NewExitError(common.ErrCodeUser, err)
+		}
 		relays, err := common.ResolveRelays(c)
 		if err != nil {
 			return err
 		}
 		limit := int(c.Int("limit"))
-		timeoutSec := time.Duration(c.Int("timeout")) * time.Second
 		jsonMode := common.JSONMode(c)
 
 		var discoverFilter DiscoverFilter
@@ -477,26 +482,14 @@ var profileDiscoverCmd = &cli.Command{
 			Profile *types.AgentProfile `json:"profile"`
 		}
 		found := make([]discovered, 0)
+		var queryErrors []error
+		var storeErrors []error
 		for _, url := range relays {
-			relay, err := nostr.RelayConnect(ctx, url, nostr.RelayOptions{})
-			if err != nil {
-				if !jsonMode {
-					fmt.Printf("   ⚠️  Failed to connect to %s: %v\n", url, err)
-				}
-				continue
+			page, queryErr := relayquery.FetchWithTimeout(ctx, url, filter, timeout)
+			if queryErr != nil {
+				queryErrors = append(queryErrors, fmt.Errorf("relay %s: %w", url, queryErr))
 			}
-
-			sub, err := relay.Subscribe(ctx, filter, nostr.SubscriptionOptions{})
-			if err != nil {
-				relay.Close()
-				if !jsonMode {
-					fmt.Printf("   ⚠️  Failed to subscribe on %s: %v\n", url, err)
-				}
-				continue
-			}
-
-			timeout := time.AfterFunc(timeoutSec, func() { sub.Unsub() })
-			for evt := range sub.Events {
+			for _, evt := range page.Events {
 				profile, err := EventToProfile(&evt)
 				if err != nil {
 					continue
@@ -504,27 +497,47 @@ var profileDiscoverCmd = &cli.Command{
 
 				evtNpub := common.EncodeNpub(evt.PubKey)
 				storeErr := db.StoreProfile(evtNpub, profile)
-				if storeErr == nil && discoverFilter.Matches(profile) {
+				if storeErr != nil {
+					storeErrors = append(storeErrors, fmt.Errorf("store profile event %s (npub %s): %w", evt.ID.Hex(), evtNpub, storeErr))
+					continue
+				}
+				if discoverFilter.Matches(profile) {
 					found = append(found, discovered{Npub: evtNpub, Profile: profile})
 					if !jsonMode {
 						fmt.Printf("   ✅ Found: %s (%s)\n", profile.Name, evtNpub[:20]+"...")
 					}
 				}
 			}
-			timeout.Stop()
-			relay.Close()
+			if ctx.Err() != nil {
+				break
+			}
 		}
 
-		common.Emit(jsonMode, found, func() {
-			if len(found) == 0 {
-				fmt.Println("No profiles found on relays.")
-			} else {
-				fmt.Printf("\n🎉 Discovered %d profile(s)\n", len(found))
-			}
-		})
+		if len(queryErrors)+len(storeErrors) == 0 || !jsonMode {
+			common.Emit(jsonMode, found, func() {
+				if len(found) == 0 {
+					fmt.Println("No profiles found on relays.")
+				} else {
+					fmt.Printf("\n🎉 Discovered %d profile(s)\n", len(found))
+				}
+			})
+		}
 
+		if len(storeErrors) > 0 {
+			return common.NewExitError(common.ErrCodeOther, errors.Join(append(queryErrors, storeErrors...)...))
+		}
+		if len(queryErrors) > 0 {
+			return common.NewExitError(common.ErrCodeNetwork, errors.Join(queryErrors...))
+		}
 		return nil
 	},
+}
+
+func discoverTimeout(seconds int64) (time.Duration, error) {
+	if seconds <= 0 || seconds > int64((1<<63-1)/int64(time.Second)) {
+		return 0, fmt.Errorf("--timeout must be a positive number of seconds within the supported duration range")
+	}
+	return time.Duration(seconds) * time.Second, nil
 }
 
 // cleanTags trims whitespace and drops empty entries from --tags values.
