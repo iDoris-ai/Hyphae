@@ -63,6 +63,22 @@ cargo test --locked --test agent24_mount_blackbox \
 
 本项补齐已授予能力的正向往返证据，未验证未授予能力的拒绝、卸载重连、模型/远端执行授权或恢复；T12/T13 及四仓验收状态保持不变。
 
+### 内核权限拒绝与包文件重验
+
+同一 Agent24 固定提交 `7009294`、Rust/Cargo `1.98.1`，在其独立验证树、短临时 HOME 下分别选定五个现有测试，均使用 `--locked` 与 `-- --exact --test-threads=1`；每项实际运行 1 项、0 失败、0 忽略。以下仅为选定测试结果，未运行全部 crate 测试：
+
+| crate/target 与完整测试名 | 结果与范围 |
+|---|---|
+| `agent24d --bin agent24d`：`domain::tests::scheduler_callback_forbidden_without_grant_and_offered_and_working_with_it` | 1 passed，500 filtered，0.87s；真实 Python 包进程完成 initialize/callback socket：scheduler 获授时写入合成 store，仅获 events 时不提供 scheduler offer，调用返回 forbidden |
+| `agent24d --bin agent24d`：`domain::tests::a_module_that_never_asked_for_approval_gets_no_requester` | 1 passed，500 filtered，0.01s；未申请 approval 的 in-process 测试模块没有 requester |
+| `agent24-os-packages --lib`：`discovery::tests::recheck_accepts_the_manifest_it_saw_before` | 1 passed，46 filtered，0.00s；原始 manifest 重验成功 |
+| `agent24-os-packages --lib`：`discovery::tests::recheck_reports_both_digests_when_the_manifest_changed` | 1 passed，46 filtered，0.00s；修改合成 manifest 后拒绝，并报告修改前后不同摘要 |
+| `agent24-os-packages --lib`：`discovery::tests::recheck_reports_a_removed_package_directory` | 1 passed，46 filtered，0.00s；合成 package 目录删除后拒绝 |
+
+命令分别使用 `cargo test --locked -p agent24d --bin agent24d TEST_NAME -- --exact --test-threads=1` 和 `cargo test --locked -p agent24-os-packages --lib TEST_NAME -- --exact --test-threads=1`；TEST_NAME 取上表完整名称。源码见 [真实 scheduler 授权正反控制](https://github.com/iDoris-ai/Agent24/blob/7009294834b2251beac438f3190aae073742c5dd/rust/apps/agent24d/src/domain.rs#L5083) 和 [包重验](https://github.com/iDoris-ai/Agent24/blob/7009294834b2251beac438f3190aae073742c5dd/rust/crates/agent24-os-packages/src/discovery.rs#L627)。
+
+测试使用合成 package/记录与 `no_models()`；子进程、socket 和临时 HOME 已清理，源码及 Cargo.lock 未改，锁文件前后摘要保持上表值。包重验单元不证明实际 Sin90 加载/重启时已完成 manifest 篡改拒绝；in-process requester 检查也不代替 OOP 全权限矩阵。Nostr 授权、版本协商、卸载重连及 run 恢复仍待验收，T12/T13 状态保持不变。
+
 T12/T13 应记录加载、停用、退出后重连、版本不兼容、非法摘要、未授权查询、越权路径、重复请求和结果回传。只读查询可证明真实模块调用及关联，不能单独证明有副作用任务的幂等；T16/T19 仍要用受控副作用计数验证执行恢复。
 
 待回填：Sin90/Agent24 PR 链接、能力声明、授权策略、参数/结果 schema、双方版本和实际验收输出。Hyphae 侧选定样例不代表对应仓库已确认或四仓闭环已通过。

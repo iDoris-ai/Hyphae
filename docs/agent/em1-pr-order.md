@@ -96,6 +96,6 @@
 ## 独立事项
 
 - [#39](https://github.com/iDoris-ai/Hyphae/pull/39) 是规划与验收记录；[#41](https://github.com/iDoris-ai/Hyphae/pull/41) 是按仓库命名的协作约定。
-- [#44](https://github.com/iDoris-ai/Hyphae/pull/44) 是经测试后创建依赖更新 PR 的工作流，已合入默认分支。Actions 创建/审批 PR 的仓库权限开关仍等待用户确认，不因 CLA 通过或工作流合入而开启；尚未验收自动创建更新 PR 的线上闭环。
+- [#44](https://github.com/iDoris-ai/Hyphae/pull/44) 是经测试后创建依赖更新 PR 的工作流，已合入默认分支。Actions 创建/审批 PR 的仓库权限开关仍等待用户确认，不因 CLA 通过或工作流合入而开启；已在 main 手动触发首次线上更新扫描，依赖无变化、发布步骤跳过，见 [运行记录](https://github.com/iDoris-ai/Hyphae/actions/runs/36702947244)；自动创建更新 PR 的线上闭环仍未验收。
 - [#37](https://github.com/iDoris-ai/Hyphae/pull/37) CI 已合入 main，Linux/macOS 检查已生效。当前 main 的 `required_status_checks` 仍为 null，本轮由主代理逐项核对 CI，不绕过 review；尚未修改仓库保护设置。
 - retarget 或解决冲突后若代码变化，运行相应测试；全部前置实现进入 main 后，运行一次隔离 HOME 的 `go test -tags integration ./... -count=1`。CLI/UI/四仓验收状态仍以任务台账为准。

@@ -141,7 +141,7 @@ T19 必交矩阵：正常语音链路、未授权发送者、能力越权、审�
 - `luna_integrations`：已完成 Agent24/AgentEar/iDoris 只读核查，正式 Rust 入口和接口缺口已纳入 T10～T17。
 - `luna_nostr_update`：上游依赖更新见 [PR #40](https://github.com/iDoris-ai/Hyphae/pull/40)；T03 见 [PR #43](https://github.com/iDoris-ai/Hyphae/pull/43)，T04a 重试结果事务见 [PR #48](https://github.com/iDoris-ai/Hyphae/pull/48)。当前转入独立工作树修复 T05 的重试历史明文与加密标记。
 - `luna_relay_migration`：维护中的 khatru relay 与部署脚本见 [PR #42](https://github.com/iDoris-ai/Hyphae/pull/42)，身份/联系人 JSON 见 [PR #45](https://github.com/iDoris-ai/Hyphae/pull/45)，T06 见 [PR #46](https://github.com/iDoris-ai/Hyphae/pull/46)；真实 CLI/relay 集成夹具见 [PR #47](https://github.com/iDoris-ai/Hyphae/pull/47)，双向验收已通过。当前转入独立 relay-query 工作树实现真实 EOSE、超时与断线的共用查询模块。
-- `luna_upstream_ci`：测试后自动提依赖 PR 的配置见 [PR #44](https://github.com/iDoris-ai/Hyphae/pull/44)，已通过 GitHub 全量、构建、实际工作流脚本回归与 core race 检查；当前转入 `Hyphae-cli-relays` 做 relay 配置与入口接线。定时任务尚未上线，需配置合入默认分支并确认 Actions 创建 PR 权限。
+- `luna_upstream_ci`：测试后自动提依赖 PR 的配置见 [PR #44](https://github.com/iDoris-ai/Hyphae/pull/44)，已通过 GitHub 全量、构建、实际工作流脚本回归与 core race 检查；当前转入 `Hyphae-cli-relays` 做 relay 配置与入口接线。配置已合入默认分支且工作流 active，首次手动线上扫描成功（依赖无变化、publish 跳过）；自动创建 PR 权限开关仍关闭，真实发布闭环尚未验收，详见 [维护约定](../upstream-maintenance.md)。
 - 本轮不修改其他仓库的生产代码；对应仓库的协作约定见 [PR #41](https://github.com/iDoris-ai/Hyphae/pull/41)。设计和验收材料由主代理维护。
 
 ### T02 验收记录
