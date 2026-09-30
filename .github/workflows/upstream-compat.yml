@@ -46,6 +46,9 @@ jobs:
       - name: Test all packages
         run: go test ./...
 
+      - name: Run CLI relay integration
+        run: go test -tags integration ./tests -count=1
+
       - name: Build CLI
         run: go build -o "$RUNNER_TEMP/hyphae" ./cmd/hyphae
 
