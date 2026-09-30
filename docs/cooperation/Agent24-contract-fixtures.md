@@ -24,8 +24,23 @@
 
 ## 必须保留的边界
 
-capability query 为平铺 scope/id/version；capabilities response data 为 {capabilities:[...]}；profile response data 是 profile 本体。错误 response 也需要有效原查询 context，不能因没有成功 data 跳过 request_id 验证。协议当前只涵盖 declaration/notification/query/response 候选，不接 acceptance/execution，所有真实签名、tag/event 关联、现在时钟、持久化和授权断言另行验收。
+capability query 为平铺 scope/id/version；capabilities response data 为 {capabilities:[...]}；profile response data 是 profile 本体。错误 response 也需要有效原查询 context，不能因没有成功 data 跳过 request_id 验证。协议当前只涵盖 declaration/notification/query/response 候选，不接 acceptance/execution。本套 70 例不覆盖真实签名、tag/event 关联、现在时钟、持久化和授权；对应层分别提供验收证据。
 
 ## 验收出口
 
 根代理对照固定 fixtures 的逐 id 期望与 Go 参考测试断言，审查消费端结果；Go 测试成功时不逐条打印阶段，失败按 id 报告。70 例一致只能证明这个候选的跨语言参考一致；生产接收器和 T01-E/T19 四仓验收仍有其他门槛。不得由 schema PASS 自动启用模型、module、run 或将旧普通消息/answer 当执行请求。
+
+## 2026-09-30：新增的两项独立参考任务
+
+消费端各开小测试 PR，固定下面的源提交，保留样例 ID、原始输入和预期阶段，不启用生产新协议：
+
+| 任务 | 固定 Hyphae head | 输入与说明 | 用例 |
+|---|---|---|---|
+| 声明生命周期 | [#99 / 1f16d3eafc55c57d22e0b0740a9aec60b5258a41](https://github.com/iDoris-ai/Hyphae/tree/1f16d3eafc55c57d22e0b0740a9aec60b5258a41/tests/contracts) | testdata/declaration-lifecycle-fixtures.json；DECLARATION-LIFECYCLE.md | 32 |
+| 非执行事件外层 | [#100 / f73ac3d010be868403e8cd6f034b76e94f45e31f](https://github.com/iDoris-ai/Hyphae/tree/f73ac3d010be868403e8cd6f034b76e94f45e31f/tests/contracts) | testdata/event-transport-fixtures.json；EVENT-TRANSPORT.md | 64 |
+
+声明任务输入是假定结构、身份与动作已验证的记录，`alice` 等是合成标签；本层检查时间、最新已知选择、过期/撤销不回退、同秒排序、冲突和未来重评。它不验签、不存储、不证明全网最新，也不运行能力。
+
+外层任务保留静态已签名事件、local_pubkey 及 event_json/Base64/recipe 三选一输入，严格按说明展开 UTF-8 字节，核对 expected_bytes 和每例 expected_stage。公开测试身份禁止用于真实通信。私有 content 的结构样例没有有效 MAC；outer_valid 仅指外层验证通过，不表示 NIP-44 解密、正文 schema、响应作者/事件关联、授权或执行通过。路由 tag 恰两项是本套收窄的候选规则，尚未冻结。
+
+消费端分别输出全部 32/64 个 ID 的 actual/expected、版本及锁文件、固定 commit、命令和结果；无跳过、无改写预期。#91 的 51 个词法样例仍是独立前置。本轮 #91/#96/#99/#100 在固定 main `1948aadc` 的临时 Go 测试组合中共断言 217 个样例并通过 race，仅证明参考套件共存。跨语言、生产入口、持久化和真实 zero-run 证据仍分别验收，T01-E/T07 门槛不变。

@@ -34,9 +34,11 @@ daemon 是长驻进程，当前输出运行日志，并未提供 JSON 消息流�
 
 ### 主线交付与接线次序（2026-09-30）
 
-2026-09-30 本轮核对，Hyphae main `e753e6f` 已包含身份/联系人 JSON、relay 配置、outbox list/clear/retry JSON、发送前持久化、可靠自动回复、inbox 查询和 daemon 首次收件登记、历史分页补收、取消恢复，以及 msg/inbox/daemon/create 的 stdin 凭据通道；最低构建版本为 Go 1.26。#66 的真实 CLI 积压验收与 #67 空统计修复仍待复审合入。正式完整接线二进制须在这两项收口并重新验收后固定。
+2026-09-30 本轮核对，Hyphae main `1948aadc551e360176711f9c50172ed6edccd253` 已包含身份/联系人 JSON、relay 配置、outbox list/clear/retry JSON、发送前持久化、可靠自动回复、inbox 查询和 daemon 首次收件登记、历史分页补收、取消恢复，以及 msg/inbox/daemon/create 的 stdin 凭据通道；最低构建版本为 Go 1.26。#66/#67 已合并，固定 main 的默认/integration 全量测试、vet、build 和 smoke 通过，三个真实 relay 用例实际执行；详情见 [验收记录](../agent/em1-cli-acceptance.md)。
 
-Agent24 现在可用固定 main commit 开发第 1 项适配器，并用实际 JSON 建立错误/公开字段契约测试。第 2 项的历史补收、取消和 stdin 解锁实现已进入 Hyphae main，可以接线准备；完整版本验收仍等 #66/#67。管理 UI 可先做服务接口与状态设计，整段验收仍等 Agent24 CLI 接线。任何仅在历史组合分支通过的接口都不能按 main 已支持发布。
+本机已验证的 macOS arm64 二进制使用 Go 1.27.1，SHA-256 为 `a7bb4a83b5d6be0a939a4cd92a853a2672f97012c48d704a9a3a718b9e6d806b`，尚未安装到生产环境。其他平台按同一固定源码构建并记录自身 hash，不把本机 hash 当跨平台产物摘要。
+
+Agent24 现在可用上述固定 main 开发第 1、2 项适配器，并用实际 JSON 建立错误/公开字段契约测试；Hyphae 侧完整 CLI 版本已经验收。管理 UI 可先做服务接口与状态设计，整段验收仍等 Agent24 CLI 接线。该本仓结果不替代 Agent24 的实际 subprocess、配置共享、普通入站不启动 run 和 UI 验收。
 
 上述 Agent24 远端版本的 Rust CLI 仍未提供通信命令；bridge 仍为 `f4/1`、内存 seen 集合和默认 `agent-speaker` 二进制。`agent24-models/src/router.rs` 尚无 `IDORIS_URL`/`idoris-local`/`idoris-any` 接线。它们是当前实现缺口，分别由 T20 和 T10/T11 推进，不能因 iDoris 自身服务已就绪而记为已完成。
 
