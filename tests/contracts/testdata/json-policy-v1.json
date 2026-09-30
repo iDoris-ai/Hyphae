@@ -1,0 +1,294 @@
+{
+  "cases": [
+    {
+      "id": "empty",
+      "input": "",
+      "expected": "JSON_INVALID"
+    },
+    {
+      "id": "root-array",
+      "input": "[]",
+      "expected": "JSON_ROOT"
+    },
+    {
+      "id": "root-string",
+      "input": "\"x\"",
+      "expected": "JSON_ROOT"
+    },
+    {
+      "id": "single-object-value",
+      "input": "{\"v\":true}  \t\n",
+      "expected": "accept"
+    },
+    {
+      "id": "trailing-second-value",
+      "input": "{} {}",
+      "expected": "JSON_INVALID"
+    },
+    {
+      "id": "trailing-garbage",
+      "input": "{}x",
+      "expected": "JSON_INVALID"
+    },
+    {
+      "id": "bom-before-object",
+      "input": "﻿{}",
+      "expected": "JSON_INVALID"
+    },
+    {
+      "id": "decoded-duplicate-key",
+      "input": "{\"a\":1,\"\\u0061\":2}",
+      "expected": "JSON_DUPLICATE_KEY"
+    },
+    {
+      "id": "same-key-in-nested-objects",
+      "input": "{\"a\":1,\"n\":{\"a\":2}}",
+      "expected": "accept"
+    },
+    {
+      "id": "escaped-quote-and-backslash",
+      "input": "{\"a\\\"b\":\"x\\\\y\"}",
+      "expected": "accept"
+    },
+    {
+      "id": "valid-surrogate-pair",
+      "input": "{\"v\":\"\\uD83D\\uDE00\"}",
+      "expected": "accept"
+    },
+    {
+      "id": "high-surrogate-alone",
+      "input": "{\"v\":\"\\uD800\"}",
+      "expected": "JSON_UNICODE"
+    },
+    {
+      "id": "low-surrogate-alone",
+      "input": "{\"v\":\"\\uDC00\"}",
+      "expected": "JSON_UNICODE"
+    },
+    {
+      "id": "reversed-surrogate-pair",
+      "input": "{\"v\":\"\\uDC00\\uD800\"}",
+      "expected": "JSON_UNICODE"
+    },
+    {
+      "id": "two-high-surrogates",
+      "input": "{\"v\":\"\\uD800\\uD801\"}",
+      "expected": "JSON_UNICODE"
+    },
+    {
+      "id": "high-followed-by-non-low",
+      "input": "{\"v\":\"\\uD800\\u0041\"}",
+      "expected": "JSON_UNICODE"
+    },
+    {
+      "id": "valid-replacement-escape",
+      "input": "{\"v\":\"\\uFFFD\"}",
+      "expected": "accept"
+    },
+    {
+      "id": "valid-replacement-raw",
+      "input": "{\"v\":\"�\"}",
+      "expected": "accept"
+    },
+    {
+      "id": "chinese-and-emoji",
+      "input": "{\"中文\":\"你好\",\"emoji\":\"🪷😀\"}",
+      "expected": "accept"
+    },
+    {
+      "id": "invalid-utf8-byte",
+      "input_base64": "eyJ2Ijoi/yJ9",
+      "expected": "JSON_UNICODE"
+    },
+    {
+      "id": "raw-noncharacter-fdd0",
+      "input": "{\"v\":\"﷐\"}",
+      "expected": "JSON_UNICODE"
+    },
+    {
+      "id": "escaped-noncharacter-fdd0",
+      "input": "{\"v\":\"\\uFDD0\"}",
+      "expected": "JSON_UNICODE"
+    },
+    {
+      "id": "raw-noncharacter-plane-end",
+      "input": "{\"v\":\"🿾\"}",
+      "expected": "JSON_UNICODE"
+    },
+    {
+      "id": "escaped-noncharacter-plane-end",
+      "input": "{\"v\":\"\\uD83F\\uDFFE\"}",
+      "expected": "JSON_UNICODE"
+    },
+    {
+      "id": "noncharacter-lower-bound-minus-one",
+      "input": "{\"v\":\"﷏\"}",
+      "expected": "accept"
+    },
+    {
+      "id": "noncharacter-upper-bound-plus-one",
+      "input": "{\"v\":\"ﷰ\"}",
+      "expected": "accept"
+    },
+    {
+      "id": "nonbmp-noncharacter-last-scalar-minus-one",
+      "input": "{\"v\":\"🿽\"}",
+      "expected": "accept"
+    },
+    {
+      "id": "positive-safe-integer-boundary",
+      "input": "{\"v\":9007199254740991}",
+      "expected": "accept"
+    },
+    {
+      "id": "negative-safe-integer-boundary",
+      "input": "{\"v\":-9007199254740991}",
+      "expected": "accept"
+    },
+    {
+      "id": "negative-nonzero-integer",
+      "input": "{\"v\":-1}",
+      "expected": "accept"
+    },
+    {
+      "id": "positive-out-of-range",
+      "input": "{\"v\":9007199254740992}",
+      "expected": "JSON_INTEGER_RANGE"
+    },
+    {
+      "id": "negative-out-of-range",
+      "input": "{\"v\":-9007199254740992}",
+      "expected": "JSON_INTEGER_RANGE"
+    },
+    {
+      "id": "negative-zero",
+      "input": "{\"v\":-0}",
+      "expected": "JSON_INTEGER_FORMAT"
+    },
+    {
+      "id": "fraction",
+      "input": "{\"v\":1.0}",
+      "expected": "JSON_INTEGER_FORMAT"
+    },
+    {
+      "id": "exponent",
+      "input": "{\"v\":1e0}",
+      "expected": "JSON_INTEGER_FORMAT"
+    },
+    {
+      "id": "leading-zero-malformed-number",
+      "input": "{\"v\":01}",
+      "expected": "JSON_INVALID"
+    },
+    {
+      "id": "malformed-string-escape",
+      "input": "{\"v\":\"\\q\"}",
+      "expected": "JSON_INVALID"
+    },
+    {
+      "id": "nested-root-and-15-arrays-depth-16",
+      "recipe": {
+        "prefix": "{\"x\":",
+        "fill": "[",
+        "repeat": 15,
+        "suffix": "0]]]]]]]]]]]]]]]}"
+      },
+      "expected": "accept"
+    },
+    {
+      "id": "nested-root-and-16-arrays-depth-17",
+      "recipe": {
+        "prefix": "{\"x\":",
+        "fill": "[",
+        "repeat": 16,
+        "suffix": "0]]]]]]]]]]]]]]]]}"
+      },
+      "expected": "JSON_DEPTH"
+    },
+    {
+      "id": "ascii-byte-limit-32768",
+      "recipe": {
+        "prefix": "{\"v\":\"",
+        "fill": "x",
+        "repeat": 32760,
+        "suffix": "\"}"
+      },
+      "expected": "accept",
+      "expected_bytes": 32768
+    },
+    {
+      "id": "ascii-byte-limit-32769",
+      "recipe": {
+        "prefix": "{\"v\":\"",
+        "fill": "x",
+        "repeat": 32760,
+        "suffix": "\"} "
+      },
+      "expected": "JSON_SIZE",
+      "expected_bytes": 32769
+    },
+    {
+      "id": "chinese-byte-limit-32768",
+      "recipe": {
+        "prefix": "{\"v\":\"",
+        "fill": "界",
+        "repeat": 10920,
+        "suffix": "\"}"
+      },
+      "expected": "accept",
+      "expected_bytes": 32768
+    },
+    {
+      "id": "chinese-byte-limit-32769",
+      "recipe": {
+        "prefix": "{\"v\":\"",
+        "fill": "界",
+        "repeat": 10920,
+        "suffix": "\"} "
+      },
+      "expected": "JSON_SIZE",
+      "expected_bytes": 32769
+    },
+    {
+      "id": "valid-surrogate-min-pair",
+      "input": "{\"v\":\"\\uD800\\uDC00\"}",
+      "expected": "accept"
+    },
+    {
+      "id": "max-surrogate-pair-decodes-to-noncharacter",
+      "input": "{\"v\":\"\\uDBFF\\uDFFF\"}",
+      "expected": "JSON_UNICODE"
+    },
+    {
+      "id": "no-normalization-composed-and-decomposed-keys",
+      "input": "{\"é\":1,\"e\\u0301\":2}",
+      "expected": "accept"
+    },
+    {
+      "id": "malformed-json-with-lone-surrogate-prioritizes-unicode",
+      "input": "{\"v\":\"\\uD800\",}",
+      "expected": "JSON_UNICODE"
+    },
+    {
+      "id": "last-plane-noncharacter-raw",
+      "input": "{\"v\":\"􏿾\"}",
+      "expected": "JSON_UNICODE"
+    },
+    {
+      "id": "last-plane-noncharacter-escaped",
+      "input": "{\"v\":\"\\uDBFF\\uDFFE\"}",
+      "expected": "JSON_UNICODE"
+    },
+    {
+      "id": "last-plane-last-scalar-minus-one",
+      "input": "{\"v\":\"􏿽\"}",
+      "expected": "accept"
+    },
+    {
+      "id": "invalid-syntax-before-duplicate-structure",
+      "input": "{\"a\":1,\"a\":}",
+      "expected": "JSON_INVALID"
+    }
+  ],
+  "profile": "hyphae-json-input-candidate/1"
+}
