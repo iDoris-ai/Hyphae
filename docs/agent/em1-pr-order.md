@@ -60,7 +60,7 @@
 | PR | 内容 | 当前评审基线 |
 |---|---|---|
 | [#53](https://github.com/iDoris-ai/Hyphae/pull/53) | outbox list/clear JSON | foundation |
-| [#54](https://github.com/iDoris-ai/Hyphae/pull/54) | 发送前可靠入队 | foundation |
+| [#54](https://github.com/iDoris-ai/Hyphae/pull/54) | 发送前可靠入队；`3f33164` 恢复必填参数，新 head 待复审 | foundation |
 | [#55](https://github.com/iDoris-ai/Hyphae/pull/55) | daemon 持久化收件接线 | foundation |
 | [#56](https://github.com/iDoris-ai/Hyphae/pull/56) | outbox retry JSON | reliability |
 | [#57](https://github.com/iDoris-ai/Hyphae/pull/57) | 可靠自动回复 | reliability |

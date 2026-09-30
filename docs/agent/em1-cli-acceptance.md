@@ -60,6 +60,16 @@
 - PR 双平台 CI：[36665545290](https://github.com/iDoris-ai/Hyphae/actions/runs/36665545290) 通过；合入 #48/#79 后的 main `e433a67`：[36667746886](https://github.com/iDoris-ai/Hyphae/actions/runs/36667746886) 通过。
 - 本地检查均使用临时 HOME。该结果不包含 #49、#53～#67 的最终主线组合，也不代表 Agent24 或四仓闭环通过。
 
+## 2026-09-30 查询修复与完整 CLI 链组合
+
+将既有组合 `59803c0`、main `e433a6754687857c146e289842c8c5f86b4b235d` 和 #82 的 `6eb95e1c82e6f8fd57dcc4d44a39f3c1306e7426` 组合后，主线新增的真实 CLI 测试发现 #54 移除了 `--to` / `--content` 的必填标记：缺参数时仍退出失败，但丢失标准帮助及约定的缺参诊断。
+
+#54 的 `3f33164facffbcaaaed3a6b0a5dc59a84ad3652f` 恢复这两个标记，保留 Action 对显式空值的校验，没有放宽测试。最终临时本地组合为 `eca615212bec5b5bbe516dfd16bd4b29e8877b6b`，不推送或合并汇总分支。
+
+- 主代理审阅冲突处理和修复差异；组合的 `go.mod/go.sum` 与 main 完全一致，保留 #62 的失败连接清理。
+- Luna 在 Go 1.27.1、临时 HOME 下通过 `go test ./cmd/hyphae -count=1`、`go test -tags integration ./... -count=1`、`go test -race ./internal/relayquery ./internal/daemon ./internal/messaging -count=1` 和 `go vet ./...`。
+- 本次验证覆盖 #79 查询实现、#82 raw req/query 及完整待合并 CLI 链的兼容性；不包含后续 profile discover 修复，也不代表已交付主线或完成四仓验收。#54 新 head 仍须复审，旧批准不能替代本次变更的审阅。
+
 ## 接线边界与下一步
 
 1. Agent24 按 [协作 PR #41](https://github.com/iDoris-ai/Hyphae/pull/41) 接 CLI，再完成身份/联系人/relay 管理及基础消息 UI；回填实际 PR、固定提交和验收结果。
