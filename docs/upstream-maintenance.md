@@ -46,7 +46,11 @@ Hyphae 是可独立运行的开源通信组件，Agent24 是其消费者之一�
 
 自动跟踪不代表修改用户已安装的二进制。Agent24 的打包、版本发现、更新提示和回滚由其仓库接入，见 [协作清单](cooperation/README.md)。本轮不启用未经兼容验证的自动合并或静默客户端安装。
 
-GitHub schedule 只在默认分支生效。工作流与更新配置合入主线后，才算启动定时跟踪。Actions 的 PR 写入策略、分支保护和 CLA 仍以仓库设置为准；工作流须显式报告无法建 PR 的情况。由默认 GITHUB_TOKEN 创建的 PR 可能不触发后续工作流，因此更新工作流自身必须先验证候选代码。
+GitHub schedule 只在默认分支生效。更新配置已合入 main，现有每周工作流处于 active。2026-09-30 在 main `e753e6f` 手动触发的 [首次线上运行](https://github.com/iDoris-ai/Hyphae/actions/runs/36702947244) 已成功：解析并核对 `fiatjaf.com/nostr@v0.0.0-20260928115942-58e4c715304e`，依赖无变化，按无变更分支退出，publish job 被跳过。这只验证线上触发和解析；本次未执行候选变更后的测试、上传 bundle 或自动建 PR，不将绿色运行当作发布闭环通过。
+
+仓库 Actions 的 `can_approve_pull_request_reviews=false`，自动创建/审批 PR 的开关仍关闭，本轮保持设置。候选测试通过与 PR 发布是两个出口：有新版本时还须验收真实 bundle、分支推送、PR 创建及最新 head CI，不能因当前 no-op 成功消除该缺口。上游 integration 门禁补充见独立 [#86](https://github.com/iDoris-ai/Hyphae/pull/86)，仍待最新 head 审阅合并。
+
+按当前 [GitHub 工作流触发规则](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow)，默认 GITHUB_TOKEN 创建/更新 PR 的 opened/synchronize/reopened 事件会产生待工作流批准的运行；须单独核实真实 checks 及其 head。workflow_dispatch/repository_dispatch 可以产生运行。更新工作流自身继续先测试精确候选树；它不替代 PR 最新 head 的 CI、review、CLA 和分支保护。
 
 ## 提交与验证约定
 

@@ -6,24 +6,36 @@
 
 ## 本轮合并进度
 
-2026-09-30 05:41 UTC 核对：主线基线为 `8874b8ebac0419a4572f8c8475f6215e00967d27`。#37～#58、#60、#68～#83 已合并；主线 Linux/macOS CI 通过。最低 Go 版本为 1.26，CI 按 go.mod 选择工具链。编号范围包含规划、CI 和维护 PR，整体 E-M1 仍待跨仓验收。
+2026-09-30 本轮实时核对：主线基线为 `1948aadc551e360176711f9c50172ed6edccd253`。#37～#67、#68～#84、#93/#97 已合并；该 main 提交的 Linux/macOS CI 与隔离本机完整 CLI 验收通过。最低 Go 版本为 1.26，CI 按 go.mod 选择工具链。编号范围包含规划、CI 和维护 PR，整体 E-M1 仍待跨仓验收。
 
 | 下一项 | 当前门槛 | 后续动作 |
 |---|---|---|
-| #59：daemon 取消 | main，`6e873b9`，本地全量/daemon race 通过，GitHub CI 运行中 | 等当前 head CI 与批准 |
-| #61～#67 | draft，仍在各组合基线上 | #59 合入后推进 recovery 层，再逐层迁移；不得合入 integration 分支 |
+| [#85](https://github.com/iDoris-ai/Hyphae/pull/85)：T01 小交付门槛 | main，`f41cfc6b`，CI 全绿 | 独立设计文档复审；不解除 T07 门槛 |
+| [#86](https://github.com/iDoris-ai/Hyphae/pull/86)：上游 integration 门禁 | main，`8867ddff`，CI 与兼容工作流全绿 | 独立复审；线上自动建 PR 仍未验收 |
+| [#87](https://github.com/iDoris-ai/Hyphae/pull/87)：relay 保留与密文边界 | main，`d38882a3`，CI 全绿 | 测试候选复审；main 已含 #66 的相同 CI 步骤，合入时确认只保留一份 |
+| [#88](https://github.com/iDoris-ai/Hyphae/pull/88)：传输候选 | main，`901a840f`，CI 全绿 | T01-B 设计复审，尚未冻结 wire 协议 |
+| [#89](https://github.com/iDoris-ai/Hyphae/pull/89)：台账与跨仓协作 | main，本文件所在文档分支 | 最新文档 head 复审与 CI；含已有模块挂载实测，整体 E-M1 未完成 |
+| [#90](https://github.com/iDoris-ai/Hyphae/pull/90)：profile stdin 解锁 | main，`54808247`，CI 全绿 | 独立功能复审；通过后扩展 headless 注册能力 |
+| [#91](https://github.com/iDoris-ai/Hyphae/pull/91)：严格 JSON 正反例 | main，`55982f24`，CI 全绿 | 测试参考复审；生产入口尚未启用该校验 |
+| [#92](https://github.com/iDoris-ai/Hyphae/pull/92)：信封与恢复候选 | main，`94ad0e05`，CI 全绿 | T01-B/C 设计复审；执行授权与冻结门槛仍保留 |
+| [#94](https://github.com/iDoris-ai/Hyphae/pull/94)：固定 NIP-44 向量 | main，`fb165dca`，CI 全绿 | 固定来源测试复审；不表示 SDK 全部安全问题已修复 |
+| [#95](https://github.com/iDoris-ai/Hyphae/pull/95)：公开资料/查询 payload | main，`bdeff57a`，CI 全绿 | T01-B 候选复审；后续共享 schema/fixtures 验证四类 body |
+| [#96](https://github.com/iDoris-ai/Hyphae/pull/96)：公开查询 schema/fixtures | main，`094d8d1c`，本地 race/全量 Go 与双平台 CI 全绿 | 等最新 head 复审；70 个候选样例，消费端任务见 Agent24 协作文档，尚无跨语言验收 |
+| [#98](https://github.com/iDoris-ai/Hyphae/pull/98)：带日期 progress | main，进展文档分支 | 最新文档 head 复审及 CI；记录阶段边界与下一步 |
+| [#99](https://github.com/iDoris-ai/Hyphae/pull/99)：声明生命周期参考 | main，`1f16d3ea`，本地/独立 race 复验及双平台 CI 全绿 | 32 个固定样例复审；不代替持久化与消费端验收 |
+| [#100](https://github.com/iDoris-ai/Hyphae/pull/100)：非执行事件外层参考 | main，`f73ac3d0`，本地/独立 race 复验及双平台 CI 全绿 | 64 个固定样例复审；不代替正文、MAC、授权或执行验收 |
 
 #56 的真实 CI 失败来自测试构建进程把只读 Go 模块缓存写进临时 HOME；已修正构建环境，relay/CLI 运行数据继续隔离。#57 新增 ACK 与父取消回归，确认 watcher 返回前自动回复已结束；旧实现对照会失败。迁移 #65 时要保留该等待逻辑，并适配其查询完成及返回值变化。
 
-独立文档 PR #84 更新这份进度与 Agent24 接线门槛，按自身 CI/审批合并，不阻塞功能链。
+独立文档 PR #84 已合并。#66/#67 合入后，已在固定 main `1948aadc` 完成默认/integration 全量测试、vet、构建、隔离身份 CLI smoke 和空统计验收，并固定 macOS arm64 接线二进制。完整证据见 [CLI 验收记录](em1-cli-acceptance.md)；Agent24 实际接线仍待对应仓库推进。
 
-状态是本次文档提交时的快照。后台 monitor 每 20 分钟读取 GitHub 实际状态，在同一 Codex 会话跟进；本会话有排队任务时不重复入队。它不替代 PR-daemon 的 review，不绕过审批或 CI。脚本在 #80 中交付，本机配置和线程 ID 不进入仓库。
+状态是本次文档提交时的快照。用户停止原 20 分钟扫描后，重新授权 30 分钟或一小时跟进；现复用同一个 monitor 每 30 分钟在本会话跟进 PR 与独立里程碑任务，本会话有排队任务时不重复入队。它不替代 PR-daemon 的 review，不绕过审批或 CI。脚本在 #80 中交付，#97 已合并并安装当前 main CI 绑定修复；本机配置和线程 ID 不进入仓库。
 
 ### 查询并发修复与剩余范围
 
 #79 修复了 `relayquery.Fetch` 使用上游异步订阅时，断线触发事件发送与通道关闭的竞争。主代理在旧实现上复现 race；新实现按 WebSocket 线序处理事件和真实 EOSE，保留验签、过滤、NIP-67 提示、帧大小限制与查询 deadline。相关 race 重复测试、真实 CLI/relay 全量 integration 及双平台 CI 通过，详见 [验收记录](em1-cli-acceptance.md)。
 
-#58 已将 inbox 接入该查询层，#60 分页模块已合入；daemon 调用点仍等 #65。底层 `req/query` 和 `profile discover` 已分别通过 #82/#83 迁移并合入。不能把 #79 当成 SDK 全局修复。基础 CLI/UI 接线和高层行为契约的设计可继续，但主线完整功能验收仍等 #59、#61～#67 收口。
+#58 已将 inbox 接入该查询层，#60 分页模块与 #65 daemon 调用点已合入。底层 `req/query` 和 `profile discover` 已分别通过 #82/#83 迁移并合入。不能把 #79 当成 SDK 全局修复。#66/#67 已收口，Hyphae 侧固定 main CLI 通过；基础 CLI/UI 跨仓接线和高层行为契约继续推进。
 
 ## 前置 PR
 
@@ -84,6 +96,6 @@
 ## 独立事项
 
 - [#39](https://github.com/iDoris-ai/Hyphae/pull/39) 是规划与验收记录；[#41](https://github.com/iDoris-ai/Hyphae/pull/41) 是按仓库命名的协作约定。
-- [#44](https://github.com/iDoris-ai/Hyphae/pull/44) 是经测试后创建依赖更新 PR 的工作流，已合入默认分支。Actions 创建/审批 PR 的仓库权限开关仍等待用户确认，不因 CLA 通过或工作流合入而开启；尚未验收自动创建更新 PR 的线上闭环。
+- [#44](https://github.com/iDoris-ai/Hyphae/pull/44) 是经测试后创建依赖更新 PR 的工作流，已合入默认分支。Actions 创建/审批 PR 的仓库权限开关仍等待用户确认，不因 CLA 通过或工作流合入而开启；已在 main 手动触发首次线上更新扫描，依赖无变化、发布步骤跳过，见 [运行记录](https://github.com/iDoris-ai/Hyphae/actions/runs/36702947244)；自动创建更新 PR 的线上闭环仍未验收。
 - [#37](https://github.com/iDoris-ai/Hyphae/pull/37) CI 已合入 main，Linux/macOS 检查已生效。当前 main 的 `required_status_checks` 仍为 null，本轮由主代理逐项核对 CI，不绕过 review；尚未修改仓库保护设置。
 - retarget 或解决冲突后若代码变化，运行相应测试；全部前置实现进入 main 后，运行一次隔离 HOME 的 `go test -tags integration ./... -count=1`。CLI/UI/四仓验收状态仍以任务台账为准。
