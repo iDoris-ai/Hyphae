@@ -3,11 +3,12 @@ package nostr
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"time"
 
 	"fiatjaf.com/nostr"
 	"github.com/iDoris-ai/hyphae/internal/common"
+	"github.com/iDoris-ai/hyphae/internal/relayquery"
 	"github.com/urfave/cli/v3"
 )
 
@@ -73,27 +74,20 @@ Example: hyphae req --kinds 1 --authors <npub> --limit 10`,
 		fmt.Printf("Querying %d relay(s)...\n", len(relays))
 
 		allEvents := make([]nostr.Event, 0)
+		var relayErrors []error
 		for _, relayURL := range relays {
-			relay, err := nostr.RelayConnect(ctx, relayURL, nostr.RelayOptions{})
+			if err := ctx.Err(); err != nil {
+				relayErrors = append(relayErrors, fmt.Errorf("query canceled: %w", err))
+				break
+			}
+			page, err := relayquery.Fetch(ctx, relayURL, filter)
+			allEvents = append(allEvents, page.Events...)
 			if err != nil {
-				fmt.Printf("  ⚠️  %s: connection failed\n", relayURL)
-				continue
+				relayErrors = append(relayErrors, err)
+				if ctx.Err() != nil {
+					break
+				}
 			}
-			defer relay.Close()
-
-			sub, err := relay.Subscribe(ctx, filter, nostr.SubscriptionOptions{})
-			if err != nil {
-				continue
-			}
-
-			timeout := time.AfterFunc(5*time.Second, func() {
-				sub.Unsub()
-			})
-
-			for evt := range sub.Events {
-				allEvents = append(allEvents, evt)
-			}
-			timeout.Stop()
 		}
 
 		fmt.Printf("Found %d events\n\n", len(allEvents))
@@ -113,6 +107,9 @@ Example: hyphae req --kinds 1 --authors <npub> --limit 10`,
 			}
 		}
 
+		if len(relayErrors) > 0 {
+			return fmt.Errorf("one or more relay queries failed: %w", errors.Join(relayErrors...))
+		}
 		return nil
 	},
 }
