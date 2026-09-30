@@ -54,12 +54,17 @@ func withoutOutputModeEnv(env []string) []string {
 
 func TestRequiredFlagErrorsAreSingleJSONEnvelope(t *testing.T) {
 	tests := []struct {
-		name string
-		args []string
-		env  []string
+		name            string
+		args            []string
+		env             []string
+		messageContains string
 	}{
-		{name: "json flag", args: []string{"agent", "msg", "--json"}},
-		{name: "output environment", args: []string{"agent", "msg"}, env: []string{"HYPHAE_OUTPUT=json"}},
+		{name: "both flags with json flag", args: []string{"agent", "msg", "--json"}, messageContains: `Required flags "to, content" not set`},
+		{name: "missing recipient with json flag", args: []string{"agent", "msg", "--content", "hello", "--json"}, messageContains: `Required flag "to" not set`},
+		{name: "missing content with json flag", args: []string{"agent", "msg", "--to", "bob", "--json"}, messageContains: `Required flag "content" not set`},
+		{name: "both flags with output environment", args: []string{"agent", "msg"}, env: []string{"HYPHAE_OUTPUT=json"}, messageContains: `Required flags "to, content" not set`},
+		{name: "missing recipient with output environment", args: []string{"agent", "msg", "--content", "hello"}, env: []string{"HYPHAE_OUTPUT=json"}, messageContains: `Required flag "to" not set`},
+		{name: "missing content with output environment", args: []string{"agent", "msg", "--to", "bob"}, env: []string{"HYPHAE_OUTPUT=json"}, messageContains: `Required flag "content" not set`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -87,8 +92,36 @@ func TestRequiredFlagErrorsAreSingleJSONEnvelope(t *testing.T) {
 			if err := dec.Decode(new(any)); err != io.EOF {
 				t.Fatalf("stderr has trailing data after JSON envelope: %q", stderr.String())
 			}
-			if result.OK || result.Error != "user_error" || !strings.Contains(result.Message, `Required flags "to, content" not set`) {
+			if result.OK || result.Error != "user_error" || !strings.Contains(result.Message, tt.messageContains) {
 				t.Fatalf("unexpected error envelope: %+v", result)
+			}
+		})
+	}
+}
+
+func TestExplicitlyEmptyRequiredFlagsAreRejected(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "recipient", args: []string{"agent", "msg", "--to", "", "--content", "hello", "--json"}, want: "recipient is required"},
+		{name: "content", args: []string{"agent", "msg", "--to", "bob", "--content", "", "--json"}, want: "message content is required"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := runHyphae(t, hyphaeBinary, tt.args)
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+			if err := cmd.Run(); exitCode(err) != 1 {
+				t.Fatalf("exit code = %d, want 1; stderr: %s", exitCode(err), stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+			if !strings.Contains(stderr.String(), tt.want) {
+				t.Fatalf("stderr = %q, want it to contain %q", stderr.String(), tt.want)
 			}
 		})
 	}
