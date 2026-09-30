@@ -225,10 +225,15 @@ func runWatchOneRelayAutoReplyLifecycle(t *testing.T, cancelParent bool) {
 	relayURL := "ws" + strings.TrimPrefix(server.URL, "http")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	watchDone := make(chan int, 1)
+	type watchResult struct {
+		count int
+		err   error
+	}
+	watchDone := make(chan watchResult, 1)
 	watchFinished := false
 	go func() {
-		watchDone <- watchOneRelay(ctx, relayURL, nostr.Filter{}, ks, recipientSK, newSeenSet(), false, true, myIdentity, []string{relayURL})
+		count, err := watchOneRelay(ctx, relayURL, nostr.Filter{}, ks, recipientSK, newSeenSet(), false, true, myIdentity, []string{relayURL})
+		watchDone <- watchResult{count: count, err: err}
 	}()
 	t.Cleanup(func() {
 		releaseQueryOnce()
@@ -266,16 +271,20 @@ func runWatchOneRelayAutoReplyLifecycle(t *testing.T, cancelParent bool) {
 	if cancelParent {
 		cancel()
 		select {
-		case <-watchDone:
+		case result := <-watchDone:
 			watchFinished = true
+			assert.Equal(t, 1, result.count, "query must process the incoming event before reply cancellation")
+			assert.NoError(t, result.err, "query completed before parent cancellation")
 		case <-time.After(2 * time.Second):
 			t.Fatal("parent cancellation did not release the in-flight auto-reply")
 		}
 	} else {
 		releaseACKOnce()
 		select {
-		case <-watchDone:
+		case result := <-watchDone:
 			watchFinished = true
+			assert.Equal(t, 1, result.count, "query must process the incoming event")
+			assert.NoError(t, result.err, "query must finish successfully")
 		case <-time.After(2 * time.Second):
 			t.Fatal("watchOneRelay did not return after the relay ACK")
 		}
