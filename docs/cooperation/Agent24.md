@@ -34,9 +34,9 @@ daemon 是长驻进程，当前输出运行日志，并未提供 JSON 消息流�
 
 ### 主线交付与接线次序（2026-09-30）
 
-截至 2026-09-30 05:32 UTC，main `4003d51` 已包含身份/联系人 JSON、relay 配置、outbox list/clear JSON、发送前持久化、daemon 首次收件登记，以及底层查询和 profile discover 的查询修复；最低构建版本为 Go 1.26。正式的完整接线二进制须在 #56～#67 收口并重新验收后固定。
+截至 2026-09-30 05:41 UTC，main `8874b8e` 已包含身份/联系人 JSON、relay 配置、outbox list/clear/retry JSON、发送前持久化、可靠自动回复、inbox 查询和 daemon 首次收件登记，以及底层查询和 profile discover 的查询修复；最低构建版本为 Go 1.26。正式的完整接线二进制须在 #59、#61～#67 收口并重新验收后固定。
 
-Agent24 现在可先用固定 main commit 开发第 1 项适配器，并用实际 JSON 建立错误/公开字段契约测试。第 2 项的 outbox retry JSON、完整离线补收、取消和 stdin 解锁仍等相关 PR 交付。管理 UI 可先做服务接口与状态设计，整段验收仍等 CLI 接线。任何仅在历史组合分支通过的接口都不能按 main 已支持发布。
+Agent24 现在可先用固定 main commit 开发第 1 项适配器，并用实际 JSON 建立错误/公开字段契约测试。第 2 项可准备发送/history/outbox 接线；完整离线补收、取消和 stdin 解锁仍等相关 PR 交付。管理 UI 可先做服务接口与状态设计，整段验收仍等 CLI 接线。任何仅在历史组合分支通过的接口都不能按 main 已支持发布。
 
 Agent24 可按下表准备独立小 PR，由对应仓库推进并回填实现链接：
 
