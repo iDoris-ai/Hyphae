@@ -76,10 +76,13 @@ case "$1" in
     exit 0
     ;;
   test)
-    if [[ "${FAIL_GO_TEST:-}" == 1 ]]; then exit 23; fi
+    printf 'go %s\n' "$*" >> "$GO_COMMAND_LOG"
+    if [[ "${*:2}" == "-tags integration ./tests -count=1" && "${FAIL_INTEGRATION_TEST:-}" == 1 ]]; then exit 24; fi
+    if [[ "${*:2}" == "./..." && "${FAIL_GO_TEST:-}" == 1 ]]; then exit 23; fi
     exit 0
     ;;
   build)
+    printf 'go %s\n' "$*" >> "$GO_COMMAND_LOG"
     if [[ "$2" == -o ]]; then touch "$3"; fi
     ;;
   *) echo "unexpected go command: $*" >&2; exit 2 ;;
@@ -89,11 +92,14 @@ esac
 
 
 def candidate_run(repo: Path, run_temp: Path, stub_dir: Path, version: str, label: str,
-                  expect_failure: bool = False, fail_go_test: bool = False):
+                  expect_failure: bool = False, fail_go_test: bool = False,
+                  fail_integration_test: bool = False):
     run_temp.mkdir(parents=True, exist_ok=True)
     output, summary = run_temp / "output", run_temp / "summary"
+    go_command_log = run_temp / "go-commands"
     output.touch()
     summary.touch()
+    go_command_log.touch()
     home = run_temp / "home"
     home.mkdir(exist_ok=True)
     env = os.environ.copy()
@@ -103,6 +109,8 @@ def candidate_run(repo: Path, run_temp: Path, stub_dir: Path, version: str, labe
         "GITHUB_STEP_SUMMARY": str(summary), "HOME": str(home),
         "TEST_NOSTR_VERSION": version,
         "FAIL_GO_TEST": "1" if fail_go_test else "0",
+        "FAIL_INTEGRATION_TEST": "1" if fail_integration_test else "0",
+        "GO_COMMAND_LOG": str(go_command_log),
         "PATH": f"{stub_dir}{os.pathsep}{env['PATH']}",
     })
     result = run(repo, "bash", "--noprofile", "--norc", "-c", CANDIDATE_SCRIPT, check=False, env=env)
@@ -110,7 +118,7 @@ def candidate_run(repo: Path, run_temp: Path, stub_dir: Path, version: str, labe
         raise AssertionError(f"candidate run {label} failed:\n{result.stdout}\n{summary.read_text()}")
     if expect_failure and result.returncode == 0:
         raise AssertionError(f"candidate run {label} unexpectedly succeeded")
-    return outputs(output), summary.read_text(), run_temp
+    return outputs(output), summary.read_text(), run_temp, go_command_log.read_text()
 
 
 def publish_run(repo: Path, run_temp: Path, data: dict[str, str], label: str):
@@ -158,9 +166,10 @@ def main() -> None:
 
         # First candidate: resolve the version, validate the exact tree, bundle and publish it.
         first = clone(remote, root / "candidate-first")
-        first_data, _, first_temp = candidate_run(first, root / "first-run", stub_dir, "v0.0.0-new", "first publication")
+        first_data, _, first_temp, first_go_commands = candidate_run(first, root / "first-run", stub_dir, "v0.0.0-new", "first publication")
         assert first_data["changed"] == "true"
         assert first_data["candidate"] == "v0.0.0-new"
+        assert "go test -tags integration ./tests -count=1" in first_go_commands, repr(first_go_commands)
         assert (first_temp / "nostr-candidate.bundle").is_file()
         publisher = clone(remote, root / "publisher")
         result, summary = publish_run(publisher, first_temp, first_data, "first publication")
@@ -171,7 +180,7 @@ def main() -> None:
         print("PASS: actual workflow blocks resolve, bundle, verify tree and publish first branch")
 
         failing = clone(remote, root / "candidate-failing-test")
-        failed_data, failed_summary, failed_temp = candidate_run(
+        failed_data, failed_summary, failed_temp, _ = candidate_run(
             failing, root / "failed-test-run", stub_dir, "v0.0.0-test-failure",
             "failed validation", expect_failure=True, fail_go_test=True,
         )
@@ -180,13 +189,26 @@ def main() -> None:
         assert "go test ./..." in failed_summary
         print("PASS: a failed Go test keeps the candidate unpublished with a failure summary")
 
+        integration_failure = clone(remote, root / "candidate-failing-integration")
+        failed_integration_data, failed_integration_summary, failed_integration_temp, failed_integration_commands = candidate_run(
+            integration_failure, root / "failed-integration-run", stub_dir,
+            "v0.0.0-integration-failure", "failed CLI relay integration",
+            expect_failure=True, fail_integration_test=True,
+        )
+        assert failed_integration_data.get("changed") != "true"
+        assert not (failed_integration_temp / "nostr-candidate.bundle").exists()
+        assert "CLI relay integration" in failed_integration_summary
+        assert "go test -tags integration ./tests -count=1" in failed_integration_commands
+        assert "go build" not in failed_integration_commands
+        print("PASS: failed CLI relay integration stops candidate before build and bundle")
+
         # Main adds source while the open PR has the same dependency. The real candidate block
         # must test the merge result and publish a refresh based on the new main commit.
         write(seed, "internal/new.go", "package internal\n")
         main_v2 = commit(seed, "main adds source", "internal/new.go")
         git(seed, "push", "origin", f"{main_v2}:refs/heads/main")
         stale_candidate = clone(remote, root / "candidate-refresh")
-        refresh_data, _, refresh_temp = candidate_run(stale_candidate, root / "refresh-run", stub_dir, "v0.0.0-new", "refresh after main advances")
+        refresh_data, _, refresh_temp, _ = candidate_run(stale_candidate, root / "refresh-run", stub_dir, "v0.0.0-new", "refresh after main advances")
         assert refresh_data["changed"] == "true"
         assert refresh_data["base_sha"] == main_v2
         refresh_publish, refresh_summary = publish_run(publisher, refresh_temp, refresh_data, "refresh after main advances")
@@ -204,13 +226,13 @@ def main() -> None:
         merged_main = git(seed, "rev-parse", "HEAD")
         git(seed, "push", "origin", f"{merged_main}:refs/heads/main")
         merged_candidate = clone(remote, root / "candidate-merged")
-        merged_data, _, _ = candidate_run(merged_candidate, root / "merged-run", stub_dir, "v0.0.0-new", "already merged")
+        merged_data, _, _, _ = candidate_run(merged_candidate, root / "merged-run", stub_dir, "v0.0.0-new", "already merged")
         assert merged_data["changed"] == "false"
         print("PASS: actual candidate block skips an unchanged bot branch already merged into main")
 
         # A branch change between validation and publish is detected by SHA before pushing.
         race_candidate = clone(remote, root / "candidate-race")
-        race_data, _, race_temp = candidate_run(race_candidate, root / "race-run", stub_dir, "v0.0.0-newer", "prepare branch race")
+        race_data, _, race_temp, _ = candidate_run(race_candidate, root / "race-run", stub_dir, "v0.0.0-newer", "prepare branch race")
         assert race_data["changed"] == "true"
         human = clone(remote, root / "human-race")
         git(human, "config", "user.name", "Human")
@@ -227,7 +249,7 @@ def main() -> None:
 
         # A default-branch change during validation stops publish before it pushes.
         base_race = clone(remote, root / "candidate-base-race")
-        base_data, _, base_temp = candidate_run(base_race, root / "base-run", stub_dir, "v0.0.0-later", "prepare base race")
+        base_data, _, base_temp, _ = candidate_run(base_race, root / "base-run", stub_dir, "v0.0.0-later", "prepare base race")
         assert base_data["changed"] == "true"
         write(seed, "main-later.txt", "main moved\n")
         main_v3 = commit(seed, "main advances again", "main-later.txt")
@@ -242,7 +264,7 @@ def main() -> None:
         manual_head = commit(human, "manual code edit", "internal/manual.go")
         git(human, "push", "origin", f"{manual_head}:refs/heads/automation/nostr-upstream")
         tampered = clone(remote, root / "candidate-tampered")
-        tamper_data, tamper_summary, _ = candidate_run(tampered, root / "tamper-run", stub_dir, "v0.0.0-later", "manual source edit", expect_failure=True)
+        tamper_data, tamper_summary, _, _ = candidate_run(tampered, root / "tamper-run", stub_dir, "v0.0.0-later", "manual source edit", expect_failure=True)
         assert not tamper_data.get("changed")
         assert "Existing bot branch contains an unexpected path" in tamper_summary
         print("PASS: actual candidate block rejects manual source edits on the bot branch")
