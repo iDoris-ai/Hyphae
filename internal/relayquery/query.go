@@ -2,15 +2,20 @@ package relayquery
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"time"
 
 	"fiatjaf.com/nostr"
+	"github.com/coder/websocket"
 )
 
-const queryTimeout = 5 * time.Second
+const (
+	queryTimeout   = 5 * time.Second
+	querySubID     = "hyphae-fetch"
+	queryReadLimit = 2 << 24 // Match the nostr SDK relay read limit.
+)
 
 // Page is the set of matching events received before the relay's EOSE.
 // Hints are returned unchanged; EOSE does not prove that this is full history.
@@ -26,112 +31,98 @@ func Fetch(ctx context.Context, url string, filter nostr.Filter) (Page, error) {
 	queryCtx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
-	relay, err := nostr.RelayConnect(queryCtx, url, nostr.RelayOptions{})
-	if relay != nil {
-		defer relay.Close()
-	}
+	conn, _, err := websocket.Dial(queryCtx, url, nil)
 	if err != nil {
 		return page, fmt.Errorf("connect to relay %s: %w", url, err)
 	}
+	defer conn.CloseNow()
+	conn.SetReadLimit(queryReadLimit)
 
-	sub, err := relay.Subscribe(queryCtx, filter, nostr.SubscriptionOptions{
-		MaxWaitForEOSE: time.Duration(math.MaxInt64),
-	})
+	req, err := (nostr.ReqEnvelope{SubscriptionID: querySubID, Filters: []nostr.Filter{filter}}).MarshalJSON()
 	if err != nil {
-		return page, fmt.Errorf("subscribe to relay %s before EOSE: %w", url, err)
+		return page, fmt.Errorf("encode query for relay %s: %w", url, err)
 	}
-	defer sub.Unsub()
+	if err := conn.Write(queryCtx, websocket.MessageText, req); err != nil {
+		return page, fmt.Errorf("send query to relay %s before EOSE: %w", url, err)
+	}
 
-	events := sub.Events
-	eoses := sub.EndOfStoredEvents
-	closed := sub.ClosedReason
-	subDone := sub.Context.Done()
-	relayDone := relay.Context().Done()
-	var terminalErr error
-	connectionEnded := false
 	for {
-		// EOSE can race with CLOSED or connection cancellation in the SDK's
-		// independently dispatched channels. Prefer an already delivered EOSE.
-		if eose, ok := receiveEOSE(sub); ok {
-			return finishQuery(page, eose, url, queryCtx, relay, connectionEnded)
+		messageType, message, err := conn.Read(queryCtx)
+		if err != nil {
+			if queryCtx.Err() != nil {
+				return page, fmt.Errorf("relay %s query incomplete: did not receive EOSE: %w", url, queryCtx.Err())
+			}
+			return page, fmt.Errorf("relay %s disconnected before EOSE: %w", url, err)
+		}
+		if messageType != websocket.MessageText {
+			continue
 		}
 
-		select {
-		case event, ok := <-events:
-			if ok {
-				page.Events = append(page.Events, event)
-			} else {
-				events = nil
-				if terminalErr == nil {
-					terminalErr = fmt.Errorf("relay %s disconnected before EOSE: %w", url, subscriptionCause(sub))
-				}
+		envelope, err := nostr.ParseMessage(string(message))
+		if err != nil {
+			// Unknown relay extensions should not end a query.
+			if errors.Is(err, nostr.UnknownLabel) {
+				continue
 			}
-		case eose, ok := <-eoses:
-			if ok {
-				return finishQuery(page, eose, url, queryCtx, relay, connectionEnded)
+			return page, fmt.Errorf("decode relay message before EOSE: %w", err)
+		}
+
+		switch env := envelope.(type) {
+		case *nostr.EventEnvelope:
+			if env.SubscriptionID == nil || *env.SubscriptionID != querySubID {
+				continue
 			}
-			eoses = nil
-			if terminalErr == nil {
-				terminalErr = fmt.Errorf("relay %s ended EOSE stream without EOSE", url)
+			if !env.Event.CheckID() || !env.Event.VerifySignature() || !filter.Matches(env.Event) {
+				continue
 			}
-		case reason, ok := <-closed:
-			closed = nil
-			if ok && terminalErr == nil {
-				terminalErr = fmt.Errorf("relay %s closed subscription before EOSE: %s", url, reason)
+			page.Events = append(page.Events, env.Event)
+		case *nostr.EOSEEnvelope:
+			hints, id, err := parseEOSE(message)
+			if err != nil {
+				return page, fmt.Errorf("decode EOSE from relay %s: %w", url, err)
 			}
-		case <-subDone:
-			subDone = nil
-			if terminalErr == nil {
-				terminalErr = fmt.Errorf("relay %s subscription ended before EOSE: %w", url, subscriptionCause(sub))
+			if id != querySubID || env.SubscriptionID != querySubID {
+				continue
 			}
-		case <-relayDone:
-			relayDone = nil
-			connectionEnded = true
-		case <-queryCtx.Done():
-			if eose, ok := receiveEOSE(sub); ok {
-				return finishQuery(page, eose, url, queryCtx, relay, connectionEnded)
+			return finish(page, hints)
+		case *nostr.ClosedEnvelope:
+			if env.SubscriptionID == querySubID {
+				return page, fmt.Errorf("relay %s closed subscription before EOSE: %s", url, env.Reason)
 			}
-			if terminalErr != nil {
-				return page, terminalErr
-			}
-			return page, fmt.Errorf("relay %s query incomplete: did not receive EOSE: %w", url, queryCtx.Err())
 		}
 	}
 }
 
-func finish(page Page, eose nostr.EndOfStoredEvent) (Page, error) {
-	page.Hints = append(page.Hints, eose.Hint...)
+func parseEOSE(message []byte) ([]string, string, error) {
+	var fields []json.RawMessage
+	if err := json.Unmarshal(message, &fields); err != nil {
+		return nil, "", err
+	}
+	if len(fields) < 2 || len(fields) > 3 {
+		return nil, "", errors.New("invalid EOSE field count")
+	}
+	var label, subID string
+	if err := json.Unmarshal(fields[0], &label); err != nil || label != "EOSE" {
+		return nil, "", errors.New("invalid EOSE label")
+	}
+	if err := json.Unmarshal(fields[1], &subID); err != nil {
+		return nil, "", errors.New("invalid EOSE subscription ID")
+	}
+	var hints []string
+	if len(fields) == 3 {
+		if err := json.Unmarshal(fields[2], &hints); err != nil || hints == nil {
+			return nil, "", errors.New("EOSE hints must be an array of strings")
+		}
+	}
+	return hints, subID, nil
+}
+
+func finish(page Page, hints []string) (Page, error) {
+	page.Hints = append(page.Hints, hints...)
 	for _, hint := range page.Hints {
 		if hint == "auth" {
 			return page, fmt.Errorf("relay requires authorization: %q", hint)
 		}
 	}
 	return page, nil
-}
-
-func finishQuery(page Page, eose nostr.EndOfStoredEvent, url string, queryCtx context.Context, relay *nostr.Relay, connectionEnded bool) (Page, error) {
-	page, err := finish(page, eose)
-	if err != nil {
-		return page, err
-	}
-	if queryCtx.Err() != nil || connectionEnded || relay.Context().Err() != nil {
-		return page, fmt.Errorf("relay %s query ended while finalizing EOSE; result may be incomplete", url)
-	}
-	return page, nil
-}
-
-func receiveEOSE(sub *nostr.Subscription) (nostr.EndOfStoredEvent, bool) {
-	select {
-	case eose, ok := <-sub.EndOfStoredEvents:
-		return eose, ok
-	default:
-		return nostr.EndOfStoredEvent{}, false
-	}
-}
-
-func subscriptionCause(sub *nostr.Subscription) error {
-	if cause := context.Cause(sub.Context); cause != nil {
-		return cause
-	}
-	return errors.New("connection closed")
 }
