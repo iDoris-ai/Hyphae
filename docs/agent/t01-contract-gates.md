@@ -66,9 +66,12 @@ relay ACK、对端收件、批准执行和执行完成是不同事实。Hyphae �
 - [Agent24](../cooperation/Agent24.md)：CLI/UI 共用通信服务；先完成基础接线，再实现请求授权与 run 登记。补齐原 F4 信封映射、结果存储和回执重试；旧 inbound 自动执行入口不能直接用于基础消息 UI。
 - [iDoris](../cooperation/iDoris.md)：明确预算核销责任、实际推理落点、缓存结果来源和隐私约束；本地限定请求失败时，外部调用数必须为零。
 - [AgentEar](../cooperation/AgentEar.md)：复用附着协议和设备授权；固定语音请求与结果播报关联，停止/取消不扩大设备权限。
-- 外部 OS/workspace：选定仓库、commit、能力版本、权限声明和退出/停用行为，再派 T12/T13；目前尚未选择完成，不以虚构模块验收。
+- 外部 OS/workspace：已选定 Sin90，T12/T13 保持 WAITING。
+  - 固定版本：Sin90 `a61ab99443efe91432487000625dfce437660c85`；Agent24 `7009294834b2251beac438f3190aae073742c5dd`。
+  - 已有真实进程的基础挂载、代理、事件及 memory/approval/scheduler 往返证据；候选协作记录见 [PR #89 固定版本](https://github.com/iDoris-ai/Hyphae/blob/4969d5c4259b1709f86fc9943f6d80847f781f5b/docs/cooperation/Sin90.md)。
+  - 完整权限矩阵、停用/重连、版本及摘要拒绝、远端执行授权和 run 恢复仍待验收。精确能力版本与参数/结果投影仍待对应仓库确认。
 
-这些是交付要求。对应仓库实现由用户推动；本文不会把它们记作已实现或已确认。
+对应仓库由用户推动后续实现与确认，按各项出口回填验收证据。
 
 ## 共享 fixtures 最低矩阵
 
