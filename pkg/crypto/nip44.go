@@ -3,6 +3,7 @@ package crypto
 
 import (
 	"fmt"
+	"strings"
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/nip44"
@@ -30,6 +31,9 @@ func DecryptMessage(ciphertext string, recipientSK nostr.SecretKey, senderPK nos
 	convKey, err := nip44.GenerateConversationKey(senderPK, recipientSK)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate conversation key: %w", err)
+	}
+	if strings.Trim(ciphertext, "\r\n") == "" {
+		return "", fmt.Errorf("failed to decrypt: invalid payload length: 0")
 	}
 
 	plaintext, err := nip44.Decrypt(ciphertext, convKey)
