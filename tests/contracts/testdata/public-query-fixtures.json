@@ -1,0 +1,399 @@
+{
+  "profile": "hyphae-public-query-fixtures/1",
+  "cases": [
+    {
+      "id": "declaration-simple",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+      "expected": "accepted"
+    },
+    {
+      "id": "declaration-tagged",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"tagged\",\"name\":\"A\",\"tags\":[\"alpha\"]}}}",
+      "expected": "accepted"
+    },
+    {
+      "id": "declaration-structured-empty-caps",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"structured\",\"name\":\"A\",\"capabilities\":[]}}}",
+      "expected": "accepted"
+    },
+    {
+      "id": "declaration-withdraw",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"withdraw\"}}",
+      "expected": "accepted"
+    },
+    {
+      "id": "notification-basic",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"notification\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"topic\":\"status\",\"text\":\"hello\"}}",
+      "expected": "accepted"
+    },
+    {
+      "id": "query-profile",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"profile\"}}",
+      "expected": "accepted"
+    },
+    {
+      "id": "query-capabilities",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"capabilities\"}}",
+      "expected": "accepted"
+    },
+    {
+      "id": "query-capability",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"capability\",\"id\":\"search\",\"version\":\"1.0\"}}",
+      "expected": "accepted"
+    },
+    {
+      "id": "response-ok-profile",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"ok\",\"scope\":\"profile\",\"declaration_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"declaration_issued_at\":90,\"declaration_expires_at\":190,\"data\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+      "expected": "accepted",
+      "query_context": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"profile\"}}"
+    },
+    {
+      "id": "response-ok-capabilities",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"ok\",\"scope\":\"capabilities\",\"declaration_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"declaration_issued_at\":90,\"declaration_expires_at\":190,\"data\":{\"capabilities\":[{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"}]}}}",
+      "expected": "accepted",
+      "query_context": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"capabilities\"}}"
+    },
+    {
+      "id": "response-ok-capability",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"ok\",\"scope\":\"capability\",\"declaration_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"declaration_issued_at\":90,\"declaration_expires_at\":190,\"data\":{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"}}}",
+      "expected": "accepted",
+      "query_context": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"capability\",\"id\":\"search\",\"version\":\"1.0\"}}"
+    },
+    {
+      "id": "response-error",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"error\",\"error\":{\"code\":\"NOT_DECLARED\",\"message\":\"none\"}}}",
+      "expected": "accepted",
+      "query_context": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"profile\"}}"
+    },
+    {
+      "id": "response-missing-query-context",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"ok\",\"scope\":\"profile\",\"declaration_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"declaration_issued_at\":90,\"declaration_expires_at\":190,\"data\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+      "expected": "payload_semantic"
+    },
+    {
+      "id": "response-nonquery-context",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"ok\",\"scope\":\"profile\",\"declaration_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"declaration_issued_at\":90,\"declaration_expires_at\":190,\"data\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+      "expected": "payload_semantic",
+      "query_context": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"notification\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"topic\":\"status\",\"text\":\"hello\"}}"
+    },
+    {
+      "id": "response-request-id-mismatch",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"cccccccccccccccccccccccccccccccc\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"ok\",\"scope\":\"profile\",\"declaration_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"declaration_issued_at\":90,\"declaration_expires_at\":190,\"data\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+      "expected": "payload_semantic",
+      "query_context": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"profile\"}}"
+    },
+    {
+      "id": "response-profile-wrapper-rejected",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"ok\",\"scope\":\"profile\",\"declaration_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"declaration_issued_at\":90,\"declaration_expires_at\":190,\"data\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"simple\",\"name\":\"A\"}}}}",
+      "expected": "schema",
+      "query_context": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"profile\"}}"
+    },
+    {
+      "id": "query-capability-nested-rejected",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"capability\",\"capability\":{\"id\":\"search\",\"version\":\"1.0\"}}}",
+      "expected": "schema"
+    },
+    {
+      "id": "duplicate-tags",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"simple\",\"name\":\"A\",\"tags\":[\"alpha\",\"alpha\"]}}}",
+      "expected": "schema"
+    },
+    {
+      "id": "33-capabilities",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"structured\",\"name\":\"A\",\"capabilities\":[{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"}]}}}",
+      "expected": "schema"
+    },
+    {
+      "id": "required-name",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"simple\"}}}",
+      "expected": "schema"
+    },
+    {
+      "id": "null-name",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"simple\",\"name\":null}}}",
+      "expected": "schema"
+    },
+    {
+      "id": "unknown-envelope-field",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"simple\",\"name\":\"A\"}},\"unknown\":1}",
+      "expected": "schema"
+    },
+    {
+      "id": "public-to-forbidden",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"simple\",\"name\":\"A\"}},\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "expected": "schema"
+    },
+    {
+      "id": "query-cross-branch",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"profile\",\"capability\":{\"id\":\"search\",\"version\":\"1.0\"}}}",
+      "expected": "schema"
+    },
+    {
+      "id": "withdraw-extra-profile",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"withdraw\",\"profile\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+      "expected": "schema"
+    },
+    {
+      "id": "unknown-protocol",
+      "body": "{\"protocol\":\"other/1\",\"type\":\"declaration\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+      "expected": "schema"
+    },
+    {
+      "id": "execution-type-forbidden",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"execute\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+      "expected": "schema"
+    },
+    {
+      "id": "unknown-type",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"future\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+      "expected": "schema"
+    },
+    {
+      "id": "requestid-lf",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"notification\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"topic\":\"status\",\"text\":\"hello\"},\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\\n\"}",
+      "expected": "schema"
+    },
+    {
+      "id": "to-cr",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"notification\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"topic\":\"status\",\"text\":\"hello\"},\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\r\"}",
+      "expected": "schema"
+    },
+    {
+      "id": "requestevent-lf",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"notification\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"topic\":\"status\",\"text\":\"hello\"},\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n\"}",
+      "expected": "schema"
+    },
+    {
+      "id": "eventhex-cr",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"notification\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"topic\":\"status\",\"text\":\"hello\",\"declaration_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\r\"}}",
+      "expected": "schema"
+    },
+    {
+      "id": "id-lf",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"structured\",\"name\":\"A\",\"capabilities\":[{\"id\":\"search\\n\",\"version\":\"1.0\",\"description\":\"Search\"}]}}}",
+      "expected": "schema"
+    },
+    {
+      "id": "version-cr",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"structured\",\"name\":\"A\",\"capabilities\":[{\"id\":\"search\",\"version\":\"1.0\\r\",\"description\":\"Search\"}]}}}",
+      "expected": "schema"
+    },
+    {
+      "id": "topic-lf",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"notification\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"topic\":\"status\\n\",\"text\":\"hello\"}}",
+      "expected": "schema"
+    },
+    {
+      "id": "tag-cr",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"tagged\",\"name\":\"A\",\"tags\":[\"alpha\\r\"]}}}",
+      "expected": "schema"
+    },
+    {
+      "id": "name-bytes-128",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"simple\",\"name\":\"éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\"}}}",
+      "expected": "accepted"
+    },
+    {
+      "id": "name-bytes-129",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"simple\",\"name\":\"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééx\"}}}",
+      "expected": "schema"
+    },
+    {
+      "id": "description-bytes-1024",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"structured\",\"name\":\"A\",\"description\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"capabilities\":[]}}}",
+      "expected": "accepted"
+    },
+    {
+      "id": "description-bytes-1025",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"structured\",\"name\":\"A\",\"description\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"capabilities\":[]}}}",
+      "expected": "schema"
+    },
+    {
+      "id": "text-bytes-4096",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"notification\",\"issued_at\":1,\"expires_at\":2,\"payload\":{\"topic\":\"t\",\"text\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}}",
+      "expected": "accepted"
+    },
+    {
+      "id": "text-bytes-4097",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"notification\",\"issued_at\":1,\"expires_at\":2,\"payload\":{\"topic\":\"t\",\"text\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}}",
+      "expected": "schema"
+    },
+    {
+      "id": "error-message-bytes-256",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":1,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"error\",\"error\":{\"code\":\"EXPIRED\",\"message\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}}}",
+      "expected": "accepted",
+      "query_context": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"profile\"}}"
+    },
+    {
+      "id": "error-message-bytes-257",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":1,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"error\",\"error\":{\"code\":\"EXPIRED\",\"message\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}}}",
+      "expected": "schema",
+      "query_context": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"profile\"}}"
+    },
+    {
+      "id": "lifecycle-equal",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":5,\"expires_at\":5,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+      "expected": "payload_semantic"
+    },
+    {
+      "id": "lifecycle-max86400",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":1,\"expires_at\":86401,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+      "expected": "accepted"
+    },
+    {
+      "id": "lifecycle-over86400",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":1,\"expires_at\":86402,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+      "expected": "payload_semantic"
+    },
+    {
+      "id": "lifecycle-negative-issued",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":-1,\"expires_at\":1,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+      "expected": "schema"
+    },
+    {
+      "id": "lifecycle-safe-upper-issued",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":9007199254654591,\"expires_at\":9007199254740991,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+      "expected": "accepted"
+    },
+    {
+      "id": "timestamp-safe-plus-one",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":0,\"expires_at\":9007199254740992,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+      "expected": "schema"
+    },
+    {
+      "id": "timestamp-fraction",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":1.5,\"expires_at\":200,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+      "expected": "schema"
+    },
+    {
+      "id": "duplicate-capability-pair",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"structured\",\"name\":\"A\",\"capabilities\":[{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Different\"}]}}}",
+      "expected": "payload_semantic"
+    },
+    {
+      "id": "response-capabilities-duplicate-pair",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"ok\",\"scope\":\"capabilities\",\"declaration_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"declaration_issued_at\":90,\"declaration_expires_at\":190,\"data\":{\"capabilities\":[{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Different\"}]}}}",
+      "expected": "payload_semantic",
+      "query_context": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"capabilities\"}}"
+    },
+    {
+      "id": "response-profile-duplicate-pair",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"ok\",\"scope\":\"profile\",\"declaration_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"declaration_issued_at\":90,\"declaration_expires_at\":190,\"data\":{\"mode\":\"structured\",\"name\":\"A\",\"capabilities\":[{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Different\"}]}}}",
+      "expected": "payload_semantic",
+      "query_context": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"profile\"}}"
+    },
+    {
+      "id": "multiple-capability-versions",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"structured\",\"name\":\"A\",\"capabilities\":[{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"},{\"id\":\"search\",\"version\":\"2.0\",\"description\":\"Search\"}]}}}",
+      "expected": "accepted"
+    },
+    {
+      "id": "response-context-match-profile",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"ok\",\"scope\":\"profile\",\"declaration_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"declaration_issued_at\":90,\"declaration_expires_at\":190,\"data\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+      "expected": "accepted",
+      "query_context": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"profile\"}}"
+    },
+    {
+      "id": "response-context-match-capabilities",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"ok\",\"scope\":\"capabilities\",\"declaration_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"declaration_issued_at\":90,\"declaration_expires_at\":190,\"data\":{\"capabilities\":[{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"}]}}}",
+      "expected": "accepted",
+      "query_context": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"capabilities\"}}"
+    },
+    {
+      "id": "response-context-match-capability",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"ok\",\"scope\":\"capability\",\"declaration_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"declaration_issued_at\":90,\"declaration_expires_at\":190,\"data\":{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"}}}",
+      "expected": "accepted",
+      "query_context": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"capability\",\"id\":\"search\",\"version\":\"1.0\"}}"
+    },
+    {
+      "id": "response-capability-version-mismatch",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"ok\",\"scope\":\"capability\",\"declaration_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"declaration_issued_at\":90,\"declaration_expires_at\":190,\"data\":{\"id\":\"search\",\"version\":\"2.0\",\"description\":\"Search\"}}}",
+      "expected": "payload_semantic",
+      "query_context": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"capability\",\"id\":\"search\",\"version\":\"1.0\"}}"
+    },
+    {
+      "id": "response-capability-id-mismatch",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"ok\",\"scope\":\"capability\",\"declaration_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"declaration_issued_at\":90,\"declaration_expires_at\":190,\"data\":{\"id\":\"other\",\"version\":\"1.0\",\"description\":\"Search\"}}}",
+      "expected": "payload_semantic",
+      "query_context": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"capability\",\"id\":\"search\",\"version\":\"1.0\"}}"
+    },
+    {
+      "id": "response-scope-mismatch",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"ok\",\"scope\":\"profile\",\"declaration_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"declaration_issued_at\":90,\"declaration_expires_at\":190,\"data\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+      "expected": "payload_semantic",
+      "query_context": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"capabilities\"}}"
+    },
+    {
+      "id": "response-expiry-equal",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"ok\",\"scope\":\"profile\",\"declaration_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"declaration_issued_at\":90,\"declaration_expires_at\":90,\"data\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+      "expected": "payload_semantic",
+      "query_context": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"profile\"}}"
+    },
+    {
+      "id": "response-expiry-over86400",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"ok\",\"scope\":\"profile\",\"declaration_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"declaration_issued_at\":90,\"declaration_expires_at\":86491,\"data\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+      "expected": "payload_semantic",
+      "query_context": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"profile\"}}"
+    },
+    {
+      "id": "body-bytes-32768",
+      "recipe": {
+        "prefix": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+        "fill": " ",
+        "repeat": 32613,
+        "suffix": ""
+      },
+      "expected_bytes": 32768,
+      "expected": "accepted"
+    },
+    {
+      "id": "body-bytes-32769",
+      "recipe": {
+        "prefix": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":100,\"expires_at\":200,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+        "fill": " ",
+        "repeat": 32614,
+        "suffix": ""
+      },
+      "expected_bytes": 32769,
+      "expected": "body_limit"
+    },
+    {
+      "id": "aggregate-body-limit",
+      "recipe": {
+        "prefix": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"declaration\",\"issued_at\":1,\"expires_at\":2,\"payload\":{\"action\":\"upsert\",\"profile\":{\"mode\":\"structured\",\"name\":\"A\",\"capabilities\":[",
+        "fill": "{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+        "repeat": 32,
+        "suffix": "]}}}"
+      },
+      "expected": "body_limit"
+    },
+    {
+      "id": "response-capabilities-array-rejected",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"ok\",\"scope\":\"capabilities\",\"declaration_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"declaration_issued_at\":90,\"declaration_expires_at\":190,\"data\":[{\"id\":\"search\",\"version\":\"1.0\",\"description\":\"Search\"}]}}",
+      "query_context": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"capabilities\"}}",
+      "expected": "schema"
+    },
+    {
+      "id": "response-error-missing-context",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"error\",\"error\":{\"code\":\"NOT_DECLARED\",\"message\":\"none\"}}}",
+      "expected": "payload_semantic"
+    },
+    {
+      "id": "response-invalid-query-context",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"ok\",\"scope\":\"profile\",\"declaration_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"declaration_issued_at\":90,\"declaration_expires_at\":190,\"data\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+      "query_context": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"NOT-LOWER-HEX\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"profile\"}}",
+      "expected": "payload_semantic"
+    },
+    {
+      "id": "response-query-context-over-limit",
+      "body": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"response\",\"issued_at\":101,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"request_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"outcome\":\"ok\",\"scope\":\"profile\",\"declaration_event\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"declaration_issued_at\":90,\"declaration_expires_at\":190,\"data\":{\"mode\":\"simple\",\"name\":\"A\"}}}",
+      "query_context_recipe": {
+        "prefix": "{\"protocol\":\"hyphae-behavior/1\",\"type\":\"query\",\"issued_at\":100,\"expires_at\":200,\"request_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"to\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"payload\":{\"scope\":\"profile\"}}",
+        "fill": " ",
+        "repeat": 32539,
+        "suffix": ""
+      },
+      "expected": "payload_semantic"
+    }
+  ]
+}
