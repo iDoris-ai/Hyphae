@@ -1,24 +1,27 @@
 # E-M1 PR 依赖与合并顺序
 
-更新：2026-09-29。下表是本轮已验收实现的依赖关系；验收通过不代表已进入 main。用户已授权主代理按依赖顺序合并；每项仍需有效批准、main 基线和通过的 CI。
+更新：2026-09-30。下表是本轮已验收实现的依赖关系；验收通过不代表已进入 main。用户已授权主代理按依赖顺序合并；每项仍需有效批准、main 基线和通过的 CI。
 
 后台 PR-daemon 可以并行评审这些 PR，包括 draft。评审范围是各 PR 相对其 base 的差异；draft 在这里表示等待前置合入 main，不等于尚未实现。自动 review 与合并是两个步骤，review 结论不自动解除依赖门槛。
 
 ## 本轮合并进度
 
-2026-09-29：#37（CI）、#38（SQLite）、#40（Nostr 上游）、#41（跨仓协作约定）、#44（上游更新工作流）已通过双平台 CI 并以 merge commit 合入 main。#44 的依赖兼容性检查也已通过。
+2026-09-30，主线基线为 `e433a6754687857c146e289842c8c5f86b4b235d`。#37～#48、#50～#52、#68～#79 已合并；主线 Linux/macOS CI 通过。最低 Go 版本为 1.26，CI 按 go.mod 选择工具链。上述编号范围包含规划、CI 和维护 PR，不表示整个 E-M1 已通过。
 
-同日继续合并 #68（nak）、#69（upload-artifact）、#74（testify）、#77（color）和 #71（setup-go）。用户通过 SSH 将已授权凭据传至执行机器后，确认 `workflow` scope 生效，#70（checkout）、#73（download-artifact）和已获新批准的 #72（CLI v3.13）也已合并；合并前逐项确认有效批准和 CI。先前的权限阻塞已解除，无需修改分支保护。已合并远程分支及失效引用已清理，本地 main 快进到 `6bc16ee`。
+| 下一项 | 当前门槛 | 后续动作 |
+|---|---|---|
+| #49：重试历史明文 | 已转 main，head `09b869b`，CI 通过，旧批准因 base 变化失效 | 获得当前基线批准后合并 |
+| #53～#55：待发管理、可靠发送、daemon 收件登记 | 仍以 foundation 为 base；等 #49 合并 | 逐项转 main，确认仅本任务差异，标记 ready，运行 CI 并取得有效批准 |
+| #56～#67 | 等各层前置合并 | 按下表逐层迁移，不能一次合并 integration 分支 |
+| #80：20 分钟 PR monitor | 独立维护项，已转 main，head `7815a15` | Python 单元测试已接入双平台 CI；等待最新检查和批准 |
 
-#75/#76 仍等待复审。新依赖合入后的冲突已解决：#42 更新为 `649bff0`，#50 更新为 `f69d05a`，均在独立 worktree 通过全量测试和相关包 race 后推送；#50 的实际 CLI list/info JSON 也通过验证。#76 由 Dependabot 更新至 `6c7b4a6`，仅模块差异，tidy 无变更，全量测试、crypto race、vet 及新 head 的 CI 均通过，无需额外提交。#76 会把最低 Go 版本提高至 1.26，已写入 PR 描述，所有 Go workflow 均从 go.mod 读取版本。#62 的新增回归测试已获批准，仍按原有依赖顺序等待主线迁移。
+状态是本次文档提交时的快照。后台 monitor 每 20 分钟读取 GitHub 实际状态，在同一 Codex 会话跟进；本会话有排队任务时不重复入队。它不替代 PR-daemon 的 review，不绕过审批或 CI。脚本在 #80 中交付，本机配置和线程 ID 不进入仓库。
 
-下一批：#42、#43、#45、#46、#50、#51、#52 已改为 main；逐项比较 retarget 前后补丁，差异完全一致，head 未改。GitHub 因 base 变化撤销了旧批准，需要 PR-daemon 在新 base 上复审；这些 PR 的 Linux/macOS 测试及 `ci-ok` 均已通过。不要因旧 review 内容仍可见而直接合并。
+### 查询并发修复与剩余范围
 
-上一轮依赖更新中，#42 的模块冲突已修复并推送 `9cef808`，全量测试、relay race 和双平台 CI 通过。#62 的连接清理回归测试提交为 `13eb491`；移除清理时失败，恢复后通过，全量测试和 nostr race 也通过。#72 的 `72e2aaf` 适配新版 CLI 参数 API，并修复缺少必填参数时 JSON 输出混入普通帮助文本的问题；真实二进制回归测试、全量测试、vet、构建和相关包 race 均通过，移除 JSON 修复时回归测试失败；#72 已通过复审并合并。
+#79 修复了 `relayquery.Fetch` 使用上游异步订阅时，断线触发事件发送与通道关闭的竞争。主代理在旧实现上复现 race；新实现按 WebSocket 线序处理事件和真实 EOSE，保留验签、过滤、NIP-67 提示、帧大小限制与查询 deadline。相关 race 重复测试、真实 CLI/relay 全量 integration 及双平台 CI 通过，详见 [验收记录](em1-cli-acceptance.md)。
 
-新版 CLI 与完整功能链的组合验收发现 #59 的 `c.Int()` 返回类型兼容问题；`c4e54c9` 用一行显式转换同时兼容新旧版本，原分支全量测试与参数边界测试通过。修复后的临时组合通过全量 integration、vet 和构建，未推送汇总分支；详见 [CLI 验收记录](em1-cli-acceptance.md)。#59 的新 head 同样需要复审。
-
-这批之后依次推进 #47（等 #42）、#48（等 #43）、#49（等 #48）；三项在现有 feature base 上已有批准，迁移后仍须核对批准是否有效。#53～#67 继续按下表等待全部前置完成，保持独立小 PR。
+#58 和 #65 合并后，inbox 与 daemon 分页将使用该查询层。当前 main 仍保留这些旧调用点；完整功能链中另外还有底层 `req/query` 和 `profile discover` 的直接 SDK 订阅，须分别迁移和验收。不能把 #79 当成 SDK 全局修复。基础 CLI/UI 接线和高层行为契约的设计可继续，但主线完整功能验收仍等 #49、#53～#67 收口。
 
 ## 前置 PR
 
@@ -57,7 +60,7 @@
 | PR | 内容 | 当前评审基线 |
 |---|---|---|
 | [#53](https://github.com/iDoris-ai/Hyphae/pull/53) | outbox list/clear JSON | foundation |
-| [#54](https://github.com/iDoris-ai/Hyphae/pull/54) | 发送前可靠入队 | foundation |
+| [#54](https://github.com/iDoris-ai/Hyphae/pull/54) | 发送前可靠入队；`3f33164` 恢复必填参数，新 head 待复审 | foundation |
 | [#55](https://github.com/iDoris-ai/Hyphae/pull/55) | daemon 持久化收件接线 | foundation |
 | [#56](https://github.com/iDoris-ai/Hyphae/pull/56) | outbox retry JSON | reliability |
 | [#57](https://github.com/iDoris-ai/Hyphae/pull/57) | 可靠自动回复 | reliability |
