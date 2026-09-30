@@ -12,6 +12,7 @@ require (
 	github.com/fatih/color v1.19.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/klauspost/compress v1.18.0
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/stretchr/testify v1.12.1
 	github.com/urfave/cli/v3 v3.13.0
 	golang.org/x/crypto v0.57.0
