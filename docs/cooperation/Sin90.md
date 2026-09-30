@@ -48,6 +48,21 @@ Sin90 该提交未提供 Cargo.lock，首次 `--locked` 因此未运行测试；
 
 本次只验收已有挂载/代理/事件机制和一个 actor 权限样例。未使用真实用户数据、模型或外部 API；未验证模块停用、退出重连、版本不兼容、manifest 篡改、Nostr 请求授权或 run 恢复，不能据此记 T12/T13 或四仓闭环完成。
 
+### 模块内核能力往返
+
+同一组固定源码、原始 manifest 和隔离 HOME 下，另选已有 `kernel_clients_roundtrip`：
+
+```bash
+cargo test --locked --test agent24_mount_blackbox \
+  kernel_clients_roundtrip -- --ignored --exact --test-threads=1
+```
+
+实际运行 1 项，`1 passed; 0 failed; 0 ignored; 4 filtered out`，`51.62s`。经真实安装、重启和代理，只调用一次测试专用路由：核对 Offer.provides 精确包含 `_a24/memory/private/`、`_a24/approval/`、`_a24/scheduler/`；memory 记忆后召回找到同一条记录；approval 返回 Pending 和 id；scheduler 创建返回 Created、查询可见、删除返回 Deleted、再次查询不可见。Pending 只证明审批登记，不表示审批通过或动作已执行。
+
+此项使用独立 `target/test-hooks-debug/debug/sin90`，SHA-256 为 `9ed0454d15a2ca1ddfa231522ac882fd7fdb4c07639924634198ab46b3adc2fc`；仅该测试构建含调试路由，不能把它作为生产分发包。原生产二进制、Agent24 daemon、manifest 和两份锁文件的摘要保持上表值，测试用 Sin90 锁文件在验证后再次移除。临时 memory/approval/scheduler 记录、HOME 与测试子进程已清理；没有模型或外部 API 调用。
+
+本项补齐已授予能力的正向往返证据，未验证未授予能力的拒绝、卸载重连、模型/远端执行授权或恢复；T12/T13 及四仓验收状态保持不变。
+
 T12/T13 应记录加载、停用、退出后重连、版本不兼容、非法摘要、未授权查询、越权路径、重复请求和结果回传。只读查询可证明真实模块调用及关联，不能单独证明有副作用任务的幂等；T16/T19 仍要用受控副作用计数验证执行恢复。
 
 待回填：Sin90/Agent24 PR 链接、能力声明、授权策略、参数/结果 schema、双方版本和实际验收输出。Hyphae 侧选定样例不代表对应仓库已确认或四仓闭环已通过。

@@ -23,7 +23,7 @@
 | [#93](https://github.com/iDoris-ai/Hyphae/pull/93)：空 NIP-44 密文保护 | main，`19743c1f`，CI 全绿 | 优先复审真实 panic 修复，可独立合并 |
 | [#94](https://github.com/iDoris-ai/Hyphae/pull/94)：固定 NIP-44 向量 | main，`fb165dca`，CI 全绿 | 固定来源测试复审；不表示 SDK 全部安全问题已修复 |
 | [#95](https://github.com/iDoris-ai/Hyphae/pull/95)：公开资料/查询 payload | main，`bdeff57a`，CI 全绿 | T01-B 候选复审；后续共享 schema/fixtures 验证四类 body |
-| [#96](https://github.com/iDoris-ai/Hyphae/pull/96)：公开查询 schema/fixtures | main，`094d8d1c`，本地 race/全量 Go 通过 | 最新 head 的实际 CI 与复审；70 个候选样例，尚无跨语言消费端验收 |
+| [#96](https://github.com/iDoris-ai/Hyphae/pull/96)：公开查询 schema/fixtures | main，`094d8d1c`，本地 race/全量 Go 与双平台 CI 全绿 | 等最新 head 复审；70 个候选样例，消费端任务见 Agent24 协作文档，尚无跨语言验收 |
 
 #56 的真实 CI 失败来自测试构建进程把只读 Go 模块缓存写进临时 HOME；已修正构建环境，relay/CLI 运行数据继续隔离。#57 新增 ACK 与父取消回归，确认 watcher 返回前自动回复已结束；旧实现对照会失败。迁移 #65 时要保留该等待逻辑，并适配其查询完成及返回值变化。
 
