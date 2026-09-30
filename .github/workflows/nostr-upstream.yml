@@ -182,6 +182,8 @@ jobs:
           tested_tree="$(git write-tree)"
           fail_step='go test ./...'
           run_logged 'go test ./...' go test ./...
+          fail_step='CLI relay integration'
+          run_logged 'CLI relay integration' go test -tags integration ./tests -count=1
           fail_step='build ./cmd/hyphae'
           run_logged 'go build ./cmd/hyphae' go build -o "$RUNNER_TEMP/hyphae" ./cmd/hyphae
           if [[ -d cmd/hyphae-relay ]]; then
