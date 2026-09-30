@@ -26,12 +26,13 @@ type publicQueryRecipe struct {
 }
 
 type publicQueryCase struct {
-	ID           string             `json:"id"`
-	Body         *string            `json:"body"`
-	Recipe       *publicQueryRecipe `json:"recipe"`
-	ExpectedByte *int               `json:"expected_bytes"`
-	Context      *string            `json:"query_context"`
-	Expected     string             `json:"expected"`
+	ID            string             `json:"id"`
+	Body          *string            `json:"body"`
+	Recipe        *publicQueryRecipe `json:"recipe"`
+	ExpectedByte  *int               `json:"expected_bytes"`
+	Context       *string            `json:"query_context"`
+	ContextRecipe *publicQueryRecipe `json:"query_context_recipe"`
+	Expected      string             `json:"expected"`
 }
 
 type publicQueryFixtures struct {
@@ -163,7 +164,11 @@ func publicQuerySemantic(root map[string]any, queryContext *string, schema *json
 		if queryContext == nil {
 			return false
 		}
-		ctxValue, err := publicQueryDecode([]byte(*queryContext))
+		ctxRaw := []byte(*queryContext)
+		if len(ctxRaw) > publicQueryMaxBody {
+			return false
+		}
+		ctxValue, err := publicQueryDecode(ctxRaw)
 		if err != nil {
 			return false
 		}
@@ -220,10 +225,29 @@ func publicQueryExpand(c publicQueryCase) ([]byte, error) {
 	if c.Body != nil {
 		return []byte(*c.Body), nil
 	}
-	if c.Recipe.Repeat < 0 || len(c.Recipe.Fill) == 0 {
+	return publicQueryRecipeBytes(*c.Recipe)
+}
+
+func publicQueryRecipeBytes(recipe publicQueryRecipe) ([]byte, error) {
+	if recipe.Repeat < 0 || len(recipe.Fill) == 0 {
 		return nil, fmt.Errorf("invalid recipe")
 	}
-	return []byte(c.Recipe.Prefix + strings.Repeat(c.Recipe.Fill, c.Recipe.Repeat) + c.Recipe.Suffix), nil
+	return []byte(recipe.Prefix + strings.Repeat(recipe.Fill, recipe.Repeat) + recipe.Suffix), nil
+}
+
+func publicQueryExpandContext(c publicQueryCase) (*string, error) {
+	if (c.Context == nil) == (c.ContextRecipe == nil) {
+		return nil, fmt.Errorf("exactly one query context or context recipe required")
+	}
+	if c.Context != nil {
+		return c.Context, nil
+	}
+	raw, err := publicQueryRecipeBytes(*c.ContextRecipe)
+	if err != nil {
+		return nil, err
+	}
+	value := string(raw)
+	return &value, nil
 }
 
 func TestPublicQuerySharedSchemaFixtures(t *testing.T) {
@@ -255,6 +279,9 @@ func TestPublicQuerySharedSchemaFixtures(t *testing.T) {
 		if tc.Body != nil && tc.Recipe != nil {
 			t.Fatalf("%s: body and recipe are mutually exclusive", tc.ID)
 		}
+		if tc.Context != nil && tc.ContextRecipe != nil {
+			t.Fatalf("%s: query context and context recipe are mutually exclusive", tc.ID)
+		}
 		if tc.Expected != "accepted" && tc.Expected != "body_limit" && tc.Expected != "schema" && tc.Expected != "payload_semantic" {
 			t.Fatalf("%s: unknown expected stage %q", tc.ID, tc.Expected)
 		}
@@ -266,26 +293,34 @@ func TestPublicQuerySharedSchemaFixtures(t *testing.T) {
 			t.Fatalf("%s: expanded bytes %d, expected %d", tc.ID, len(raw), *tc.ExpectedByte)
 		}
 		got := "accepted"
-		bodyValue, bodyErr := publicQueryDecode(raw)
-		if bodyErr == nil {
-			if root := publicQueryObject(bodyValue); root != nil {
-				typ, _ := root["type"].(string)
-				if coverage[typ] == nil {
-					coverage[typ] = map[string]bool{}
-				}
-				coverage[typ][tc.Expected] = true
-			}
-		}
 		if len(raw) > publicQueryMaxBody {
 			got = "body_limit"
 		} else {
 			value, err := publicQueryDecode(raw)
 			if err != nil {
 				got = "schema"
-			} else if err := schema.Validate(value); err != nil {
-				got = "schema"
-			} else if !publicQuerySemantic(publicQueryObject(value), tc.Context, schema) {
-				got = "payload_semantic"
+			} else {
+				if root := publicQueryObject(value); root != nil {
+					typ, _ := root["type"].(string)
+					if coverage[typ] == nil {
+						coverage[typ] = map[string]bool{}
+					}
+					coverage[typ][tc.Expected] = true
+				}
+				if err := schema.Validate(value); err != nil {
+					got = "schema"
+				} else {
+					var ctx *string
+					if tc.Context != nil || tc.ContextRecipe != nil {
+						ctx, err = publicQueryExpandContext(tc)
+						if err != nil {
+							t.Fatalf("%s: invalid query context recipe: %v", tc.ID, err)
+						}
+					}
+					if !publicQuerySemantic(publicQueryObject(value), ctx, schema) {
+						got = "payload_semantic"
+					}
+				}
 			}
 		}
 		if got != tc.Expected {
