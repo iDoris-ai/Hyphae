@@ -1,6 +1,9 @@
 package crypto
 
 import (
+	"encoding/base64"
+	"fmt"
+	"strings"
 	"testing"
 
 	"fiatjaf.com/nostr"
@@ -68,6 +71,29 @@ func TestEncryptDecrypt_LongMessage(t *testing.T) {
 	decrypted, err := DecryptMessage(ciphertext, bobSK, aliceSK.Public())
 	require.NoError(t, err)
 	assert.Equal(t, string(plaintext), decrypted)
+}
+
+func TestEncryptDecryptCandidatePayloadSizes(t *testing.T) {
+	aliceSK := nostr.Generate()
+	bobSK := nostr.Generate()
+	for _, size := range []int{16 << 10, 32 << 10, 64 << 10} {
+		t.Run(fmt.Sprintf("%d_bytes", size), func(t *testing.T) {
+			plaintext := strings.Repeat("x", size)
+			ciphertext, err := EncryptMessage(plaintext, aliceSK, bobSK.Public())
+			require.NoError(t, err)
+			require.NotEmpty(t, ciphertext)
+			assert.GreaterOrEqual(t, len(ciphertext), size)
+			assert.LessOrEqual(t, len(ciphertext), size*2)
+
+			payload, err := base64.StdEncoding.DecodeString(ciphertext)
+			require.NoError(t, err)
+			assert.Greater(t, len(payload), size, "decoded payload should include NIP-44 framing and authentication data")
+
+			decrypted, err := DecryptMessage(ciphertext, bobSK, aliceSK.Public())
+			require.NoError(t, err)
+			assert.Equal(t, plaintext, decrypted)
+		})
+	}
 }
 
 func TestEncryptDecrypt_WrongKey(t *testing.T) {
