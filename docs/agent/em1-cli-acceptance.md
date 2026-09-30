@@ -1,5 +1,7 @@
 # E-M1-A：Hyphae CLI 验收记录
 
+最新结果：2026-09-30 固定 main `1948aadc` 的 Hyphae 侧基础 CLI 已收口通过，见下方“固定 main 收口验收”；Agent24 CLI/UI 与完整 E-M1 仍未通过。以下保留各历史提交当时的证据，不用历史组合结果替代新版本验收。
+
 2026-09-29，主代理独立验收。**Hyphae 侧基础 CLI 通信在下述固定组合提交上通过；Agent24 CLI 接线、基础 UI 和完整 E-M1 尚未通过。** 实现以独立小 PR 交付；最新合并状态见 [PR 依赖表](em1-pr-order.md)。后续依赖升级和修复需要另行验证，不能把这一结果当作当前 main 的完整功能验收。
 
 ## 固定版本
@@ -69,6 +71,20 @@
 - 主代理审阅冲突处理和修复差异；组合的 `go.mod/go.sum` 与 main 完全一致，保留 #62 的失败连接清理。
 - Luna 在 Go 1.27.1、临时 HOME 下通过 `go test ./cmd/hyphae -count=1`、`go test -tags integration ./... -count=1`、`go test -race ./internal/relayquery ./internal/daemon ./internal/messaging -count=1` 和 `go vet ./...`。
 - 本次验证覆盖 #79 查询实现、#82 raw req/query 及完整待合并 CLI 链的兼容性；不包含后续 profile discover 修复，也不代表已交付主线或完成四仓验收。#54 新 head 仍须复审，旧批准不能替代本次变更的审阅。
+
+## 2026-09-30 固定 main 收口验收
+
+#93/#67/#66/#97 按最新有效批准和 head SHA 正常合并后，main 固定为 `1948aadc551e360176711f9c50172ed6edccd253`。Luna 在独立 detached worktree、Go 1.27.1 darwin/arm64、临时 HOME 下执行；根代理核对原始日志、源码断言、二进制摘要及干净工作树。GOPATH/GOCACHE 使用固定缓存路径，测试数据不进入用户 HOME。
+
+- `go test ./... -count=1`、`go test -tags integration ./... -count=1 -v`、`go vet ./...`、`./build.sh` 和 `./test.sh` 均退出 0。
+- 真实 `TestDaemonImportsAndDeduplicatesOfflineBacklog` 执行 6.42 秒并通过：relay 保存恰好 125 个唯一且签名有效的事件；daemon 导入 125 条正确正文/属性并产生 125 个新消息效果；同库重启行数及内容不变、新效果为零。
+- 真实 `TestOfflineCLIOutboxRetryAndDaemonSignal`（1.73 秒）和 `TestEncryptedCLIRelayFlow`（1.69 秒）均通过。三个目标测试实际执行，未跳过；integration tests 包共 13.192 秒。
+- 默认 suite 包含 stdin 和空统计回归。另在临时 HOME 创建合成默认身份后运行 `history stats --json`，单个成功信封中的四项统计均为零；身份创建输出丢弃，临时数据已清理。
+- `test.sh` 只提示 E2E 脚本，没有执行它们；真实 relay 证据来自上述 integration。`go.mod`/`go.sum` 前后摘要不变，源码工作树干净。
+- macOS arm64 构建产物 SHA-256：`a7bb4a83b5d6be0a939a4cd92a853a2672f97012c48d704a9a3a718b9e6d806b`。未安装生产二进制，其他平台产物需独立记录摘要。
+- 该 main 的 [Linux/macOS CI 36729070274](https://github.com/iDoris-ai/Hyphae/actions/runs/36729070274) 通过，包含真实 integration 步骤。
+
+此项收口 Hyphae 侧基础 CLI；Agent24 CLI/UI、模型、模块完整生命周期、语音和四仓执行闭环仍未通过。T20/T21/T22/T19 维持各自跨仓门槛。
 
 ## 接线边界与下一步
 
