@@ -24,6 +24,8 @@ Hyphae 是可独立运行的开源通信组件，Agent24 是其消费者之一�
 | relay 事件持久化 | `fiatjaf.com/nostr/eventstore/boltdb` | 同 module；与客户端 SQLite 数据目录分开 |
 | 参考 CLI | `third_party/nak` | Git submodule 固定 commit；不是运行时必需组件 |
 
+当前固定版本的 NIP-44 `Decrypt` 对 CR/LF-only Base64 输入会在空解码结果上 panic；Hyphae 的 `DecryptMessage` 在调用前拒绝该空 payload。上游应在访问首字节前检查解码长度。这项应用保护不代表 SDK 已修复，也不代表 MAC 比较已确认使用常数时间或应用已设置输入最大长度。
+
 旧 [fiatjaf/khatru](https://github.com/fiatjaf/khatru) 已归档，上游 README 指向新 module。新的源码托管地址可能变化，应以 module 的官方元数据和 Go 校验链为准，不把 GitHub 旧仓库地址写死在构建步骤里。
 
 本轮核验到的更新候选为 `v0.0.0-20260928115942-58e4c715304e`。这是此次升级的版本快照，不是永久“最新”版本。API、持久化兼容和行为测试通过后才作为发布依赖。
