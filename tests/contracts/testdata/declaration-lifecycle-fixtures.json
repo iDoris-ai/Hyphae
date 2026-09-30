@@ -1,0 +1,861 @@
+{
+  "description": "Normalized declaration selector fixtures. Signature/schema validity is a precondition except lifecycle-time rejection cases.",
+  "cases": [
+    {
+      "id": "ttl_zero_rejected",
+      "now": 100,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000001",
+          "issued_at": 100,
+          "expires_at": 100,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "none"
+        }
+      ],
+      "rejected": [
+        {
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000001",
+          "reason": "invalid_lifecycle"
+        }
+      ]
+    },
+    {
+      "id": "ttl_one_day_active",
+      "now": 100,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000002",
+          "issued_at": 100,
+          "expires_at": 86500,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "active",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000002"
+        }
+      ]
+    },
+    {
+      "id": "ttl_over_one_day_rejected",
+      "now": 100,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000003",
+          "issued_at": 100,
+          "expires_at": 86501,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "none"
+        }
+      ],
+      "rejected": [
+        {
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000003",
+          "reason": "invalid_lifecycle"
+        }
+      ]
+    },
+    {
+      "id": "future_300_seconds_is_eligible",
+      "now": 100,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000004",
+          "issued_at": 400,
+          "expires_at": 500,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "active",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000004"
+        }
+      ]
+    },
+    {
+      "id": "future_301_seconds_is_ignored",
+      "now": 100,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000005",
+          "issued_at": 401,
+          "expires_at": 500,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "none"
+        }
+      ],
+      "rejected": [
+        {
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000005",
+          "reason": "future_clock"
+        }
+      ]
+    },
+    {
+      "id": "expires_exactly_now_is_inactive",
+      "now": 200,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000006",
+          "issued_at": 100,
+          "expires_at": 200,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "inactive",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000006"
+        }
+      ]
+    },
+    {
+      "id": "expires_one_second_after_now_is_active",
+      "now": 199,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000007",
+          "issued_at": 100,
+          "expires_at": 200,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "active",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000007"
+        }
+      ]
+    },
+    {
+      "id": "expired_newer_upsert_does_not_fall_back",
+      "now": 200,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000008",
+          "issued_at": 100,
+          "expires_at": 300,
+          "action": "upsert"
+        },
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000009",
+          "issued_at": 150,
+          "expires_at": 200,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "inactive",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000009"
+        }
+      ]
+    },
+    {
+      "id": "expired_withdraw_remains_tombstone",
+      "now": 500,
+      "prior_known": [
+        {
+          "author": "alice",
+          "event_id": "000000000000000000000000000000000000000000000000000000000000000b",
+          "issued_at": 100,
+          "expires_at": 900,
+          "action": "upsert"
+        }
+      ],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "000000000000000000000000000000000000000000000000000000000000000a",
+          "issued_at": 150,
+          "expires_at": 200,
+          "action": "withdraw"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "inactive",
+          "event_id": "000000000000000000000000000000000000000000000000000000000000000a"
+        }
+      ]
+    },
+    {
+      "id": "later_upsert_restores_after_withdraw",
+      "now": 500,
+      "prior_known": [
+        {
+          "author": "alice",
+          "event_id": "000000000000000000000000000000000000000000000000000000000000000d",
+          "issued_at": 150,
+          "expires_at": 200,
+          "action": "withdraw"
+        }
+      ],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "000000000000000000000000000000000000000000000000000000000000000c",
+          "issued_at": 200,
+          "expires_at": 600,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "active",
+          "event_id": "000000000000000000000000000000000000000000000000000000000000000c"
+        }
+      ]
+    },
+    {
+      "id": "authors_are_selected_independently",
+      "now": 150,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "000000000000000000000000000000000000000000000000000000000000000e",
+          "issued_at": 100,
+          "expires_at": 300,
+          "action": "upsert"
+        },
+        {
+          "author": "alice",
+          "event_id": "000000000000000000000000000000000000000000000000000000000000000f",
+          "issued_at": 110,
+          "expires_at": 300,
+          "action": "upsert"
+        },
+        {
+          "author": "bob",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000010",
+          "issued_at": 105,
+          "expires_at": 300,
+          "action": "upsert"
+        },
+        {
+          "author": "carol",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000011",
+          "issued_at": 100,
+          "expires_at": 150,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "active",
+          "event_id": "000000000000000000000000000000000000000000000000000000000000000f"
+        },
+        {
+          "author": "bob",
+          "status": "active",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000010"
+        },
+        {
+          "author": "carol",
+          "status": "inactive",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000011"
+        }
+      ]
+    },
+    {
+      "id": "equal_time_chooses_lower_event_id_forward",
+      "now": 150,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000016",
+          "issued_at": 100,
+          "expires_at": 300,
+          "action": "upsert"
+        },
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000014",
+          "issued_at": 100,
+          "expires_at": 300,
+          "action": "upsert"
+        },
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000015",
+          "issued_at": 100,
+          "expires_at": 300,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "active",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000014"
+        }
+      ]
+    },
+    {
+      "id": "equal_time_chooses_lower_event_id_reverse",
+      "now": 150,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000015",
+          "issued_at": 100,
+          "expires_at": 300,
+          "action": "upsert"
+        },
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000014",
+          "issued_at": 100,
+          "expires_at": 300,
+          "action": "upsert"
+        },
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000016",
+          "issued_at": 100,
+          "expires_at": 300,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "active",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000014"
+        }
+      ]
+    },
+    {
+      "id": "equal_time_chooses_lower_event_id_mixed",
+      "now": 150,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000014",
+          "issued_at": 100,
+          "expires_at": 300,
+          "action": "upsert"
+        },
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000016",
+          "issued_at": 100,
+          "expires_at": 300,
+          "action": "upsert"
+        },
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000015",
+          "issued_at": 100,
+          "expires_at": 300,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "active",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000014"
+        }
+      ]
+    },
+    {
+      "id": "same_event_record_is_deduplicated",
+      "now": 150,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000017",
+          "issued_at": 100,
+          "expires_at": 300,
+          "action": "upsert"
+        },
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000017",
+          "issued_at": 100,
+          "expires_at": 300,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "active",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000017"
+        }
+      ]
+    },
+    {
+      "id": "same_event_id_conflict_fails_closed",
+      "now": 150,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000018",
+          "issued_at": 100,
+          "expires_at": 300,
+          "action": "upsert"
+        },
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000018",
+          "issued_at": 101,
+          "expires_at": 300,
+          "action": "upsert"
+        }
+      ],
+      "error": "conflict"
+    },
+    {
+      "id": "prior_and_new_same_id_conflict_fails_closed",
+      "now": 150,
+      "prior_known": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000019",
+          "issued_at": 100,
+          "expires_at": 300,
+          "action": "upsert"
+        }
+      ],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000019",
+          "issued_at": 101,
+          "expires_at": 300,
+          "action": "upsert"
+        }
+      ],
+      "error": "conflict"
+    },
+    {
+      "id": "negative_timestamp_rejected_without_replacing_prior",
+      "now": 150,
+      "prior_known": [
+        {
+          "author": "alice",
+          "event_id": "000000000000000000000000000000000000000000000000000000000000001b",
+          "issued_at": 100,
+          "expires_at": 300,
+          "action": "upsert"
+        }
+      ],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "000000000000000000000000000000000000000000000000000000000000001a",
+          "issued_at": -1,
+          "expires_at": 300,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "active",
+          "event_id": "000000000000000000000000000000000000000000000000000000000000001b"
+        }
+      ],
+      "rejected": [
+        {
+          "event_id": "000000000000000000000000000000000000000000000000000000000000001a",
+          "reason": "invalid_lifecycle"
+        }
+      ]
+    },
+    {
+      "id": "unsafe_issued_at_rejected",
+      "now": 150,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "000000000000000000000000000000000000000000000000000000000000001c",
+          "issued_at": 9007199254740992,
+          "expires_at": 9007199254740993,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "none"
+        }
+      ],
+      "rejected": [
+        {
+          "event_id": "000000000000000000000000000000000000000000000000000000000000001c",
+          "reason": "invalid_lifecycle"
+        }
+      ]
+    },
+    {
+      "id": "unsafe_expires_at_rejected",
+      "now": 150,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "000000000000000000000000000000000000000000000000000000000000001d",
+          "issued_at": 100,
+          "expires_at": 9007199254740992,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "none"
+        }
+      ],
+      "rejected": [
+        {
+          "event_id": "000000000000000000000000000000000000000000000000000000000000001d",
+          "reason": "invalid_lifecycle"
+        }
+      ]
+    },
+    {
+      "id": "invalid_now_fails_closed",
+      "now": 9007199254740992,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "000000000000000000000000000000000000000000000000000000000000001e",
+          "issued_at": 100,
+          "expires_at": 300,
+          "action": "upsert"
+        }
+      ],
+      "error": "invalid_now"
+    },
+    {
+      "id": "withdraw_is_inactive_even_before_expiry",
+      "now": 150,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "000000000000000000000000000000000000000000000000000000000000001f",
+          "issued_at": 100,
+          "expires_at": 300,
+          "action": "withdraw"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "inactive",
+          "event_id": "000000000000000000000000000000000000000000000000000000000000001f"
+        }
+      ]
+    },
+    {
+      "id": "future_record_does_not_replace_known_state",
+      "now": 100,
+      "prior_known": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000021",
+          "issued_at": 90,
+          "expires_at": 200,
+          "action": "upsert"
+        }
+      ],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000020",
+          "issued_at": 401,
+          "expires_at": 500,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "active",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000021"
+        }
+      ],
+      "rejected": [
+        {
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000020",
+          "reason": "future_clock"
+        }
+      ]
+    },
+    {
+      "id": "invalid_lifecycle_does_not_replace_known_state",
+      "now": 150,
+      "prior_known": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000023",
+          "issued_at": 100,
+          "expires_at": 300,
+          "action": "upsert"
+        }
+      ],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000022",
+          "issued_at": 110,
+          "expires_at": 110,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "active",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000023"
+        }
+      ],
+      "rejected": [
+        {
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000022",
+          "reason": "invalid_lifecycle"
+        }
+      ]
+    },
+    {
+      "id": "zero_timestamp_is_valid",
+      "now": 0,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000024",
+          "issued_at": 0,
+          "expires_at": 1,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "active",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000024"
+        }
+      ]
+    },
+    {
+      "id": "expires_before_issued_rejected",
+      "now": 100,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000025",
+          "issued_at": 101,
+          "expires_at": 100,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "none"
+        }
+      ],
+      "rejected": [
+        {
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000025",
+          "reason": "invalid_lifecycle"
+        }
+      ]
+    },
+    {
+      "id": "negative_expiry_rejected",
+      "now": 100,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000026",
+          "issued_at": 0,
+          "expires_at": -1,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "none"
+        }
+      ],
+      "rejected": [
+        {
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000026",
+          "reason": "invalid_lifecycle"
+        }
+      ]
+    },
+    {
+      "id": "negative_now_fails_closed",
+      "now": -1,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000027",
+          "issued_at": 0,
+          "expires_at": 1,
+          "action": "upsert"
+        }
+      ],
+      "error": "invalid_now"
+    },
+    {
+      "id": "prior_expired_newer_blocks_older_active_record",
+      "now": 200,
+      "prior_known": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000028",
+          "issued_at": 150,
+          "expires_at": 200,
+          "action": "upsert"
+        }
+      ],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000029",
+          "issued_at": 140,
+          "expires_at": 300,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "inactive",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000028"
+        }
+      ]
+    },
+    {
+      "id": "future_301_reconsidered_at_future_300",
+      "now": 101,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000005",
+          "issued_at": 401,
+          "expires_at": 500,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "active",
+          "event_id": "0000000000000000000000000000000000000000000000000000000000000005"
+        }
+      ]
+    },
+    {
+      "id": "near_safe_limit_future_300_and_ttl_are_exact",
+      "now": 9007199254740591,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "000000000000000000000000000000000000000000000000000000000000002a",
+          "issued_at": 9007199254740891,
+          "expires_at": 9007199254740991,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "active",
+          "event_id": "000000000000000000000000000000000000000000000000000000000000002a"
+        }
+      ]
+    },
+    {
+      "id": "near_safe_limit_future_301_is_ignored",
+      "now": 9007199254740591,
+      "prior_known": [],
+      "records": [
+        {
+          "author": "alice",
+          "event_id": "000000000000000000000000000000000000000000000000000000000000002b",
+          "issued_at": 9007199254740892,
+          "expires_at": 9007199254740991,
+          "action": "upsert"
+        }
+      ],
+      "expected": [
+        {
+          "author": "alice",
+          "status": "none"
+        }
+      ],
+      "rejected": [
+        {
+          "event_id": "000000000000000000000000000000000000000000000000000000000000002b",
+          "reason": "future_clock"
+        }
+      ]
+    }
+  ]
+}
