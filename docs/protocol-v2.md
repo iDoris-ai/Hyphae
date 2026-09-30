@@ -154,6 +154,8 @@ Hyphae V2 从"单 relay 加密 IM"演进为"**去中心化 Agent 协作网络**"
 
 ## 4. L3 应用行为协议（JSON Schema）
 
+> 本节是尚待 T01 收口的历史方案；与 `agent/spec.md` 的独立 kind 要求存在冲突。新的高层行为实现需等待 [T01 契约收口](agent/t01-contract-gates.md)，不能按下面的 30078 示例直接启用执行。现有 CLI 消息兼容路径保持原有定义。
+
 事件结构（基于 Nostr Kind 30078）：
 
 ```json
