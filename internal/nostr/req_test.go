@@ -48,10 +48,17 @@ func reqWriteEvent(t *testing.T, conn *websocket.Conn, event nostr.Event) {
 
 func TestReqCmdReturnsOnEOSE(t *testing.T) {
 	event := reqSignedEvent(t)
+	eoseWritten := make(chan struct{})
+	clientClosed := make(chan struct{})
 	url := reqRelay(t, func(conn *websocket.Conn) {
 		_, _, _ = conn.ReadMessage()
 		require.NoError(t, conn.WriteJSON([]any{"EVENT", "hyphae-fetch", event}))
 		require.NoError(t, conn.WriteJSON([]any{"EOSE", "hyphae-fetch"}))
+		close(eoseWritten)
+		// Keep the relay connection open until the query client finishes.
+		require.NoError(t, conn.SetReadDeadline(time.Now().Add(2*time.Second)))
+		_, _, _ = conn.ReadMessage()
+		close(clientClosed)
 	})
 	started := time.Now()
 	var runErr error
@@ -60,12 +67,23 @@ func TestReqCmdReturnsOnEOSE(t *testing.T) {
 	})
 	require.NoError(t, runErr)
 	assert.Less(t, time.Since(started), time.Second)
+	select {
+	case <-eoseWritten:
+	default:
+		t.Fatal("query returned before the relay sent EOSE")
+	}
+	select {
+	case <-clientClosed:
+	case <-time.After(time.Second):
+		t.Fatal("query did not close the still-open relay after EOSE")
+	}
 	assert.Contains(t, out, "Found 1 events")
 	assert.Contains(t, out, event.Content)
 }
 
 func TestReqCmdKeepsPartialEventsAndReturnsRelayFailure(t *testing.T) {
 	event := reqSignedEvent(t)
+	secondEvent := reqSignedEvent(t)
 	first := reqRelay(t, func(conn *websocket.Conn) {
 		_, _, _ = conn.ReadMessage()
 		reqWriteEvent(t, conn, event)
@@ -73,6 +91,7 @@ func TestReqCmdKeepsPartialEventsAndReturnsRelayFailure(t *testing.T) {
 	})
 	second := reqRelay(t, func(conn *websocket.Conn) {
 		_, _, _ = conn.ReadMessage()
+		reqWriteEvent(t, conn, secondEvent)
 		require.NoError(t, conn.WriteJSON([]any{"EOSE", "hyphae-fetch"}))
 	})
 	var runErr error
@@ -82,8 +101,9 @@ func TestReqCmdKeepsPartialEventsAndReturnsRelayFailure(t *testing.T) {
 	require.Error(t, runErr)
 	assert.Contains(t, runErr.Error(), first)
 	assert.Contains(t, runErr.Error(), "EOSE")
-	assert.Contains(t, out, "Found 1 events")
+	assert.Contains(t, out, "Found 2 events")
 	assert.Contains(t, out, event.Content)
+	assert.Contains(t, out, secondEvent.Content)
 }
 
 func TestReqCmdCancellationStopsBeforeNextRelay(t *testing.T) {
@@ -94,8 +114,9 @@ func TestReqCmdCancellationStopsBeforeNextRelay(t *testing.T) {
 		_, _, _ = conn.ReadMessage()
 		reqWriteEvent(t, conn, event)
 		cancel()
-		// Keep the connection open; Fetch must stop because its parent was canceled.
-		time.Sleep(100 * time.Millisecond)
+		// Wait for Fetch to close the connection after observing cancellation.
+		require.NoError(t, conn.SetReadDeadline(time.Now().Add(2*time.Second)))
+		_, _, _ = conn.ReadMessage()
 	})
 	var secondHit atomic.Bool
 	second := reqRelay(t, func(conn *websocket.Conn) { secondHit.Store(true) })
