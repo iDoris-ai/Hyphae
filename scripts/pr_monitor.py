@@ -8,13 +8,16 @@ import logging
 from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
+import re
 import sqlite3
 import subprocess
 import sys
 from datetime import datetime, timezone
 
 PR_FIELDS = "number,title,url,author,headRefOid,headRefName,baseRefName,isDraft,reviewDecision,mergeStateStatus,statusCheckRollup"
-RUN_FIELDS = "status,conclusion,headSha,url"
+RUN_FIELDS = "status,conclusion,headSha,url,workflowName"
+MAIN_WORKFLOW = "ci.yml"
+MAIN_WORKFLOW_NAME = "CI"
 
 
 def utc_now():
@@ -67,9 +70,33 @@ def queued_count(db_path, thread_id):
 
 def scan(config, scanned_at):
     gh = config["gh_bin"]
+    branch = gh_json([gh, "api", f"repos/{config['repo_slug']}/branches/main"], config["repo_dir"])
+    commit = branch.get("commit") if isinstance(branch, dict) else None
+    main_sha = commit.get("sha") if isinstance(commit, dict) else None
+    if not isinstance(main_sha, str) or not re.fullmatch(r"[0-9a-fA-F]{40}", main_sha):
+        raise RuntimeError("GitHub main branch response did not contain a valid 40-character commit SHA")
+    main_sha = main_sha.lower()
     prs = gh_json([gh, "pr", "list", "--repo", config["repo_slug"], "--state", "open", "--limit", "100", "--json", PR_FIELDS], config["repo_dir"])
-    runs = gh_json([gh, "run", "list", "--repo", config["repo_slug"], "--branch", "main", "--limit", "5", "--json", RUN_FIELDS], config["repo_dir"])
-    snapshot = {"scanned_at_utc": scanned_at, "repo_slug": config["repo_slug"], "pull_requests": prs, "main_runs": runs}
+    runs = gh_json([
+        gh, "run", "list", "--repo", config["repo_slug"], "--branch", "main",
+        "--workflow", MAIN_WORKFLOW, "--commit", main_sha, "--limit", "5", "--json", RUN_FIELDS,
+    ], config["repo_dir"])
+    if not isinstance(runs, list):
+        raise RuntimeError("GitHub main workflow query did not return a run list")
+    # `--workflow ci.yml` and the workflowName check identify this repository's
+    # current CI workflow; headSha prevents any stale main run from being used.
+    main_runs = [run for run in runs if isinstance(run, dict)
+                 and str(run.get("headSha", "")).lower() == main_sha
+                 and run.get("workflowName") == MAIN_WORKFLOW_NAME]
+    snapshot = {
+        "scanned_at_utc": scanned_at,
+        "repo_slug": config["repo_slug"],
+        "pull_requests": prs,
+        "main_sha": main_sha,
+        "main_workflow": MAIN_WORKFLOW,
+        "main_runs": main_runs,
+        "main_ci_missing": not main_runs,
+    }
     latest = Path(config["state_dir"]) / "latest.json"
     atomic_json(latest, snapshot)
     return latest

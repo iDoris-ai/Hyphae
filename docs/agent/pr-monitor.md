@@ -29,6 +29,8 @@ python3 /absolute/path/to/Hyphae/scripts/pr_monitor.py --config /absolute/path/t
 
 Then run without `--scan-only` to enable queueing. Each run writes `latest.json`, `status.json`, `monitor.log`, and a lock file under `state_dir`. The JSON files are replaced atomically. The log is limited to 1 MiB with one rotated copy. Files created by the process are private to the current user.
 
+The snapshot's `main_sha` comes from the current `main` branch API response. `main_workflow` is `ci.yml`, and `main_runs` includes only runs for that exact SHA and the repository's `CI` workflow. `main_ci_missing` is true when the current SHA has no matching CI run; the monitor does not substitute a green run from an older commit or another workflow. If the branch lookup or CI scan fails, the scan fails closed and does not queue work.
+
 ## launchd
 
 Install a per-user LaunchAgent with `StartInterval` set to `1200` seconds (20 minutes). Its program arguments should invoke the absolute Python 3 path, this script, `--config`, and the absolute config path. Set the working directory to the checkout if desired; the monitor itself does not depend on the shell's current directory. Keep the plist and local config out of Git.
