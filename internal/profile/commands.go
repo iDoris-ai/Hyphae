@@ -86,9 +86,16 @@ var profilePublishCmd = &cli.Command{
 			Name:  "json-file",
 			Usage: "Load profile from JSON file",
 		},
+		&cli.BoolFlag{
+			Name:  "password-stdin",
+			Usage: "Read the keystore password from stdin",
+		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
-		ks, err := identity.LoadKeyStore()
+		ks, err := identity.LoadKeyStoreForCommand(identity.KeyStoreCommandOptions{
+			JSONMode: common.JSONMode(c), RequireSecret: true,
+			PasswordStdin: c.Bool("password-stdin"), Stdin: os.Stdin,
+		})
 		if err != nil {
 			return fmt.Errorf("failed to load keystore: %w", err)
 		}
