@@ -27,8 +27,17 @@ type Page struct {
 // Fetch performs one relay query. It succeeds only after a real EOSE arrives;
 // callers may use Page.Hints to decide whether and how to request another page.
 func Fetch(ctx context.Context, url string, filter nostr.Filter) (Page, error) {
+	return FetchWithTimeout(ctx, url, filter, queryTimeout)
+}
+
+// FetchWithTimeout performs one relay query bounded by timeout. A non-positive
+// timeout is rejected before the relay is contacted.
+func FetchWithTimeout(ctx context.Context, url string, filter nostr.Filter, timeout time.Duration) (Page, error) {
 	page := Page{Events: make([]nostr.Event, 0)}
-	queryCtx, cancel := context.WithTimeout(ctx, queryTimeout)
+	if timeout <= 0 {
+		return page, fmt.Errorf("relay query timeout must be positive: %s", timeout)
+	}
+	queryCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	conn, _, err := websocket.Dial(queryCtx, url, nil)
