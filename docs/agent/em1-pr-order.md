@@ -14,6 +14,16 @@
 | [#67](https://github.com/iDoris-ai/Hyphae/pull/67)：空统计 | main，`d85aa14b`，CI 全绿 | 等最新 head 复审；与 #66 独立 |
 | [#85](https://github.com/iDoris-ai/Hyphae/pull/85)：T01 小交付门槛 | main，`aa6b9bb7`，CI 全绿 | 独立设计文档复审；不解除 T07 门槛 |
 | [#86](https://github.com/iDoris-ai/Hyphae/pull/86)：上游 integration 门禁 | main，`8867ddff`，CI 与兼容工作流全绿 | 独立复审；线上自动建 PR 仍未验收 |
+| [#87](https://github.com/iDoris-ai/Hyphae/pull/87)：relay 保留与密文边界 | main，`d38882a3`，CI 全绿 | 测试候选复审；与 #66 重复的 CI 步骤合入时保留一份 |
+| [#88](https://github.com/iDoris-ai/Hyphae/pull/88)：传输候选 | main，`901a840f`，CI 全绿 | T01-B 设计复审，尚未冻结 wire 协议 |
+| [#89](https://github.com/iDoris-ai/Hyphae/pull/89)：台账与跨仓协作 | main，本文件所在文档分支 | 最新文档 head 复审与 CI；含已有模块挂载实测，整体 E-M1 未完成 |
+| [#90](https://github.com/iDoris-ai/Hyphae/pull/90)：profile stdin 解锁 | main，`54808247`，CI 全绿 | 独立功能复审；通过后扩展 headless 注册能力 |
+| [#91](https://github.com/iDoris-ai/Hyphae/pull/91)：严格 JSON 正反例 | main，`55982f24`，CI 全绿 | 测试参考复审；生产入口尚未启用该校验 |
+| [#92](https://github.com/iDoris-ai/Hyphae/pull/92)：信封与恢复候选 | main，`94ad0e05`，CI 全绿 | T01-B/C 设计复审；执行授权与冻结门槛仍保留 |
+| [#93](https://github.com/iDoris-ai/Hyphae/pull/93)：空 NIP-44 密文保护 | main，`19743c1f`，CI 全绿 | 优先复审真实 panic 修复，可独立合并 |
+| [#94](https://github.com/iDoris-ai/Hyphae/pull/94)：固定 NIP-44 向量 | main，`fb165dca`，CI 全绿 | 固定来源测试复审；不表示 SDK 全部安全问题已修复 |
+| [#95](https://github.com/iDoris-ai/Hyphae/pull/95)：公开资料/查询 payload | main，`bdeff57a`，CI 全绿 | T01-B 候选复审；后续共享 schema/fixtures 验证四类 body |
+| [#96](https://github.com/iDoris-ai/Hyphae/pull/96)：公开查询 schema/fixtures | main，`094d8d1c`，本地 race/全量 Go 通过 | 最新 head 的实际 CI 与复审；70 个候选样例，尚无跨语言消费端验收 |
 
 #56 的真实 CI 失败来自测试构建进程把只读 Go 模块缓存写进临时 HOME；已修正构建环境，relay/CLI 运行数据继续隔离。#57 新增 ACK 与父取消回归，确认 watcher 返回前自动回复已结束；旧实现对照会失败。迁移 #65 时要保留该等待逻辑，并适配其查询完成及返回值变化。
 

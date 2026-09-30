@@ -84,7 +84,7 @@ T10/T11 需验证已有 `idoris-local`/`idoris-any` 设计与 `X-iDoris-Privacy`
 
 T14 需为 Agent24 既有 `version/intent/thread_id/reply_to/topic/payload/expires_at` 信封定义逐字段映射。T15～T17 的执行状态归 Agent24；Hyphae daemon 只负责接收、投递状态和传输诊断，不能另起一套任务执行器。T06 仅修历史存储缺陷，不新增群组协作功能。
 
-T12 的真实外部 OS 样例已选 [Sin90](../cooperation/Sin90.md)，固定 `a61ab99443efe91432487000625dfce437660c85`。先验证外部进程发现/加载/停用，再以合成数据验证获授权的只读 today 查询。能力名称与授权映射尚待 T01 和对应仓库落实；T12/T13 仍为 WAITING，不把现有 Sin90 挂载测试当作本轮验收完成。
+T12 的真实外部 OS 样例已选 [Sin90](../cooperation/Sin90.md)，固定 `a61ab99443efe91432487000625dfce437660c85`。已在 Agent24 `7009294` 与固定 Sin90 基线运行现有真实挂载黑盒测试，1 项通过，覆盖安装后重启挂载、API 代理、事件转发及一个 actor 权限样例；完整证据见协作文档。停用/重连、版本及摘要拒绝、能力名称与 Nostr 授权映射仍待 T01 和对应仓库落实；T12/T13 保持 WAITING。
 
 ### 派发批次
 
