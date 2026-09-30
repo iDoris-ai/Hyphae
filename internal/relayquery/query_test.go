@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -62,6 +63,39 @@ func TestFetchEOSEImmediatelyFollowedByClosed(t *testing.T) {
 	}
 }
 
+func TestFetchWithTimeoutRejectsNonPositiveBeforeConnecting(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+	}))
+	t.Cleanup(server.Close)
+	url := "ws" + strings.TrimPrefix(server.URL, "http")
+	for _, timeout := range []time.Duration{0, -time.Second} {
+		if _, err := FetchWithTimeout(context.Background(), url, nostr.Filter{}, timeout); err == nil {
+			t.Fatalf("timeout %s unexpectedly succeeded", timeout)
+		}
+	}
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("invalid timeout contacted relay %d times", got)
+	}
+}
+
+func TestFetchWithTimeoutShortDeadline(t *testing.T) {
+	fixture := newRelayFixture(t, relayPlan{})
+	started := time.Now()
+	page, err := FetchWithTimeout(context.Background(), fixture.url, nostr.Filter{}, 120*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "deadline exceeded") {
+		t.Fatalf("FetchWithTimeout error = %v, want short query deadline", err)
+	}
+	if len(page.Events) != 0 {
+		t.Fatalf("got unexpected events: %#v", page.Events)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("short query deadline took %s", elapsed)
+	}
+	fixture.requireClosed(t)
+}
+
 func TestFetchClosedWithoutEOSEIsError(t *testing.T) {
 	fixture := newRelayFixture(t, relayPlan{closed: "auth required"})
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
@@ -80,7 +114,7 @@ func TestFetchWithoutEOSEReturnsPartialEventsOnDeadline(t *testing.T) {
 	fixture := newRelayFixture(t, relayPlan{events: []nostr.Event{signedEvent(t)}})
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
-	page, err := Fetch(ctx, fixture.url, nostr.Filter{Kinds: []nostr.Kind{1}})
+	page, err := FetchWithTimeout(ctx, fixture.url, nostr.Filter{Kinds: []nostr.Kind{1}}, time.Second)
 	if err == nil {
 		t.Fatal("Fetch succeeded without EOSE")
 	}
@@ -100,7 +134,7 @@ func TestFetchWithoutEOSEIsErrorOnCancellation(t *testing.T) {
 		<-fixture.eventSent
 		cancel()
 	}()
-	page, err := Fetch(ctx, fixture.url, nostr.Filter{Kinds: []nostr.Kind{1}})
+	page, err := FetchWithTimeout(ctx, fixture.url, nostr.Filter{Kinds: []nostr.Kind{1}}, 5*time.Second)
 	if err == nil {
 		t.Fatal("Fetch succeeded without EOSE")
 	}
