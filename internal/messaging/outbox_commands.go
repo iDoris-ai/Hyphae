@@ -43,6 +43,7 @@ var outboxListCmd = &cli.Command{
 		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
+		jsonMode := common.JSONMode(c)
 		ob, err := LoadOutbox()
 		if err != nil {
 			return fmt.Errorf("failed to load outbox: %w", err)
@@ -59,11 +60,6 @@ var outboxListCmd = &cli.Command{
 			entries = filtered
 		}
 
-		if len(entries) == 0 {
-			fmt.Println("📭 Outbox is empty (or nothing matches --failed-only)")
-			return nil
-		}
-
 		// Outbox entries are keyed by ID for status/retry updates
 		// (UpdateOutboxStatus/IncrementOutboxRetry), but IDs are not
 		// guaranteed unique -- an event that failed to sign keeps a
@@ -73,6 +69,25 @@ var outboxListCmd = &cli.Command{
 		idCount := make(map[string]int, len(ob.Entries))
 		for _, e := range ob.Entries {
 			idCount[e.ID]++
+		}
+		if jsonMode {
+			result := make([]outboxListEntry, 0, len(entries))
+			for _, e := range entries {
+				result = append(result, outboxListEntry{
+					ID: displayOutboxID(e.ID), RecipientNpub: e.RecipientNpub,
+					Relays: nonNilStrings(e.Relays), Status: e.Status,
+					RetryCount: e.RetryCount, MaxRetries: e.MaxRetries,
+					CreatedAt: e.CreatedAt, LastAttempt: e.LastAttempt,
+					DuplicateID: idCount[e.ID] > 1,
+					Stuck:       e.Status == "pending" && e.RetryCount >= e.MaxRetries,
+				})
+			}
+			common.Emit(true, result, nil)
+			return nil
+		}
+		if len(entries) == 0 {
+			fmt.Println("📭 Outbox is empty (or nothing matches --failed-only)")
+			return nil
 		}
 
 		fmt.Printf("📬 Outbox (%d entr%s)\n", len(entries), plural(len(entries)))
@@ -102,14 +117,33 @@ var outboxListCmd = &cli.Command{
 	},
 }
 
+type outboxListEntry struct {
+	ID            string   `json:"id"`
+	RecipientNpub string   `json:"recipient_npub"`
+	Relays        []string `json:"relays"`
+	Status        string   `json:"status"`
+	RetryCount    int      `json:"retry_count"`
+	MaxRetries    int      `json:"max_retries"`
+	CreatedAt     int64    `json:"created_at"`
+	LastAttempt   int64    `json:"last_attempt"`
+	DuplicateID   bool     `json:"duplicate_id"`
+	Stuck         bool     `json:"stuck"`
+}
+
+func nonNilStrings(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
+}
+
 var outboxClearCmd = &cli.Command{
 	Name:  "clear",
 	Usage: "Permanently remove failed/exhausted outbox entries",
 	Flags: []cli.Flag{
 		&cli.BoolFlag{
-			Name:     "failed",
-			Usage:    "Clear entries that are status=failed, or have retry_count >= --min-failures",
-			Required: true,
+			Name:  "failed",
+			Usage: "Clear entries that are status=failed, or have retry_count >= --min-failures",
 		},
 		&cli.IntFlag{
 			Name:  "min-failures",
@@ -122,7 +156,19 @@ var outboxClearCmd = &cli.Command{
 		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
+		jsonMode := common.JSONMode(c)
 		minFailures := int(c.Int("min-failures"))
+		if !c.Bool("failed") {
+			return common.NewExitError(common.ErrCodeUser, fmt.Errorf("--failed is required"))
+		}
+		if jsonMode {
+			if !c.Bool("yes") {
+				return common.NewExitError(common.ErrCodeUser, fmt.Errorf("JSON clear requires --yes"))
+			}
+			if minFailures < 1 {
+				return common.NewExitError(common.ErrCodeUser, fmt.Errorf("--min-failures must be at least 1"))
+			}
+		}
 
 		ob, err := LoadOutbox()
 		if err != nil {
@@ -162,6 +208,10 @@ var outboxClearCmd = &cli.Command{
 		}
 
 		if len(toClear) == 0 {
+			if jsonMode {
+				common.Emit(true, map[string]int{"removed": 0, "remaining": len(ob.Entries)}, nil)
+				return nil
+			}
 			fmt.Printf("Nothing to clear (no entries with status=failed or retry_count >= %d)\n", minFailures)
 			return nil
 		}
@@ -182,6 +232,10 @@ var outboxClearCmd = &cli.Command{
 			return fmt.Errorf("failed to save outbox: %w", err)
 		}
 
+		if jsonMode {
+			common.Emit(true, map[string]int{"removed": removed, "remaining": len(updated.Entries)}, nil)
+			return nil
+		}
 		fmt.Printf("✅ Removed %d entr%s; %d remain\n", removed, plural(removed), len(updated.Entries))
 		return nil
 	},
