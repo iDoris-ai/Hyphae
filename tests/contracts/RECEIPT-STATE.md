@@ -36,6 +36,6 @@ Fixture 输入是假设上游已经验签、解析、通过 schema，并把 rece
 
 ## 共享夹具与边界
 
-`receipt-state-fixtures.json` 使用 `hyphae-receipt-state-fixtures/1`，包含全部 20 条直接边、5 个区分直接边与路径可达性的图用例，以及 45 个具名镜像场景。预期决策和预期 prior/更新后记录均静态保存在 JSON 中；测试运行时不会从判定器推导预期值。
+`receipt-state-fixtures.json` 使用 `hyphae-receipt-state-fixtures/1`，包含全部 20 条直接边、5 个区分直接边与路径可达性的图用例，以及 46 个具名镜像场景。样例覆盖 `seq=9007199254740991` 可接受以及更大值拒绝。预期决策和预期 prior/更新后记录均静态保存在 JSON 中；测试运行时不会从判定器推导预期值。
 
 夹具覆盖初始 snapshot、高 seq 跨越中间状态、unknown 恢复、低 seq、不完整与关联前置、同 seq 幂等/冲突、语义和 run 绑定、run 缺失/替换、终态锁定、不可达状态和 safe-integer 边界。整数词法、Nostr 验签、receipt schema、canonicalization/hash、授权、真实执行器结果、run 查询、副作用计数、数据库事务和回执投递都不在本测试范围。通过这些静态样例不能证明生产入口执行相同检查，也不能证明 T01-E/T07 或任何跨仓验收通过。

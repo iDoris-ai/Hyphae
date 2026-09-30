@@ -1255,6 +1255,30 @@
         "run_id": "",
         "semantic_id": "sem-ready"
       }
+    },
+    {
+      "id": "initial-ready-at-safe-integer-max",
+      "prior": {
+        "state": "received",
+        "seq": 0,
+        "run_id": "",
+        "semantic_id": ""
+      },
+      "incoming": {
+        "state": "ready",
+        "seq": 9007199254740991,
+        "run_id": "",
+        "semantic_id": "sem-ready-max",
+        "correlation_ok": true,
+        "complete_snapshot": true
+      },
+      "expected_decision": "applied",
+      "expected_record": {
+        "state": "ready",
+        "seq": 9007199254740991,
+        "run_id": "",
+        "semantic_id": "sem-ready-max"
+      }
     }
   ]
 }
