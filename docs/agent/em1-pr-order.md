@@ -6,14 +6,16 @@
 
 ## 本轮合并进度
 
-2026-09-30，主线基线为 `e433a6754687857c146e289842c8c5f86b4b235d`。#37～#48、#50～#52、#68～#79 已合并；主线 Linux/macOS CI 通过。最低 Go 版本为 1.26，CI 按 go.mod 选择工具链。上述编号范围包含规划、CI 和维护 PR，不表示整个 E-M1 已通过。
+2026-09-30 05:41 UTC 核对：主线基线为 `8874b8ebac0419a4572f8c8475f6215e00967d27`。#37～#58、#60、#68～#83 已合并；主线 Linux/macOS CI 通过。最低 Go 版本为 1.26，CI 按 go.mod 选择工具链。编号范围包含规划、CI 和维护 PR，整体 E-M1 仍待跨仓验收。
 
 | 下一项 | 当前门槛 | 后续动作 |
 |---|---|---|
-| #49：重试历史明文 | 已转 main，head `09b869b`，CI 通过，旧批准因 base 变化失效 | 获得当前基线批准后合并 |
-| #53～#55：待发管理、可靠发送、daemon 收件登记 | 仍以 foundation 为 base；等 #49 合并 | 逐项转 main，确认仅本任务差异，标记 ready，运行 CI 并取得有效批准 |
-| #56～#67 | 等各层前置合并 | 按下表逐层迁移，不能一次合并 integration 分支 |
-| #80：20 分钟 PR monitor | 独立维护项，已转 main，head `7815a15` | Python 单元测试已接入双平台 CI；等待最新检查和批准 |
+| #59：daemon 取消 | main，`6e873b9`，本地全量/daemon race 通过，GitHub CI 运行中 | 等当前 head CI 与批准 |
+| #61～#67 | draft，仍在各组合基线上 | #59 合入后推进 recovery 层，再逐层迁移；不得合入 integration 分支 |
+
+#56 的真实 CI 失败来自测试构建进程把只读 Go 模块缓存写进临时 HOME；已修正构建环境，relay/CLI 运行数据继续隔离。#57 新增 ACK 与父取消回归，确认 watcher 返回前自动回复已结束；旧实现对照会失败。迁移 #65 时要保留该等待逻辑，并适配其查询完成及返回值变化。
+
+独立文档 PR #84 更新这份进度与 Agent24 接线门槛，按自身 CI/审批合并，不阻塞功能链。
 
 状态是本次文档提交时的快照。后台 monitor 每 20 分钟读取 GitHub 实际状态，在同一 Codex 会话跟进；本会话有排队任务时不重复入队。它不替代 PR-daemon 的 review，不绕过审批或 CI。脚本在 #80 中交付，本机配置和线程 ID 不进入仓库。
 
@@ -21,7 +23,7 @@
 
 #79 修复了 `relayquery.Fetch` 使用上游异步订阅时，断线触发事件发送与通道关闭的竞争。主代理在旧实现上复现 race；新实现按 WebSocket 线序处理事件和真实 EOSE，保留验签、过滤、NIP-67 提示、帧大小限制与查询 deadline。相关 race 重复测试、真实 CLI/relay 全量 integration 及双平台 CI 通过，详见 [验收记录](em1-cli-acceptance.md)。
 
-#58 和 #65 合并后，inbox 与 daemon 分页将使用该查询层。当前 main 仍保留这些旧调用点；完整功能链中另外还有底层 `req/query` 和 `profile discover` 的直接 SDK 订阅，须分别迁移和验收。不能把 #79 当成 SDK 全局修复。基础 CLI/UI 接线和高层行为契约的设计可继续，但主线完整功能验收仍等 #49、#53～#67 收口。
+#58 已将 inbox 接入该查询层，#60 分页模块已合入；daemon 调用点仍等 #65。底层 `req/query` 和 `profile discover` 已分别通过 #82/#83 迁移并合入。不能把 #79 当成 SDK 全局修复。基础 CLI/UI 接线和高层行为契约的设计可继续，但主线完整功能验收仍等 #59、#61～#67 收口。
 
 ## 前置 PR
 
@@ -55,17 +57,17 @@
 
 下一层 `integration/em1-cli-recovery` / `c2f3651` 再组合 #56～#59，同样不直接作为汇总 PR 合并。
 
-**以下 PR 保持 draft，不合入它们当前指向的临时 integration 分支。** 当前基线的全部前置 PR 进入 main 后，再逐项 retarget 到 main，检查差异与测试，再标记 ready。这样保留每个小 PR 的独立审阅记录。
+下表记录原始开发基线，当前状态以上方进度表及 GitHub 为准。**仍以 integration 或临时固定分支为 base 的 PR 保持 draft。** 当前基线的全部前置 PR 进入 main 后，再逐项迁移到 main，检查差异与测试，再标记 ready。这样保留每个小 PR 的独立审阅记录。
 
-| PR | 内容 | 当前评审基线 |
+| PR | 内容 | 原始开发基线 |
 |---|---|---|
 | [#53](https://github.com/iDoris-ai/Hyphae/pull/53) | outbox list/clear JSON | foundation |
-| [#54](https://github.com/iDoris-ai/Hyphae/pull/54) | 发送前可靠入队；`3f33164` 恢复必填参数，新 head 待复审 | foundation |
+| [#54](https://github.com/iDoris-ai/Hyphae/pull/54) | 发送前可靠入队；必填参数及 JSON 错误回归已合并 | foundation |
 | [#55](https://github.com/iDoris-ai/Hyphae/pull/55) | daemon 持久化收件接线 | foundation |
 | [#56](https://github.com/iDoris-ai/Hyphae/pull/56) | outbox retry JSON | reliability |
 | [#57](https://github.com/iDoris-ai/Hyphae/pull/57) | 可靠自动回复 | reliability |
 | [#58](https://github.com/iDoris-ai/Hyphae/pull/58) | inbox 查询与部分错误结果 | reliability |
-| [#59](https://github.com/iDoris-ai/Hyphae/pull/59) | daemon 参数校验与退出取消 | #57 分支；#57 合入后改回 main |
+| [#59](https://github.com/iDoris-ai/Hyphae/pull/59) | daemon 参数校验与退出取消 | #57 分支；迁移时须包含 `561af2c` 和 `c4e54c9` |
 | [#60](https://github.com/iDoris-ai/Hyphae/pull/60) | 有界历史分页模块 | reliability |
 | [#61](https://github.com/iDoris-ai/Hyphae/pull/61) | 实际 CLI 离线重试与退出验收 | recovery |
 | [#62](https://github.com/iDoris-ai/Hyphae/pull/62) | relay 探测失败连接清理 | recovery |
