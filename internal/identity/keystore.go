@@ -363,6 +363,9 @@ func ListContacts(ks *types.KeyStore) []*types.Contact {
 
 // PromptPassword securely prompts for password
 func PromptPassword(prompt string) (string, error) {
+	if common.JSONModeFromArgs(os.Args) {
+		return "", common.NewExitError(common.ErrCodeAuth, fmt.Errorf("interactive password prompts are unavailable in JSON mode"))
+	}
 	if prompt == "" {
 		prompt = "Password: "
 	}
