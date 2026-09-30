@@ -2,10 +2,13 @@ package messaging
 
 import (
 	"encoding/hex"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"fiatjaf.com/nostr"
 	"github.com/iDoris-ai/hyphae/internal/common"
+	"github.com/iDoris-ai/hyphae/internal/storage"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -188,4 +191,32 @@ func TestStoreIncomingMessageOnceWrapper(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, stored)
 	assert.Equal(t, "first plaintext", stored.Plaintext)
+}
+
+func TestInitStorageRetriesAfterTransientDatabaseFailure(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ResetStoreForTest()
+	t.Cleanup(ResetStoreForTest)
+	dbPath, err := storage.GetDBPath()
+	require.NoError(t, err)
+	require.NoError(t, os.Mkdir(dbPath, 0700))
+	require.Error(t, InitStorage())
+	require.NoError(t, os.Remove(dbPath))
+	require.NoError(t, InitStorage(), "a failed initialization must not poison this process")
+	_, err = GetStore()
+	require.NoError(t, err)
+}
+
+func TestInitStorageClosesDatabaseWhenJSONMigrationFails(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ResetStoreForTest()
+	t.Cleanup(ResetStoreForTest)
+	dbPath, err := storage.GetDBPath()
+	require.NoError(t, err)
+	migrationPath := filepath.Join(filepath.Dir(dbPath), "messages.json")
+	require.NoError(t, os.WriteFile(migrationPath, []byte(`{"messages": broken}`), 0600))
+	require.Error(t, InitStorage())
+	assert.Nil(t, storage.DB, "the connection opened for a failed migration must be closed")
+	require.NoError(t, os.Remove(migrationPath))
+	require.NoError(t, InitStorage())
 }
