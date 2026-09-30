@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -307,16 +308,23 @@ func watchOneRelay(
 	myIdentity *types.Identity,
 	relays []string,
 ) int {
-	return watchOneRelayWithHooks(ctx, url, filter, ks, recipientSK, seen, useNotify, autoReply, myIdentity, relays, incomingReceiveHooks{
+	var replies sync.WaitGroup
+	processed := watchOneRelayWithHooks(ctx, url, filter, ks, recipientSK, seen, useNotify, autoReply, myIdentity, relays, incomingReceiveHooks{
 		store: messaging.StoreIncomingMessageOnce,
 		notify: func(title, message string) {
 			notify.DesktopNotification(title, message)
 			notify.PlaySound()
 		},
 		reply: func(senderNpub, content string) {
-			go sendAutoReply(ctx, myIdentity, ks, senderNpub, content, relays)
+			replies.Add(1)
+			go func() {
+				defer replies.Done()
+				sendAutoReply(ctx, myIdentity, ks, senderNpub, content, relays)
+			}()
 		},
 	})
+	replies.Wait()
+	return processed
 }
 
 type incomingReceiveHooks struct {
