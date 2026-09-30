@@ -1,6 +1,6 @@
 # Agent24 × Hyphae
 
-状态：Hyphae 侧协作提案，待 Agent24 确认。基线：Agent24 `32072b0`。
+状态：Hyphae 侧协作提案，待 Agent24 确认。2026-09-30 固定的远端 main 审阅与隔离验证基线：Agent24 `7009294834b2251beac438f3190aae073742c5dd`。本地用户 checkout 未更新；源码核查与实际模块挂载在独立 detached worktree 完成。
 
 ## 已有接口
 
@@ -34,9 +34,19 @@ daemon 是长驻进程，当前输出运行日志，并未提供 JSON 消息流�
 
 ### 主线交付与接线次序（2026-09-30）
 
-截至 2026-09-30 05:41 UTC，main `8874b8e` 已包含身份/联系人 JSON、relay 配置、outbox list/clear/retry JSON、发送前持久化、可靠自动回复、inbox 查询和 daemon 首次收件登记，以及底层查询和 profile discover 的查询修复；最低构建版本为 Go 1.26。正式的完整接线二进制须在 #59、#61～#67 收口并重新验收后固定。
+2026-09-30 本轮核对，Hyphae main `1948aadc551e360176711f9c50172ed6edccd253` 已包含身份/联系人 JSON、relay 配置、outbox list/clear/retry JSON、发送前持久化、可靠自动回复、inbox 查询和 daemon 首次收件登记、历史分页补收、取消恢复，以及 msg/inbox/daemon/create 的 stdin 凭据通道；最低构建版本为 Go 1.26。#66/#67 已合并，固定 main 的默认/integration 全量测试、vet、build 和 smoke 通过，三个真实 relay 用例实际执行；详情见 [验收记录](../agent/em1-cli-acceptance.md)。
 
-Agent24 现在可先用固定 main commit 开发第 1 项适配器，并用实际 JSON 建立错误/公开字段契约测试。第 2 项可准备发送/history/outbox 接线；完整离线补收、取消和 stdin 解锁仍等相关 PR 交付。管理 UI 可先做服务接口与状态设计，整段验收仍等 CLI 接线。任何仅在历史组合分支通过的接口都不能按 main 已支持发布。
+本机已验证的 macOS arm64 二进制使用 Go 1.27.1，SHA-256 为 `a7bb4a83b5d6be0a939a4cd92a853a2672f97012c48d704a9a3a718b9e6d806b`，尚未安装到生产环境。其他平台按同一固定源码构建并记录自身 hash，不把本机 hash 当跨平台产物摘要。
+
+Agent24 现在可用上述固定 main 开发第 1、2 项适配器，并用实际 JSON 建立错误/公开字段契约测试；Hyphae 侧完整 CLI 版本已经验收。管理 UI 可先做服务接口与状态设计，整段验收仍等 Agent24 CLI 接线。该本仓结果不替代 Agent24 的实际 subprocess、配置共享、普通入站不启动 run 和 UI 验收。
+
+上述 Agent24 远端版本的 Rust CLI 仍未提供通信命令；bridge 仍为 `f4/1`、内存 seen 集合和默认 `agent-speaker` 二进制。`agent24-models/src/router.rs` 尚无 `IDORIS_URL`/`idoris-local`/`idoris-any` 接线。它们是当前实现缺口，分别由 T20 和 T10/T11 推进，不能因 iDoris 自身服务已就绪而记为已完成。
+
+本轮从早期审阅基线 `879d77e` 增量核查到 `7009294`：语音面板安全修复与附着模块修复，通信 CLI、基础消息 UI 和 iDoris 接线结论没有变化。Rust CLI 仍只有 Chat/Models/Service/Daemon/Tui/Os/Mcp；桌面 Chat 调用本地 `/api/v1/chat`，尚无 Nostr 联系人、relay 或收件管理。bridge 的白名单限制和现有 run 审批不能替代新协议的授权绑定，内存 seen 也不能证明跨重启执行去重。
+
+模型路由仍按 Local/Lora/Remote 与 Any/LocalOnly 选择自身 provider；未接通 iDoris 隐私请求头、实际落点响应头及预算核销。自身 loopback 地址不能证明未来 iDoris 的实际模型落点；provider 缺 usage 时默认零值、`cost_usd=0` 也不能作为实际预算结算证据。对应源码固定在 [CLI](https://github.com/iDoris-ai/Agent24/blob/7009294834b2251beac438f3190aae073742c5dd/rust/apps/agent24-cli/src/main.rs)、[入站 bridge](https://github.com/iDoris-ai/Agent24/blob/7009294834b2251beac438f3190aae073742c5dd/packages/nostr-bridge/src/inbound.ts) 和 [模型 router](https://github.com/iDoris-ai/Agent24/blob/7009294834b2251beac438f3190aae073742c5dd/rust/crates/agent24-models/src/router.rs)。
+
+真实 Sin90 外部进程挂载、API 代理和事件转发已在本基线选定黑盒测试中通过，证据见 [Sin90 协作文档](Sin90.md)。该基础机制验证不解除 T12/T13 的授权、停用及恢复门槛。
 
 Agent24 可按下表准备独立小 PR，由对应仓库推进并回填实现链接：
 
@@ -93,7 +103,13 @@ Agent24 可按下表准备独立小 PR，由对应仓库推进并回填实现链
 - 返回结果与回执待发记录独立持久化；回执失败只重发回执。进程重启、重复 answer、对端自动回复均不得形成执行循环。
 - T01 冻结时同时更新 Hyphae 权威协议和 Agent24 F4 契约，并提供共用正反例。具体新版本、kind、字段格式尚未冻结，本轮 CLI 改动不静默转换旧 content。
 
+外部 OS 样例选用 [Sin90](Sin90.md)。Agent24 按现有 OS package 发现与 ME-3 外挂载流程加载；初次高层能力拟限制为获授权的只读 today 查询。这个通信授权须独立绑定请求和 run，不能由模块已挂载或 `model_access` 推断。
+
 至少加入三个跨仓断言：普通文本/answer 入站的 run 数为零；相同授权请求重启重放的副作用计数为一；同 request_id 修改参数后拒绝且原结果保持。单靠 Hyphae 消息行数不能证明 Agent24 没有重复执行。
+
+## 共享候选样例的消费端任务
+
+[Agent24 契约样例交接](Agent24-contract-fixtures.md) 固定 Hyphae #96 的 70 个资料/查询样例及源文件摘要，约定消费者限长、UTF-8 字节格式、逐 id 结果和错误上下文检查。它是独立测试准备，可与 CLI 接线并行；尚未实现 Agent24 消费端，不启用生产新协议，也不解除 T01-E 门槛。
 
 ## 验收
 

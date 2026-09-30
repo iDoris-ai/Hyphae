@@ -2,7 +2,7 @@
 
 更新：2026-09-30。范围依据 [生态里程碑草案](ecosystem-roadmap.md)。保留历史 M1～M5 编号；本表用 E-M 编号关联旧任务，不覆盖旧台账。
 
-**当前出口：Hyphae 侧 A 段 CLI 在组合分支验收通过，见 [最终验收记录](em1-cli-acceptance.md)。** 固定历史组合提交 `f46744a`；截至 2026-09-30 05:41 UTC，main `8874b8e` 已合并 #37～#58、#60、#68～#83，#59、#61～#67 仍待独立交付。完整 main 验收须在收尾后重做，当前进度见 [PR 依赖表](em1-pr-order.md)。T20 的 Agent24 CLI 接线、T21/T22 基础 UI、T01 高层契约和 C 段四仓链路尚未完成，整体 E-M1 不记通过。下文早期组合记录只描述对应提交当时的状态。
+**当前出口：Hyphae 侧 A 段 CLI 在固定 main `1948aadc551e360176711f9c50172ed6edccd253` 验收通过，见 [最终验收记录](em1-cli-acceptance.md)。** 2026-09-30 已合并 #37～#67、#68～#84、#93/#97；该 main 的双平台 CI、隔离 HOME 的全量默认/integration 测试、vet、构建与 smoke 均通过。当前进度见 [PR 依赖表](em1-pr-order.md)。T20 的 Agent24 CLI 接线、T21/T22 基础 UI、T01 高层契约和 C 段四仓链路尚未完成，整体 E-M1 不记通过。下文早期组合记录只描述对应提交当时的状态。
 
 ## 工作方式
 
@@ -84,6 +84,8 @@ T10/T11 需验证已有 `idoris-local`/`idoris-any` 设计与 `X-iDoris-Privacy`
 
 T14 需为 Agent24 既有 `version/intent/thread_id/reply_to/topic/payload/expires_at` 信封定义逐字段映射。T15～T17 的执行状态归 Agent24；Hyphae daemon 只负责接收、投递状态和传输诊断，不能另起一套任务执行器。T06 仅修历史存储缺陷，不新增群组协作功能。
 
+T12 的真实外部 OS 样例已选 [Sin90](../cooperation/Sin90.md)，固定 `a61ab99443efe91432487000625dfce437660c85`。已在 Agent24 `7009294` 与固定 Sin90 基线运行现有真实挂载黑盒测试，两个独立选定测试各运行 1 项并通过，覆盖安装后重启挂载、API 代理、事件转发、一个 actor 权限样例，以及已授予 memory/approval/scheduler 的实际往返；完整证据见协作文档。停用/重连、版本及摘要拒绝、能力名称与 Nostr 授权映射仍待 T01 和对应仓库落实；T12/T13 保持 WAITING。
+
 ### 派发批次
 
 1. 当前：上游迁移与测试基础、T02～T05 存储/重试修复、T20 的 Hyphae CLI 接口，先验收 A 段本仓能力；Agent24 CLI 接线交协作文档推进。
@@ -139,7 +141,7 @@ T19 必交矩阵：正常语音链路、未授权发送者、能力越权、审�
 - `luna_integrations`：已完成 Agent24/AgentEar/iDoris 只读核查，正式 Rust 入口和接口缺口已纳入 T10～T17。
 - `luna_nostr_update`：上游依赖更新见 [PR #40](https://github.com/iDoris-ai/Hyphae/pull/40)；T03 见 [PR #43](https://github.com/iDoris-ai/Hyphae/pull/43)，T04a 重试结果事务见 [PR #48](https://github.com/iDoris-ai/Hyphae/pull/48)。当前转入独立工作树修复 T05 的重试历史明文与加密标记。
 - `luna_relay_migration`：维护中的 khatru relay 与部署脚本见 [PR #42](https://github.com/iDoris-ai/Hyphae/pull/42)，身份/联系人 JSON 见 [PR #45](https://github.com/iDoris-ai/Hyphae/pull/45)，T06 见 [PR #46](https://github.com/iDoris-ai/Hyphae/pull/46)；真实 CLI/relay 集成夹具见 [PR #47](https://github.com/iDoris-ai/Hyphae/pull/47)，双向验收已通过。当前转入独立 relay-query 工作树实现真实 EOSE、超时与断线的共用查询模块。
-- `luna_upstream_ci`：测试后自动提依赖 PR 的配置见 [PR #44](https://github.com/iDoris-ai/Hyphae/pull/44)，已通过 GitHub 全量、构建、实际工作流脚本回归与 core race 检查；当前转入 `Hyphae-cli-relays` 做 relay 配置与入口接线。定时任务尚未上线，需配置合入默认分支并确认 Actions 创建 PR 权限。
+- `luna_upstream_ci`：测试后自动提依赖 PR 的配置见 [PR #44](https://github.com/iDoris-ai/Hyphae/pull/44)，已通过 GitHub 全量、构建、实际工作流脚本回归与 core race 检查；当前转入 `Hyphae-cli-relays` 做 relay 配置与入口接线。配置已合入默认分支且工作流 active，首次手动线上扫描成功（依赖无变化、publish 跳过）；自动创建 PR 权限开关仍关闭，真实发布闭环尚未验收，详见 [维护约定](../upstream-maintenance.md)。
 - 本轮不修改其他仓库的生产代码；对应仓库的协作约定见 [PR #41](https://github.com/iDoris-ai/Hyphae/pull/41)。设计和验收材料由主代理维护。
 
 ### T02 验收记录
