@@ -84,8 +84,8 @@ func TestEncryptDecrypt_WrongKey(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestEncryptDeterministicWithCustomNonce(t *testing.T) {
-	// Just verify encryption works and produces different outputs for same plaintext
+func TestEncryptMessageUsesRandomNonce(t *testing.T) {
+	// Encrypting the same plaintext twice uses fresh random nonces.
 	aliceSK := nostr.Generate()
 	bobPK := nostr.Generate().Public()
 
