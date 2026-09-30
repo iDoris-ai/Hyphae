@@ -73,6 +73,15 @@ Hyphae main 固定 `e753e6f5ced27a46a2a6befd20c49c5d4c8d6080`，已合并 #37～
 
 2026-09-30：用户先要求停止原 20 分钟扫描，已停用；随后授权按 30 分钟或一小时检查，选择复用现有 monitor 改为 30 分钟。检查不取代开发：每轮同时评估可独立推进的里程碑任务。有效批准、最新 head CI 和前置满足后按 SHA 正常合并；不自批、不绕过保护、不合并 integration 汇总分支。
 
+### 当日后续交付与验收
+
+- [#93](https://github.com/iDoris-ai/Hyphae/pull/93)、[#67](https://github.com/iDoris-ai/Hyphae/pull/67)、[#66](https://github.com/iDoris-ai/Hyphae/pull/66)、[#97](https://github.com/iDoris-ai/Hyphae/pull/97) 已按最新有效批准、通过的 CI 和绑定 head SHA 正常合并。固定 main 为 `1948aadc551e360176711f9c50172ed6edccd253`，其 [Linux/macOS CI](https://github.com/iDoris-ai/Hyphae/actions/runs/36729070274) 通过。
+- Luna 在该固定 main 的独立 worktree、Go 1.27.1、临时 HOME 下通过全量默认与 integration 测试、vet、build 和 CLI smoke。三个真实 relay 测试都实际执行；125 条积压完整导入，重启后新消息效果为零；空统计四项为零。`test.sh` 只提示 E2E 入口，真实 relay 证据来自 integration 测试。
+- 固定 macOS arm64 接线二进制 SHA-256 为 `a7bb4a83b5d6be0a939a4cd92a853a2672f97012c48d704a9a3a718b9e6d806b`；未安装生产二进制。Hyphae 侧 CLI 收口通过，Agent24 CLI/UI 及四仓闭环仍待对应仓库验收。
+- Luna 新交付 [#99](https://github.com/iDoris-ai/Hyphae/pull/99) `1f16d3ea`：32 个声明生命周期共享样例；[#100](https://github.com/iDoris-ai/Hyphae/pull/100) `f73ac3d0`：64 个非执行事件外层共享样例。两项仅测试/文档，本地全量、专项 race、根代理独立复验及双平台 CI 通过，仍待外部审核。
+- #91/#96/#99/#100 在固定 main 的临时 detached worktree 组合后，四套 Go 参考测试共 217 个样例通过 race 验收；未推送组合分支。该证据仅证明 Go 参考测试共存，不代表跨语言、生产执行入口或 T01-E/T19 通过。
+- #97 的已审核合并版本已安装到现有 monitor，9 个 Python 回归测试及真实 scan-only 验证通过；当前 main CI 与 SHA 对应正确。继续使用同一个 1800 秒调度，不创建第二个计时器。
+
 ## 历史记录：2026-09-10
 
 以下保留当日记录，不代表当前 PR、分支或生态里程碑状态。
