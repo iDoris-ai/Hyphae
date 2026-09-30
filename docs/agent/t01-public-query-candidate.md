@@ -74,7 +74,7 @@ payload 按 outcome 区分：
 | ok | outcome=`ok`、scope、declaration_event、declaration_issued_at、declaration_expires_at、data | 无 | error 及其他全部 |
 | error | outcome=`error`、error | 无 | scope、declaration_*、data 及其他全部 |
 
-ok 的 scope 必须与原查询一致；两个声明时间均为非负安全整数，满足上述声明生命周期及期限关系，declaration_event 为小写 hex。data 的封闭分支为：profile 查询返回完整 upsert profile；capabilities 返回 `{capabilities:[descriptor...]}`；capability 返回一个精确匹配原 id/version 的 descriptor。数据来自生成快照时的 active 声明；不得从 inactive 声明返回能力。
+ok 的 scope 必须与原查询一致；两个声明时间均为非负安全整数，满足上述声明生命周期及期限关系，declaration_event 为小写 hex。data 的封闭分支为：profile 查询的 data 就是 upsert 分支中的 profile 对象 `{mode,name,...}`，不包 action/profile 外壳；capabilities 返回 `{capabilities:[descriptor...]}`；capability 返回一个精确匹配原 id/version 的 descriptor。数据来自生成快照时的 active 声明；不得从 inactive 声明返回能力。
 
 声明事件引用是对端报告的来源，不能单独证明该声明已被查询方获取、完整验签或在网络中仍最新。响应可以迟到；不因当前时间超过 declaration_expires_at 丢掉历史查询快照，但展示为历史数据，不能凭它启动已失效的能力。真正开跑仍核对当前声明、许可和版本。
 
