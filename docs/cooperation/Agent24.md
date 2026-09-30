@@ -103,3 +103,9 @@ Agent24 可按下表准备独立小 PR，由对应仓库推进并回填实现链
 - 已有入口：`pnpm --filter @agent24/nostr-bridge test`、对应 `typecheck`；Rust CLI 新入口和真实二进制联调测试需在本任务补充。
 
 待确认：CLI 命令名、安装包分发方式、版本能力声明格式、服务端接口是否继续 subprocess 或增加本地 socket。初期继续复用 subprocess + JSON，不要求提前改通信架构。
+
+## T01 字段与恢复方案评审
+
+[信封候选](../agent/t01-envelope-candidate.md) 逐字段说明 F4 兼容展示、查询/执行/回执分流和事件关联；[授权与恢复候选](../agent/t01-authorization-recovery-candidate.md) 给出审批、run 登记、状态修订与崩溃边界。两份都未冻结，不据此启用新生产协议。
+
+Agent24 后续先反馈字段可实现性，特别是持久化幂等 run_id、执行器查询、结果与回执 outbox 的事务边界，以及终态 revision 冲突处理；缺口不能靠收到消息就重新运行来弥补。T01-B/D 子 schema 与共享样例收口后，再提交消费端实现和真实故障注入证据。普通消息与旧 F4 的 zero-run 分流仍是前置要求。
