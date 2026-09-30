@@ -6,9 +6,11 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"fiatjaf.com/nostr"
@@ -16,6 +18,7 @@ import (
 	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/pkg/crypto"
+	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/klauspost/compress/zstd"
 	"github.com/urfave/cli/v3"
 )
@@ -27,6 +30,30 @@ const (
 	AgentTag     = "agent"
 	EncryptTag   = "encrypted"
 )
+
+type agentMsgRelayResult struct {
+	URL   string `json:"url"`
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
+type agentMsgResult struct {
+	From              string                `json:"from"`
+	To                string                `json:"to"`
+	Encrypted         bool                  `json:"encrypted"`
+	EventID           string                `json:"event_id"`
+	Relays            []agentMsgRelayResult `json:"relays"`
+	PublishedTo       int                   `json:"published_to"`
+	RelayCount        int                   `json:"relay_count"`
+	QueuedForRetry    bool                  `json:"queued_for_retry"`
+	HistoryStored     bool                  `json:"history_stored"`
+	Superseded        bool                  `json:"superseded"`
+	QueueStateUnknown bool                  `json:"queue_state_unknown"`
+	AuditError        string                `json:"audit_error,omitempty"`
+}
+
+type agentMsgRelayPublisher func(context.Context, []string, nostr.Event, time.Duration) ([]agentMsgRelayResult, int)
+type agentMsgEnqueuer func(*types.Outbox, *nostr.Event, string, []string) (types.OutboxEntry, error)
 
 // CompressText compresses text using zstd
 func CompressText(text string) (string, error) {
@@ -117,6 +144,10 @@ Example: hyphae agent msg --from alice --to bob --content "Hello!"`,
 		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
+		to := c.String("to")
+		if strings.TrimSpace(to) == "" {
+			return common.NewExitError(common.ErrCodeUser, fmt.Errorf("recipient is required"))
+		}
 		content := c.String("content")
 		if content == "" {
 			return common.NewExitError(common.ErrCodeUser, fmt.Errorf("message content is required"))
@@ -132,7 +163,7 @@ Example: hyphae agent msg --from alice --to bob --content "Hello!"`,
 			return common.NewExitError(common.ErrCodeUser, fmt.Errorf("sender not found: %w", err))
 		}
 
-		recipientNpub, err := identity.ResolveRecipient(ks, c.String("to"))
+		recipientNpub, err := identity.ResolveRecipient(ks, to)
 		if err != nil {
 			return common.NewExitError(common.ErrCodeUser, err)
 		}
@@ -158,7 +189,10 @@ Example: hyphae agent msg --from alice --to bob --content "Hello!"`,
 			isEncrypted = true
 		}
 
-		compressed, _ := CompressText(messageContent)
+		compressed, err := CompressText(messageContent)
+		if err != nil {
+			return fmt.Errorf("failed to compress message: %w", err)
+		}
 		createdAt := nostr.Now()
 		dTag, err := deriveMessageDTag(compressed, createdAt)
 		if err != nil {
@@ -199,95 +233,151 @@ Example: hyphae agent msg --from alice --to bob --content "Hello!"`,
 			return err
 		}
 		jsonMode := common.JSONMode(c)
-
-		// Publish with detailed error output
-		type relayResult struct {
-			URL   string `json:"url"`
-			OK    bool   `json:"ok"`
-			Error string `json:"error,omitempty"`
-		}
-		results := make([]relayResult, 0, len(relays))
-		success := 0
-		for _, url := range relays {
-			relay, err := nostr.RelayConnect(ctx, url, nostr.RelayOptions{})
-			if err != nil {
-				if !jsonMode {
-					fmt.Printf("   ❌ %s: connect failed: %v\n", url, err)
-				}
-				results = append(results, relayResult{URL: url, OK: false, Error: fmt.Sprintf("connect failed: %v", err)})
-				continue
-			}
-
-			pubCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			err = relay.Publish(pubCtx, *event)
-			cancel()
-			relay.Close()
-
-			if err != nil {
-				if !jsonMode {
-					fmt.Printf("   ❌ %s: publish failed: %v\n", url, err)
-				}
-				results = append(results, relayResult{URL: url, OK: false, Error: fmt.Sprintf("publish failed: %v", err)})
-			} else {
-				if !jsonMode {
-					fmt.Printf("   ✅ %s\n", url)
-				}
-				results = append(results, relayResult{URL: url, OK: true})
-				success++
-			}
-		}
-
-		// Store in local history and outbox
-		queuedForRetry := false
-		if success > 0 {
-			StoreOutgoingMessage(event, recipientNpub, content, isEncrypted)
-			if err := audit.LogAction(sender.Nickname, audit.ActionMessageSent, map[string]any{
-				"to": recipientNpub, "encrypted": isEncrypted, "event_id": event.ID.Hex(),
-			}); err != nil {
-				fmt.Fprintf(os.Stderr, "⚠️  audit log failed: %v\n", err)
-			}
-			// Remove from outbox if it was there. AddToOutbox stores IDs
-			// hex-encoded (see its doc comment), so the lookup key here
-			// must match that encoding, not the raw event.ID bytes.
-			ob, _ := LoadOutbox()
-			RemoveFromOutbox(ob, hex.EncodeToString(event.ID[:]))
-		} else {
-			// Add to outbox for retry
-			ob, _ := LoadOutbox()
-			AddToOutbox(ob, event, recipientNpub, relays)
-			queuedForRetry = true
-			if !jsonMode {
+		result, sendErr := sendQueuedAgentMessage(ctx, event, recipientNpub, content, sender.Nickname, to, isEncrypted, relays, 5*time.Second, StoreOutgoingMessage, enqueueOutboxEntry, publishAgentMessageRelays)
+		if !jsonMode {
+			printAgentMessageRelays(result.Relays)
+			if result.QueuedForRetry {
 				fmt.Println("   📝 Added to outbox for retry")
 			}
 		}
+		if result.PublishedTo > 0 {
+			if err := audit.LogAction(sender.Nickname, audit.ActionMessageSent, map[string]any{
+				"to": recipientNpub, "encrypted": isEncrypted, "event_id": event.ID.Hex(),
+			}); err != nil {
+				result.AuditError = err.Error()
+				if sendErr != nil {
+					sendErr = errors.Join(sendErr, fmt.Errorf("audit log failed: %w", err))
+				} else if !jsonMode {
+					fmt.Fprintf(os.Stderr, "⚠️  audit log failed: %v\n", err)
+				}
+			}
+		}
+		if sendErr != nil {
+			queueState := "not queued"
+			switch {
+			case result.QueueStateUnknown:
+				queueState = "queue state unknown"
+			case result.Superseded:
+				queueState = "queue entry superseded"
+			case result.QueuedForRetry:
+				queueState = "queued for retry"
+			}
+			sendErr = fmt.Errorf("event %s; relay ACKs %d/%d; %s: %w", result.EventID, result.PublishedTo, result.RelayCount, queueState, sendErr)
+			return common.NewExitErrorWithData(common.ErrCodeOther, sendErr, result)
+		}
 
-		isEncryptedFinal := isEncrypted
-		common.Emit(jsonMode, map[string]any{
-			"from":             sender.Nickname,
-			"to":               c.String("to"),
-			"encrypted":        isEncryptedFinal,
-			"event_id":         event.ID.Hex(),
-			"relays":           results,
-			"published_to":     success,
-			"relay_count":      len(relays),
-			"queued_for_retry": queuedForRetry,
-		}, func() {
+		common.Emit(jsonMode, result, func() {
 			encryptionStatus := "plaintext"
-			if isEncryptedFinal {
+			if isEncrypted {
 				encryptionStatus = "🔒 NIP-44 encrypted"
 			}
-			fmt.Printf("📤 Message from '%s' to '%s' (%s)\n", sender.Nickname, c.String("to"), encryptionStatus)
-			fmt.Printf("   Published to %d/%d relays\n", success, len(relays))
-
-			if success == 0 {
+			fmt.Printf("📤 Message from '%s' to '%s' (%s)\n", sender.Nickname, to, encryptionStatus)
+			fmt.Printf("   Published to %d/%d relays\n", result.PublishedTo, result.RelayCount)
+			if result.PublishedTo == 0 {
 				fmt.Println("   ⚠️  Warning: Message not published to any relay")
 			} else {
-				fmt.Printf("   💾 Stored in local history\n")
+				fmt.Println("   💾 Stored in local history")
 			}
 		})
-
 		return nil
 	},
+}
+
+func sendQueuedAgentMessage(
+	ctx context.Context,
+	event *nostr.Event,
+	recipientNpub, plaintext, sender, recipient string,
+	isEncrypted bool,
+	relays []string,
+	dialTimeout time.Duration,
+	store outgoingMessageStore,
+	enqueue agentMsgEnqueuer,
+	publish agentMsgRelayPublisher,
+) (agentMsgResult, error) {
+	result := agentMsgResult{
+		From: sender, To: recipient, Encrypted: isEncrypted, EventID: event.ID.Hex(),
+		Relays: make([]agentMsgRelayResult, 0, len(relays)), RelayCount: len(relays),
+	}
+	if err := store(event, recipientNpub, plaintext, isEncrypted); err != nil {
+		return result, fmt.Errorf("store local message history: %w", err)
+	}
+	result.HistoryStored = true
+
+	entry, err := enqueue(nil, event, recipientNpub, relays)
+	if err != nil {
+		var uncertain *outboxCommitUncertainError
+		result.QueueStateUnknown = errors.As(err, &uncertain)
+		return result, fmt.Errorf("enqueue message before publishing: %w", err)
+	}
+
+	relayResults := make([]agentMsgRelayResult, 0, len(relays))
+	var publishedTo int
+	sendResult, err := attemptSend(ctx, nil, entry, nil, dialTimeout,
+		func(ctx context.Context, targets []string, queued nostr.Event, timeout time.Duration) bool {
+			relayResults, publishedTo = publish(ctx, targets, queued, timeout)
+			return publishedTo > 0
+		}, func(event *nostr.Event, _ string, _ string, _ bool) error {
+			return store(event, recipientNpub, plaintext, isEncrypted)
+		})
+	result.Relays = relayResults
+	result.PublishedTo = publishedTo
+	result.QueuedForRetry = sendResult.Queued
+	result.Superseded = sendResult.Superseded
+	result.QueueStateUnknown = sendResult.QueueStateUnknown
+	// History was stored before enqueue and therefore remains present even if
+	// the post-ACK upsert reports an error.
+	result.HistoryStored = true
+
+	if err != nil {
+		if !result.Superseded && !result.QueueStateUnknown && !result.QueuedForRetry {
+			result.QueuedForRetry, result.Superseded, result.QueueStateUnknown = inspectAttemptQueue(entry)
+		}
+		return result, fmt.Errorf("send queued message: %w", err)
+	}
+	if sendResult.Superseded {
+		return result, errors.New("queued message was removed or replaced while publishing")
+	}
+	if sendResult.QueueStateUnknown {
+		return result, errors.New("outbox state is unknown after the publish outcome")
+	}
+	return result, nil
+}
+
+func publishAgentMessageRelays(ctx context.Context, targets []string, event nostr.Event, timeout time.Duration) ([]agentMsgRelayResult, int) {
+	results := make([]agentMsgRelayResult, 0, len(targets))
+	success := 0
+	for _, url := range targets {
+		pubCtx, cancel := context.WithTimeout(ctx, timeout)
+		relay, err := nostr.RelayConnect(pubCtx, url, nostr.RelayOptions{})
+		if err != nil {
+			if relay != nil {
+				relay.Close()
+			}
+			cancel()
+			results = append(results, agentMsgRelayResult{URL: url, Error: fmt.Sprintf("connect failed: %v", err)})
+			continue
+		}
+		err = relay.Publish(pubCtx, event)
+		relay.Close()
+		cancel()
+		if err != nil {
+			results = append(results, agentMsgRelayResult{URL: url, Error: fmt.Sprintf("publish failed: %v", err)})
+			continue
+		}
+		results = append(results, agentMsgRelayResult{URL: url, OK: true})
+		success++
+	}
+	return results, success
+}
+
+func printAgentMessageRelays(results []agentMsgRelayResult) {
+	for _, result := range results {
+		if result.OK {
+			fmt.Printf("   ✅ %s\n", result.URL)
+		} else {
+			fmt.Printf("   ❌ %s: %s\n", result.URL, result.Error)
+		}
+	}
 }
 
 // AgentInboxCmd - Show inbox

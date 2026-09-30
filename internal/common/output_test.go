@@ -2,7 +2,10 @@ package common
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -107,6 +110,38 @@ func TestEmitErrorExitErrorUsesWrappedCode(t *testing.T) {
 	got := EmitError(true, NewExitError(ErrCodeNetwork, errors.New("connect failed")))
 	if got != ExitNetworkError {
 		t.Errorf("EmitError with network ExitError = %d, want %d", got, ExitNetworkError)
+	}
+}
+
+func TestEmitErrorIncludesControlledData(t *testing.T) {
+	readEnd, writeEnd, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalStderr := os.Stderr
+	defer func() { os.Stderr = originalStderr }()
+	os.Stderr = writeEnd
+	code := EmitError(true, NewExitErrorWithData(ErrCodeOther, errors.New("bookkeeping failed"), map[string]any{
+		"event_id": "abc123", "published_to": 1,
+	}))
+	if err := writeEnd.Close(); err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = originalStderr
+	if code != ExitOtherError {
+		t.Fatalf("EmitError returned %d, want %d", code, ExitOtherError)
+	}
+	encoded, err := io.ReadAll(readEnd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Result
+	if err := json.Unmarshal(encoded, &got); err != nil {
+		t.Fatalf("EmitError wrote invalid JSON: %s: %v", encoded, err)
+	}
+	data, ok := got.Data.(map[string]any)
+	if !ok || data["event_id"] != "abc123" || data["published_to"] != float64(1) {
+		t.Fatalf("EmitError data = %#v, want event_id and published_to", got.Data)
 	}
 }
 
