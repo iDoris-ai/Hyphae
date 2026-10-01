@@ -1,6 +1,8 @@
 # E-M1 固定制品交付与独立联调
 
-11:40 UTC 更新：执行权限已解除，原 lock 的真实 macOS arm64 CLI/relay 第一轮独立复测 exit 0，原始日志见 [progress](progress.md)。构建工具 R1 已发布 [#102](https://github.com/iDoris-ai/Hyphae/pull/102) 26bfe6ab；独立 runner/R2a/R2b 正逐项整理，尚未完成真实 Actions 和下载验收，R3 不提前发布。下列 09:01/09:10 段落保留历史证据。
+收尾快照（2026-10-01 14:38 UTC）：#119 head `3a837d1a7ee8c3b75a589e6556bab5f6fe32f564` 已于 14:32:14Z 独立 squash 合并为 `419d0e3b22ce4dbae28dcc7a6320ed63b519deee`；#118 head `94532e7701ed87e0137ae6ac4a48e62cb4a2304f` 于 14:32:54Z 独立 squash 合并为当前 main `884424167ef84bf1aaf1143df8486294f5c75425`。两项均获 clestons 对最新 head 的外部批准、全部检查通过，核对实际差异后按 SHA 正常合并。当前 main 的 [CI 36877200986](https://github.com/iDoris-ai/Hyphae/actions/runs/36877200986) SUCCESS；#119 合并版本的制品 [Actions 36877114664](https://github.com/iDoris-ai/Hyphae/actions/runs/36877114664) SUCCESS。本会话只剩交接文档 [#120](https://github.com/iDoris-ai/Hyphae/pull/120) 待外部评审；不等待新评审，不启动 R3 或其他开发，交接后按用户要求暂停 Goal。E-M1 尚未完成，定时扫描关闭。下方 14:23 状态为合并前历史快照。
+
+14:23 UTC 当前状态：R1 #102、R2a #106 与 runner #105 已合入 final main `57494422d17051dc5440d2dbed9411df8acd5536`，main CI `36871057418` SUCCESS。R2b [#119](https://github.com/iDoris-ai/Hyphae/pull/119) head `3a837d1a7ee8c3b75a589e6556bab5f6fe32f564` 的普通 CI `36875227363`（macOS/Ubuntu/ci-ok）与 artifact run `36875227369`（lock校验、Linux/macOS构建及制品执行）均 SUCCESS；当前 review required、尚无 review。此前 head `0114d622` 的普通 CI `36873124154` 在 Ubuntu `TestDaemonParentCancellationReleasesHomeLock` 3.01s timeout/ci-ok FAIL、macOS成功；artifact run `36873124352` 三 job 成功。原因是测试主动轮询抢 daemon lock 与被测 daemon 的锁启动竞争。test-only修复改为等待真实 relay REQ readiness 后单次 probe，focused 50次、daemon race、全 Go 测试本地均 exit 0；原失败与修复日志见绝对路径 `/Users/jason/Dev/iDoris/Hyphae/build/agent-handoff/20261001/r2b-main/ci-test-race-fix/`。R3未开始、无Release。旧“尚未发 PR”段落是历史快照。
 
 2026-10-01 09:01 UTC。状态：R1/R2a/R2b 本地工具/编排验收通过；固定 Go 1.26.4 两平台真实制品已构建并经根代理生产 lock/归档/编译信息校验，本机加密身份 smoke 通过。真实下载、Actions、Linux 实机及 relay 联调未验收；R3 待真实前置验收。关联 [FU-1](followups.md)、[T20](ecosystem-tasks.md) 与 [Agent24 协作](../cooperation/Agent24.md)。这项交付补齐可下载的 CLI/relay，不修改 E-M1 的执行协议或四仓验收出口。
 
@@ -74,8 +76,8 @@ R2 通过后才发布固定 tag 的 Release。发布前核对 tag 指向完整�
 
 FU-1 的安装验收还需覆盖 install.sh 已识别的 darwin/linux × amd64/arm64 全部平台，提供缺失的归档，真实执行下载安装与 smoke，并检查 Release latest 的选择。当前第一轮两个平台只解除联调制品缺口，不能直接关闭 FU-1。若要改安装器的校验或 sudo 行为，另外提独立小 PR。
 
-## 当前边界与后续
+## 历史边界快照（早期）
 
-本会话尚未发布新分支、PR 或 Release；相关 GitHub 写操作被工具执行审批层拒绝。制品请求评论正文已保存，尚未送达。恢复可用的发布路径后按 R1→R2→R3 分别审查和交付，不创建汇总 PR。
+以下文字记录本地首次整理时的状态；其中“尚未发布 PR”及工具审批受阻已过时，不代表当前状态。R1/R2a/runner 已合入，R2b #119 正等待真实 Actions 双平台 job 完成；R3 仍须等待这些前置验收。
 
 第一轮复测通过后再推进 Agent24 COMM-3 与 COMM-4a 的第二轮托管、history 可见、故障恢复及 zero-run 验收。基础 UI、T01-E、模型/模块/语音和四仓闭环继续按原门槛验收。
