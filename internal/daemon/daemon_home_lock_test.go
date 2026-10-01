@@ -10,13 +10,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/internal/messaging"
@@ -218,36 +222,68 @@ func TestDaemonParentCancellationReleasesHomeLock(t *testing.T) {
 	messaging.ResetStoreForTest()
 	t.Cleanup(messaging.ResetStoreForTest)
 
+	reqReceived := make(chan struct{}, 1)
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+		_, payload, err := conn.ReadMessage()
+		if err != nil || !bytes.HasPrefix(payload, []byte(`["REQ"`)) {
+			return
+		}
+		select {
+		case reqReceived <- struct{}{}:
+		default:
+		}
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(server.Close)
+	relayURL := "ws" + strings.TrimPrefix(server.URL, "http")
+
 	ctx, cancel := context.WithCancel(context.Background())
 	finished := make(chan error, 1)
 	go func() {
 		app := &cli.Command{Name: "hyphae", Commands: []*cli.Command{DaemonCmd}}
-		finished <- app.Run(ctx, []string{"hyphae", "daemon", "--relay", "ws://127.0.0.1:1", "--notify=false"})
+		finished <- app.Run(ctx, []string{"hyphae", "daemon", "--relay", relayURL, "--notify=false"})
 	}()
-	deadline := time.After(3 * time.Second)
-	for {
-		lock, err := acquireDaemonHomeLock()
-		if errors.Is(err, errDaemonHomeLocked) {
-			break
-		}
-		if err == nil {
-			_ = lock.Close()
+	joined := false
+	t.Cleanup(func() {
+		cancel()
+		if joined {
+			return
 		}
 		select {
-		case <-deadline:
-			cancel()
-			t.Fatal("daemon action did not acquire the home lock")
-		case <-time.After(10 * time.Millisecond):
+		case <-finished:
+			joined = true
+		case <-time.After(3 * time.Second):
+			t.Error("daemon goroutine did not stop during cleanup")
 		}
+	})
+	select {
+	case <-reqReceived:
+	case <-time.After(5 * time.Second):
+		t.Fatal("daemon did not send a relay query after startup")
 	}
+	lock, err := acquireDaemonHomeLock()
+	require.ErrorIs(t, err, errDaemonHomeLocked, "daemon must hold its home lock after the relay query starts")
+	assert.Nil(t, lock)
 	cancel()
 	select {
 	case err := <-finished:
+		joined = true
 		require.NoError(t, err)
 	case <-time.After(3 * time.Second):
 		t.Fatal("daemon did not return after parent context cancellation")
 	}
-	lock, err := acquireDaemonHomeLock()
+	lock, err = acquireDaemonHomeLock()
 	require.NoError(t, err)
 	require.NoError(t, lock.Close())
 }
