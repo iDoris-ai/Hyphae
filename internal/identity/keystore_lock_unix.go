@@ -17,11 +17,18 @@ func withKeyStoreLock(fn func() error) error {
 	if err != nil {
 		return err
 	}
-	lock, err := os.OpenFile(keyStoreLockPath(path), os.O_CREATE|os.O_RDWR, 0600)
+	lock, err := os.OpenFile(keyStoreLockPath(path), os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0600)
 	if err != nil {
 		return fmt.Errorf("open keystore lock: %w", err)
 	}
 	defer lock.Close()
+	info, err := lock.Stat()
+	if err != nil {
+		return fmt.Errorf("inspect keystore lock: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("keystore lock path is not a regular file")
+	}
 	if err := lock.Chmod(0600); err != nil {
 		return fmt.Errorf("protect keystore lock: %w", err)
 	}
