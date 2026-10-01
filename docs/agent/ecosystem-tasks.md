@@ -1,8 +1,8 @@
 # 生态里程碑任务与 Luna 分工
 
-更新：2026-09-30。范围依据 [生态里程碑草案](ecosystem-roadmap.md)。保留历史 M1～M5 编号；本表用 E-M 编号关联旧任务，不覆盖旧台账。
+更新：2026-10-01。范围依据 [生态里程碑草案](ecosystem-roadmap.md)。保留历史 M1～M5 编号；本表用 E-M 编号关联旧任务，不覆盖旧台账。
 
-**当前出口：Hyphae 侧 A 段 CLI 在固定 main `1948aadc551e360176711f9c50172ed6edccd253` 验收通过，见 [最终验收记录](em1-cli-acceptance.md)。** 2026-09-30 已合并 #37～#67、#68～#84、#93/#97；该 main 的双平台 CI、隔离 HOME 的全量默认/integration 测试、vet、构建与 smoke 均通过。当前进度见 [PR 依赖表](em1-pr-order.md)。T20 的 Agent24 CLI 接线、T21/T22 基础 UI、T01 高层契约和 C 段四仓链路尚未完成，整体 E-M1 不记通过。下文早期组合记录只描述对应提交当时的状态。
+**当前出口：Hyphae 侧 CLI 在固定 main `a4aa606eb81d5c040d94c51cdf94553e646d8674` 验收通过，见 [最终验收记录](em1-cli-acceptance.md)。** #37～#100 的已有任务已合并；该固定 main 的双平台 CI、隔离 HOME 的全量默认/integration 测试、vet、构建与 smoke 均通过。当前进度见 [PR 依赖表](em1-pr-order.md)。T20 的 Agent24 CLI 接线、T21/T22 基础 UI、T01 高层契约和 C 段四仓链路尚未完成，整体 E-M1 不记通过。2026-10-01 正在补齐 [CLI 联调缺口](em1-comm-followups.md) G7/G8/G9；其测试和批准不能沿用基线的验收。下文早期组合记录只描述对应提交当时的状态。
 
 ## 工作方式
 

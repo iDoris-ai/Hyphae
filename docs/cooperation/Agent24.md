@@ -1,5 +1,17 @@
 # Agent24 × Hyphae
 
+## 2026-10-01 接线更新
+
+Hyphae 当前固定 main 为 `a4aa606eb81d5c040d94c51cdf94553e646d8674`。[Agent24 COMM-0 #612](https://github.com/iDoris-ai/Agent24/pull/612) 已合并，采用统一 Rust 通信服务和 `/api/v1/comm/*`，CLI/UI 共用配置与状态；[COMM-1a #614](https://github.com/iDoris-ai/Agent24/pull/614) 已在 `77655f48` 合并，最终双平台 Rust CI 全绿。其 runner 和环境扫描修复已进入 main；CI 尚未构建锁定版本 Hyphae，真实二进制测试仍可跳过，这部分交付仍待补齐。
+
+Hyphae 已核验 [运行反馈](https://github.com/iDoris-ai/Agent24/pull/601#issuecomment-5923235533)。G7 会话历史 JSON、G9 文件正文已本地实现并通过专项测试，G8 keystore 完整并发写保护及专项/race 回归已通过；尚未发布，具体契约与验收见 [联调缺口](../agent/em1-comm-followups.md)。daemon 互斥已本地实现并通过专项/race，特殊锁路径正在补修；只读口令校验已派发，补收状态契约正在设计。不要提前调用尚未发布的命令。
+
+当前 Agent24 main `c9f5f9cab1c208b09f7ebf9d13a3e1481adcaf12` 的启动入口已默认停止 F4b 入站执行分派；直接 `InboundBridge.handle` 仍保留旧执行逻辑。联合验收须从正式入口验证普通消息、answer、未知版本的 runs/模型/模块计数为零，不能仅根据配置或源码判断通过。
+
+Agent24 提案 [#601](https://github.com/iDoris-ai/Agent24/pull/601) 在 `67ddbce` 已获批准和全绿 CI；用户已授权合并，本会话工具拒绝了合并调用。勘误 `9bfb0df` 尚在独立本地 worktree，待 #601 合入后另提文档 PR。Hyphae 接口变化合入后须更新 Agent24 的源码/构建配方/hash lock，再固定联合测试版本。
+
+以下是 2026-09-30 的固定版本核查与约定，旧待审描述不代表当前队列。
+
 状态：Hyphae 侧协作提案，待 Agent24 确认。2026-09-30 固定的远端 main 审阅与隔离验证基线：Agent24 `7009294834b2251beac438f3190aae073742c5dd`。本地用户 checkout 未更新；源码核查与实际模块挂载在独立 detached worktree 完成。
 
 ## 已有接口
