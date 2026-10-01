@@ -313,31 +313,7 @@ Identities are stored in ~/.hyphae/ with 600 permissions.`,
 					if err != nil {
 						return fmt.Errorf("failed to set password: %w", err)
 					}
-					// Encrypt all existing nsecs
-					saltB64, verificationB64, err := createVerification(pw)
-					if err != nil {
-						return fmt.Errorf("failed to setup encryption: %w", err)
-					}
-					saltBytes, err := mustDecodeB64(saltB64)
-					if err != nil {
-						return fmt.Errorf("failed to decode salt: %w", err)
-					}
-					key, err := deriveMasterKey(pw, saltBytes)
-					if err != nil {
-						return err
-					}
-					for nickname, identity := range ks.Identities {
-						encrypted, err := encryptWithKey(identity.Nsec, key)
-						if err != nil {
-							return fmt.Errorf("failed to encrypt nsec for %s: %w", nickname, err)
-						}
-						identity.Nsec = encrypted
-					}
-					ks.Encrypted = true
-					ks.Salt = saltB64
-					ks.Verification = verificationB64
-					ks.MasterKey = &key
-					if err := SaveKeyStore(ks); err != nil {
+					if err := EncryptKeyStore(ks, pw); err != nil {
 						return err
 					}
 					fmt.Println("✅ Keystore encrypted successfully")

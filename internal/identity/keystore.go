@@ -2,7 +2,9 @@ package identity
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -131,9 +133,15 @@ func LoadAndUnlockKeyStore() (*types.KeyStore, error) {
 
 // LoadKeyStore loads the keystore from disk
 func LoadKeyStore() (*types.KeyStore, error) {
-	path := GetKeyStorePath()
-	file := filepath.Join(path, KeyStoreFile)
+	return loadKeyStoreFromDisk()
+}
 
+func keyStoreLockPath(directory string) string {
+	return filepath.Join(directory, KeyStoreFile+".lock")
+}
+
+func loadKeyStoreFromDisk() (*types.KeyStore, error) {
+	file := filepath.Join(GetKeyStorePath(), KeyStoreFile)
 	ks := &types.KeyStore{
 		Identities: make(map[string]*types.Identity),
 		Contacts:   make(map[string]*types.Contact),
@@ -146,6 +154,9 @@ func LoadKeyStore() (*types.KeyStore, error) {
 		}
 		return nil, err
 	}
+	ks.StoreExists = true
+	version := sha256.Sum256(data)
+	ks.StoreVersion = hex.EncodeToString(version[:])
 
 	if err := json.Unmarshal(data, ks); err != nil {
 		return nil, fmt.Errorf("failed to parse keystore: %w", err)
@@ -154,34 +165,35 @@ func LoadKeyStore() (*types.KeyStore, error) {
 	return ks, nil
 }
 
-// SaveKeyStore saves the keystore to disk. The write is atomic (temp file + fsync +
-// rename) so a crash never leaves keystore.json truncated or half-written.
-//
-// The temp file gets a unique name via os.CreateTemp rather than a fixed
-// "keystore.json.tmp". A fixed name is not enough: two concurrent writers both
-// open it with O_TRUNC, land on the same inode, and write at independent
-// offsets, so the file that Rename atomically publishes is already spliced
-// garbage — the rename being atomic protects the directory entry, not the
-// bytes. Measured at ~11% of concurrent pairs producing an unparseable
-// keystore (PR #33 review, concurrency round). There is no keystore backup
-// anywhere, so a corrupted one means permanent loss of every private key.
-// internal/messaging/outbox.go's SaveOutbox still has the fixed-name form and
-// is far more exposed (daemon retry tick + every send, both non-interactive) —
-// tracked as FU-2, out of scope here.
+// SaveKeyStore uses compare-and-swap semantics so a caller cannot replace a
+// newer on-disk keystore with a stale snapshot. Writers that need to combine
+// concurrent updates should use a keystore transaction instead.
 func SaveKeyStore(ks *types.KeyStore) error {
+	if ks == nil {
+		return errors.New("keystore is nil")
+	}
+	return withKeyStoreLock(func() error {
+		current, err := loadKeyStoreFromDisk()
+		if err != nil {
+			return err
+		}
+		if current.StoreExists != ks.StoreExists || (current.StoreExists && current.StoreVersion != ks.StoreVersion) {
+			return common.NewExitError(common.ErrCodeWriteConflict, errors.New("keystore changed since it was loaded; reload and retry"))
+		}
+		return saveKeyStoreLocked(ks)
+	})
+}
+
+func saveKeyStoreLocked(ks *types.KeyStore) error {
 	path, err := EnsureKeyStore()
 	if err != nil {
 		return err
 	}
-
 	file := filepath.Join(path, KeyStoreFile)
-
 	data, err := json.MarshalIndent(ks, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal keystore: %w", err)
 	}
-
-	// os.CreateTemp creates with 0600, the mode the keystore requires.
 	f, err := os.CreateTemp(path, KeyStoreFile+".*.tmp")
 	if err != nil {
 		return fmt.Errorf("open temp keystore: %w", err)
@@ -205,8 +217,35 @@ func SaveKeyStore(ks *types.KeyStore) error {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("rename keystore: %w", err)
 	}
-
+	ks.StoreExists = true
+	version := sha256.Sum256(data)
+	ks.StoreVersion = hex.EncodeToString(version[:])
 	return nil
+}
+
+func runKeyStoreTransaction(ks *types.KeyStore, mutate func(*types.KeyStore) error) error {
+	if ks == nil {
+		return errors.New("keystore is nil")
+	}
+	return withKeyStoreLock(func() error {
+		fresh, err := loadKeyStoreFromDisk()
+		if err != nil {
+			return err
+		}
+		if fresh.Encrypted && ks.MasterKey != nil {
+			if ok, _ := verifyMasterKey(fresh.Verification, *ks.MasterKey); ok {
+				fresh.MasterKey = ks.MasterKey
+			}
+		}
+		if err := mutate(fresh); err != nil {
+			return err
+		}
+		if err := saveKeyStoreLocked(fresh); err != nil {
+			return err
+		}
+		*ks = *fresh
+		return nil
+	})
 }
 
 // UnlockKeyStore verifies the password and sets the master key on the keystore
@@ -214,7 +253,14 @@ func UnlockKeyStore(ks *types.KeyStore, password string) error {
 	if !ks.Encrypted {
 		return nil
 	}
-	return unlockKeyStore(ks, password)
+	oldSalt, oldVerification := ks.Salt, ks.Verification
+	if err := unlockKeyStoreMemory(ks, password); err != nil {
+		return err
+	}
+	if _, isLegacy := verifyMasterKey(oldVerification, *ks.MasterKey); isLegacy {
+		upgradeVerificationToken(ks, *ks.MasterKey, oldSalt, oldVerification)
+	}
+	return nil
 }
 
 // requireMasterKey ensures the keystore is unlocked if encrypted
@@ -235,58 +281,55 @@ func CreateIdentity(ks *types.KeyStore, nickname string) (*types.Identity, error
 
 // CreateIdentityWithPassword creates a new identity with optional password encryption
 func CreateIdentityWithPassword(ks *types.KeyStore, nickname, password string) (*types.Identity, error) {
-	if _, exists := ks.Identities[nickname]; exists {
-		return nil, fmt.Errorf("identity '%s' already exists", nickname)
-	}
-
-	// Generate new keypair
-	sk := nostr.Generate()
-	pk := sk.Public()
-
-	nsec := common.EncodeNsec(sk)
-
-	// Handle encryption
-	if password != "" {
-		if !ks.Encrypted {
-			// First encrypted identity: setup keystore encryption
+	var created *types.Identity
+	err := runKeyStoreTransaction(ks, func(fresh *types.KeyStore) error {
+		if _, exists := fresh.Identities[nickname]; exists {
+			return fmt.Errorf("identity '%s' already exists", nickname)
+		}
+		if fresh.Encrypted {
+			if password == "" {
+				return common.NewExitError(common.ErrCodeAuth, errors.New("encrypted keystore requires a password"))
+			}
+			if err := unlockKeyStoreMemory(fresh, password); err != nil {
+				return common.NewExitError(common.ErrCodeAuth, errors.New("failed to unlock keystore"))
+			}
+		} else if password != "" {
+			if len(fresh.Identities) != 0 {
+				return common.NewExitError(common.ErrCodeUser, errors.New("encrypt the existing keystore with 'identity change-password' before creating another identity with a password"))
+			}
 			saltB64, verificationB64, err := createVerification(password)
 			if err != nil {
-				return nil, fmt.Errorf("failed to setup encryption: %w", err)
+				return fmt.Errorf("failed to setup encryption: %w", err)
 			}
-			ks.Encrypted = true
-			ks.Salt = saltB64
-			ks.Verification = verificationB64
-		}
-
-		if err := requireMasterKey(ks); err != nil {
-			// Unlock with the provided password
-			if err := UnlockKeyStore(ks, password); err != nil {
-				return nil, fmt.Errorf("failed to unlock keystore: %w", err)
+			fresh.Encrypted, fresh.Salt, fresh.Verification = true, saltB64, verificationB64
+			salt, err := base64.StdEncoding.DecodeString(saltB64)
+			if err != nil {
+				return fmt.Errorf("invalid salt: %w", err)
 			}
+			key, err := deriveMasterKey(password, salt)
+			if err != nil {
+				return err
+			}
+			fresh.MasterKey = &key
 		}
 
-		encryptedNsec, err := encryptWithKey(nsec, *ks.MasterKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to encrypt nsec: %w", err)
+		sk := nostr.Generate()
+		nsec := common.EncodeNsec(sk)
+		if fresh.Encrypted {
+			encrypted, err := encryptWithKey(nsec, *fresh.MasterKey)
+			if err != nil {
+				return fmt.Errorf("failed to encrypt nsec: %w", err)
+			}
+			nsec = encrypted
 		}
-		nsec = encryptedNsec
-	}
-
-	identity := &types.Identity{
-		Nickname: nickname,
-		Npub:     common.EncodeNpub(pk),
-		Nsec:     nsec,
-		Created:  int64(nostr.Now()),
-	}
-
-	ks.Identities[nickname] = identity
-
-	// Set as default if first identity
-	if ks.DefaultIdentity == "" {
-		ks.DefaultIdentity = nickname
-	}
-
-	return identity, SaveKeyStore(ks)
+		created = &types.Identity{Nickname: nickname, Npub: common.EncodeNpub(sk.Public()), Nsec: nsec, Created: int64(nostr.Now())}
+		fresh.Identities[nickname] = created
+		if fresh.DefaultIdentity == "" {
+			fresh.DefaultIdentity = nickname
+		}
+		return nil
+	})
+	return created, err
 }
 
 // GetIdentity retrieves an identity by nickname
@@ -337,12 +380,13 @@ func GetPublicKey(ks *types.KeyStore, nickname string) (nostr.PubKey, error) {
 
 // SetDefault sets the default identity
 func SetDefault(ks *types.KeyStore, nickname string) error {
-	if _, exists := ks.Identities[nickname]; !exists {
-		return fmt.Errorf("identity '%s' not found", nickname)
-	}
-
-	ks.DefaultIdentity = nickname
-	return SaveKeyStore(ks)
+	return runKeyStoreTransaction(ks, func(fresh *types.KeyStore) error {
+		if _, exists := fresh.Identities[nickname]; !exists {
+			return fmt.Errorf("identity '%s' not found", nickname)
+		}
+		fresh.DefaultIdentity = nickname
+		return nil
+	})
 }
 
 // AddContact adds a contact with the default role (human). Equivalent to
@@ -359,24 +403,19 @@ func AddContactWithRole(ks *types.KeyStore, nickname, npub string, role types.Ro
 		return fmt.Errorf("invalid role %q: must be %q or %q", role, types.RoleHuman, types.RoleAgent)
 	}
 
-	if _, exists := ks.Contacts[nickname]; exists {
-		return fmt.Errorf("contact '%s' already exists", nickname)
-	}
-
 	// Validate npub
 	pk, err := common.ParsePublicKey(npub)
 	if err != nil {
 		return fmt.Errorf("invalid npub: %w", err)
 	}
 
-	ks.Contacts[nickname] = &types.Contact{
-		Nickname: nickname,
-		Npub:     common.EncodeNpub(pk),
-		AddedAt:  int64(nostr.Now()),
-		Role:     role,
-	}
-
-	return SaveKeyStore(ks)
+	return runKeyStoreTransaction(ks, func(fresh *types.KeyStore) error {
+		if _, exists := fresh.Contacts[nickname]; exists {
+			return fmt.Errorf("contact '%s' already exists", nickname)
+		}
+		fresh.Contacts[nickname] = &types.Contact{Nickname: nickname, Npub: common.EncodeNpub(pk), AddedAt: int64(nostr.Now()), Role: role}
+		return nil
+	})
 }
 
 // GetContact retrieves a contact by nickname
@@ -469,53 +508,65 @@ func PromptPasswordWithConfirm() (string, error) {
 
 // ChangePassword changes the keystore password and re-encrypts all nsecs
 func ChangePassword(ks *types.KeyStore, oldPassword, newPassword string) error {
-	if !ks.Encrypted {
-		return fmt.Errorf("keystore is not encrypted")
-	}
+	return updateKeyStorePassword(ks, oldPassword, newPassword, false)
+}
 
-	if err := UnlockKeyStore(ks, oldPassword); err != nil {
-		return fmt.Errorf("failed to unlock keystore: %w", err)
-	}
+// EncryptKeyStore enables password protection on an unencrypted keystore.
+func EncryptKeyStore(ks *types.KeyStore, password string) error {
+	return updateKeyStorePassword(ks, "", password, true)
+}
 
-	// Decrypt all nsecs with old key
-	decryptedNsecs := make(map[string]string)
-	for nickname, identity := range ks.Identities {
-		nsec, err := decryptWithKey(identity.Nsec, *ks.MasterKey)
-		if err != nil {
-			return fmt.Errorf("failed to decrypt nsec for %s: %w", nickname, err)
+func updateKeyStorePassword(ks *types.KeyStore, oldPassword, newPassword string, allowEnable bool) error {
+	if newPassword == "" {
+		return errors.New("password cannot be empty")
+	}
+	return runKeyStoreTransaction(ks, func(fresh *types.KeyStore) error {
+		decrypted := make(map[string]string, len(fresh.Identities))
+		if fresh.Encrypted {
+			if allowEnable {
+				return common.NewExitError(common.ErrCodeAuth, errors.New("keystore is already encrypted"))
+			}
+			if err := unlockKeyStoreMemory(fresh, oldPassword); err != nil {
+				return common.NewExitError(common.ErrCodeAuth, errors.New("failed to unlock keystore"))
+			}
+			for nickname, identity := range fresh.Identities {
+				nsec, err := decryptWithKey(identity.Nsec, *fresh.MasterKey)
+				if err != nil {
+					return fmt.Errorf("failed to decrypt nsec for %s: %w", nickname, err)
+				}
+				decrypted[nickname] = nsec
+			}
+		} else {
+			if !allowEnable {
+				return errors.New("keystore is not encrypted")
+			}
+			for nickname, identity := range fresh.Identities {
+				decrypted[nickname] = identity.Nsec
+			}
 		}
-		decryptedNsecs[nickname] = nsec
-	}
 
-	// Create new encryption parameters
-	saltB64, verificationB64, err := createVerification(newPassword)
-	if err != nil {
-		return fmt.Errorf("failed to setup new encryption: %w", err)
-	}
-
-	saltBytes, err := base64.StdEncoding.DecodeString(saltB64)
-	if err != nil {
-		return fmt.Errorf("invalid salt: %w", err)
-	}
-	newKey, err := deriveMasterKey(newPassword, saltBytes)
-	if err != nil {
-		return err
-	}
-
-	// Re-encrypt all nsecs with new key
-	for nickname, nsec := range decryptedNsecs {
-		encrypted, err := encryptWithKey(nsec, newKey)
+		saltB64, verificationB64, err := createVerification(newPassword)
 		if err != nil {
-			return fmt.Errorf("failed to encrypt nsec for %s: %w", nickname, err)
+			return fmt.Errorf("failed to setup new encryption: %w", err)
 		}
-		ks.Identities[nickname].Nsec = encrypted
-	}
-
-	ks.Salt = saltB64
-	ks.Verification = verificationB64
-	ks.MasterKey = &newKey
-
-	return SaveKeyStore(ks)
+		saltBytes, err := base64.StdEncoding.DecodeString(saltB64)
+		if err != nil {
+			return fmt.Errorf("invalid salt: %w", err)
+		}
+		newKey, err := deriveMasterKey(newPassword, saltBytes)
+		if err != nil {
+			return err
+		}
+		for nickname, nsec := range decrypted {
+			encrypted, err := encryptWithKey(nsec, newKey)
+			if err != nil {
+				return fmt.Errorf("failed to encrypt nsec for %s: %w", nickname, err)
+			}
+			fresh.Identities[nickname].Nsec = encrypted
+		}
+		fresh.Encrypted, fresh.Salt, fresh.Verification, fresh.MasterKey = true, saltB64, verificationB64, &newKey
+		return nil
+	})
 }
 
 func mustDecodeB64(s string) ([]byte, error) {

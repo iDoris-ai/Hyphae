@@ -62,6 +62,11 @@ type KeyStore struct {
 
 	// MasterKey is a transient field (not serialized) set after password verification
 	MasterKey *[32]byte `json:"-"`
+
+	// StoreVersion and StoreExists track the bytes loaded from disk so direct
+	// saves can reject stale snapshots. They are local metadata, never serialized.
+	StoreVersion string `json:"-"`
+	StoreExists  bool   `json:"-"`
 }
 
 // MessageStore 存储消息历史
