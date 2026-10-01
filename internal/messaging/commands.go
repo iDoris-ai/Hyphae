@@ -28,6 +28,11 @@ var HistoryCmd = &cli.Command{
 					Usage:    "Contact nickname",
 					Required: true,
 				},
+				&cli.StringFlag{
+					Name:    "as",
+					Aliases: []string{"a"},
+					Usage:   "Your nickname (defaults to the keystore's default identity)",
+				},
 				&cli.IntFlag{
 					Name:    "limit",
 					Aliases: []string{"l"},
@@ -46,14 +51,14 @@ var HistoryCmd = &cli.Command{
 					return err
 				}
 
-				myIdentity, err := identity.GetIdentity(ks, "")
+				myIdentity, err := identity.GetIdentity(ks, c.String("as"))
 				if err != nil {
 					return err
 				}
 
 				recipientNpub, err := identity.ResolveRecipient(ks, c.String("with"))
 				if err != nil {
-					return err
+					return common.NewExitError(common.ErrCodeUser, err)
 				}
 
 				store, err := GetStore()
@@ -66,39 +71,45 @@ var HistoryCmd = &cli.Command{
 					return err
 				}
 
-				if len(messages) == 0 {
-					fmt.Println("No messages found")
-					return nil
+				if messages == nil {
+					messages = []types.StoredMessage{}
 				}
 
-				fmt.Printf("📜 Conversation with %s (%d messages)\n\n", c.String("with"), len(messages))
-
-				w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-				// Reverse order (oldest first)
-				for i := len(messages) - 1; i >= 0; i-- {
-					msg := messages[i]
-					direction := "→"
-					if msg.IsIncoming {
-						direction = "←"
+				common.Emit(common.JSONMode(c), messages, func() {
+					if len(messages) == 0 {
+						fmt.Println("No messages found")
+						return
 					}
 
-					content := msg.Plaintext
-					if content == "" {
-						content = msg.Content
-					}
+					fmt.Printf("📜 Conversation with %s (%d messages)\n\n", c.String("with"), len(messages))
 
-					encrypted := ""
-					if msg.IsEncrypted {
-						encrypted = "🔒"
-					}
+					w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+					// The storage query is newest-first; retain the existing human display order.
+					for i := len(messages) - 1; i >= 0; i-- {
+						msg := messages[i]
+						direction := "→"
+						if msg.IsIncoming {
+							direction = "←"
+						}
 
-					fmt.Fprintf(w, "%d %s\t%s\t%s\n",
-						msg.CreatedAt,
-						direction,
-						encrypted,
-						common.TruncateString(content, 40))
-				}
-				w.Flush()
+						content := msg.Plaintext
+						if content == "" {
+							content = msg.Content
+						}
+
+						encrypted := ""
+						if msg.IsEncrypted {
+							encrypted = "🔒"
+						}
+
+						fmt.Fprintf(w, "%d %s\t%s\t%s\n",
+							msg.CreatedAt,
+							direction,
+							encrypted,
+							common.TruncateString(content, 40))
+					}
+					w.Flush()
+				})
 
 				return nil
 			},
