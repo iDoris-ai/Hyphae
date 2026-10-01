@@ -59,6 +59,7 @@ func preflightDaemonCLIStartup() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, daemonLockCLI, "--version")
+	cmd.WaitDelay = time.Second
 	cmd.Env = daemonLockCLIEnv(os.Environ(), home)
 	started := time.Now()
 	output, err := cmd.CombinedOutput()
