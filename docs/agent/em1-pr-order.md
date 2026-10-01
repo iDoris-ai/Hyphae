@@ -1,5 +1,7 @@
 # E-M1 PR 依赖与合并顺序
 
+12:25 UTC：#115 head `2fa6f0b` 的 CI `36861616162` 成功。#104 head `aaa6d0f` 的双平台测试已成功，`ci-ok` 刚进入 queued，待根代理核验最终状态；其 Windows compile 旧失败/新通过、daemon race 9.415s。#103 `9ee5cca` CI `36859748709` 成功。#102/#105/#106 Python discovery 新 CI 两平台实际通过 16/20/23 项；#111–#114 CI 绿、待外审。G2-S2b 新增 stdout 检查契约不符（状态流允许 stderr 诊断/明文），正在修正测试；另两项 runtime 测试仍失败待查。细节见 [progress](progress.md)。
+
 12:04 UTC：Agent24 自有文档 #634 已在有效外部批准、六项检查通过后正常合并；新 main f5a76c01 的 CI 运行中。Hyphae #111/#112 为独立 main PR，待真实 CI/外部评审。#102/#105/#106 补 Python 工具单测的 CI 步骤由 Luna 处理中，变更后须按新 head 检查，不沿用旧绿色结果；其余队列依赖不变。
 
 11:58 UTC 队列：main fc6681c 的 CI 通过。#102/#105/#106 各自 CI 通过、待外部评审；#103/#104 的真实 CI 失败已定位到测试子进程重复构建与临时 HOME 缓存，Luna 修复并复验；#107/#108/#109/#110 新独立 PR 的 CI 运行中。最新 heads 与范围见 [带日期进展](progress.md)。这些 PR 都只含自身差异，可独立评审；G7/G9 与 G2-S1/S2a 后续独立提交。R2b 依赖 #102/#105/#106，待全部进入 main 后才基于新 main 提自身工作流/helper 差异，禁止将当前 integration 父分支作为 main PR 发布。Agent24 #634 六项检查通过、待评审；#626 有批准但仍 OPEN，#627 仍依赖草稿，对仓生产合并由其负责。下方旧快照按时间阅读。
