@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -29,6 +30,17 @@ func TestKeystoreTransactionChild(t *testing.T) {
 		return
 	}
 	requireSubprocessGoEnv(t)
+	if action == "check-lock-path" {
+		called := false
+		err := withKeyStoreLock(func() error {
+			called = true
+			return nil
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "not a regular file")
+		require.False(t, called)
+		return
+	}
 	ks, err := LoadKeyStore()
 	if err != nil {
 		t.Fatal(err)
@@ -57,6 +69,76 @@ func TestKeystoreTransactionChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestKeystoreLockRejectsSymlinkWithoutChangingTarget(t *testing.T) {
+	lockPath, home := prepareKeystoreLockPathTest(t)
+	targetPath := filepath.Join(t.TempDir(), "sentinel")
+	contents := []byte("do not modify this target")
+	require.NoError(t, os.WriteFile(targetPath, contents, 0640))
+	require.NoError(t, os.Chmod(targetPath, 0640))
+	require.NoError(t, os.Remove(lockPath))
+	require.NoError(t, os.Symlink(targetPath, lockPath))
+
+	called := false
+	err := withKeyStoreLock(func() error { called = true; return nil })
+	require.Error(t, err)
+	assert.False(t, called)
+	resolved, err := os.Readlink(lockPath)
+	require.NoError(t, err)
+	assert.Equal(t, targetPath, resolved)
+	got, err := os.ReadFile(targetPath)
+	require.NoError(t, err)
+	assert.Equal(t, contents, got)
+	info, err := os.Stat(targetPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0640), info.Mode().Perm())
+	assert.Equal(t, home, os.Getenv("HOME"))
+}
+
+func TestKeystoreLockRejectsDirectory(t *testing.T) {
+	lockPath, _ := prepareKeystoreLockPathTest(t)
+	require.NoError(t, os.Remove(lockPath))
+	require.NoError(t, os.Mkdir(lockPath, 0755))
+
+	called := false
+	err := withKeyStoreLock(func() error { called = true; return nil })
+	require.Error(t, err)
+	assert.False(t, called)
+	info, err := os.Stat(lockPath)
+	require.NoError(t, err)
+	assert.True(t, info.IsDir())
+	assert.Equal(t, os.FileMode(0755), info.Mode().Perm())
+}
+
+func TestKeystoreLockRejectsFIFOWithoutBlocking(t *testing.T) {
+	lockPath, _ := prepareKeystoreLockPathTest(t)
+	require.NoError(t, os.Remove(lockPath))
+	require.NoError(t, syscall.Mkfifo(lockPath, 0640))
+	require.NoError(t, os.Chmod(lockPath, 0640))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestKeystoreTransactionChild$")
+	cmd.Env = append(withSubprocessGoEnv(os.Environ()), "HYPHAE_TEST_KEYSTORE_CHILD=check-lock-path")
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	err := cmd.Run()
+	require.NoError(t, err, "child did not reject FIFO promptly: %s", output.String())
+	assert.NoError(t, ctx.Err(), "FIFO lock open blocked: %s", output.String())
+	info, err := os.Lstat(lockPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.ModeNamedPipe, info.Mode()&os.ModeType)
+	assert.Equal(t, os.FileMode(0640), info.Mode().Perm())
+}
+
+func prepareKeystoreLockPathTest(t *testing.T) (string, string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	require.NoError(t, SaveKeyStore(&types.KeyStore{Identities: map[string]*types.Identity{}, Contacts: map[string]*types.Contact{}}))
+	return filepath.Join(GetKeyStorePath(), KeyStoreFile+".lock"), home
 }
 
 func startKeystoreChild(t *testing.T, action string) (*exec.Cmd, io.WriteCloser, *bytes.Buffer) {
