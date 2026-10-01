@@ -2,6 +2,30 @@
 
 ## 2026-10-01 接线更新
 
+### 07:29 UTC：第二轮候选与已确认阻塞
+
+main 仍为 `f1dbe1ef`。第二轮候选已经公开，之前“未发现后续 PR”的描述属于 06:58 的历史快照。
+
+| PR | 本次核对 head / 状态 | 下一项 |
+|---|---|---|
+| [#626 COMM-4a](https://github.com/iDoris-ai/Agent24/pull/626) | `5531abe0f78b077512161c3800c9398116d6081a`；ready，六项 CI 通过；外部 REQUEST_CHANGES | 按外部评审修 pid 启动时间标记的 locale/TZ 不稳定，补跨环境回归，再复审 |
+| [#627 COMM-3](https://github.com/iDoris-ai/Agent24/pull/627) | `95013516393ce1dd69006ae07e8b34a8d91f0543`；叠在 #626 上的 draft，仅 CLA | 前置合入后整理到 main，保留自身差异，触发完整真实 CI 后评审 |
+| [#628 联调用口令存储](https://github.com/iDoris-ai/Agent24/pull/628) | `b45ba08a0214b3d5d05966323dc83565f7071f43`；ready，暂无 review；Linux Rust CI 失败 | 定位 scheduler 恢复轮询失败，修复/解释证据后再核对，不以重跑变绿代替修复 |
+| [#630 第二轮记录](https://github.com/iDoris-ai/Agent24/pull/630) | `104b8c4448acc7676df45d905e4bca4f9918f01a`；匹配 head 的外部批准；最新 CLA 在运行 | 文档记录可独立审阅，不能让它替代未合并代码或完整验收 |
+
+#628 已读取 [失败日志](https://github.com/iDoris-ai/Agent24/actions/runs/36828139299/job/110258356981)：`agent24-scheduler` 的 `an_unavailable_module_never_counts_as_a_failure_and_recovers_with_the_same_fire_id` 在 `deliveries.rs:1220` 报 `the pump never re-polled after the skip window`，进程 exit 101。这是实际失败；本轮未判定根因或声明修复。
+
+#626 的外部 [评审](https://github.com/iDoris-ai/Agent24/pull/626#pullrequestreview-5376062711) 已实测同一 pid 的 `ps -o lstart=` 因 locale/TZ 改变而不一致，孤儿进程无法核对。Agent24 应固定绝对 ps 路径与 LC_ALL/TZ，再用写入/重启环境不同的回归验证；Hyphae 当前 a4 没有新 daemon HOME 锁，不能借尚未发布的锁绕过该失败。
+
+已读取 #630 的完整记录：被测本地组合 `ea76f9fef569f21f533f7b9e865d30a17157353b` 包含三个候选 PR，与 main 不同；其 Hyphae/relay 两个 hash 与旧生产 lock 一致。报告提供六条入站 event_id、托管 history 可见、L2/L1、同 event_id 重试、kill/config 后 generation 增加和关机组清理。这些可记为 Agent24 报告的运行证据；Hyphae 尚未取得制品并独立复测。
+
+**zero-run 尚未收口**：同一个 runs 端点只观察到 0→0，报告没有正对照；没有模型调用和模块副作用计数。下一轮需同时提供同一量具的有效正对照、三类计数、固定完整合法的六类输入，以及等待窗口/日志。memory store 只用于隔离联调，不能替代持久凭据的重启验收。125 条积压/重启零新增和基础 UI 仍未由这份报告证明通过。
+
+合并顺序建议由 Agent24 执行：#628 修复并批准后可独立合入；#626 与它有明确冲突，后合者保留两组参数并重新核对 head/CI/评审；#627 随 #626 迁移 main。最终在实际 main 重跑第二轮并回填源码/hash及原始日志，不能直接合并组合分支。生产大小 #626 约940行、#627 约530行来自 PR 自报，需对应仓库决定拆分或说明例外；Hyphae 自有 PR 继续小任务。
+
+Hyphae R1 `5fe391e` 已通过本地源码/编排验收，R2 正在独立 worktree 开发真实构建/下载/联调 CI；Release 仍无 assets。请求固定 Release/asset URL 与上述后续建议的 #601 评论正文将保存在交付目录，未送达。本会话禁止提交 GitHub PR review。
+
+
 ### 06:58 UTC：COMM-2a 合入与当前交付
 
 已实时核对 [#622](https://github.com/iDoris-ai/Agent24/pull/622)：`48c866ace755f2ae92464f3e12e59c9ea9c77a73` 获最新 head 的外部批准并合并；main `f1dbe1efe01766a31e4cff3768c7375c5ab0f2ae` 的 [CI 36826098337](https://github.com/iDoris-ai/Agent24/actions/runs/36826098337) 通过。#620/#621/#622 前置链均已进入 main，COMM-3 与 COMM-4a 可以分别从当前 main 继续，仍由对应仓库实现。当前公开 COMM PR 搜索只返回 #601，未据此假定后续代码已经存在。
