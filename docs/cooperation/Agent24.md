@@ -23,6 +23,9 @@ Hyphae 侧独立复测工具正在新 worktree 实现：读取生产 lock、校�
 
 ### 后续实时更新：#620 合并、#621/#622 与第二轮准备
 
+最新：#622 `c660319a` 六项 CI 已通过，外部评审 [REQUEST_CHANGES](https://github.com/iDoris-ai/Agent24/pull/622#pullrequestreview-5375590068)。须先修首次身份创建失败后的凭据保留/晋升，以及转存完成前锁释放的竞争；补“已落盘但 runner 失败”“凭据转存未完成时并发请求”断言，交外部复审。尚未 merge；第二轮托管和 zero-run 尚未验收。Agent24 `4fb5a892` 最新 main CI 已通过。下列在运行/待review的记录是旧快照。
+
+
 2026-10-01 后续核对：#621 已在 `f6d055ff` 合并；#622 已迁移 main 并 ready，最新 head `c660319a8343f8e948db51a8b3779cd26ae3b4b1`，尚无正式 review，Rust CI 在运行。最新 main `4fb5a892` 的 CI `36822440235` 仍在运行。下列 `65a5c511` / `13604363` 是旧快照。COMM-3 与 COMM-4a 可以基于 #622 分别准备草稿；仍逐项核对实际差异、head 批准与 CI。Hyphae G2-S2b 已本地提交 `7b29bf6f`（410 生产行），最终专项/race 和根代理独立 race 通过，实际 relay 和完整 CI 未验收，未发布。当前仍用旧 lock；不提前启用新接口。
 
 独立复测工具已本地提交 `3acedb21`，11 项单元测试及根代理无外部变量的 fixture 复验通过；尚未真实联调。用户明确要求在 #601 索取固定 Release URL、两个 asset 下载 URL、生产 lock 和 SHA256SUMS；评论已尝试，工具在执行前拒绝，尚未送达。独立复测制品未取得：用户给出的 laptop `~/Dev/auraai/Agent24` 不在本执行机；Hyphae release 无制品附件，Agent24 release 包不等于锁定 Hyphae/relay。必须先提供匹配 lock 的两个二进制，再在支持监听的环境执行复测工具。该缺口不妨碍对应仓库准备收发路由和托管草稿。

@@ -6,6 +6,11 @@
 
 ### 本轮收尾：托管状态流与依赖推进
 
+最新实时更新：#622 `c660319a` 六项 CI 全绿，但外部评审 [REQUEST_CHANGES](https://github.com/iDoris-ai/Agent24/pull/622#pullrequestreview-5375590068)。评审指出首次身份创建失败时可能删除已落盘 keystore 的唯一口令，以及 Pending→Salt 完成前释放锁；Agent24 须修复并补有界故障/并发回归，再由外部复审。#622 不合并。Agent24 最新 main `4fb5a892` CI `36822440235` 已通过；Hyphae main `a4aa606` CI `36738033201` 通过。
+
+当前 goal 系统状态为 `usageLimited`，E-M1 没有完成；恢复自动推进需额度可用后恢复同一 goal。用户明确约束：根代理可以 merge 外部批准的最新 head，在既有 CI/依赖条件满足时正常合并；禁止批准任何 PR 或提交 GitHub PR review，所有 PR review 均由外部完成。根代理继续设计、协调、代码检查和验收。工具执行审批与 GitHub PR review 是独立机制，不能混用词义。
+
+
 实时核对：Agent24 #620、#621 已合并；#622 已转 main 正式评审，head `c660319a8343f8e948db51a8b3779cd26ae3b4b1`，尚无正式 review，Linux/macOS Rust 检查仍在运行。Agent24 main 已为 `4fb5a89246a64e31870cb531e0e2044aa1a315f4`，CI `36822440235` 此次读取时仍在运行，不沿用上一 main 的通过结论。Hyphae main 仍为 `a4aa606`。
 
 G2-S2b 已在独立 worktree 提交 `7b29bf6f2f76663fcbddb7bf69bb37d13fba25b7`，生产差异 410 行，测试 760 行：实际 daemon 生命周期、每 relay 扫描结果及 JSON-lines，stdout 仅状态、stderr 诊断，输出失败停止后续任务。已修复并保留多 relay 索引回归、测试数据库隔离和子进程异常回收。Luna 最终正常/race 专项及根代理独立 race 均 exit 0。真实 CLI 的 JSON 模式、未知 relay、generation、SIGTERM 与 kill 专项通过；真实 relay/125 条进程重启用例源码已保留，未在本沙箱运行通过。完整测试唯一尝试因 listener denied exit 1。开发组合仅作依赖基线；S2b 只提自己的小改动，不发布汇总分支。
