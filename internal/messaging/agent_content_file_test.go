@@ -140,16 +140,29 @@ func TestAgentMsgContentSourceValidationBeforeUnlockOrWrites(t *testing.T) {
 
 	contentPath := filepath.Join(t.TempDir(), "body")
 	require.NoError(t, os.WriteFile(contentPath, []byte("body"), 0600))
+	invalidDir := t.TempDir()
+	invalidUTF8Path := filepath.Join(invalidDir, "invalid-utf8")
+	require.NoError(t, os.WriteFile(invalidUTF8Path, []byte{0xff, 0xfe}, 0600))
+	oversizePath := filepath.Join(invalidDir, "oversize")
+	require.NoError(t, os.WriteFile(oversizePath, bytes.Repeat([]byte{'x'}, maxMessageContentFileBytes+1), 0600))
+	directoryPath := filepath.Join(invalidDir, "directory")
+	require.NoError(t, os.Mkdir(directoryPath, 0700))
 	for _, tc := range []struct {
 		name string
 		args []string
+		path string
 	}{
-		{"neither", nil},
-		{"both", []string{"--content", "body", "--content-file", contentPath}},
-		{"explicit empty content", []string{"--content", ""}},
-		{"explicit empty content alias", []string{"-c", ""}},
-		{"alias and file", []string{"-c", "body", "--content-file", contentPath}},
-		{"empty file", []string{"--content-file", writeEmptyContentFixture(t)}},
+		{name: "neither"},
+		{name: "both", args: []string{"--content", "body", "--content-file", contentPath}},
+		{name: "explicit empty content", args: []string{"--content", ""}},
+		{name: "explicit empty content alias", args: []string{"-c", ""}},
+		{name: "alias and file", args: []string{"-c", "body", "--content-file", contentPath}},
+		{name: "empty file", args: []string{"--content-file", writeEmptyContentFixture(t)}},
+		{name: "missing file", args: []string{"--content-file", filepath.Join(invalidDir, "missing")}, path: filepath.Join(invalidDir, "missing")},
+		{name: "directory", args: []string{"--content-file", directoryPath}, path: directoryPath},
+		{name: "oversize file", args: []string{"--content-file", oversizePath}, path: oversizePath},
+		{name: "invalid UTF-8 file", args: []string{"--content-file", invalidUTF8Path}, path: invalidUTF8Path},
+		{name: "dash is not stdin", args: []string{"--content-file", "-"}, path: "-"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			args := append(passwordCLIArgs("agent", "msg", "--from", "alice", "--to", "bob", "--relay", "ws://127.0.0.1:1"), tc.args...)
@@ -158,6 +171,9 @@ func TestAgentMsgContentSourceValidationBeforeUnlockOrWrites(t *testing.T) {
 			assert.Empty(t, stdout)
 			assert.NotContains(t, stderr, "body")
 			assert.NotContains(t, stderr, "secret")
+			if tc.path != "" {
+				assert.NotContains(t, stderr, tc.path, "file errors must not reveal paths")
+			}
 			assert.Equal(t, beforeState, hyphaeStateSnapshot(t, home), "invalid content must fail before any state write")
 		})
 	}
