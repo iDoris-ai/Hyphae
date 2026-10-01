@@ -6,6 +6,8 @@
 
 ### 本轮收尾：托管状态流与依赖推进
 
+R2b 已提交 `343520df6470884f37cc962a3105cebbc5905783`，独立 worktree `/tmp/hyphae-artifact-r2b-wt`，生产 397 行（workflow 237、helper 160），测试 149 行，文档 17 行。Luna 与根代理固定最终提交、隔离 HOME 的四套工具 39 项均通过；Actionlint、实际 YAML 结构和四段 bash 语法检查通过。已修复 checkout 越出工作区、ZIP 丢执行位及 FIFO 打开阻塞；下载包复验后才运行，Linux relay 摘要绑定 build output。源码/编排本地验收完成，真实固定 Go 构建、GitHub Actions、制品传输与 live relay 尚未通过。尚无远端 PR；不能记 T20 或 E-M1 完成。另派 GPT-6 Luna 在独立原 main 基线准备 C1 时间/执行恢复候选 fixtures 与测试，生产入口不变，T01-E/T07 门槛保留。
+
 R2a 校验器已提交 `cb374a257466b0afa19a4924898843dcec17c8a1`，491 行生产代码、313 行测试、16 行文档，工作树干净。Luna 最终 14 项和根代理固定最终提交、隔离 HOME 的独立 14 项均通过。已修复校验后复制路径被替换的问题，最终交付字节重新校验摘要与大小；测试对恶意归档同步更新 manifest/SHA256SUMS 后实际命中成员拒绝门禁。公开 CLI 始终固定真实生产基线，合成夹具只进入内部测试函数。这是本地校验工具验收，未生成真实 Go 1.26.4 制品或运行 relay。已派同一 Luna 在新的独立 worktree 实现 R2b CI，分别固定工具、源码与对仓生产 lock，下载同 run 的制品后在两个目标平台真实执行。没有继续重复查询 GitHub，E-M1 仍未完成。
 
 07:29 UTC：Agent24 第二轮候选已出现：#626 `5531abe0` REQUEST_CHANGES（孤儿 pid 标记受 locale/TZ 影响）；#627 `95013516` 依赖 #626 的草稿；#628 `b45ba08a` Linux scheduler 恢复轮询测试失败，已查实际日志；#630 `104b8c44` 有当前 head 批准、CLA 仍在运行。已读取 #630 的实际 event_id、收发重试与托管运行记录；这是对仓本地组合报告，仍缺计数正对照、模型/模块计数、Hyphae 独立复测、125 条与 UI 验收。已更新按仓协作文档与后续依赖，R2 在 `/tmp/hyphae-artifact-r2-wt` 实现，不修改对应仓库代码。

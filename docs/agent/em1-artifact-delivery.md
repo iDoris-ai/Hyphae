@@ -1,6 +1,6 @@
 # E-M1 固定制品交付与独立联调
 
-2026-10-01。状态：R1 本地工具验收通过，真实构建未通过；R2 已派独立开发，R3 待前置验收。关联 [FU-1](followups.md)、[T20](ecosystem-tasks.md) 与 [Agent24 协作](../cooperation/Agent24.md)。这项交付补齐可下载的 CLI/relay，不修改 E-M1 的执行协议或四仓验收出口。
+2026-10-01。状态：R1、R2a、R2b 本地工具/编排验收通过，真实构建、下载和运行 CI 尚未验收；R3 待真实前置验收。关联 [FU-1](followups.md)、[T20](ecosystem-tasks.md) 与 [Agent24 协作](../cooperation/Agent24.md)。这项交付补齐可下载的 CLI/relay，不修改 E-M1 的执行协议或四仓验收出口。
 
 ## 固定版本
 
@@ -26,6 +26,8 @@ Luna 在独立 worktree 实现标准库 Python 工具。输入固定源码目录
 ### R2：真实 CI 构建与制品验证
 
 R2 分两次独立提交：R2a 先交付固定生产基线的校验器、对应测试和本地验收；R2b 再在新 worktree 接入真实构建、下载与两平台运行的 workflow。两项分别保留自身差异，不因等待外部审批停止校验工具开发。R2a 的合成夹具只能调用显式接收预期基线的内部函数；生产 CLI 固定真实基线，不提供测试绕过参数。解包复制的最终字节也须匹配已验证的摘要，不能在校验后重新读取未经验证的可执行文件。
+
+实际 R2b checkout 使用 GITHUB_WORKSPACE 下 tools、hyphae-source、agent24-lock 三个独立目录；输出留在 runner 临时目录。Actions ZIP 传输会丢失执行位，helper 只对四个已确认普通、单链接文件恢复执行位，随后 R2a 完整复验 hash/归档/生产 lock，成功后才可执行。ZIP 与 FIFO 拒绝回归已本地通过；这不代表真实 GitHub 传输已通过。
 
 R1 验收后另提小 PR。CI 使用固定 Go 1.26.4；构建工具与待打包的固定源码分别 checkout，关闭凭据持久化、子模块及外层 workspace。脚本从工具 checkout 执行，source-dir 指向干净的固定源码 checkout，输出位于 runner 临时目录。配置用环境变量传递，不把用户输入拼进 shell。
 
