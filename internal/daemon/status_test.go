@@ -185,14 +185,15 @@ func TestStatusStreamPartialFailureAndCancellationClassification(t *testing.T) {
 	if err := timed.BeginRelay(0, statusTestTime(3)); err != nil {
 		t.Fatal(err)
 	}
-	if err := timed.FinishRelay(0, relayquery.Stats{}, 0, 0, false, true, statusTestTime(4)); err != nil {
+	if err := timed.FinishRelay(0, relayquery.Stats{}, 0, 0, true, false, statusTestTime(4)); err != nil {
 		t.Fatal(err)
 	}
 	if err := timed.FinishScan(false, statusTestTime(5)); err != nil {
 		t.Fatal(err)
 	}
-	if got := timed.Snapshot().Scan.State; got != StatusScanIncomplete {
-		t.Fatalf("relay-local timeout with live parent should be incomplete, got %s", got)
+	timedScan := timed.Snapshot().Scan
+	if timedScan.State != StatusScanIncomplete || timedScan.Relays[0].State != StatusRelayIncomplete || timedScan.Relays[0].Error == nil || *timedScan.Relays[0].Error != StatusErrorQueryFailed {
+		t.Fatalf("walk deadline with live parent should be query_failed/incomplete, got %+v", timedScan)
 	}
 }
 
