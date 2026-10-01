@@ -5,7 +5,9 @@
 **当前出口：Hyphae 侧 CLI 在固定 main `a4aa606eb81d5c040d94c51cdf94553e646d8674` 验收通过，见 [最终验收记录](em1-cli-acceptance.md)。** #37～#100 的已有任务已合并；该固定 main 的双平台 CI、隔离 HOME 的全量默认/integration 测试、vet、构建与 smoke 均通过。当前进度见 [PR 依赖表](em1-pr-order.md)。T20 的 Agent24 CLI 接线、T21/T22 基础 UI、T01 高层契约和 C 段四仓链路尚未完成，整体 E-M1 不记通过。2026-10-01 已在七个独立分支补齐 [CLI 联调缺口](em1-comm-followups.md)，尚未发布/进入 main；对应本地组合测试只证明保留源码的专项范围，完整 CI 和 relay 联调仍待完成。补收状态模型/统计/runtime 分别已本地提交 S1 `82de8549`、S2a `6f7daa14`、S2b `7b29bf6f`，最终专项/race 通过，尚未发布，真实 relay 和完整 CI 未验收；新改动不能沿用基线的验收。下文早期组合记录只描述对应提交当时的状态。
 
 
-2026-10-01 06:58 UTC 更新：Agent24 #620/#621/#622 已合并，正式身份/联系人/relay CLI/REST 进入 `f1dbe1ef` 且该 main CI 通过，T20 仍 IN_PROGRESS；消息、托管、zero-run 与真实下载制品联调尚未验收。FU-1/R1 已由 Luna 在独立 worktree 实现，R2/R3 的固定 CI、Release 与下载验收见 [制品交付任务](em1-artifact-delivery.md)。这项前置交付不解除 T01-E、基础 UI 或四仓出口。
+2026-10-01 06:58 UTC 更新：Agent24 #620/#621/#622 已合并，正式身份/联系人/relay CLI/REST 进入 `f1dbe1ef` 且该 main CI 通过，T20 仍 IN_PROGRESS；消息、托管、zero-run 与真实下载制品联调尚未验收。FU-1 的 R1/R2a/R2b 已由 Luna 在独立 worktree 提交并通过本地工具验收，最终四套工具共 39 项通过；真实 CI、固定制品、Release 与下载联调仍待 [制品交付任务](em1-artifact-delivery.md) 的出口，R3 尚未启动。这项前置交付不解除 T01-E、基础 UI 或四仓出口。
+2026-10-01 本地候选补充：T01-C1 `427f631f` 已由 Luna 在独立 worktree 提交，仅测试/样例/文档。根代理最终 SHA 的整个 contracts 包普通/race 各验证 102 个恢复样例，零跳过；跨语言、实际执行/副作用及 T01-E 仍待交付。消费约定见 [Agent24](../cooperation/Agent24.md)，没有启用生产 T07。
+
 ## 工作方式
 
 - **主代理**：架构、契约、任务拆分、依赖协调、代码评审和验收；生产代码与测试实现交给 **GPT-6 Luna**。

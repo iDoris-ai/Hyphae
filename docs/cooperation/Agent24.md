@@ -1,5 +1,17 @@
 # Agent24 × Hyphae
 
+## 2026-10-01：T01-C1 候选样例交付
+
+本节是本地产物交付，未重新查询 GitHub；后文 PR 状态保留各自核对时间。Hyphae 候选分支 `em1/c1-execution-recovery` 最终提交 `427f631f986ec8100554f4118a228b3b1fa2ad2a`，基于 `a4aa606`；尚未 push 或提交 PR，以下路径暂不提供公开 GitHub 下载地址。
+
+- 输入：`tests/contracts/testdata/execution-recovery-fixtures.json`，102 个唯一 case ID，原始 SHA-256 `fdd39bc40de1f1b6ed8c9e899faae834410404f785ec72f20ea6e1c3f7a1ac55`。
+- 参考：`tests/contracts/execution_recovery_test.go` 与 `EXECUTION-RECOVERY.md`。manifest 绑定原候选文档摘要，测试逐项核对其 20 条状态边。
+- 本地交付：`build/agent-handoff/20261001/C1-execution-recovery/` 包含 fixture、说明、独立补丁、Git bundle、PR 草稿、根代理普通/race 原始日志及验收摘要。根代理两项检查均运行全部 102 个样例，零跳过。
+
+请 Agent24 后续消费同一份原始 JSON，逐 ID 对比预期 action/state/reason，记录消费端 SHA、fixture 原始摘要、运行命令和原始结果；不能只报告总数或通过率。`model_required`、`selected_model_available` 与 `privacy_ok` 是测试观察；本地/远端及不需模型的能力各有样例，不作为新 wire 字段或已冻结的模型契约。
+
+候选恢复规则包括：同作者/目标/request_id 共用登记；同键更改不可变内容拒绝；不确定启动或结果事务失败查询同一个 run；结果可靠保存前不发完成回执；保存后投递失败只补回执。样例里的允许动作不是实际 run/副作用计数。真实消费实现须另验执行器幂等键/查询、崩溃窗口、可靠结果与回执待发事务以及受控副作用计数。T01-E 未通过前不启用生产 T07；这份交付不能替代 CLI/基础 UI 联调或四仓完成。
+
 ## 2026-10-01 接线更新
 
 ### 07:29 UTC：第二轮候选与已确认阻塞
