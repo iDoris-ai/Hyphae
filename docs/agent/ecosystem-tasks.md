@@ -1,5 +1,7 @@
 # 生态里程碑任务与 Luna 分工
 
+收尾快照（2026-10-01 14:38 UTC）：#119 head `3a837d1a7ee8c3b75a589e6556bab5f6fe32f564` 已于 14:32:14Z 独立 squash 合并为 `419d0e3b22ce4dbae28dcc7a6320ed63b519deee`；#118 head `94532e7701ed87e0137ae6ac4a48e62cb4a2304f` 于 14:32:54Z 独立 squash 合并为当前 main `884424167ef84bf1aaf1143df8486294f5c75425`。两项均获 clestons 对最新 head 的外部批准、全部检查通过，核对实际差异后按 SHA 正常合并。当前 main 的 [CI 36877200986](https://github.com/iDoris-ai/Hyphae/actions/runs/36877200986) SUCCESS；#119 合并版本的制品 [Actions 36877114664](https://github.com/iDoris-ai/Hyphae/actions/runs/36877114664) SUCCESS。本会话只剩交接文档 [#120](https://github.com/iDoris-ai/Hyphae/pull/120) 待外部评审；不等待新评审，不启动 R3 或其他开发，交接后按用户要求暂停 Goal。E-M1 尚未完成，定时扫描关闭。下方 14:23 状态为合并前历史快照。
+
 更新：2026-10-01。范围依据 [生态里程碑草案](ecosystem-roadmap.md)。保留历史 M1～M5 编号；本表用 E-M 编号关联旧任务，不覆盖旧台账。
 
 14:23 UTC：Hyphae #105–#117 已合入 final main `57494422d17051dc5440d2dbed9411df8acd5536`，main CI `36871057418` SUCCESS。#118 head `94532e77`、#119 head `3a837d1a` 均 OPEN、REVIEW_REQUIRED（无 reviews），两者最新 CI 已全绿；#118 的本机 full/race/9 个真实 relay case也通过。#119 旧head普通CI `36873124154` Ubuntu `TestDaemonParentCancellationReleasesHomeLock` 3.01s timeout/ci-ok FAIL，macOS成功；旧artifact run `36873124352` 三job成功。测试主动轮询争锁竞态已修正；新head普通CI `36875227363` 和artifact run `36875227369` 均SUCCESS。失败/修复证据见handoff。R3未开始、无Release；E-M1与T01-E/T07/T19未完成。
