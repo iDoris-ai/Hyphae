@@ -28,6 +28,7 @@ func TestKeystoreTransactionChild(t *testing.T) {
 	if action == "" {
 		return
 	}
+	requireSubprocessGoEnv(t)
 	ks, err := LoadKeyStore()
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +64,7 @@ func startKeystoreChild(t *testing.T, action string) (*exec.Cmd, io.WriteCloser,
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	t.Cleanup(cancel)
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestKeystoreTransactionChild$")
-	cmd.Env = append(os.Environ(), "HYPHAE_TEST_KEYSTORE_CHILD="+action)
+	cmd.Env = append(withSubprocessGoEnv(os.Environ()), "HYPHAE_TEST_KEYSTORE_CHILD="+action)
 	stdin, err := cmd.StdinPipe()
 	require.NoError(t, err)
 	stdout, err := cmd.StdoutPipe()
@@ -304,7 +305,7 @@ func TestKeystoreLockPermissionsAndProcessExitRelease(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestKeystoreTransactionChild$")
-	cmd.Env = append(os.Environ(), "HYPHAE_TEST_KEYSTORE_CHILD=hold-lock")
+	cmd.Env = append(withSubprocessGoEnv(os.Environ()), "HYPHAE_TEST_KEYSTORE_CHILD=hold-lock")
 	stdin, err := cmd.StdinPipe()
 	require.NoError(t, err)
 	stdout, err := cmd.StdoutPipe()
