@@ -2,6 +2,14 @@
 
 最后更新：2026-10-01。本文记录实际交付与验收边界；各节固定其对应版本，新审批及合并以 GitHub 为准。
 
+## 2026-10-01 11:16 UTC：按用户要求重新实测执行限制和连接账号
+
+本地 `127.0.0.1:0` bind/listen 仍返回 errno 1 / EPERM。实时核对 Hyphae #101 head `b3f9053e`，匹配外部 APPROVED，macOS/Ubuntu/ci-ok/CLA 均成功；实际差异仅测试/文档。按既有授权重试一次 SHA 绑定正常 merge，仍在执行前被 `MCP tool call requires approval, but approval policy is never` 拒绝；复查仍 OPEN。此处是工具运行许可，不是 PR review，本代理没有提交 APPROVE。
+
+新查到 GitHub connector 实际登录 `muziknozik`，该连接对 Hyphae 的权限响应 push=false；与此前 gh 登录和 PR 作者 `jhfnetboy` 不同。账号连接和当前 workspace-write/network restricted/never 运行策略须分别修复。Luna 只读检查没有找到用户配置中的权限设置或指定项目、系统、MDM 配置；ps 也被 EPERM 拒绝，具体启动覆盖来源仍未知，不能宣称是某一配置文件导致。本机 gh 报告 token invalid，但当前网络限制使此结果不能独立证明 token 真失效。
+
+证据和已用本机 CLI 0.159.3 help 核验的恢复命令保存于生成物 `build/agent-handoff/20261001/permission-diagnosis-1116.md`。尚未修改宿主权限、账号连接或发布；E-M1 和 Goal 原状态保持，未重建扫描。
+
 ## 2026-10-01：Goal 标记 blocked，E-M1 未完成
 
 同一执行阻塞连续三轮复核，全部 Luna 任务已终态，当前无进一步可独立执行的任务。Goal 实际状态已更新为 `blocked`；原目标保持 CLI 接线、基础 UI、授权执行和四仓验收全部完成。固定制品、候选样例、独立提交、补丁/bundle及真实失败日志均保留，定时扫描保持停止。
