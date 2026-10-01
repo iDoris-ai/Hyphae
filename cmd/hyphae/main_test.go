@@ -59,12 +59,12 @@ func TestRequiredFlagErrorsAreSingleJSONEnvelope(t *testing.T) {
 		env             []string
 		messageContains string
 	}{
-		{name: "both flags with json flag", args: []string{"agent", "msg", "--json"}, messageContains: `Required flags "to, content" not set`},
+		{name: "both flags with json flag", args: []string{"agent", "msg", "--json"}, messageContains: `Required flag "to" not set`},
 		{name: "missing recipient with json flag", args: []string{"agent", "msg", "--content", "hello", "--json"}, messageContains: `Required flag "to" not set`},
-		{name: "missing content with json flag", args: []string{"agent", "msg", "--to", "bob", "--json"}, messageContains: `Required flag "content" not set`},
-		{name: "both flags with output environment", args: []string{"agent", "msg"}, env: []string{"HYPHAE_OUTPUT=json"}, messageContains: `Required flags "to, content" not set`},
+		{name: "missing content with json flag", args: []string{"agent", "msg", "--to", "bob", "--json"}, messageContains: `provide exactly one of --content or --content-file`},
+		{name: "both flags with output environment", args: []string{"agent", "msg"}, env: []string{"HYPHAE_OUTPUT=json"}, messageContains: `Required flag "to" not set`},
 		{name: "missing recipient with output environment", args: []string{"agent", "msg", "--content", "hello"}, env: []string{"HYPHAE_OUTPUT=json"}, messageContains: `Required flag "to" not set`},
-		{name: "missing content with output environment", args: []string{"agent", "msg", "--to", "bob"}, env: []string{"HYPHAE_OUTPUT=json"}, messageContains: `Required flag "content" not set`},
+		{name: "missing content with output environment", args: []string{"agent", "msg", "--to", "bob"}, env: []string{"HYPHAE_OUTPUT=json"}, messageContains: `provide exactly one of --content or --content-file`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
