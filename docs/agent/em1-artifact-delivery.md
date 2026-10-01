@@ -1,6 +1,6 @@
 # E-M1 固定制品交付与独立联调
 
-2026-10-01。状态：R1、R2a、R2b 本地工具/编排验收通过，真实构建、下载和运行 CI 尚未验收；R3 待真实前置验收。关联 [FU-1](followups.md)、[T20](ecosystem-tasks.md) 与 [Agent24 协作](../cooperation/Agent24.md)。这项交付补齐可下载的 CLI/relay，不修改 E-M1 的执行协议或四仓验收出口。
+2026-10-01 09:01 UTC。状态：R1/R2a/R2b 本地工具/编排验收通过；固定 Go 1.26.4 两平台真实制品已构建并经根代理生产 lock/归档/编译信息校验，本机加密身份 smoke 通过。真实下载、Actions、Linux 实机及 relay 联调未验收；R3 待真实前置验收。关联 [FU-1](followups.md)、[T20](ecosystem-tasks.md) 与 [Agent24 协作](../cooperation/Agent24.md)。这项交付补齐可下载的 CLI/relay，不修改 E-M1 的执行协议或四仓验收出口。
 
 ## 固定版本
 
@@ -53,6 +53,12 @@ workflow 以只读 contents 权限运行，显式安装 Go 1.26.4，日志/制�
 验收工具的黑盒用例至少包括 archive 被替换、SHA256SUMS 与 manifest 不一致、CLI 与生产 lock 不一致、源码/Go/recipe 不符、错误目标平台及非普通归档成员；输出使用临时目录，既有文件不可覆盖。两平台真实 relay 与超时/清理出口分别记录。上传保存不含测试 HOME、身份库或数据库。
 
 这里的 Go 1.26.4 是第一轮制品基线。未来源码或依赖要求更高 Go 时，另行更新双方 lock 与对应轮次配方；不以自动升级工具链沿用旧 hash。
+
+### 当前可用的本地固定制品（2026-10-01 09:01 UTC）
+
+`build/agent-handoff/20261001/real-a4-go1264/artifacts/` 已保存九个真实文件，源码固定 a4、Go 1.26.4、原无版本注入配方。根代理完整验证、darwin 提取和加密身份创建/列表均通过；Linux relay 本次摘要为 `a59058571d246d0d8eea1231a7eb1ce5869a0b7cf684e9263376113e2e9b8a49`。工具链在本机模块缓存内，先前仅检查默认 Go 的“不存在”结论已更正。
+
+这些是本地候选，manifest 中的 URL 尚未发布。实际第一轮运行仍需要支持监听的执行环境；真实 Actions/制品下载/两平台运行不因本地构建通过而完成。R3 保留下面的 CI 和下载验收前置。
 
 ### R3：Release 发布与下载验收
 

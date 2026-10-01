@@ -2,6 +2,14 @@
 
 最后更新：2026-10-01。本文记录实际交付与验收边界；各节固定其对应版本，新审批及合并以 GitHub 为准。
 
+## 2026-10-01 09:01 UTC：固定 Go 真实制品已获得
+
+更正先前“本机 Go 1.26.4 不可用”的结论：默认 Go 是 1.27.1，但缓存中存在可执行的固定工具链 `/Users/jason/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.4.darwin-arm64/bin/go`。根代理实际核对版本后，由 GPT-6 Luna 用已验收工具 `343520df`、干净源码 `a4aa606`、原生产配方生成两个平台的真实 CLI/relay、确定性归档、manifest 和 checksum，共九个文件。Luna 报告两次真实构建字节一致，报告及日志保留；未联网下载或修改生产 lock。
+
+根代理独立对现存完整 bundle 执行生产 lock 校验和本机安全提取，两项 exit 0；四个二进制编译信息实际核对为 Go 1.26.4、CGO_ENABLED=0、trimpath。macOS CLI `f53c29b3…`、macOS relay `a012d86e…` 和 Linux CLI `042f6200…` 均匹配历史生产摘要。Linux relay `a59058571d246d0d8eea1231a7eb1ce5869a0b7cf684e9263376113e2e9b8a49` 为本次受控构建摘要，不冒充历史基线。根代理又在一次性 HOME 实际创建加密身份并列出同一公钥，两次 exit 0，encrypted=true、identity_count=1，原始公共结果及断言已保存，临时身份目录删除。
+
+真实九文件制品和双方日志归档在 `build/agent-handoff/20261001/real-a4-go1264/`；只属生成物，不提交到 Git。manifest 的 local-candidate Release URL 仅是预期地址，尚未发布或可下载。现在已补齐本地固定制品，不能继续以“缺本地二进制/工具链”阻塞；后续使用这些已校验制品在支持监听的环境实际运行第一轮工具。Linux 实机、真实 relay、GitHub Actions、Release/安装器、Agent24 正式 main 的托管/收发、基础 UI、T01-E 及四仓出口仍未通过，E-M1 保持未完成。
+
 ## 2026-10-01 08:47 UTC：正式联调前置复核
 
 上一轮完成 C1 源码与根代理独立验收；本轮按正式联调需要核对实际远端状态。Agent24 #628（`b45ba08a`）和 #630（`104b8c44`）已合并；main 已为 `be3652321f604b5242691abd2186212cc193ab75`，实际 `ci.yml` [36830773430](https://github.com/iDoris-ai/Agent24/actions/runs/36830773430) 五项成功。#628 当前 head 的检查已通过，历史 scheduler 失败不能继续列作当前失败；外部评审报告六次复测未复现，但本轮没有独立证明其根因或修复。
