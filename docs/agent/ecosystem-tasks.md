@@ -1,8 +1,22 @@
 # 生态里程碑任务与 Luna 分工
 
-更新：2026-09-30。范围依据 [生态里程碑草案](ecosystem-roadmap.md)。保留历史 M1～M5 编号；本表用 E-M 编号关联旧任务，不覆盖旧台账。
+更新：2026-10-01。范围依据 [生态里程碑草案](ecosystem-roadmap.md)。保留历史 M1～M5 编号；本表用 E-M 编号关联旧任务，不覆盖旧台账。
 
-**当前出口：Hyphae 侧 A 段 CLI 在固定 main `1948aadc551e360176711f9c50172ed6edccd253` 验收通过，见 [最终验收记录](em1-cli-acceptance.md)。** 2026-09-30 已合并 #37～#67、#68～#84、#93/#97；该 main 的双平台 CI、隔离 HOME 的全量默认/integration 测试、vet、构建与 smoke 均通过。当前进度见 [PR 依赖表](em1-pr-order.md)。T20 的 Agent24 CLI 接线、T21/T22 基础 UI、T01 高层契约和 C 段四仓链路尚未完成，整体 E-M1 不记通过。下文早期组合记录只描述对应提交当时的状态。
+12:25 UTC：T10/T11 按 iDoris `ffed37a107a2e152963caea845450c9515d12044` 与 Agent24 `f5a76c015a7026c64fc872f47c6c160485cfed37` 的只读源码审阅修订，完整边界和固定源码链接见 [iDoris 协作记录](../cooperation/iDoris.md)。服务端 ledger/usage/tenant 身份与 capabilities 合同先行，再做 Agent24 专用 adapter；不假定双 endpoint 已存在。本轮不是服务或构建验收，T01-E/T07 门槛不变。
+
+11:58 UTC：独立工具/CLI/候选样例已发布 #102～#110，准确 heads、CI 与下一批任务见 [progress](progress.md)。#103/#104 真实 CI 失败已定位并交 Luna 修复，其他已通过的本地检查不代替失败 CI。G2-S1/S2a/S2b 已继续派 Luna 实测与整理；R2b 依赖三个独立工具 PR 合入，R3 分发尚未交付。T20 继续 IN_PROGRESS；T21/T22、T01-E/T07、T19 仍待原完整出口，未把第一轮 Hyphae CLI 或恢复样例当 E-M1 完成。
+
+11:40 UTC 最新出口：运行环境限制解除，原生产 lock 的真实 macOS 第一轮 CLI/relay 独立复测 exit 0，阶段日志与范围见 [progress](progress.md)。#101 已合并，实际 main fc6681c 的 CI 通过；制品 R1 #102、keystore G8 #103、daemon HOME 锁 #104 分别待 review/CI。Agent24 #601 已合并，Hyphae 已回帖确认并提文档 #634；#626 ba30f104 当前批准/CI通过，#627 仍为依赖草稿。T20 继续 IN_PROGRESS：本轮直调 Hyphae CLI 不代替对仓最终 main 的托管/收发与三类计数正对照；T21/T22、T01-E、T19 不变。下文所有旧快照保留对应时间，不能继续把旧运行环境或 #626 REQUEST_CHANGES 当当前阻塞。
+
+**当前出口：Hyphae 侧 CLI 在固定 main `a4aa606eb81d5c040d94c51cdf94553e646d8674` 验收通过，见 [最终验收记录](em1-cli-acceptance.md)。** #37～#100 的已有任务已合并；该固定 main 的双平台 CI、隔离 HOME 的全量默认/integration 测试、vet、构建与 smoke 均通过。当前进度见 [PR 依赖表](em1-pr-order.md)。T20 的 Agent24 CLI 接线、T21/T22 基础 UI、T01 高层契约和 C 段四仓链路尚未完成，整体 E-M1 不记通过。2026-10-01 已在七个独立分支补齐 [CLI 联调缺口](em1-comm-followups.md)，尚未发布/进入 main；对应本地组合测试只证明保留源码的专项范围，完整 CI 和 relay 联调仍待完成。补收状态模型/统计/runtime 分别已本地提交 S1 `82de8549`、S2a `6f7daa14`、S2b `7b29bf6f`，最终专项/race 通过，尚未发布，真实 relay 和完整 CI 未验收；新改动不能沿用基线的验收。下文早期组合记录只描述对应提交当时的状态。
+
+
+2026-10-01 06:58 UTC 更新：Agent24 #620/#621/#622 已合并，正式身份/联系人/relay CLI/REST 进入 `f1dbe1ef` 且该 main CI 通过，T20 仍 IN_PROGRESS；消息、托管、zero-run 与真实下载制品联调尚未验收。FU-1 的 R1/R2a/R2b 已由 Luna 在独立 worktree 提交并通过本地工具验收，最终四套工具共 39 项通过；真实 CI、固定制品、Release 与下载联调仍待 [制品交付任务](em1-artifact-delivery.md) 的出口，R3 尚未启动。这项前置交付不解除 T01-E、基础 UI 或四仓出口。
+2026-10-01 本地候选补充：T01-C1 `427f631f` 已由 Luna 在独立 worktree 提交，仅测试/样例/文档。根代理最终 SHA 的整个 contracts 包普通/race 各验证 102 个恢复样例，零跳过；跨语言、实际执行/副作用及 T01-E 仍待交付。消费约定见 [Agent24](../cooperation/Agent24.md)，没有启用生产 T07。
+
+2026-10-01 08:47 UTC 对仓更新：Agent24 main `be365232`（#628/#630 已合并）CI 通过；#626 仍有当前 head REQUEST_CHANGES，#627 仍为依赖草稿。T20 尚缺正式 main 联调及固定制品，T21/T22 和 T01-E 保持未验收；已完成 C1 不能解除这些门槛。
+
+2026-10-01 09:01 UTC：原 a4/Go1.26.4 的真实两平台制品已构建、根代理验证生产 lock 和归档、本机加密 CLI smoke 通过，缺本地制品已解决。T20 剩余真实 relay/正式 main 联调、Release 下载与 UI/执行出口仍未通过；不把本地构建等同 R2 Actions 或 E-M1 完成。
 
 ## 工作方式
 
@@ -64,8 +78,8 @@ T01 的交付包括：权威协议修改、字段/错误码表、跨仓共享正
 | T07 | behavior 编解码与兼容读取；新增 `internal/behavior/`、`pkg/types/`；承接 `M2-F5-T5/M2-F1-T1` | T01 | 正反例跨语言一致；验签、版本、重复 tag、截断、解压上限、未知行为；旧 30078 不误解析 | WAITING |
 | T08 | register/publish 收发与 CLI；behavior、profile、`cmd/hyphae/` | T07、T05 | 三种注册模式、能力版本可发现；广播只带允许公开的字段；CLI JSON 稳定；真实 relay 可查询 | WAITING |
 | T09 | inquire/subscribe 收发与 CLI；behavior 及测试 | T07、T05 | 查询/回复关联正确，订阅过滤与退出正确；重复事件不重复通知；查询不触发执行 | WAITING |
-| T10 | Agent24 → iDoris 适配器；Agent24 `rust/crates/agent24-models/src/router.rs` 及 provider/配置/测试 | T01 | 复用已有接入设计，接通 `IDORIS_URL`；超时、取消、不可用显式返回；mock 与真实服务分别验收 | WAITING |
-| T11 | 隐私、预算、推理落点校验；iDoris router 与 Agent24 适配器 | T10 | 本地限定时外部请求数为零；预算拒绝不执行；审计与实际上游一致；用量标注实际或估算 | WAITING |
+| T10 | iDoris 正式入口接持久 ledger、认证 tenant scope、usage 策略与 capabilities 合同；随后 Agent24 `rust/crates/agent24-models/` 专用 iDoris adapter、配置与测试 | T01；服务端合同先于 adapter | mock/真实服务分别验收；profile/control headers、超时取消、错误映射、Served-Locality/Record-Id 消费明确；默认 OMLX/Ollama 不冒充 iDoris 接线 | WAITING |
+| T11 | 隐私、预算、推理落点及 egress 核对；iDoris router 与 Agent24 adapter | T10 | local_only 零外发；预算拒绝不执行；settle 依据来源明确的实际 usage 或显式估算/未知；缓存/重试不重复计费；取消与 redirect/egress 边界有合同测试 | WAITING |
 | T12 | 选定外部模块并固定权限/生命周期样例；Agent24 `rust/crates/agent24-os-packages/src/discovery.rs` 与真实项目 `domain-os.yml` | T01 | 主代理确认项目、commit、能力和授权范围；加载/停用/版本不兼容都有明确结果 | WAITING |
 | T13 | 模块加载和单步能力调用；Agent24 `rust/apps/agent24d/src/{domain,attached,attached_routes}.rs`、AgentEar `src/a3.rs` | T12 | 从外部路径加载；拒绝未声明/未授权能力；脱离与重连不重复挂载；结果带请求关联；不扩大 AgentEar speak/stop_playback 命令集 | WAITING |
 | T14 | Agent24 bridge 兼容新行为；`packages/nostr-bridge/src/{protocol,speaker,inbound}.ts` | T08、T09 | 新旧消息可读；完整发送者与事件 ID；只把获授权的执行请求送入 Agent24；回执不触发回复循环 | WAITING |
@@ -80,7 +94,7 @@ T01 的交付包括：权威协议修改、字段/错误码表、跨仓共享正
 
 T02～T06 是已有存储缺陷修复，可在 T01 期间推进，不改变跨仓契约。T03～T05 与 T14～T17 分别串行，避免改同一文件发生冲突。
 
-T10/T11 需验证已有 `idoris-local`/`idoris-any` 设计与 `X-iDoris-Privacy`、`X-iDoris-Served-Locality`、Record-Id 的真实实现。回环 HTTP 地址不能证明推理在本地，缓存命中也必须保留原始落点。角色目录 Q-3 与预算核销接口在 T01 明确；避免在两个仓库重复实现预算账本。
+T10/T11 以 [固定提交源码审阅](../cooperation/iDoris.md) 为准：iDoris Rust router/tenancy 已有 crate，旧 TypeScript 命令只适用于 `074d35f` 历史快照；当前优先验收服务端持久 ledger、tenant identity、usage 和 capabilities 合同，再接 Agent24 provider。`idoris-local`/`idoris-any` 未确认存在，不据此实现双入口。
 
 T14 需为 Agent24 既有 `version/intent/thread_id/reply_to/topic/payload/expires_at` 信封定义逐字段映射。T15～T17 的执行状态归 Agent24；Hyphae daemon 只负责接收、投递状态和传输诊断，不能另起一套任务执行器。T06 仅修历史存储缺陷，不新增群组协作功能。
 
@@ -106,12 +120,11 @@ T20 在 Hyphae 侧进一步拆小 PR：身份/联系人 JSON、outbox JSON 与�
 | Hyphae | `go test ./internal/group/... -race -count=1` | T06 |
 | Hyphae | `go test ./internal/behavior/... ./pkg/types/... -race -count=1` | T07～T09，新包创建后可运行 |
 | Hyphae | `go test ./...`、`./build.sh`、`./test.sh` | Hyphae 完整回归与 CLI；脚本须先确认数据隔离 |
-| Agent24 `rust/` | `cargo test -p agent24-models` | T10/T11 正式模型入口 |
+| Agent24 `rust/` | `cargo test -p agent24-models` | T10/T11 adapter 单测；mock 不替代真实 iDoris service 验收 |
 | Agent24 `rust/` | `cargo test -p agent24-os-packages`、`cargo test -p agent24d` | 模块、附着、run；按代码范围补充相关 crate |
 | Agent24 | `pnpm --filter @agent24/nostr-bridge test`、`pnpm --filter @agent24/nostr-bridge typecheck` | bridge |
 | Agent24 | `pnpm test:contract` | 跨组件契约 |
-| iDoris 独立工作树 | `pnpm --filter @idoris/router test`、`pnpm --filter @idoris/router typecheck` | 模型路由；按实际修改范围追加依赖包测试 |
-| iDoris 独立工作树 | `pnpm smoke:agent24` | 已有接入 smoke；不等于实际 Agent24 Rust provider 已接通 |
+| iDoris 独立工作树 | `cargo test -p idoris-router`；涉及账本时追加 `cargo test -p idoris-tenancy` | 当前 Rust router/tenancy crates；旧 TS 命令仅适用于 `074d35f` 快照 |
 | AgentEar | `cargo test --test contracts` | host 契约；附着代码改动后追加相关 Rust 测试 |
 | AgentEar | `scripts/e2e-agent24.sh` | 已有 Agent24+AgentEar 语音集成；依赖 release 二进制、ASR/本地模型与 macOS 音频工具 |
 

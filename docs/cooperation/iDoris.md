@@ -1,45 +1,38 @@
 # iDoris × Hyphae
 
-状态：Hyphae 侧协作提案，待 iDoris 确认。2026-09-30 只读 GitHub API 固定 main `074d35f89c9281a742872a1baf54013ee9d42b56`；本轮未访问或修改原仓库用户暂存文件，未启服务。下述事实仅针对该提交。
+状态：Hyphae 侧协作提案，待 iDoris 确认。2026-10-01 只读核对 iDoris main `ffed37a107a2e152963caea845450c9515d12044` 与 Agent24 main `f5a76c015a7026c64fc872f47c6c160485cfed37`；没有改动两仓用户工作区、运行服务或调用 provider。iDoris 固定提交比旧基线 `074d35f89c9281a742872a1baf54013ee9d42b56` 多 273 commits。当前事实以本段两个固定 SHA 为准。
 
-## 边界
+## 边界与当前实现
 
-Hyphae 不调用模型来完成基础消息收发；iDoris 不接管 Nostr relay、身份密钥和投递重试。模型接线发生在 Agent24 的 Rust `agent24-models`，由 Agent24 向 iDoris 传递隐私、预算和能力约束。
+Hyphae 不调用模型来完成基础消息收发；iDoris 不接管 Nostr relay、身份密钥和投递重试。模型协作发生在 Agent24 Rust `agent24-models` 与 iDoris Rust router 之间。Agent24 当前尚未接入 iDoris：固定源码的 provider registry 默认只建 oMLX 与 Ollama，没有 iDoris provider 或 `X-iDoris-*` header 实现。
 
-## 协作事项
+iDoris 当前正式入口是 `crates/idoris-router/src/bin/idoris.rs`，默认绑定 `127.0.0.1:8740`，路由包括 `/health`、`/v1/models`、`/v1/chat/completions`。生产 `AppState::default()` 未装载虽已实现的 SQLite `BudgetLedger`；没有认证、capabilities、usage/audit HTTP API。付费 dispatch 在账本不可用时 fail closed。非免费 resident `http_service` 启动受拒绝。router 可解析隐私/tenant等 profile headers，并在响应生成 Record-Id、选择后返回 Served-Locality；buffered proxy 只向上游传 JSON body，不传身份/控制 headers。
 
-- 确认 `IDORIS_URL`、`idoris-local/idoris-any` 和角色目录对应的请求/错误格式。
-- 贯穿 `X-iDoris-Privacy`、`X-iDoris-Served-Locality`、Record-Id 及缓存原始落点。本地回环地址本身不能证明推理发生在本地。
-- 确认预算准入/核销归属与用量来源；未知或估算用量不得写成实际用量。
-- 相关上游升级改变模型接口时，先提出兼容约定，由 Agent24 跑真实 provider 联调。此次 Nostr/khatru 升级不要求修改 iDoris。
+固定源码： [iDoris router entry](https://github.com/iDoris-ai/iDoris/blob/ffed37a107a2e152963caea845450c9515d12044/crates/idoris-router/src/bin/idoris.rs#L77-L124)、[routes and state defaults](https://github.com/iDoris-ai/iDoris/blob/ffed37a107a2e152963caea845450c9515d12044/crates/idoris-router/src/lib.rs#L138-L221)、[profile parsing](https://github.com/iDoris-ai/iDoris/blob/ffed37a107a2e152963caea845450c9515d12044/crates/idoris-router/src/profile.rs#L72-L143)、[loopback registration checks](https://github.com/iDoris-ai/iDoris/blob/ffed37a107a2e152963caea845450c9515d12044/crates/idoris-policy/src/registry.rs#L96-L190)。组件声明 `locality: loopback` 时会静态校验 endpoint scheme/host；这不证明 DNS 解析、redirect 或最终连接目标受限。
 
-## 验收与待确认
+## 协作顺序
 
-本地限定且本地不可用时，外部调用次数必须为零；预算拒绝不得启动模型调用；实际 provider/model 与审计落点一致。已有入口为 `pnpm --filter @idoris/router test`、`typecheck` 和 `pnpm smoke:agent24`；最后一项不替代 Agent24 Rust provider 的真实接线验收。
+1. **iDoris 服务端先交付**：正式 binary 接入持久 ledger；绑定经认证的身份与 tenant scope；明确币种/最小单位、单请求与租户上限、`all`/`paid_only` gate、未知价格策略、并发预留和重启恢复；定义 provider usage 缺失/无效时的估算或未知策略，并让 reserve/settle/usage 查询来自一致账本；提供并测试 capabilities 与受保护的 usage 查询合同。当前 reservation completion 占位固定为 1024 tokens，settle actual 由本地文本 token estimator 得出，不是 provider 报告的真实 usage；没有可信 usage 时只能明确估算或未知，不能填 actual/0 成本：[budget estimate](https://github.com/iDoris-ai/iDoris/blob/ffed37a107a2e152963caea845450c9515d12044/crates/idoris-router/src/budget.rs#L17-L87)、[dispatch settle](https://github.com/iDoris-ai/iDoris/blob/ffed37a107a2e152963caea845450c9515d12044/crates/idoris-router/src/dispatch.rs#L380-L399)、[SQLite ledger](https://github.com/iDoris-ai/iDoris/blob/ffed37a107a2e152963caea845450c9515d12044/crates/idoris-tenancy/src/budget/ledger.rs#L218-L245)。
+2. **再由 Agent24 实现专用 adapter**：将获准的 privacy/intent/complexity/capability/tenant/request id 映射到双方确认的 header，保留取消；读取并验证 `X-iDoris-Served-Locality`、Record-Id 与 usage 来源。当前 OpenAI-compatible adapter 只发送标准 chat body 和自己的可选 Authorization，未消费 iDoris 响应 headers：[Agent24 provider](https://github.com/iDoris-ai/Agent24/blob/f5a76c015a7026c64fc872f47c6c160485cfed37/rust/crates/agent24-models/src/lib.rs#L185-L223)、[request/response path](https://github.com/iDoris-ai/Agent24/blob/f5a76c015a7026c64fc872f47c6c160485cfed37/rust/crates/agent24-models/src/lib.rs#L569-L690)。默认注册是 OMLX+Ollama：[registry](https://github.com/iDoris-ai/Agent24/blob/f5a76c015a7026c64fc872f47c6c160485cfed37/rust/crates/agent24-models/src/lib.rs#L694-L729)。
+3. **endpoint 形态先用单入口**：由 iDoris 内部 privacy-aware router 选择 provider。`idoris-local`/`idoris-any` 是旧设计提案，不是当前已实现/确认的两个 iDoris endpoint；如仍需要双逻辑 provider，需先由双方确认它们的 capabilities、落点及失败语义。
 
-待确认：角色目录 Q-3、预算字段/错误码、缓存与重试的用量核销规则。基础 CLI/UI 通信不依赖这些事项完成。
+## 取消、重试、缓存与 egress
 
-## T01-D：已核对接口与真实缺口
+Local handler 当前传入新建 cancellation token，没有将客户端断开接入；proxy streaming response 在断开时可通过 drop 取消上游，但 streaming 不重试/缓存。Buffered proxy 对 5xx/transport 最多重试两次，成功响应可按 tenant/endpoint/provider/request-id 做 60 秒进程内缓存，不是持久执行幂等账本；router 的默认 reqwest client 允许进一步核查 redirect、环境代理及实际连接目标边界。[handler](https://github.com/iDoris-ai/iDoris/blob/ffed37a107a2e152963caea845450c9515d12044/crates/idoris-router/src/lib.rs#L498-L529)、[proxy retry/cache](https://github.com/iDoris-ai/iDoris/blob/ffed37a107a2e152963caea845450c9515d12044/crates/idoris-router/src/proxy.rs#L208-L329)、[stream path](https://github.com/iDoris-ai/iDoris/blob/ffed37a107a2e152963caea845450c9515d12044/crates/idoris-router/src/proxy.rs#L339-L385)。
 
-固定来源均为 [iDoris@074d35f](https://github.com/iDoris-ai/iDoris/tree/074d35f89c9281a742872a1baf54013ee9d42b56)。
+后续合同测试使用本地 mock 与临时 SQLite：local_only 不得外发；客户端断开可取消仍运行的 provider；只有能确认未执行/未产生费用时才释放 reservation，若费用可能发生或结果不明则保留未结算状态并进入对账，不能假定取消即零费用；成功只 reserve/settle 一次；provider usage 与账本、响应 cost 一致；缺失 usage 不标 actual；retry/cache 不重复收费且按 tenant 隔离；Authorization/控制 headers 不泄漏；redirect/代理配置不能绕开 egress 策略。Agent24 adapter 再测请求 header、取消、非成功映射和响应 locality/Record-Id 消费。此次只是源码审查，未运行这些测试或真实服务。
 
-| 项目 | 固定版本事实 | 接线约束 |
-|---|---|---|
-| 请求隐私 | `packages/router/src/profile.ts` 支持 `X-iDoris-Privacy: local_only\|any`，缺省 local_only；tenant 模式需 Tenant header | 控制模型执行位置，不表达发起端向远端 Agent 披露数据的许可；两项授权分别检查 |
-| 实际落点 | `dispatch.ts` 与 `locality.ts` 校验有效 loopback、privacy_class 和 allowed_egress；subscription/spawn_cli 为 remote | 不能凭 router 回环 URL 或客户端 provider tier 推断实际落点 |
-| 记录与缓存 | `server.ts` 各响应生成独立 Record-Id；通过来源校验并进入 backend 路径后才设置 Served-Locality；缓存回放原始落点及 Origin-Record-Id | 早期错误可以没有 locality；不能补猜测值。缓存来源与本次记录分别保留 |
-| HTTP 服务 | `server.ts` 提供 health/models/capabilities/chat；usage/budget 路由未接入 | tenancy helper 的响应 interface 不能当已可调用 API；未知路径当前为 404 |
-| 预算 | `packages/tenancy/src/budget.ts` 只比较 TenantContext 的 spent_minor/limit_minor，区分 all/paid_only；charge 是内存计数器；store 是内存数组 | router 未接入预算 helper，也未消费 schema 的可选 quota.rpm/tpm；缺少单次费用上限、原子预留或实际核销，不能宣称预算受限执行已实现 |
-| 用量 | `proxy.ts` 透传 provider JSON，不核验/落账 usage；`packages/adapters/subscription/relay.ts` 按文本长度估算 tokens | 缺少可靠来源时只能标未知或估算，不能统一标 actual |
-| 重试 | 非流式代理可重试；请求 ID 可用于短期进程内缓存，但没有连接预算账本 | 缓存去重不是持久化执行幂等；一次逻辑请求的多个尝试须另行定义准入和核销 |
+建议的本地命令（待对应实现添加测试后运行，不是本轮结果）：
 
-这些是代码核查证据，不是本轮真实 provider 联调结果。现有 helper 单元通过不代表 HTTP 准入、持久化账本或并发预算通过。
+```sh
+cd /path/to/iDoris && cargo test -p idoris-router
+cd /path/to/Agent24/rust && cargo test -p agent24-models
+```
 
-## 由对应仓库推进的最小任务
+服务验收还需另提供固定两仓 SHA、隔离 tenant/SQLite/mock upstream 的启动配置、实际 HTTP 命令及 record id/账本断言；`cargo test` 不能替代真实入口检查。
 
-1. **iDoris：预算准入与持久化。** 固定请求上限/租户上限、单位与币种、预留键和未知价格处理；将准入与核销实际接入 chat 路径。并发请求不能共用同一份过期余额；重试、缓存命中、取消和崩溃不能重复核销或直接释放未确认费用。模型费用控制不等于 E-M5 支付实现。
-2. **iDoris：用量来源与查询接口。** 区分 provider 返回、估算和未知；实际/估算 token、cost 和原始记录的语义分别固定。公开 usage/budget 路由前补真实 HTTP、权限、持久化与时区验收，不能仅暴露类型定义。
-3. **Agent24：正式 provider 接线。** 复用已有 idoris-local/idoris-any 设计，转发严格许可并验证服务身份、响应落点及来源；缺落点时不猜测本地，预算能力不满足时不启动预算受限调用。网络取消不能降级成另一个 provider 继续运行。
-4. **Hyphae：执行约束与回执字段。** 请求的隐私/预算/模块许可进入授权摘要；回执记录实际观察。字段与双方错误码确认后再补共享正反例，T01-E 之前不开启生产执行入口。
+## 历史：2026-09-30 的 TypeScript 快照
 
-验收至少包含：预算零（区分 all/paid_only）/未知价格/超限、并发预留、重试与缓存核销、取消后未知费用、重启恢复；local_only 本地不可用时外部调用零；any 实际走本地时准确记录；缺 locality、缓存原始落点和估算 usage 不误标。固定双方 commit、真实服务命令与记录 ID，再回填 PR 链接。跨仓实现由用户推动，本文不表示对应仓库已确认或完成。
+以下仅记录旧 `074d35f` TS 源码，不代表当前 main。该快照中 TypeScript router 提供 health/models/capabilities/chat，但 usage/budget HTTP route 未接；tenant budget 是内存 helper，proxy 未校验/落账 provider usage。旧判断“没有持久 SQLite ledger”只适用于该 TS 快照；iDoris 当前 Rust main 已有 SQLite ledger 模块，但 production binary 尚未接入。旧详细证据见 [旧提交接口表](https://github.com/iDoris-ai/iDoris/tree/074d35f89c9281a742872a1baf54013ee9d42b56/packages/router/src)。
+
+T01-E 与 T07 门槛不变；本轮不冻结 wire、角色目录或双 endpoint，也不把源码审查记作编译、服务或跨仓验收。基础 CLI/UI 通信不依赖模型接线完成。
