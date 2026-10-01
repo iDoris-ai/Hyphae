@@ -1,6 +1,6 @@
 # E-M1 PR 依赖与合并顺序
 
-12:25 UTC：#115 head `2fa6f0b` 的 CI `36861616162` 成功。#104 head `aaa6d0f` 的双平台测试已成功，`ci-ok` 刚进入 queued，待根代理核验最终状态；其 Windows compile 旧失败/新通过、daemon race 9.415s。#103 `9ee5cca` CI `36859748709` 成功。#102/#105/#106 Python discovery 新 CI 两平台实际通过 16/20/23 项；#111–#114 CI 绿、待外审。G2-S2b 新增 stdout 检查契约不符（状态流允许 stderr 诊断/明文），正在修正测试；另两项 runtime 测试仍失败待查。细节见 [progress](progress.md)。
+12:25 UTC：#115 head `2fa6f0b` 的 CI `36861616162` 成功。#104 head `aaa6d0f` 的双平台测试已成功，`ci-ok` 刚进入 queued，待根代理核验最终状态；其 Windows compile 旧失败/新通过、daemon race 9.415s。#103 `9ee5cca` CI `36859748709` 成功。#102/#105/#106 Python discovery 新 CI 两平台实际通过 16/20/23 项；#111–#114 CI 绿、待外审。G2-S2b 新增“stderr 不得含正文”断言不符状态流设计（允许 stderr 诊断/明文），正在修正；另两项 runtime 测试仍失败待查。细节见 [progress](progress.md)。
 
 12:04 UTC：Agent24 自有文档 #634 已在有效外部批准、六项检查通过后正常合并；新 main f5a76c01 的 CI 运行中。Hyphae #111/#112 为独立 main PR，待真实 CI/外部评审。#102/#105/#106 补 Python 工具单测的 CI 步骤由 Luna 处理中，变更后须按新 head 检查，不沿用旧绿色结果；其余队列依赖不变。
 

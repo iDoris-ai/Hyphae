@@ -12,7 +12,7 @@ iDoris 当前正式入口是 `crates/idoris-router/src/bin/idoris.rs`，默认�
 
 ## 协作顺序
 
-1. **iDoris 服务端先交付**：正式 binary 接入持久 ledger；绑定经认证的身份与 tenant scope；定义 provider usage 缺失/无效时的估算或未知策略，并让 reserve/settle/usage 查询来自一致账本；提供并测试 capabilities 与受保护的 usage 查询合同。当前 reservation completion 占位固定为 1024 tokens，settle actual 由本地文本 token estimator 得出，不是 provider 报告的真实 usage：[budget estimate](https://github.com/iDoris-ai/iDoris/blob/ffed37a107a2e152963caea845450c9515d12044/crates/idoris-router/src/budget.rs#L17-L87)、[dispatch settle](https://github.com/iDoris-ai/iDoris/blob/ffed37a107a2e152963caea845450c9515d12044/crates/idoris-router/src/dispatch.rs#L380-L399)、[SQLite ledger](https://github.com/iDoris-ai/iDoris/blob/ffed37a107a2e152963caea845450c9515d12044/crates/idoris-tenancy/src/budget/ledger.rs#L218-L245)。
+1. **iDoris 服务端先交付**：正式 binary 接入持久 ledger；绑定经认证的身份与 tenant scope；明确币种/最小单位、单请求与租户上限、`all`/`paid_only` gate、未知价格策略、并发预留和重启恢复；定义 provider usage 缺失/无效时的估算或未知策略，并让 reserve/settle/usage 查询来自一致账本；提供并测试 capabilities 与受保护的 usage 查询合同。当前 reservation completion 占位固定为 1024 tokens，settle actual 由本地文本 token estimator 得出，不是 provider 报告的真实 usage；没有可信 usage 时只能明确估算或未知，不能填 actual/0 成本：[budget estimate](https://github.com/iDoris-ai/iDoris/blob/ffed37a107a2e152963caea845450c9515d12044/crates/idoris-router/src/budget.rs#L17-L87)、[dispatch settle](https://github.com/iDoris-ai/iDoris/blob/ffed37a107a2e152963caea845450c9515d12044/crates/idoris-router/src/dispatch.rs#L380-L399)、[SQLite ledger](https://github.com/iDoris-ai/iDoris/blob/ffed37a107a2e152963caea845450c9515d12044/crates/idoris-tenancy/src/budget/ledger.rs#L218-L245)。
 2. **再由 Agent24 实现专用 adapter**：将获准的 privacy/intent/complexity/capability/tenant/request id 映射到双方确认的 header，保留取消；读取并验证 `X-iDoris-Served-Locality`、Record-Id 与 usage 来源。当前 OpenAI-compatible adapter 只发送标准 chat body 和自己的可选 Authorization，未消费 iDoris 响应 headers：[Agent24 provider](https://github.com/iDoris-ai/Agent24/blob/f5a76c015a7026c64fc872f47c6c160485cfed37/rust/crates/agent24-models/src/lib.rs#L185-L223)、[request/response path](https://github.com/iDoris-ai/Agent24/blob/f5a76c015a7026c64fc872f47c6c160485cfed37/rust/crates/agent24-models/src/lib.rs#L569-L690)。默认注册是 OMLX+Ollama：[registry](https://github.com/iDoris-ai/Agent24/blob/f5a76c015a7026c64fc872f47c6c160485cfed37/rust/crates/agent24-models/src/lib.rs#L694-L729)。
 3. **endpoint 形态先用单入口**：由 iDoris 内部 privacy-aware router 选择 provider。`idoris-local`/`idoris-any` 是旧设计提案，不是当前已实现/确认的两个 iDoris endpoint；如仍需要双逻辑 provider，需先由双方确认它们的 capabilities、落点及失败语义。
 
@@ -20,13 +20,13 @@ iDoris 当前正式入口是 `crates/idoris-router/src/bin/idoris.rs`，默认�
 
 Local handler 当前传入新建 cancellation token，没有将客户端断开接入；proxy streaming response 在断开时可通过 drop 取消上游，但 streaming 不重试/缓存。Buffered proxy 对 5xx/transport 最多重试两次，成功响应可按 tenant/endpoint/provider/request-id 做 60 秒进程内缓存，不是持久执行幂等账本；router 的默认 reqwest client 允许进一步核查 redirect、环境代理及实际连接目标边界。[handler](https://github.com/iDoris-ai/iDoris/blob/ffed37a107a2e152963caea845450c9515d12044/crates/idoris-router/src/lib.rs#L498-L529)、[proxy retry/cache](https://github.com/iDoris-ai/iDoris/blob/ffed37a107a2e152963caea845450c9515d12044/crates/idoris-router/src/proxy.rs#L208-L329)、[stream path](https://github.com/iDoris-ai/iDoris/blob/ffed37a107a2e152963caea845450c9515d12044/crates/idoris-router/src/proxy.rs#L339-L385)。
 
-后续合同测试使用本地 mock 与临时 SQLite：local_only 不得外发；客户端断开取消 local provider 并释放 reservation；成功只 reserve/settle 一次；provider usage 与账本、响应 cost 一致；缺失 usage 不标 actual；retry/cache 不重复收费且按 tenant 隔离；Authorization/控制 headers 不泄漏；redirect/代理配置不能绕开 egress 策略。Agent24 adapter 再测请求 header、取消、非成功映射和响应 locality/Record-Id 消费。此次只是源码审查，未运行这些测试或真实服务。
+后续合同测试使用本地 mock 与临时 SQLite：local_only 不得外发；客户端断开可取消仍运行的 provider；只有能确认未执行/未产生费用时才释放 reservation，若费用可能发生或结果不明则保留未结算状态并进入对账，不能假定取消即零费用；成功只 reserve/settle 一次；provider usage 与账本、响应 cost 一致；缺失 usage 不标 actual；retry/cache 不重复收费且按 tenant 隔离；Authorization/控制 headers 不泄漏；redirect/代理配置不能绕开 egress 策略。Agent24 adapter 再测请求 header、取消、非成功映射和响应 locality/Record-Id 消费。此次只是源码审查，未运行这些测试或真实服务。
 
 建议的本地命令（待对应实现添加测试后运行，不是本轮结果）：
 
 ```sh
 cd /path/to/iDoris && cargo test -p idoris-router
-cd /path/to/Agent24 && cargo test -p agent24-models
+cd /path/to/Agent24/rust && cargo test -p agent24-models
 ```
 
 服务验收还需另提供固定两仓 SHA、隔离 tenant/SQLite/mock upstream 的启动配置、实际 HTTP 命令及 record id/账本断言；`cargo test` 不能替代真实入口检查。

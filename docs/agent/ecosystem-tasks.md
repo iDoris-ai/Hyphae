@@ -94,7 +94,7 @@ T01 的交付包括：权威协议修改、字段/错误码表、跨仓共享正
 
 T02～T06 是已有存储缺陷修复，可在 T01 期间推进，不改变跨仓契约。T03～T05 与 T14～T17 分别串行，避免改同一文件发生冲突。
 
-T10/T11 需验证已有 `idoris-local`/`idoris-any` 设计与 `X-iDoris-Privacy`、`X-iDoris-Served-Locality`、Record-Id 的真实实现。回环 HTTP 地址不能证明推理在本地，缓存命中也必须保留原始落点。角色目录 Q-3 与预算核销接口在 T01 明确；避免在两个仓库重复实现预算账本。
+T10/T11 以 [固定提交源码审阅](../cooperation/iDoris.md) 为准：iDoris Rust router/tenancy 已有 crate，旧 TypeScript 命令只适用于 `074d35f` 历史快照；当前优先验收服务端持久 ledger、tenant identity、usage 和 capabilities 合同，再接 Agent24 provider。`idoris-local`/`idoris-any` 未确认存在，不据此实现双入口。
 
 T14 需为 Agent24 既有 `version/intent/thread_id/reply_to/topic/payload/expires_at` 信封定义逐字段映射。T15～T17 的执行状态归 Agent24；Hyphae daemon 只负责接收、投递状态和传输诊断，不能另起一套任务执行器。T06 仅修历史存储缺陷，不新增群组协作功能。
 
@@ -120,12 +120,11 @@ T20 在 Hyphae 侧进一步拆小 PR：身份/联系人 JSON、outbox JSON 与�
 | Hyphae | `go test ./internal/group/... -race -count=1` | T06 |
 | Hyphae | `go test ./internal/behavior/... ./pkg/types/... -race -count=1` | T07～T09，新包创建后可运行 |
 | Hyphae | `go test ./...`、`./build.sh`、`./test.sh` | Hyphae 完整回归与 CLI；脚本须先确认数据隔离 |
-| Agent24 `rust/` | `cargo test -p agent24-models` | T10/T11 正式模型入口 |
+| Agent24 `rust/` | `cargo test -p agent24-models` | T10/T11 adapter 单测；mock 不替代真实 iDoris service 验收 |
 | Agent24 `rust/` | `cargo test -p agent24-os-packages`、`cargo test -p agent24d` | 模块、附着、run；按代码范围补充相关 crate |
 | Agent24 | `pnpm --filter @agent24/nostr-bridge test`、`pnpm --filter @agent24/nostr-bridge typecheck` | bridge |
 | Agent24 | `pnpm test:contract` | 跨组件契约 |
-| iDoris 独立工作树 | `pnpm --filter @idoris/router test`、`pnpm --filter @idoris/router typecheck` | 模型路由；按实际修改范围追加依赖包测试 |
-| iDoris 独立工作树 | `pnpm smoke:agent24` | 已有接入 smoke；不等于实际 Agent24 Rust provider 已接通 |
+| iDoris 独立工作树 | `cargo test -p idoris-router`；涉及账本时追加 `cargo test -p idoris-tenancy` | 当前 Rust router/tenancy crates；旧 TS 命令仅适用于 `074d35f` 快照 |
 | AgentEar | `cargo test --test contracts` | host 契约；附着代码改动后追加相关 Rust 测试 |
 | AgentEar | `scripts/e2e-agent24.sh` | 已有 Agent24+AgentEar 语音集成；依赖 release 二进制、ASR/本地模型与 macOS 音频工具 |
 
