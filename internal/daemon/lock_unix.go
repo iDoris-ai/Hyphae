@@ -32,7 +32,7 @@ func acquireDaemonHomeLock() (*daemonHomeLock, error) {
 	}
 
 	path := filepath.Join(dir, "daemon.lock")
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0600)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("open daemon lock file: %w", err)
 	}
@@ -40,15 +40,15 @@ func acquireDaemonHomeLock() (*daemonHomeLock, error) {
 		_ = file.Close()
 		return nil, err
 	}
-	if err := file.Chmod(0600); err != nil {
-		return closeOnError(fmt.Errorf("set daemon lock permissions: %w", err))
-	}
 	info, err := file.Stat()
 	if err != nil {
 		return closeOnError(fmt.Errorf("inspect daemon lock file: %w", err))
 	}
 	if !info.Mode().IsRegular() {
 		return closeOnError(fmt.Errorf("daemon lock path is not a regular file"))
+	}
+	if err := file.Chmod(0600); err != nil {
+		return closeOnError(fmt.Errorf("set daemon lock permissions: %w", err))
 	}
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {

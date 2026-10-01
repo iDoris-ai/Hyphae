@@ -33,7 +33,7 @@ const daemonLockHelperEnv = "HYPHAE_DAEMON_LOCK_HELPER"
 var daemonLockCLI string
 
 func TestMain(m *testing.M) {
-	if os.Getenv(daemonLockHelperEnv) == "1" {
+	if os.Getenv(daemonLockHelperEnv) != "" {
 		os.Exit(m.Run())
 	}
 	_, source, _, _ := runtime.Caller(0)
@@ -111,6 +111,74 @@ func TestDaemonHomeLockChild(t *testing.T) {
 	if err := lock.Close(); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "release lock: %v\n", err)
 		os.Exit(3)
+	}
+}
+
+func TestDaemonHomeLockInvalidPathChild(t *testing.T) {
+	if os.Getenv(daemonLockHelperEnv) != "invalid" {
+		return
+	}
+	lock, err := acquireDaemonHomeLock()
+	if err == nil {
+		_ = lock.Close()
+		_, _ = fmt.Fprintln(os.Stdout, "UNEXPECTED_LOCK_ACQUIRED")
+		os.Exit(0)
+	}
+	if errors.Is(err, errDaemonHomeLocked) {
+		_, _ = fmt.Fprintln(os.Stdout, "WRITE_CONFLICT")
+		os.Exit(common.ExitWriteConflict)
+	}
+	_, _ = fmt.Fprintf(os.Stdout, "ORDINARY_ERROR: %v\n", err)
+	os.Exit(common.ExitOtherError)
+}
+
+func TestDaemonHomeLockMalformedPathsFailWithoutConflict(t *testing.T) {
+	for _, kind := range []string{"fifo", "symlink", "directory"} {
+		t.Run(kind, func(t *testing.T) {
+			home := t.TempDir()
+			dir := filepath.Join(home, identity.KeyStoreDirName)
+			require.NoError(t, os.Mkdir(dir, 0700))
+			path := filepath.Join(dir, "daemon.lock")
+			var checkedPath string
+			switch kind {
+			case "fifo":
+				require.NoError(t, syscall.Mkfifo(path, 0644))
+				require.NoError(t, os.Chmod(path, 0644))
+				checkedPath = path
+			case "symlink":
+				checkedPath = filepath.Join(home, "sentinel")
+				require.NoError(t, os.WriteFile(checkedPath, []byte("keep mode"), 0644))
+				require.NoError(t, os.Symlink(checkedPath, path))
+			case "directory":
+				require.NoError(t, os.Mkdir(path, 0755))
+				require.NoError(t, os.Chmod(path, 0755))
+				checkedPath = path
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestDaemonHomeLockInvalidPathChild$")
+			cmd.Env = append(daemonLockCLIEnv(os.Environ(), home), daemonLockHelperEnv+"=invalid")
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
+			err := cmd.Run()
+			if ctx.Err() != nil {
+				t.Fatalf("malformed lock path blocked startup: %v; stdout=%q stderr=%q", ctx.Err(), stdout.String(), stderr.String())
+			}
+			exit, ok := err.(*exec.ExitError)
+			require.True(t, ok, "expected ordinary helper error, got err=%v stdout=%q stderr=%q", err, stdout.String(), stderr.String())
+			assert.Equal(t, common.ExitOtherError, exit.ExitCode())
+			assert.Contains(t, stdout.String(), "ORDINARY_ERROR:")
+			assert.NotContains(t, stdout.String(), "WRITE_CONFLICT")
+
+			info, statErr := os.Stat(checkedPath)
+			require.NoError(t, statErr)
+			wantMode := os.FileMode(0644)
+			if kind == "directory" {
+				wantMode = 0755
+			}
+			assert.Equal(t, wantMode, info.Mode().Perm(), "malformed path permissions must remain untouched")
+		})
 	}
 }
 
