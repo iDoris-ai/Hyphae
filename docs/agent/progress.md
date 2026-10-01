@@ -6,10 +6,13 @@
 
 ### 本轮收尾：托管状态流与依赖推进
 
-最新实时更新：#622 `c660319a` 六项 CI 全绿，但外部评审 [REQUEST_CHANGES](https://github.com/iDoris-ai/Agent24/pull/622#pullrequestreview-5375590068)。评审指出首次身份创建失败时可能删除已落盘 keystore 的唯一口令，以及 Pending→Salt 完成前释放锁；Agent24 须修复并补有界故障/并发回归，再由外部复审。#622 不合并。Agent24 最新 main `4fb5a892` CI `36822440235` 已通过；Hyphae main `a4aa606` CI `36738033201` 通过。
+最新实时更新（2026-10-01 06:58 UTC）：Agent24 [#622](https://github.com/iDoris-ai/Agent24/pull/622) 已在 `48c866ace755f2ae92464f3e12e59c9ea9c77a73` 获最新 head 的外部 APPROVED 后合并；旧 `c660319a` 的 REQUEST_CHANGES 不是最终结论。Agent24 main 为 `f1dbe1efe01766a31e4cff3768c7375c5ab0f2ae`，[CI 36826098337](https://github.com/iDoris-ai/Agent24/actions/runs/36826098337) 通过；正式 CLI/REST 的身份、联系人、relay 接线已进入 main，真实联合验收仍未完成。Hyphae main `a4aa606` 的 CI `36738033201` 通过。
 
-当前 goal 系统状态为 `usageLimited`，E-M1 没有完成；恢复自动推进需额度可用后恢复同一 goal。用户明确约束：根代理可以 merge 外部批准的最新 head，在既有 CI/依赖条件满足时正常合并；禁止批准任何 PR 或提交 GitHub PR review，所有 PR review 均由外部完成。根代理继续设计、协调、代码检查和验收。工具执行审批与 GitHub PR review 是独立机制，不能混用词义。
+Goal 已恢复为 `active`，未设置 token 预算；此前 usageLimited 只作为历史状态保留。根代理可以在既有 CI/依赖条件满足时 merge 外部批准的最新 head；禁止批准任何 PR 或提交 GitHub PR review，所有 PR review 由外部完成。
 
+已派现有 Luna 在 `/tmp/hyphae-artifact-wt` 独立 worktree 实现 FU-1/R1：固定源码/Go、隔离环境、确定性归档与实际摘要。根代理已拆清 R1 工具→R2 真实 CI/联调→R3 Release/下载验收，见 [制品交付](em1-artifact-delivery.md)。当前 Hyphae Release 仍仅 v0.26.0 且 assets 为空；Agent24 已合并的真实 Linux 构建/hash CI 没有上传制品，不能替代下载交付。第一轮同 hash 独立复测仍缺制品与支持监听的执行环境。
+
+下面的“实时核对”和固定版本记录是历史快照，当前状态以上述更新时间为准。
 
 实时核对：Agent24 #620、#621 已合并；#622 已转 main 正式评审，head `c660319a8343f8e948db51a8b3779cd26ae3b4b1`，尚无正式 review，Linux/macOS Rust 检查仍在运行。Agent24 main 已为 `4fb5a89246a64e31870cb531e0e2044aa1a315f4`，CI `36822440235` 此次读取时仍在运行，不沿用上一 main 的通过结论。Hyphae main 仍为 `a4aa606`。
 

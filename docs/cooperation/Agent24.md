@@ -2,6 +2,16 @@
 
 ## 2026-10-01 接线更新
 
+### 06:58 UTC：COMM-2a 合入与当前交付
+
+已实时核对 [#622](https://github.com/iDoris-ai/Agent24/pull/622)：`48c866ace755f2ae92464f3e12e59c9ea9c77a73` 获最新 head 的外部批准并合并；main `f1dbe1efe01766a31e4cff3768c7375c5ab0f2ae` 的 [CI 36826098337](https://github.com/iDoris-ai/Agent24/actions/runs/36826098337) 通过。#620/#621/#622 前置链均已进入 main，COMM-3 与 COMM-4a 可以分别从当前 main 继续，仍由对应仓库实现。当前公开 COMM PR 搜索只返回 #601，未据此假定后续代码已经存在。
+
+源代码核对确认失败后按 keystore 落盘情况保留/提升口令，成功的 Pending→Salt 提升仍持有写锁。还需对应仓库跟进一个保守性边界：[`router.rs` L201–215](https://github.com/iDoris-ai/Agent24/blob/f1dbe1efe01766a31e4cff3768c7375c5ab0f2ae/rust/crates/agent24-comm/src/router.rs#L201) 在文件不存在，以及已有合法 JSON 缺失/非字符串 salt 时都返回 None；L413 将 None 视为“确认没有文件”并删 Pending。应区分 absent 与已存在但结构无效，后一类保留口令并失败；补缺 salt、非字符串 salt 与 unreadable 的故障断言。此项为源码发现，尚未运行真实 CLI 故障复测，不抹去已合并版本和外部审批事实。成功路径的提升失败警告仍宣称下次创建/重启会恢复，但现行 Pending 查找恢复尚未交付，需要单独明确恢复动作。
+
+第一轮仍需两个固定 hash 二进制的 Release 页面及下载 URL，详细来源、配方和验收见 [制品交付](../agent/em1-artifact-delivery.md)。Hyphae 侧 R1 正在独立 worktree 实现，发布和同 hash 复测尚未完成。第二轮仍需 COMM-3 收发/history/outbox 与 COMM-4a 托管共同就绪，再验证真实零调用计数及正对照，不能以管理路由合并代替基础 UI 或四仓通过。
+
+以下小节的 head、CI 和“未合并”描述保留各自历史版本；最新状态以本小节为准。
+
 ### 第一轮联调 F1：历史查询与补收
 
 已阅读 [#601 第一轮结果](https://github.com/iDoris-ai/Agent24/pull/601#issuecomment-5924511217) 与 [#620](https://github.com/iDoris-ai/Agent24/pull/620) `a9c4bd634504bcaf9491019ab4e5b6a8c680872c` 的记录，并对照 Hyphae `a4aa606` 源码确认：`history inbox` 仅查询本地历史，不主动拉取 relay。默认解密的单次补收使用 `agent inbox --as <nick> --password-stdin`；`--decrypt` 默认 true。口令由 stdin 传递，成功持久化后才会在 history 出现新消息。这个顺序同样适用于未加密身份，区别在于解锁需求。

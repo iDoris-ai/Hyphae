@@ -6,6 +6,8 @@
 
 当前 Hyphae main 为 `a4aa606eb81d5c040d94c51cdf94553e646d8674`；#37～#100 的已有任务均已合并。#101 `b3f9053eb5d117877656c5102d23f91fb8325eb9` 与 Agent24 #601 `67ddbce30cc7dd713191f63e16f682094e99dee8` 有最新 head 的外部批准及通过的 CI，仍 OPEN；工具审批层拒绝本轮合并调用，用户授权不变。
 
+
+06:58 UTC：Agent24 #620/#621/#622 已依次合并，#622 最终 head `48c866ac` 有匹配的外部批准，main `f1dbe1ef` CI 通过。后续 COMM-3/4a 从该 main 独立推进，不再等待 #622。制品 R1 已派 Luna 实现；R2 前置 R1 验收/合并，R3 前置真实构建/hash/联调通过，见 [交付任务](em1-artifact-delivery.md)。所有新增本地 feature 尚无远端 PR，不能列成待 review 的 GitHub PR。
 | 新工作 | 前置 | 交付门槛 |
 |---|---|---|
 | G7：会话历史 JSON | 当前 main | 独立小 PR；真实 CLI、身份隔离、三种 JSON 开关 |
@@ -20,7 +22,7 @@
 | G2-S2a：真实扫描结果 | 当前 main | 独立小 PR；分页/部分结果、durable 新增及取消分类，尚不启用状态流 |
 | G2-S2b：daemon 状态流接入 | G2-S1、G2-S2a、daemon HOME 互斥 | 本地 `7b29bf6f`，410 生产行，专项/race通过；独立小 PR，真实 relay/完整CI待验收；每条记录不作为永久同步证明 |
 | 组合并发回归 | G8、G1、daemon HOME 互斥 | 独立测试提交；保留源码、真实 CLI 并发及 race；待生产前置合入后整理到 main |
-| 第一轮 Agent24 CLI 联调 | #614 已合并；仍需真实制品/hash CI 及后续路由/凭据交付 | 记录双方源码、构建配方/hash、实际入口及 zero-run 证据 |
+| 第一轮 Agent24 CLI 联调 | #614/#620/#621/#622 已合并；Linux 构建/hash CI 已存在，仍缺下载制品及 Hyphae 独立复测 | 记录双方源码、构建配方/hash、实际入口及 zero-run 证据 |
 
 上述 CLI 改动独立实现，生产改动分别审核，不汇总合并。详见 [接线任务契约](em1-comm-followups.md)。定时扫描按用户要求停用，本轮不创建新计时器。
 
