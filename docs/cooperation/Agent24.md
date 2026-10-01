@@ -23,6 +23,10 @@ Hyphae 侧独立复测工具正在新 worktree 实现：读取生产 lock、校�
 
 ### 后续实时更新：#620 合并、#621/#622 与第二轮准备
 
+2026-10-01 后续核对：#621 已在 `f6d055ff` 合并；#622 已迁移 main 并 ready，最新 head `c660319a8343f8e948db51a8b3779cd26ae3b4b1`，尚无正式 review，Rust CI 在运行。最新 main `4fb5a892` 的 CI `36822440235` 仍在运行。下列 `65a5c511` / `13604363` 是旧快照。COMM-3 与 COMM-4a 可以基于 #622 分别准备草稿；仍逐项核对实际差异、head 批准与 CI。Hyphae G2-S2b 已本地提交 `7b29bf6f`（410 生产行），最终专项/race 和根代理独立 race 通过，实际 relay 和完整 CI 未验收，未发布。当前仍用旧 lock；不提前启用新接口。
+
+独立复测制品未取得：用户给出的 laptop `~/Dev/auraai/Agent24` 不在本执行机；Hyphae release 无制品附件，Agent24 release 包不等于锁定 Hyphae/relay。必须先提供匹配 lock 的两个二进制，再在支持监听的环境执行复测工具。该缺口不妨碍对应仓库准备收发路由和托管草稿。
+
 Agent24 main 已推进到 `65a5c5115482522539496bc5c5cd8cdbec9a2f6e`，对应 [main CI 36821229359](https://github.com/iDoris-ai/Agent24/actions/runs/36821229359) 通过。[#620](https://github.com/iDoris-ai/Agent24/pull/620) 已在 `b00b51d7808df46519931b036514f051e3328467` 合并：文档已删口令夹具原文，拉取前空历史和非法发送错误码已改为严格断言。前节针对 `a9c4bd63` 的这两项发现已解决；缺制品变量仍返回、B 无超时、relay 异常清理及双向范围仍需按最新源码补齐。F1 的 history/daemon 表述仍建议改为本节开头确认的精确定义。
 
 [#621 COMM-1b](https://github.com/iDoris-ai/Agent24/pull/621) head `f6d055ff5e75df00d29d03913430e83f5b172acb` 当前 OPEN，暂无正式 review；七项检查通过。其 [Hyphae lock verify 36815881473](https://github.com/iDoris-ai/Agent24/actions/runs/36815881473) 真实执行锁定源码、Go 配方与 Linux hash 比对并通过。它已补写锁及凭据接口的候选实现，尚未合入；不能继续把“没有 Linux 构建/hash CI”作为当前候选缺口，也不能把它算作已进 main。

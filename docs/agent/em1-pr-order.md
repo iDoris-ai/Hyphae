@@ -18,7 +18,7 @@
 | 只读口令检查 | 当前 main | 独立小 PR；验证 legacy/current 不迁移，所有结果保持磁盘内容及元数据 |
 | G2-S1：JSON-lines 状态模型 | 当前 main | 独立小 PR；闭集统计、多行信封及短写失败，尚不启用 daemon |
 | G2-S2a：真实扫描结果 | 当前 main | 独立小 PR；分页/部分结果、durable 新增及取消分类，尚不启用状态流 |
-| G2-S2b：daemon 状态流接入 | G2-S1、G2-S2a、daemon HOME 互斥 | 独立小 PR；stdout 无人工文字，真实 relay/取消与输出失败；每条记录不作为永久同步证明 |
+| G2-S2b：daemon 状态流接入 | G2-S1、G2-S2a、daemon HOME 互斥 | 本地 `7b29bf6f`，410 生产行，专项/race通过；独立小 PR，真实 relay/完整CI待验收；每条记录不作为永久同步证明 |
 | 组合并发回归 | G8、G1、daemon HOME 互斥 | 独立测试提交；保留源码、真实 CLI 并发及 race；待生产前置合入后整理到 main |
 | 第一轮 Agent24 CLI 联调 | #614 已合并；仍需真实制品/hash CI 及后续路由/凭据交付 | 记录双方源码、构建配方/hash、实际入口及 zero-run 证据 |
 
