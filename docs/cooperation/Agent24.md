@@ -1,5 +1,15 @@
 # Agent24 × Hyphae
 
+## 2026-10-01 08:47 UTC：当前联合验收出口
+
+已实时核对：#628 和 #630 合并，Agent24 main `be3652321f604b5242691abd2186212cc193ab75` 的 `ci.yml` [36830773430](https://github.com/iDoris-ai/Agent24/actions/runs/36830773430) 通过。#628 最新 head 检查通过；此前 scheduler 失败为历史证据。外部评审对同测试作了六次未复现的调查，当前不能继续要求“先解决仍失败的 CI”，也不将非复现当作根因已独立修复。
+
+#626 `5531abe0` 的外部 REQUEST_CHANGES 仍有效，须修复 locale/TZ/PATH 影响的 pid 启动标记并补跨环境回归；#627 `95013516` 仍是依赖草稿，前置合入后移至 main、核对与 #628 的接线冲突，完成自己的实际 CI 和外部 review。
+
+请后续在最终实际 main 上给出完整源码/hash、真实入口、三类 run/model/module 零计数及同量具有效正对照、125 条积压与重启去重、持久凭据重启，以及 CLI/UI 共用服务的实际 UI 证据。#630 是候选组合的运行记录，不能替代这些出口。Hyphae 侧固定制品尚无可下载 Release assets；须给固定 Release URL、两个目标平台的 CLI/relay 归档直接 URL、manifest、SHA256SUMS 与生产 lock。已准备构建/校验/两平台实际复测 workflow，但尚未发布或真实运行通过。
+
+下列带旧时间的小节保留历史状态。GitHub 评论和合并的本会话执行拒绝条件未变；上述请求仅已写成协作交付，尚未发到 #601。
+
 ## 2026-10-01：T01-C1 候选样例交付
 
 本节是本地产物交付，未重新查询 GitHub；后文 PR 状态保留各自核对时间。Hyphae 候选分支 `em1/c1-execution-recovery` 最终提交 `427f631f986ec8100554f4118a228b3b1fa2ad2a`，基于 `a4aa606`；尚未 push 或提交 PR，以下路径暂不提供公开 GitHub 下载地址。

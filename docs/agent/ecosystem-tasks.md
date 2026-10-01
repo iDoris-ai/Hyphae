@@ -8,6 +8,8 @@
 2026-10-01 06:58 UTC 更新：Agent24 #620/#621/#622 已合并，正式身份/联系人/relay CLI/REST 进入 `f1dbe1ef` 且该 main CI 通过，T20 仍 IN_PROGRESS；消息、托管、zero-run 与真实下载制品联调尚未验收。FU-1 的 R1/R2a/R2b 已由 Luna 在独立 worktree 提交并通过本地工具验收，最终四套工具共 39 项通过；真实 CI、固定制品、Release 与下载联调仍待 [制品交付任务](em1-artifact-delivery.md) 的出口，R3 尚未启动。这项前置交付不解除 T01-E、基础 UI 或四仓出口。
 2026-10-01 本地候选补充：T01-C1 `427f631f` 已由 Luna 在独立 worktree 提交，仅测试/样例/文档。根代理最终 SHA 的整个 contracts 包普通/race 各验证 102 个恢复样例，零跳过；跨语言、实际执行/副作用及 T01-E 仍待交付。消费约定见 [Agent24](../cooperation/Agent24.md)，没有启用生产 T07。
 
+2026-10-01 08:47 UTC 对仓更新：Agent24 main `be365232`（#628/#630 已合并）CI 通过；#626 仍有当前 head REQUEST_CHANGES，#627 仍为依赖草稿。T20 尚缺正式 main 联调及固定制品，T21/T22 和 T01-E 保持未验收；已完成 C1 不能解除这些门槛。
+
 ## 工作方式
 
 - **主代理**：架构、契约、任务拆分、依赖协调、代码评审和验收；生产代码与测试实现交给 **GPT-6 Luna**。
