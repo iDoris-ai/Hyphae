@@ -1,5 +1,7 @@
 # E-M1 固定制品交付与独立联调
 
+11:40 UTC 更新：执行权限已解除，原 lock 的真实 macOS arm64 CLI/relay 第一轮独立复测 exit 0，原始日志见 [progress](progress.md)。构建工具 R1 已发布 [#102](https://github.com/iDoris-ai/Hyphae/pull/102) 26bfe6ab；独立 runner/R2a/R2b 正逐项整理，尚未完成真实 Actions 和下载验收，R3 不提前发布。下列 09:01/09:10 段落保留历史证据。
+
 2026-10-01 09:01 UTC。状态：R1/R2a/R2b 本地工具/编排验收通过；固定 Go 1.26.4 两平台真实制品已构建并经根代理生产 lock/归档/编译信息校验，本机加密身份 smoke 通过。真实下载、Actions、Linux 实机及 relay 联调未验收；R3 待真实前置验收。关联 [FU-1](followups.md)、[T20](ecosystem-tasks.md) 与 [Agent24 协作](../cooperation/Agent24.md)。这项交付补齐可下载的 CLI/relay，不修改 E-M1 的执行协议或四仓验收出口。
 
 ## 固定版本

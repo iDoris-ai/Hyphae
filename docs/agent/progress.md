@@ -2,6 +2,44 @@
 
 最后更新：2026-10-01。本文记录实际交付与验收边界；各节固定其对应版本，新审批及合并以 GitHub 为准。
 
+12:04 UTC 补充：Agent24 自有文档 [#634](https://github.com/iDoris-ai/Agent24/pull/634) 已获 `clestons` 对 `c7bcf702` 的外部 APPROVE，六项检查通过；根代理重新核对 main base 与唯一文件 +17/-3 的实际差异后按 head SHA 正常 squash merge。合并为 `f5a76c015a7026c64fc872f47c6c160485cfed37`，该新 main 的 [CI 36859330529](https://github.com/iDoris-ai/Agent24/actions/runs/36859330529) 正在运行。已清理自有干净 worktree/本地分支，远端分支确认自动删除。Hyphae G7 [#111](https://github.com/iDoris-ai/Hyphae/pull/111) `74c47319`、G9 [#112](https://github.com/iDoris-ai/Hyphae/pull/112) `c53a09f0` 也已独立发布。另核对发现 #102/#105/#106 原 ci.yml 尚未执行各自 Python 工具单测，已派 Luna 给三个 PR 加同一自动发现步骤；原 CI 的 Go/integration 通过不作为这些 Python 工具的双平台验收。
+
+## 2026-10-01 11:58 UTC：独立交付进入评审，CI 缺陷已定位
+
+本轮继续 E-M1，定时扫描保持停止。Hyphae main 仍为 `fc6681c6fb605e734a4c819faf3e0abf5890d7e8`，该 SHA 的双平台 CI 通过。根代理核对源码、实际专项及全量日志后发布以下独立 main PR；均未自行 APPROVE，等待外部评审。
+
+| PR | 固定 head | 交付与当前证据 |
+|---|---|---|
+| [#102](https://github.com/iDoris-ai/Hyphae/pull/102) | `26bfe6ab` | R1 可复现制品构建工具；真实 CI 通过 |
+| [#103](https://github.com/iDoris-ai/Hyphae/pull/103) | `685e5dd3` | G8 完整 keystore 写事务；真实 CI 失败，Luna 修复中 |
+| [#104](https://github.com/iDoris-ai/Hyphae/pull/104) | `82228178` | 同 HOME daemon 互斥；真实 CI 失败，Luna 修复中 |
+| [#105](https://github.com/iDoris-ai/Hyphae/pull/105) | `fbf51599` | 固定制品第一轮工具；本机真实 relay 九阶段通过，工具 PR 的双平台 CI 通过 |
+| [#106](https://github.com/iDoris-ai/Hyphae/pull/106) | `d0604af8` | 独立生产 lock、归档和解包校验；实际九文件 bundle 校验及双平台 CI 通过 |
+| [#107](https://github.com/iDoris-ai/Hyphae/pull/107) | `b3e7b441` | G6 非法联系人 key 分类；本机全量/专项/race 通过，CI 运行中 |
+| [#108](https://github.com/iDoris-ai/Hyphae/pull/108) | `c0fc0a5c` | G7b 存储信息 JSON；只读查询及三种机器开关已测试，CI 运行中 |
+| [#109](https://github.com/iDoris-ai/Hyphae/pull/109) | `1713f7cc` | G1 只读口令校验；独立于 G8，本机全量/identity/race 通过，CI 运行中 |
+| [#110](https://github.com/iDoris-ai/Hyphae/pull/110) | `18dd9dd7` | T01-C1 的 102 个恢复候选样例；仅测试/文档，本机普通/race 通过，CI 运行中 |
+
+#103 的测试子进程继承临时 HOME 后再次进入 TestMain 构建 CLI；#104 的 signal 测试子进程也没有走已有 skip-build 分支。实际日志同时包含模块下载、子进程失败和临时目录内只读模块文件清理失败。Luna 正修 helper 启动路径和父进程构建缓存传递，保留跨进程锁与 SIGTERM 的真实断言，并用不预设 Go 缓存变量的环境复验。失败日志保留；不靠重跑掩盖失败，也不把它们记成 main 失败。
+
+本机另发生磁盘不足：仅剩 116 MiB，临时文件创建失败。已暂停构建，核对归属后仅移除本轮四个临时 Go build cache，保留源码、日志、已构建制品、模块缓存及用户全局缓存；可用空间恢复约 2.3 GiB。后续构建复用规定的 GOPATH/GOCACHE 并串行，不再为每项复制大缓存。
+
+下一批：Luna 整理 G2-S1/S2a 独立 PR，并在本地依赖基线实测 S2b 的 125 条补收、重启零新增、失败/取消及 JSON-lines。R2b 只在 #102/#105/#106 全部合入后基于新 main 发布自身 397 行生产差异，随后运行真实双平台制品构建、传输与 runtime CI；R3 Release URL 待这些出口通过后交付。G7/G9 继续独立发布，不合并任何 integration 汇总分支。
+
+Agent24 main `92f844ee`；#626 `ba30f104` 已获有效批准、六项检查通过但仍 OPEN，#627 为依赖草稿。自有文档 [#634](https://github.com/iDoris-ai/Agent24/pull/634) `c7bcf702` 的六项检查通过、待外部评审。对仓生产代码由其推进。T20 仍缺最终 main 的实际托管/收发与三类计数有效正对照，T21/T22 基础 UI、T01-E 契约验收和 T19 四仓闭环仍未通过；#110 的样例不替代实际执行或跨语言消费。
+
+## 2026-10-01 11:40 UTC：运行限制解除，真实第一轮通过并恢复发布
+
+当前会话已实际切为完整本地访问/网络开启：loopback TCP bind/listen PASS，本机 gh 的 jhfnetboy 登录校验 exit 0。之前受限 shell 的 token-invalid 输出不能作为真实失效结论。GitHub connector 的账号连接与 gh 独立；本轮按既有授权使用已验证的 gh 路径，未修改 connector、保护规则或自行提交 PR APPROVE。Goal 实际恢复为 active，定时扫描保持停止。
+
+- Hyphae [#101](https://github.com/iDoris-ai/Hyphae/pull/101) 最新 head 的外部批准、四项检查及实际测试-only差异重新核对后，按 SHA 正常 squash merge；main `fc6681c6fb605e734a4c819faf3e0abf5890d7e8` 的 [CI 36855662206](https://github.com/iDoris-ai/Hyphae/actions/runs/36855662206) 实际成功。原已合并干净 worktree/本地 receipt 分支已清理，远端分支确认不存在；主仓旧 checkout、AGENTS.md/tmux.sh 保留。
+- GPT-6 Luna 使用原 a4/Go1.26.4 的真实 CLI `f53c29b3…`、relay `a012d86e…` 和原生产 lock，独立正式第一轮运行一次 exit 0。根代理核对 [原始阶段日志](acceptance/20261001-locked-round1/run.log)、[精确无口令命令](acceptance/20261001-locked-round1/exact-command.txt)、[范围报告](acceptance/20261001-locked-round1/report.md) 与 runner 实际断言：双向加密 event_id/正文对应、拉取前 history 为空、断线可靠入队、重启 relay 原 event_id 重试、outbox 清空和重复拉取后历史恰一条。错误项为错口令、非法 contact 公钥、未知发送联系人；最后一项不冒充 Agent24 的非法 npub 发送测试。此前 EPERM 失败证据保留。
+- R1 构建工具 [#102](https://github.com/iDoris-ai/Hyphae/pull/102) `26bfe6ab`、G8 完整 keystore 事务 [#103](https://github.com/iDoris-ai/Hyphae/pull/103) `685e5dd3`、daemon HOME 互斥 [#104](https://github.com/iDoris-ai/Hyphae/pull/104) `82228178` 已分别提交、push、提 PR；生产新增/删除合计 343/407/97 行。最新基线的全量 Go 和对应专项/race/工具测试已通过，真实 GitHub CI/外部 review分别等待，未提前合并。
+- Agent24 [#601](https://github.com/iDoris-ai/Agent24/pull/601) 已由对方合入 main `92f844ee`，对应 CI `36849380543` 成功。Hyphae 已实际在 [#601 回帖](https://github.com/iDoris-ai/Agent24/pull/601#issuecomment-5930558677) 确认 history 本地读、默认 30s 补收的边界、第一轮固定制品结果及后续交付。独立纯文档 [#634](https://github.com/iDoris-ai/Agent24/pull/634) `c7bcf70` 修正接口表并记录同 hash 复测；未修改对仓生产实现。
+- #626 当前 `ba30f104` 已修孤儿标记并获新的外部批准、CI 全绿；不能继续记录为当前 REQUEST_CHANGES。#627 `500cc03e` 仍依赖草稿，由 Agent24 推进前置合并/迁移/正式 main 联调。#630 的候选组合通过记录不能代替最终 main 的 run/model/module 零计数及同量具有效正对照、125 条积压/重启零新增、持久凭据重启或基础 UI。
+
+下一项并行推进其余独立 CLI 修复、第一轮复测工具、固定制品校验与真实两平台 Actions；R3 仍需真实 CI/下载前置，尚无新 Release URL。制品工具准备中曾同时启动三个全量 Go 与 relay 测试，触发已有 8秒 CLI timeout/relay readiness 失败；原日志保留，资源争用仅是推断。后续昂贵本地测试改共享 flock 串行；受控执行通过与初次失败分别记录，不以重跑通过宣称根因已修复。生产 T07 仍等 T01-E，T21/T22 和四仓出口均未完成，E-M1 保持未完成。
+
 ## 2026-10-01 11:16 UTC：按用户要求重新实测执行限制和连接账号
 
 本地 `127.0.0.1:0` bind/listen 仍返回 errno 1 / EPERM。实时核对 Hyphae #101 head `b3f9053e`，匹配外部 APPROVED，macOS/Ubuntu/ci-ok/CLA 均成功；实际差异仅测试/文档。按既有授权重试一次 SHA 绑定正常 merge，仍在执行前被 `MCP tool call requires approval, but approval policy is never` 拒绝；复查仍 OPEN。此处是工具运行许可，不是 PR review，本代理没有提交 APPROVE。

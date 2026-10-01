@@ -2,6 +2,10 @@
 
 更新：2026-10-01。范围依据 [生态里程碑草案](ecosystem-roadmap.md)。保留历史 M1～M5 编号；本表用 E-M 编号关联旧任务，不覆盖旧台账。
 
+11:58 UTC：独立工具/CLI/候选样例已发布 #102～#110，准确 heads、CI 与下一批任务见 [progress](progress.md)。#103/#104 真实 CI 失败已定位并交 Luna 修复，其他已通过的本地检查不代替失败 CI。G2-S1/S2a/S2b 已继续派 Luna 实测与整理；R2b 依赖三个独立工具 PR 合入，R3 分发尚未交付。T20 继续 IN_PROGRESS；T21/T22、T01-E/T07、T19 仍待原完整出口，未把第一轮 Hyphae CLI 或恢复样例当 E-M1 完成。
+
+11:40 UTC 最新出口：运行环境限制解除，原生产 lock 的真实 macOS 第一轮 CLI/relay 独立复测 exit 0，阶段日志与范围见 [progress](progress.md)。#101 已合并，实际 main fc6681c 的 CI 通过；制品 R1 #102、keystore G8 #103、daemon HOME 锁 #104 分别待 review/CI。Agent24 #601 已合并，Hyphae 已回帖确认并提文档 #634；#626 ba30f104 当前批准/CI通过，#627 仍为依赖草稿。T20 继续 IN_PROGRESS：本轮直调 Hyphae CLI 不代替对仓最终 main 的托管/收发与三类计数正对照；T21/T22、T01-E、T19 不变。下文所有旧快照保留对应时间，不能继续把旧运行环境或 #626 REQUEST_CHANGES 当当前阻塞。
+
 **当前出口：Hyphae 侧 CLI 在固定 main `a4aa606eb81d5c040d94c51cdf94553e646d8674` 验收通过，见 [最终验收记录](em1-cli-acceptance.md)。** #37～#100 的已有任务已合并；该固定 main 的双平台 CI、隔离 HOME 的全量默认/integration 测试、vet、构建与 smoke 均通过。当前进度见 [PR 依赖表](em1-pr-order.md)。T20 的 Agent24 CLI 接线、T21/T22 基础 UI、T01 高层契约和 C 段四仓链路尚未完成，整体 E-M1 不记通过。2026-10-01 已在七个独立分支补齐 [CLI 联调缺口](em1-comm-followups.md)，尚未发布/进入 main；对应本地组合测试只证明保留源码的专项范围，完整 CI 和 relay 联调仍待完成。补收状态模型/统计/runtime 分别已本地提交 S1 `82de8549`、S2a `6f7daa14`、S2b `7b29bf6f`，最终专项/race 通过，尚未发布，真实 relay 和完整 CI 未验收；新改动不能沿用基线的验收。下文早期组合记录只描述对应提交当时的状态。
 
 

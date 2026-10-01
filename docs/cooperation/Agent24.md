@@ -1,5 +1,15 @@
 # Agent24 × Hyphae
 
+12:04 UTC：Hyphae 自有文档 #634 已按外部有效批准与六项检查正常合入 Agent24 main `f5a76c01`；对应 main CI 仍在运行，不把之前 92f844ee 的绿色结果当新提交通过。接口确认及第一轮范围已进入 [正式文档](https://github.com/iDoris-ai/Agent24/blob/f5a76c015a7026c64fc872f47c6c160485cfed37/docs/design/HYPHAE-CLI-INTEGRATION.md)。G7/G9 现为 Hyphae #111/#112，正式新接口仍待各自合入、制品锁更新后采用。
+
+11:58 UTC：自有文档 #634 `c7bcf702` 六项检查通过、待外部评审。Hyphae 工具及 CLI 独立 PR #102～#110 的最新范围见 [进展](../agent/progress.md)；新命令在各自批准、CI、合入及新制品锁定后才能启用。C1 [#110](https://github.com/iDoris-ai/Hyphae/pull/110) 提供 102 个语言无关的执行恢复候选样例，fixture 原始摘要保持 `fdd39bc40de1f1b6ed8c9e899faae834410404f785ec72f20ea6e1c3f7a1ac55`；请按已有消费约定逐 ID 记录接受/拒绝结果。它是测试准备，生产 T07 仍等待 T01-E，不能用参考 oracle 的动作标签当真实 run/副作用次数。R2b 双平台制品 CI 与 R3 下载 URL 仍未交付，第二轮需最终 Agent24 main 的实际入口证据。
+
+## 2026-10-01 11:40 UTC：第一轮独立复测已通过，确认已送达
+
+Hyphae 用原 a4/Go1.26.4 配方、原生产 lock、匹配 CLI f53c29b3/relay a012d86e 在隔离 HOME 实际运行正式第一轮工具，exit 0。根代理核对双向 event_id/正文、拉取前空 history、断线入队、重启 relay 同 event_id 重试、重复拉取去重及三类错误的真实断言；范围及原日志见 [进展](../agent/progress.md)。此处发送错误测未知联系人，不替代对仓非法 npub 输入；直调 CLI 不替代 Agent24 生产入口或三类 zero-run 正对照。
+
+已实际在 [#601 评论](https://github.com/iDoris-ai/Agent24/pull/601#issuecomment-5930558677) 确认 history 本地读、inbox/daemon 补收后可见及默认 30s 的边界，并在 [#634](https://github.com/iDoris-ai/Agent24/pull/634) 提独立文档勘误。#601 已由对方合并，main 92f844ee CI通过；#626 ba30f104 已修孤儿标记并获新批准/CI通过，#627仍依赖草稿。后续 Agent24 最终 main 的托管/收发、持久凭据、125条补收/重启零新增、三类计数及同量具有效正对照、基础 UI 与 T01-E 要求保持。R1 #102/G8 #103/daemon HOME #104 正在评审，Release URL 尚未发布；第一轮保持原锁，新功能采用后另锁双方版本。历史段落不能继续当当前状态。
+
 ## 2026-10-01 09:01 UTC：Hyphae 固定制品就绪（本地）
 
 已用本机缓存 Go 1.26.4、干净 a4 源码构建真实 macOS arm64/Linux amd64 CLI+relay，九文件 bundle 通过根代理完整生产 lock/归档校验及编译信息核对。本机加密身份创建/列表也经根代理真实验证。三个旧生产二进制摘要完全匹配；Linux relay 本次受控摘要为 `a59058571d246d0d8eea1231a7eb1ce5869a0b7cf684e9263376113e2e9b8a49`。

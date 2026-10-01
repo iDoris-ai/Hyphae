@@ -1,5 +1,11 @@
 # E-M1 PR 依赖与合并顺序
 
+12:04 UTC：Agent24 自有文档 #634 已在有效外部批准、六项检查通过后正常合并；新 main f5a76c01 的 CI 运行中。Hyphae #111/#112 为独立 main PR，待真实 CI/外部评审。#102/#105/#106 补 Python 工具单测的 CI 步骤由 Luna 处理中，变更后须按新 head 检查，不沿用旧绿色结果；其余队列依赖不变。
+
+11:58 UTC 队列：main fc6681c 的 CI 通过。#102/#105/#106 各自 CI 通过、待外部评审；#103/#104 的真实 CI 失败已定位到测试子进程重复构建与临时 HOME 缓存，Luna 修复并复验；#107/#108/#109/#110 新独立 PR 的 CI 运行中。最新 heads 与范围见 [带日期进展](progress.md)。这些 PR 都只含自身差异，可独立评审；G7/G9 与 G2-S1/S2a 后续独立提交。R2b 依赖 #102/#105/#106，待全部进入 main 后才基于新 main 提自身工作流/helper 差异，禁止将当前 integration 父分支作为 main PR 发布。Agent24 #634 六项检查通过、待评审；#626 有批准但仍 OPEN，#627 仍依赖草稿，对仓生产合并由其负责。下方旧快照按时间阅读。
+
+11:40 UTC 最新队列：#101 已按批准 head 合并，main fc6681c 的 ci.yml 实际通过。R1 [#102](https://github.com/iDoris-ai/Hyphae/pull/102) 26bfe6ab、G8 [#103](https://github.com/iDoris-ai/Hyphae/pull/103) 685e5dd3、daemon HOME [#104](https://github.com/iDoris-ai/Hyphae/pull/104) 82228178 为各自独立 main PR，等待真实 CI/外部 review。独立第一轮工具、R2a、R2b 及其余 CLI 改动由 Luna 整理，按实际依赖发小 PR，不合并汇总分支。Agent24 #601 已合并；根代理文档 #634 c7bcf70 独立待审；对仓 #626 ba30f104 已获新批准/CI通过，#627 500cc03e 仍依赖草稿，对仓实施/合并由其负责。下列带早期时间的队列是历史记录。
+
 2026-10-01 本地补充：R2a `cb374a2`（生产 491 行）和 R2b `343520d`（生产 397 行）已各自在独立 worktree 提交并通过根代理本地验收；最终四套工具共 39 项通过，workflow 的 Actionlint、YAML 结构及 bash 语法通过。真实固定 Go 构建、GitHub CI、制品传输与 relay 复测尚未执行通过。发布顺序为 R1、独立第一轮复测工具、R2a、R2b；组合基线仅作依赖，不发布汇总 PR。上述提交尚无远端 PR，不能进入自动合并队列。
 
 更新：2026-10-01。下表是本轮实现的依赖关系；验收通过不代表已进入 main。用户已授权主代理按依赖顺序合并；每项仍需有效批准、main 基线和通过的 CI。

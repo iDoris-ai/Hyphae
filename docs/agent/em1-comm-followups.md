@@ -2,6 +2,8 @@
 
 2026-10-01。Hyphae 基线 `a4aa606eb81d5c040d94c51cdf94553e646d8674`；反馈来自 [Agent24 #601](https://github.com/iDoris-ai/Agent24/pull/601#issuecomment-5923235533)，接口设计见已合并的 [COMM-0 #612](https://github.com/iDoris-ai/Agent24/pull/612)。下列改动各自独立提交，不切换高层协议，不解除 T01-E。
 
+12:04 UTC 交付更新：G8 #103、daemon HOME 锁 #104、G6 #107、G7b #108、G1 #109、G7 #111、G9 #112 已分别迁移实际 main `fc6681c6`、提交/push/提独立 PR。准确 heads 与 CI 状态见 [progress](progress.md)；#103/#104 的测试构建环境缺陷正在修复，其余新命令也尚未进入 main。固定旧 a4/Go1.26.4 生产制品已实际构建、hash 匹配并经真实 relay 第一轮复测通过；R2 双平台制品 CI/传输及 R3 Release 仍待交付。下表保留早期候选版本，不能继续把“未发布”或“未复现旧配方”作为当前事实。
+
 ## 已确认的 CLI 行为
 
 - 未配置 relay 时回退到 `wss://relay.aastar.io`。托管调用应先要求显式配置，再向 daemon 传入解析后的 relay。
