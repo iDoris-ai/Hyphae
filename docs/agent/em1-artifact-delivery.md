@@ -31,6 +31,25 @@ R1 验收后另提小 PR。CI 使用固定 Go 1.26.4；构建工具与待打包�
 
 先保存成功运行的 workflow artifact 与 run ID，供复核。它是 CI 交付证据，不能冒充用户要求的永久 Release 下载 URL。GitHub workflow artifact 有访问与保留期条件，见 [官方说明](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/download-workflow-artifacts?tool=webui)。
 
+#### R2 派工输入（2026-10-01 官方版本核对）
+
+实现文件限定新 workflow、独立制品验证工具及对应黑盒测试；不修改 R1 构建配方、生产 lock 或 Agent24 源码。开发基线需同时包含已验收 R1 与独立第一轮复测工具 `3acedb216b09348fb649fe475924ce5f4ad0e2f1`，组合仅作开发依赖；R2 PR 保持 draft，前置合入后整理到 main，只保留自身差异。
+
+| 官方 Action | 本次核对版本与完整 commit |
+|---|---|
+| [checkout](https://github.com/actions/checkout/tree/v7) | v7 · `3d3c42e5aac5ba805825da76410c181273ba90b1` |
+| [setup-go](https://github.com/actions/setup-go/tree/v7) | v7 · `b7ad1dad31e06c5925ef5d2fc7ad053ef454303e` |
+| [upload-artifact](https://github.com/actions/upload-artifact/releases/tag/v7.0.1) | v7.0.1 · `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` |
+| [download-artifact](https://github.com/actions/download-artifact/releases/tag/v8.0.1) | v8.0.1 · `3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` |
+
+运行主机用 ubuntu-24.04/x64 与 macos-15/arm64，并在运行时核对实际 platform；依据 [官方 runner 表](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)。上传与下载都绑定本次 run/attempt 的 artifact，下载失败或 digest 不匹配失败；解包后另校验二进制 hash，不把 GitHub artifact 的传输摘要当作 CLI 摘要。tar 仅允许四个普通根目录成员，不接纳额外路径、重复成员或链接。
+
+workflow 以只读 contents 权限运行，显式安装 Go 1.26.4，日志/制品限定归档、摘要、公开 manifest 与测试输出。Go 版本选择有独立真实证据；不使用 bootstrap stable 加自动下载来隐藏实际工具链。第一轮工具显式传入独立生产 lock、完整 recipe 和 relay 摘要，不使用缺变量返回 PASS 的调用。CI 缺任一输入必须失败。Linux relay 尚无独立旧摘要，需记录受控真实构建值；macOS 必须匹配已有旧摘要，不能更新旧值使之通过。
+
+验收工具的黑盒用例至少包括 archive 被替换、SHA256SUMS 与 manifest 不一致、CLI 与生产 lock 不一致、源码/Go/recipe 不符、错误目标平台及非普通归档成员；输出使用临时目录，既有文件不可覆盖。两平台真实 relay 与超时/清理出口分别记录。上传保存不含测试 HOME、身份库或数据库。
+
+这里的 Go 1.26.4 是第一轮制品基线。未来源码或依赖要求更高 Go 时，另行更新双方 lock 与对应轮次配方；不以自动升级工具链沿用旧 hash。
+
 ### R3：Release 发布与下载验收
 
 R2 通过后才发布固定 tag 的 Release。发布前核对 tag 指向完整源码 SHA、对应真实 CI、manifest、SHA256SUMS 及原生产 lock；拒绝同 tag 资产覆盖。首次联调 tag 采用明确标识源码与 Go 的命名，具体名称在实际发布前确定；不更新已有空 v0.26.0 来掩盖历史缺口。
