@@ -122,6 +122,15 @@ Run this in a separate terminal or as a system service.`,
 			return common.NewExitError(common.ErrCodeUser, err)
 		}
 
+		homeLock, err := acquireDaemonHomeLock()
+		if err != nil {
+			if errors.Is(err, errDaemonHomeLocked) {
+				return common.NewExitError(common.ErrCodeWriteConflict, err)
+			}
+			return fmt.Errorf("acquire daemon home lock: %w", err)
+		}
+		defer homeLock.Close()
+
 		ks, err := identity.LoadKeyStoreForCommand(identity.KeyStoreCommandOptions{
 			JSONMode: common.JSONMode(c), RequireSecret: true, PasswordStdin: c.Bool("password-stdin"), Stdin: os.Stdin,
 		})
