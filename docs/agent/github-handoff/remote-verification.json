@@ -1,0 +1,10 @@
+{
+  "archive_release": "https://github.com/iDoris-ai/Hyphae/releases/tag/handoff-em1-20261001",
+  "archive_sha256": "5a4ae77b45e7b5fa190714c2be07e6c1defe2c9a4fc49fe701eea873121dc468",
+  "files_verified": 514,
+  "original_branch_tips_verified": 19,
+  "manifest_branch_head": "a7b9124c0cd92f0e27c55cbf932aaf9829441acb",
+  "manifest_branch_url": "https://github.com/iDoris-ai/Hyphae/tree/a7b9124c0cd92f0e27c55cbf932aaf9829441acb",
+  "stable_latest": "v0.26.0",
+  "goal_status": "paused"
+}

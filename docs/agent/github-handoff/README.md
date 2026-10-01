@@ -24,4 +24,6 @@ tar -xzf handoff-em1-20261001.tar.gz
 - [AGENTS.md 副本](local-files/AGENTS.md.txt)、[tmux.sh 副本](local-files/tmux.sh.txt)：原主仓未跟踪用户文件的逐字节快照；原文件在原机器保留，副本未改变 main 的工具配置。
 - [manifest.json](manifest.json)：固定 main、CI、存档和用户文件摘要。
 
-所有当前开发工作树均无未提交的代码改动，stash 为空。当前存在的提交、两份用户文件和被归档的证据可仅通过 GitHub 恢复；过去已被误删、从未提交且没有备份的内容仍不能保证恢复。缓存及可重建输出不属于交接源文件；私钥、身份库和凭据不入存档。后续正式 R3 与四仓验收按原交接门槛推进。
+开发分支均干净，stash 为空。主仓保留的两份未跟踪用户文件已逐字节保存到上面的 GitHub 副本。当前存在的提交、两份用户文件和被归档的证据可仅通过 GitHub 恢复；过去已被误删、从未提交且没有备份的内容仍不能保证恢复。缓存及可重建输出不属于交接源文件；私钥、身份库和凭据不入存档。后续正式 R3 与四仓验收按原交接门槛推进。
+
+远端复核已完成：从 GitHub 重新下载归档后，514 个文件逐项通过大小和 SHA256 校验；19 个原分支 tip 与远端逐项相符；两份用户文件通过 GitHub Contents API 读取后与本地字节完全一致。结果见 [remote-verification.json](remote-verification.json)。
