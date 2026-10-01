@@ -68,6 +68,21 @@ hyphae/
 ./bin/hyphae agent msg --from alice --to bob --content "Hello" --relay wss://relay.aastar.io
 ```
 
+## 本地可复现发布候选包
+
+从干净的固定提交生成 macOS arm64 和 Linux amd64 的 Hyphae/relay 二进制及归档：
+
+```bash
+SOURCE_DIR=/path/to/clean/hyphae-checkout
+python3 scripts/build_release_artifacts.py \
+  --source-dir "$SOURCE_DIR" \
+  --source-sha "$(git -C "$SOURCE_DIR" rev-parse HEAD)" \
+  --release-tag vX.Y.Z \
+  --output /tmp/hyphae-vX.Y.Z-artifacts
+```
+
+工具要求本机已有 Go 1.26.4，拒绝不干净或 SHA 不匹配的源码和已存在的输出目录。它只在本地生成候选资产；metadata 中的 Release URL 是预期地址，不代表已发布。详见 [`docs/agent/reproducible-artifact-bundles.md`](docs/agent/reproducible-artifact-bundles.md)。
+
 ## 核心功能
 
 ### 1. 点对点消息 (Agent Messaging)

@@ -111,8 +111,8 @@ jobs:
       - name: Test daemon backlog integration
         run: go test -tags integration ./tests -count=1
 
-      - name: Test PR monitor
-        run: python3 -m unittest discover -s scripts -p test_pr_monitor.py
+      - name: Test Python tools
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
   # A stable name for branch protection to require.
   #
