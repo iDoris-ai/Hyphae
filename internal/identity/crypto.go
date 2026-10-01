@@ -130,6 +130,12 @@ func verifyMasterKey(verificationB64 string, key [32]byte) (ok bool, isLegacy bo
 
 // unlockKeyStore derives the master key and verifies it against the stored verification token
 func unlockKeyStore(ks *types.KeyStore, password string) error {
+	return unlockKeyStoreMemory(ks, password)
+}
+
+// unlockKeyStoreMemory verifies the password without changing the disk. Writers
+// use it after reloading under the keystore lock, avoiding nested flock calls.
+func unlockKeyStoreMemory(ks *types.KeyStore, password string) error {
 	if !ks.Encrypted {
 		return nil
 	}
@@ -141,14 +147,11 @@ func unlockKeyStore(ks *types.KeyStore, password string) error {
 	if err != nil {
 		return err
 	}
-	ok, isLegacy := verifyMasterKey(ks.Verification, key)
+	ok, _ := verifyMasterKey(ks.Verification, key)
 	if !ok {
 		return fmt.Errorf("incorrect password")
 	}
 	ks.MasterKey = &key
-	if isLegacy {
-		upgradeVerificationToken(ks, key)
-	}
 	return nil
 }
 
@@ -157,14 +160,32 @@ func unlockKeyStore(ks *types.KeyStore, password string) error {
 // already confirmed the password is correct, so a failure here must only warn,
 // never turn a successful unlock into an error — there's always a next unlock
 // to retry the upgrade on.
-func upgradeVerificationToken(ks *types.KeyStore, key [32]byte) {
+func upgradeVerificationToken(ks *types.KeyStore, key [32]byte, oldSalt, oldVerification string) {
 	newVerification, err := encryptWithKey(verifyToken, key)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not prepare keystore verification-token upgrade: %v\n", err)
 		return
 	}
-	ks.Verification = newVerification
-	if err := SaveKeyStore(ks); err != nil {
+	err = withKeyStoreLock(func() error {
+		fresh, err := loadKeyStoreFromDisk()
+		if err != nil {
+			return err
+		}
+		if fresh.Salt != oldSalt || fresh.Verification != oldVerification {
+			return nil // a password rotation or another migration won the race
+		}
+		if ok, isLegacy := verifyMasterKey(fresh.Verification, key); !ok || !isLegacy {
+			return nil
+		}
+		fresh.Verification = newVerification
+		if err := saveKeyStoreLocked(fresh); err != nil {
+			return err
+		}
+		fresh.MasterKey = &key
+		*ks = *fresh
+		return nil
+	})
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not persist keystore verification-token upgrade: %v\n", err)
 	}
 }
