@@ -173,6 +173,9 @@ func TestDaemonProcessStopsOnSIGTERMWhileRelayIsStalled(t *testing.T) {
 	select {
 	case err := <-wait:
 		require.NoError(t, err, output.String())
+		lock, lockErr := acquireDaemonHomeLock()
+		require.NoError(t, lockErr, "SIGTERM shutdown must release the daemon home lock")
+		require.NoError(t, lock.Close())
 	case <-time.After(2 * time.Second):
 		_ = command.Process.Kill()
 		<-wait
