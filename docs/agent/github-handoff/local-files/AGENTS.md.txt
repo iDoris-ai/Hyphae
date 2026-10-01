@@ -1,0 +1,40 @@
+# Repository Guidelines
+
+## Project Structure & Module Organization
+
+Hyphae is a Go CLI for encrypted, compressed, decentralized agent messaging over Nostr.
+
+- `cmd/hyphae/` contains the executable entry point.
+- `internal/` contains application-only packages, including `nostr`, `identity`, `messaging`, `group`, `profile`, `storage`, `daemon`, and `tui`.
+- `pkg/` contains reusable libraries such as `compress`, `crypto`, and shared `types`.
+- `docs/` contains architecture, protocol, milestone, and testing documentation; `scripts/` contains relay and E2E helpers.
+- `bin/` and `build/` are generated outputs and should not be committed. `third_party/nak/` is an optional submodule/reference copy.
+
+## Build, Test, and Development Commands
+
+Use the current root scripts for normal development:
+
+```bash
+./build.sh             # build bin/hyphae
+./build.sh install     # build and install to GOPATH/bin
+go test ./...          # run all Go tests
+./test.sh              # build, unit-test, and run CLI smoke checks
+```
+
+For integration testing, use the focused scripts such as `./test_e2e.sh`, `./test_group_e2e.sh`, and `./test_profile_e2e.sh`; these may require local identities and a reachable relay. `Makefile` targets largely describe the older pre-refactor layout, so prefer `build.sh`, `go test ./...`, and `test.sh` unless working specifically on a legacy target.
+
+## Coding Style & Naming Conventions
+
+Format Go changes with `gofmt` and keep imports/modules tidy with `go mod tidy`. Follow standard Go naming: exported identifiers use `PascalCase`, local variables and package names use `camelCase`/lowercase, and tests live beside code in files named `*_test.go`. Keep CLI behavior and output conventions consistent with neighboring commands.
+
+## Testing Guidelines
+
+Add unit tests for every new package or behavior, including error and boundary cases; use temporary directories or fixtures rather than production `~/.hyphae/` data. Add or update CLI/E2E coverage for user-facing commands, using the real relay where required. Run `go test ./...` before opening a PR.
+
+## Commit & Pull Request Guidelines
+
+Use Conventional Commits, matching repository history: `feat(scope): ...`, `fix(scope): ...`, `docs(scope): ...`, or `test(scope): ...`. Keep commits focused. PRs should explain the behavior change, list validation commands, link the relevant issue or milestone, and include screenshots or command output when changing CLI/TUI behavior. Contributors must complete the project CLA process; preserve Apache 2.0 and NOTICE requirements.
+
+## Security & Configuration
+
+Do not commit private keys, identities, relay credentials, local databases, or `.env` files. Use `.env.example` and isolated test identities. Treat cryptography, storage migrations, and relay changes as security-sensitive and document compatibility implications.

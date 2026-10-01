@@ -1,0 +1,97 @@
+[
+  {
+    "local_branch": "artifact/r2b-integration",
+    "sha": "3f4e8112360cad6e4e0b91461223e512d5c80e5f",
+    "archive_branch": "archive/em1-handoff-20261001/artifact/r2b-integration"
+  },
+  {
+    "local_branch": "ci/comm-artifacts-main",
+    "sha": "3a837d1a7ee8c3b75a589e6556bab5f6fe32f564",
+    "archive_branch": "archive/em1-handoff-20261001/ci/comm-artifacts-main"
+  },
+  {
+    "local_branch": "docs/em1-cooperation-durable",
+    "sha": "d18c541bad6d0cc2ec180acfb90c17efb93b616a",
+    "archive_branch": "archive/em1-handoff-20261001/docs/em1-cooperation-durable"
+  },
+  {
+    "local_branch": "docs/em1-post-merge-status-20261001",
+    "sha": "7710eb40f418c67509119763626f61a851c42fab",
+    "archive_branch": "archive/em1-handoff-20261001/docs/em1-post-merge-status-20261001"
+  },
+  {
+    "local_branch": "feat/daemon-status-runtime-main",
+    "sha": "94532e7701ed87e0137ae6ac4a48e62cb4a2304f",
+    "archive_branch": "archive/em1-handoff-20261001/feat/daemon-status-runtime-main"
+  },
+  {
+    "local_branch": "fix/empty-history-stats",
+    "sha": "5f4b9ee66dfdf253138deb9717d46fe727117310",
+    "archive_branch": "archive/em1-handoff-20261001/fix/empty-history-stats"
+  },
+  {
+    "local_branch": "integration/em1-cli-acceptance",
+    "sha": "f46744aa519937ed38832e75395591b7200d9520",
+    "archive_branch": "archive/em1-handoff-20261001/integration/em1-cli-acceptance"
+  },
+  {
+    "local_branch": "integration/em1-cli-backfill",
+    "sha": "916fc1f2dac1a186c91bce586f8f03bab6786918",
+    "archive_branch": "archive/em1-handoff-20261001/integration/em1-cli-backfill"
+  },
+  {
+    "local_branch": "integration/em1-cli-foundation",
+    "sha": "60715f329021908acabdbaf2f6966c9f15e53483",
+    "archive_branch": "archive/em1-handoff-20261001/integration/em1-cli-foundation"
+  },
+  {
+    "local_branch": "integration/em1-cli-recovery",
+    "sha": "c2f3651b10e8922b829bfcc3ff0aed836bcd6d65",
+    "archive_branch": "archive/em1-handoff-20261001/integration/em1-cli-recovery"
+  },
+  {
+    "local_branch": "integration/em1-cli-reliability",
+    "sha": "6e64aaadf6919ef3600e67ecc24121cb8b55a292",
+    "archive_branch": "archive/em1-handoff-20261001/integration/em1-cli-reliability"
+  },
+  {
+    "local_branch": "integration/em1-cli-runtime",
+    "sha": "b1cbaaae59f3e540be0416442ab287f7615bb130",
+    "archive_branch": "archive/em1-handoff-20261001/integration/em1-cli-runtime"
+  },
+  {
+    "local_branch": "local/cli-inittrace-diagnostic",
+    "sha": "a40ce96a226e01c04924c881032bb121b2fe0ff8",
+    "archive_branch": "archive/em1-handoff-20261001/local/cli-inittrace-diagnostic"
+  },
+  {
+    "local_branch": "local/g2-current-main-stack",
+    "sha": "3c848381d591b517a7a3411101bdecd08b828b47",
+    "archive_branch": "archive/em1-handoff-20261001/local/g2-current-main-stack"
+  },
+  {
+    "local_branch": "local/g2-s2b-stack",
+    "sha": "c55ffcdc56da3d8c7b4c11d3ac9f32a6b50aa3eb",
+    "archive_branch": "archive/em1-handoff-20261001/local/g2-s2b-stack"
+  },
+  {
+    "local_branch": "local/g2-validation-durable",
+    "sha": "b88a219b6ca4688fda126c4f49f366cc9198b93d",
+    "archive_branch": "archive/em1-handoff-20261001/local/g2-validation-durable"
+  },
+  {
+    "local_branch": "main",
+    "sha": "b1ddf97e3dce74de3eaf19784c174543b7b5831c",
+    "archive_branch": "archive/em1-handoff-20261001/main"
+  },
+  {
+    "local_branch": "review/em1-cli",
+    "sha": "317fb82b3f904ec8b0627ba1baa9792fd3eb3129",
+    "archive_branch": "archive/em1-handoff-20261001/review/em1-cli"
+  },
+  {
+    "local_branch": "test/cli-daemon-backlog",
+    "sha": "fab7be3377dac1dc034e3aba7c7e62cc060de9b3",
+    "archive_branch": "archive/em1-handoff-20261001/test/cli-daemon-backlog"
+  }
+]

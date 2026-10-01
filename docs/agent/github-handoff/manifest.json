@@ -1,0 +1,32 @@
+{
+  "main_sha": "671c584f9e9eb807a15968e2aa42fd7507e178b8",
+  "main_ci": "https://github.com/iDoris-ai/Hyphae/actions/runs/36886817294",
+  "goal_status": "paused",
+  "merged_prs": [
+    118,
+    119,
+    120
+  ],
+  "archive_branch_prefix": "archive/em1-handoff-20261001/",
+  "original_local_branches": 19,
+  "release_url": "https://github.com/iDoris-ai/Hyphae/releases/tag/handoff-em1-20261001",
+  "archive_sha256": "5a4ae77b45e7b5fa190714c2be07e6c1defe2c9a4fc49fe701eea873121dc468",
+  "archive_files": 514,
+  "user_files": [
+    {
+      "name": "AGENTS.md",
+      "snapshot_path": "local-files/AGENTS.md.txt",
+      "sha256": "825ead05bddae12364451186028c2b2fd39ba937581535f441edd10b44e7732a"
+    },
+    {
+      "name": "tmux.sh",
+      "snapshot_path": "local-files/tmux.sh.txt",
+      "sha256": "5f993396eba422d62701bfa2a6768b9d91f2b32c0b8c5a3c779c5bcefabe6518"
+    }
+  ],
+  "limitations": [
+    "Old deleted uncommitted contents and missing diagnostic logs remain unverified/unrecoverable from this backup",
+    "Archive branches are for recovery; integration/candidate branches must not merge wholesale into main",
+    "Formal R3 and full E-M1 acceptance are incomplete"
+  ]
+}
