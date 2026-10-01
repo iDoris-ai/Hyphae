@@ -2,6 +2,10 @@
 
 最后更新：2026-10-01。本文记录实际交付与验收边界；各节固定其对应版本，新审批及合并以 GitHub 为准。
 
+12:25 UTC：#634 已 merge 到 Agent24 main `f5a76c015a7026c64fc872f47c6c160485cfed37`，CI `36859330529` 成功。Hyphae #104 新 head `aaa6d0f` 已 push，CI `36861579126` 运行中；Windows compile 旧失败/新通过，daemon race 9.415s。#103 `9ee5cca` 的 CI `36859748709` 通过。#102 `73b9bb07`、#105 `358d7e9d`、#106 `a41b882d` 的 Python discovery 已分别在新 CI 两平台实际通过 16/20/23 项；#111–#114 新 CI 已绿，等待外审。新 #115 `2fa6f0b` CI `36861616162` 运行中（生产差异 113 行、测试 165 行）。#634 与上述结果不代表 E-M1 完成。G2-S2b 新增 raw stdout 断言发现 fixture 会泄漏明文日志，Luna 正修；本地组合仍有四项已验证的局部结果，但不能记录第二轮全通过。定时扫描保持停止。全 E-M1 未完成。
+
+12:25 UTC：iDoris T01-D 接口审阅更新见 [iDoris 协作记录](../cooperation/iDoris.md)；只读固定 iDoris `ffed37a` / Agent24 `f5a76c01`，未运行服务/编译/付费 provider。确认 iDoris Rust router 已有 SQLite ledger 模块但正式入口未启用；Agent24 默认 provider 尚未接线。T10/T11 先服务端合同、后专用 adapter；T01-E/T07 门槛不变。
+
 12:04 UTC 补充：Agent24 自有文档 [#634](https://github.com/iDoris-ai/Agent24/pull/634) 已获 `clestons` 对 `c7bcf702` 的外部 APPROVE，六项检查通过；根代理重新核对 main base 与唯一文件 +17/-3 的实际差异后按 head SHA 正常 squash merge。合并为 `f5a76c015a7026c64fc872f47c6c160485cfed37`，该新 main 的 [CI 36859330529](https://github.com/iDoris-ai/Agent24/actions/runs/36859330529) 正在运行。已清理自有干净 worktree/本地分支，远端分支确认自动删除。Hyphae G7 [#111](https://github.com/iDoris-ai/Hyphae/pull/111) `74c47319`、G9 [#112](https://github.com/iDoris-ai/Hyphae/pull/112) `c53a09f0` 也已独立发布。另核对发现 #102/#105/#106 原 ci.yml 尚未执行各自 Python 工具单测，已派 Luna 给三个 PR 加同一自动发现步骤；原 CI 的 Go/integration 通过不作为这些 Python 工具的双平台验收。
 
 ## 2026-10-01 11:58 UTC：独立交付进入评审，CI 缺陷已定位

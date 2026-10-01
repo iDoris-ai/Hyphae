@@ -1,5 +1,7 @@
 # Agent24 × Hyphae
 
+12:25 UTC：iDoris/Agent24 固定 main 的只读接口审阅已记录于 [iDoris 协作方案](iDoris.md)：iDoris 当前是 Rust 单入口，ledger 模块存在但生产 binary 未注入；provider actual usage、认证 tenant scope、capabilities/usage API 和 client-disconnect cancellation 接线仍有缺口。Agent24 `f5a76c01` 默认 provider 仍是 OMLX/Ollama，未实现 iDoris adapter 或控制/响应 header。正式顺序为 iDoris 服务端 ledger/usage/tenant/auth/capabilities 合同，再由 Agent24 增加专用 adapter；`idoris-local/idoris-any` 仍是未确认的旧提案。本次源码审查没有运行服务、编译或跨仓测试，T01-E/T07 不变。
+
 12:04 UTC：Hyphae 自有文档 #634 已按外部有效批准与六项检查正常合入 Agent24 main `f5a76c01`；对应 main CI 仍在运行，不把之前 92f844ee 的绿色结果当新提交通过。接口确认及第一轮范围已进入 [正式文档](https://github.com/iDoris-ai/Agent24/blob/f5a76c015a7026c64fc872f47c6c160485cfed37/docs/design/HYPHAE-CLI-INTEGRATION.md)。G7/G9 现为 Hyphae #111/#112，正式新接口仍待各自合入、制品锁更新后采用。
 
 11:58 UTC：自有文档 #634 `c7bcf702` 六项检查通过、待外部评审。Hyphae 工具及 CLI 独立 PR #102～#110 的最新范围见 [进展](../agent/progress.md)；新命令在各自批准、CI、合入及新制品锁定后才能启用。C1 [#110](https://github.com/iDoris-ai/Hyphae/pull/110) 提供 102 个语言无关的执行恢复候选样例，fixture 原始摘要保持 `fdd39bc40de1f1b6ed8c9e899faae834410404f785ec72f20ea6e1c3f7a1ac55`；请按已有消费约定逐 ID 记录接受/拒绝结果。它是测试准备，生产 T07 仍等待 T01-E，不能用参考 oracle 的动作标签当真实 run/副作用次数。R2b 双平台制品 CI 与 R3 下载 URL 仍未交付，第二轮需最终 Agent24 main 的实际入口证据。

@@ -2,6 +2,8 @@
 
 更新：2026-10-01。范围依据 [生态里程碑草案](ecosystem-roadmap.md)。保留历史 M1～M5 编号；本表用 E-M 编号关联旧任务，不覆盖旧台账。
 
+12:25 UTC：T10/T11 按 iDoris `ffed37a107a2e152963caea845450c9515d12044` 与 Agent24 `f5a76c015a7026c64fc872f47c6c160485cfed37` 的只读源码审阅修订，完整边界和固定源码链接见 [iDoris 协作记录](../cooperation/iDoris.md)。服务端 ledger/usage/tenant 身份与 capabilities 合同先行，再做 Agent24 专用 adapter；不假定双 endpoint 已存在。本轮不是服务或构建验收，T01-E/T07 门槛不变。
+
 11:58 UTC：独立工具/CLI/候选样例已发布 #102～#110，准确 heads、CI 与下一批任务见 [progress](progress.md)。#103/#104 真实 CI 失败已定位并交 Luna 修复，其他已通过的本地检查不代替失败 CI。G2-S1/S2a/S2b 已继续派 Luna 实测与整理；R2b 依赖三个独立工具 PR 合入，R3 分发尚未交付。T20 继续 IN_PROGRESS；T21/T22、T01-E/T07、T19 仍待原完整出口，未把第一轮 Hyphae CLI 或恢复样例当 E-M1 完成。
 
 11:40 UTC 最新出口：运行环境限制解除，原生产 lock 的真实 macOS 第一轮 CLI/relay 独立复测 exit 0，阶段日志与范围见 [progress](progress.md)。#101 已合并，实际 main fc6681c 的 CI 通过；制品 R1 #102、keystore G8 #103、daemon HOME 锁 #104 分别待 review/CI。Agent24 #601 已合并，Hyphae 已回帖确认并提文档 #634；#626 ba30f104 当前批准/CI通过，#627 仍为依赖草稿。T20 继续 IN_PROGRESS：本轮直调 Hyphae CLI 不代替对仓最终 main 的托管/收发与三类计数正对照；T21/T22、T01-E、T19 不变。下文所有旧快照保留对应时间，不能继续把旧运行环境或 #626 REQUEST_CHANGES 当当前阻塞。
@@ -76,8 +78,8 @@ T01 的交付包括：权威协议修改、字段/错误码表、跨仓共享正
 | T07 | behavior 编解码与兼容读取；新增 `internal/behavior/`、`pkg/types/`；承接 `M2-F5-T5/M2-F1-T1` | T01 | 正反例跨语言一致；验签、版本、重复 tag、截断、解压上限、未知行为；旧 30078 不误解析 | WAITING |
 | T08 | register/publish 收发与 CLI；behavior、profile、`cmd/hyphae/` | T07、T05 | 三种注册模式、能力版本可发现；广播只带允许公开的字段；CLI JSON 稳定；真实 relay 可查询 | WAITING |
 | T09 | inquire/subscribe 收发与 CLI；behavior 及测试 | T07、T05 | 查询/回复关联正确，订阅过滤与退出正确；重复事件不重复通知；查询不触发执行 | WAITING |
-| T10 | Agent24 → iDoris 适配器；Agent24 `rust/crates/agent24-models/src/router.rs` 及 provider/配置/测试 | T01 | 复用已有接入设计，接通 `IDORIS_URL`；超时、取消、不可用显式返回；mock 与真实服务分别验收 | WAITING |
-| T11 | 隐私、预算、推理落点校验；iDoris router 与 Agent24 适配器 | T10 | 本地限定时外部请求数为零；预算拒绝不执行；审计与实际上游一致；用量标注实际或估算 | WAITING |
+| T10 | iDoris 正式入口接持久 ledger、认证 tenant scope、usage 策略与 capabilities 合同；随后 Agent24 `rust/crates/agent24-models/` 专用 iDoris adapter、配置与测试 | T01；服务端合同先于 adapter | mock/真实服务分别验收；profile/control headers、超时取消、错误映射、Served-Locality/Record-Id 消费明确；默认 OMLX/Ollama 不冒充 iDoris 接线 | WAITING |
+| T11 | 隐私、预算、推理落点及 egress 核对；iDoris router 与 Agent24 adapter | T10 | local_only 零外发；预算拒绝不执行；settle 依据来源明确的实际 usage 或显式估算/未知；缓存/重试不重复计费；取消与 redirect/egress 边界有合同测试 | WAITING |
 | T12 | 选定外部模块并固定权限/生命周期样例；Agent24 `rust/crates/agent24-os-packages/src/discovery.rs` 与真实项目 `domain-os.yml` | T01 | 主代理确认项目、commit、能力和授权范围；加载/停用/版本不兼容都有明确结果 | WAITING |
 | T13 | 模块加载和单步能力调用；Agent24 `rust/apps/agent24d/src/{domain,attached,attached_routes}.rs`、AgentEar `src/a3.rs` | T12 | 从外部路径加载；拒绝未声明/未授权能力；脱离与重连不重复挂载；结果带请求关联；不扩大 AgentEar speak/stop_playback 命令集 | WAITING |
 | T14 | Agent24 bridge 兼容新行为；`packages/nostr-bridge/src/{protocol,speaker,inbound}.ts` | T08、T09 | 新旧消息可读；完整发送者与事件 ID；只把获授权的执行请求送入 Agent24；回执不触发回复循环 | WAITING |
