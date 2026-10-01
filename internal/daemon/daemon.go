@@ -322,6 +322,9 @@ func watchInboxWithResults(
 	for index := range results {
 		results[index].RelayIndex = index
 	}
+	if walk == nil {
+		return 0, results, errors.New("relay history walk is required")
+	}
 	if ctx.Err() != nil {
 		return 0, results, ctx.Err()
 	}
@@ -473,6 +476,9 @@ func watchOneRelayWithHooksResult(
 	hooks incomingReceiveHooks,
 	walk relayWalkFunc,
 ) (relayScanResult, error) {
+	if walk == nil {
+		return relayScanResult{}, errors.New("relay history walk is required")
+	}
 	newCount := 0
 	errorCount := 0
 	errorSamples := make([]string, 0, 5)
