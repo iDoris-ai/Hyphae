@@ -2,6 +2,8 @@
 
 更新：2026-10-01。范围依据 [生态里程碑草案](ecosystem-roadmap.md)。保留历史 M1～M5 编号；本表用 E-M 编号关联旧任务，不覆盖旧台账。
 
+13:52 UTC：Hyphae main 已推进到 `57494422d17051dc5440d2dbed9411df8acd5536`（#105–#117 独立 PR 全部合入）；新 main CI 尚未核实。#114/#115、#105/#106 前置已满足，S2b runtime 与 R2b 制品 workflow 分别开发、验收和发 PR，不组合成汇总提交。候选组合 `b88a219` 的本机/race/CLI relay 结果不替代最终 main runtime 或生产实现验收。T20 仍 IN_PROGRESS；T01-E、生产 T07 与 T19 四仓验收未完成。固定第一轮 artifacts 和 tracked acceptance report 保留；旧 `/tmp` worktree/诊断日志当前不可读，不推测原因，新的 G2 日志位置见 [进展](progress.md)。
+
 12:25 UTC：T10/T11 按 iDoris `ffed37a107a2e152963caea845450c9515d12044` 与 Agent24 `f5a76c015a7026c64fc872f47c6c160485cfed37` 的只读源码审阅修订，完整边界和固定源码链接见 [iDoris 协作记录](../cooperation/iDoris.md)。服务端 ledger/usage/tenant 身份与 capabilities 合同先行，再做 Agent24 专用 adapter；不假定双 endpoint 已存在。本轮不是服务或构建验收，T01-E/T07 门槛不变。
 
 11:58 UTC：独立工具/CLI/候选样例已发布 #102～#110，准确 heads、CI 与下一批任务见 [progress](progress.md)。#103/#104 真实 CI 失败已定位并交 Luna 修复，其他已通过的本地检查不代替失败 CI。G2-S1/S2a/S2b 已继续派 Luna 实测与整理；R2b 依赖三个独立工具 PR 合入，R3 分发尚未交付。T20 继续 IN_PROGRESS；T21/T22、T01-E/T07、T19 仍待原完整出口，未把第一轮 Hyphae CLI 或恢复样例当 E-M1 完成。
