@@ -58,13 +58,11 @@ M1.5 已在 `internal/profile` 实现了这三模式的 profile 侧,M2 是把它
 | `~/.hyphae/outbox.json` | 待重试的发送队列 | ⚠️ **当前并发写不安全**,见 M2-F5-T2 |
 | `~/.hyphae/profile.enc` | 三层加密 profile | M2.5 计划 |
 
-Keystore writes also use the stable sibling lock `keystore.json.lock` (0600),
-which must not be removed while the store is in use. Identity creation,
-default selection, contact changes, password rotation, and legacy verification
-token upgrades reload and update the store while holding this cross-process
-lock. A process-local Tokio mutex does not replace this filesystem lock.
-External callers must not hold the lock and then launch Hyphae, because the
-child process will wait for the same lock.
+keystore 还使用稳定的同目录锁文件 `keystore.json.lock`（权限 0600），使用期间不能删除或替换它。创建身份、切换默认身份、添加联系人、轮换密码和升级 legacy 校验 token 时，程序都会持锁后重新读取并更新 keystore。进程内的 Tokio mutex 不能替代这个跨进程文件锁。外部调用方不要先持有此锁再启动 Hyphae 子进程，否则子进程会等待同一把锁。
+
+直接调用 `SaveKeyStore` 更新已有文件时，传入的 keystore 必须来自 `LoadKeyStore`，并且其加载版本必须与磁盘版本一致。用陈旧版本或手工构造的 snapshot 覆盖已有文件会返回 `write_conflict`（退出码 5）；调用方应重新加载后合并更新，或改用会在锁内读取最新状态的事务业务 API。版本元数据只用于本地冲突检测，不会写入 keystore JSON，因此磁盘 wire 格式不变。
+
+升级到使用此锁的版本前，应先停止所有旧版 Hyphae writer。旧版程序不认识锁文件，不能参与新版本的并发写保护。
 
 ### keystore 校验 token(跨持久化边界,改动需极度小心)
 
