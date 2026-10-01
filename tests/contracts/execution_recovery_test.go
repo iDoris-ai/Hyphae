@@ -163,16 +163,12 @@ func decideExecutionRecovery(kind string, in map[string]any) (executionRecoveryD
 	case "clock":
 		return checkExecutionRecoveryClock(in), nil
 	case "preflight":
-		if d := checkExecutionRecoveryClock(in); d.Action != "allow_start" {
-			if d.Action == "deny_expired" {
-				return executionRecoveryDecision{Action: "reject", State: "expired", Reason: d.Reason}, nil
+		if reason := executionRecoveryPreflightFailure(in); reason != "" {
+			state := "ready"
+			if reason == "expired" {
+				state = "expired"
 			}
-			return executionRecoveryDecision{Action: "reject", State: "ready", Reason: d.Reason}, nil
-		}
-		for _, gate := range []struct{ key, reason string }{{"approval_persisted", "unauthorized"}, {"scope_digest_match", "scope_or_digest_mismatch"}, {"budget_ok", "budget_rejected"}, {"privacy_ok", "privacy_requirement_unmet"}, {"module_allowed", "module_forbidden"}, {"local_model_available", "local_model_unavailable"}} {
-			if !boolValue(in[gate.key]) {
-				return executionRecoveryDecision{Action: "reject", State: "ready", Reason: gate.reason}, nil
-			}
+			return executionRecoveryDecision{Action: "reject", State: state, Reason: reason}, nil
 		}
 		return executionRecoveryDecision{Action: "register_run", State: "run_registered"}, nil
 	case "replay":
@@ -216,6 +212,40 @@ func checkExecutionRecoveryClock(in map[string]any) executionRecoveryDecision {
 	return executionRecoveryDecision{Action: "allow_start"}
 }
 
+// executionRecoveryPreflightFailure is shared by initial registration,
+// ready-to-run_registered, and recovery of an existing not-yet-started run.
+// Model observations are test context only: only model-dependent capabilities
+// require a selected model, while privacy_ok covers the selected route's policy.
+func executionRecoveryPreflightFailure(in map[string]any) string {
+	if d := checkExecutionRecoveryClock(in); d.Action != "allow_start" {
+		return d.Reason
+	}
+	for _, gate := range []struct{ key, reason string }{{"approval_persisted", "unauthorized"}, {"scope_digest_match", "scope_or_digest_mismatch"}, {"budget_ok", "budget_rejected"}, {"privacy_ok", "privacy_requirement_unmet"}, {"module_allowed", "module_forbidden"}} {
+		if !boolValue(in[gate.key]) {
+			return gate.reason
+		}
+	}
+	modelRequired, present := boolObservation(in, "model_required")
+	if !present {
+		return "model_requirement_unknown"
+	}
+	if modelRequired {
+		modelAvailable, available := boolObservation(in, "selected_model_available")
+		if !available {
+			return "model_availability_unknown"
+		}
+		if !modelAvailable {
+			return "selected_model_unavailable"
+		}
+	}
+	return ""
+}
+
+func boolObservation(in map[string]any, key string) (bool, bool) {
+	value, ok := in[key].(bool)
+	return value, ok
+}
+
 func isExecutionRecoverySafeInteger(value int64) bool {
 	return value >= -executionRecoveryMaxSafeInteger && value <= executionRecoveryMaxSafeInteger
 }
@@ -241,10 +271,7 @@ func executionRecoveryEdgeFactsHold(from, to string, facts map[string]any) bool 
 	case to == "ready":
 		return boolValue(facts["approval_persisted"]) && boolValue(facts["scope_digest_match"])
 	case from == "ready" && to == "run_registered":
-		if checkExecutionRecoveryClock(facts).Action != "allow_start" {
-			return false
-		}
-		return boolValue(facts["approval_persisted"]) && boolValue(facts["scope_digest_match"]) && boolValue(facts["budget_ok"]) && boolValue(facts["privacy_ok"]) && boolValue(facts["module_allowed"])
+		return executionRecoveryPreflightFailure(facts) == ""
 	case from == "run_registered" && to == "expired":
 		now, nowOK := intValue(facts["now"])
 		expires, expiresOK := intValue(facts["expires_at"])
@@ -283,7 +310,7 @@ func recoverExecutionObservation(in map[string]any) executionRecoveryDecision {
 			if !boolValue(in["same_run_id_present"]) {
 				return executionRecoveryDecision{Action: "hold_for_recheck", State: state, Reason: "run_id_missing"}
 			}
-			if checkExecutionRecoveryClock(in).Action != "allow_start" || !boolValue(in["approval_persisted"]) || !boolValue(in["scope_digest_match"]) || !boolValue(in["budget_ok"]) || !boolValue(in["privacy_ok"]) || !boolValue(in["module_allowed"]) || !boolValue(in["local_model_available"]) {
+			if executionRecoveryPreflightFailure(in) != "" {
 				return executionRecoveryDecision{Action: "hold_for_recheck", State: state, Reason: "preflight_incomplete"}
 			}
 			return executionRecoveryDecision{Action: "start_existing_run", State: state}

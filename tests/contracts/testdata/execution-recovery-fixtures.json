@@ -5,7 +5,7 @@
     "authorization_candidate_source_sha256": "9ac0b52db70ad5e0e156ac8276e8aa7e13025e34cf3349ba6af49f21b9aa47b3",
     "contract_gates_source_sha256": "f739451f4821d321f465f565b69488c31d5468bb6c6dce3c28f8a28643de227a",
     "semantics": "test-observation-only",
-    "case_count": 79
+    "case_count": 102
   },
   "cases": [
     {
@@ -176,7 +176,8 @@
         "budget_ok": true,
         "privacy_ok": true,
         "module_allowed": true,
-        "local_model_available": true
+        "selected_model_available": true,
+        "model_required": true
       },
       "expected": {
         "action": "register_run",
@@ -195,7 +196,8 @@
         "budget_ok": true,
         "privacy_ok": true,
         "module_allowed": true,
-        "local_model_available": true
+        "selected_model_available": true,
+        "model_required": true
       },
       "expected": {
         "action": "reject",
@@ -215,7 +217,8 @@
         "budget_ok": true,
         "privacy_ok": true,
         "module_allowed": true,
-        "local_model_available": true
+        "selected_model_available": true,
+        "model_required": true
       },
       "expected": {
         "action": "reject",
@@ -235,7 +238,8 @@
         "budget_ok": false,
         "privacy_ok": true,
         "module_allowed": true,
-        "local_model_available": true
+        "selected_model_available": true,
+        "model_required": true
       },
       "expected": {
         "action": "reject",
@@ -255,7 +259,8 @@
         "budget_ok": true,
         "privacy_ok": false,
         "module_allowed": true,
-        "local_model_available": true
+        "selected_model_available": true,
+        "model_required": true
       },
       "expected": {
         "action": "reject",
@@ -275,7 +280,8 @@
         "budget_ok": true,
         "privacy_ok": true,
         "module_allowed": false,
-        "local_model_available": true
+        "selected_model_available": true,
+        "model_required": true
       },
       "expected": {
         "action": "reject",
@@ -284,7 +290,7 @@
       }
     },
     {
-      "id": "preflight_local_model_available_false",
+      "id": "preflight_required_model_unavailable",
       "kind": "preflight",
       "input": {
         "now": 1000,
@@ -295,12 +301,13 @@
         "budget_ok": true,
         "privacy_ok": true,
         "module_allowed": true,
-        "local_model_available": false
+        "selected_model_available": false,
+        "model_required": true
       },
       "expected": {
         "action": "reject",
         "state": "ready",
-        "reason": "local_model_unavailable"
+        "reason": "selected_model_unavailable"
       }
     },
     {
@@ -315,7 +322,8 @@
         "budget_ok": true,
         "privacy_ok": true,
         "module_allowed": true,
-        "local_model_available": true
+        "selected_model_available": true,
+        "model_required": true
       },
       "expected": {
         "action": "reject",
@@ -558,7 +566,8 @@
           "budget_ok": true,
           "privacy_ok": true,
           "module_allowed": true,
-          "local_model_available": true
+          "selected_model_available": true,
+          "model_required": true
         }
       },
       "expected": {
@@ -806,7 +815,8 @@
           "budget_ok": false,
           "privacy_ok": true,
           "module_allowed": true,
-          "local_model_available": true
+          "selected_model_available": true,
+          "model_required": true
         }
       },
       "expected": {
@@ -1072,7 +1082,8 @@
         "budget_ok": true,
         "privacy_ok": true,
         "module_allowed": true,
-        "local_model_available": true
+        "selected_model_available": true,
+        "model_required": true
       },
       "expected": {
         "action": "start_existing_run",
@@ -1094,7 +1105,8 @@
         "scope_digest_match": true,
         "privacy_ok": true,
         "module_allowed": true,
-        "local_model_available": true
+        "selected_model_available": true,
+        "model_required": true
       },
       "expected": {
         "action": "hold_for_recheck",
@@ -1267,6 +1279,539 @@
         "action": "resend_receipt",
         "state": "failed",
         "reason": ""
+      }
+    },
+    {
+      "id": "preflight_model_independent_selected_unavailable_ignored",
+      "kind": "preflight",
+      "input": {
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "approval_persisted": true,
+        "scope_digest_match": true,
+        "budget_ok": true,
+        "privacy_ok": true,
+        "module_allowed": true,
+        "selected_model_available": false,
+        "model_required": false
+      },
+      "expected": {
+        "action": "register_run",
+        "state": "run_registered"
+      }
+    },
+    {
+      "id": "preflight_remote_model_available_privacy_ok",
+      "kind": "preflight",
+      "input": {
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "approval_persisted": true,
+        "scope_digest_match": true,
+        "budget_ok": true,
+        "privacy_ok": true,
+        "module_allowed": true,
+        "selected_model_available": true,
+        "model_required": true,
+        "selected_model_location": "remote"
+      },
+      "expected": {
+        "action": "register_run",
+        "state": "run_registered"
+      }
+    },
+    {
+      "id": "preflight_remote_model_privacy_failed",
+      "kind": "preflight",
+      "input": {
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "approval_persisted": true,
+        "scope_digest_match": true,
+        "budget_ok": true,
+        "privacy_ok": false,
+        "module_allowed": true,
+        "selected_model_available": true,
+        "model_required": true,
+        "selected_model_location": "remote"
+      },
+      "expected": {
+        "action": "reject",
+        "state": "ready",
+        "reason": "privacy_requirement_unmet"
+      }
+    },
+    {
+      "id": "preflight_model_requirement_missing",
+      "kind": "preflight",
+      "input": {
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "approval_persisted": true,
+        "scope_digest_match": true,
+        "budget_ok": true,
+        "privacy_ok": true,
+        "module_allowed": true,
+        "selected_model_available": true
+      },
+      "expected": {
+        "action": "reject",
+        "state": "ready",
+        "reason": "model_requirement_unknown"
+      }
+    },
+    {
+      "id": "preflight_model_requirement_not_boolean",
+      "kind": "preflight",
+      "input": {
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "approval_persisted": true,
+        "scope_digest_match": true,
+        "budget_ok": true,
+        "privacy_ok": true,
+        "module_allowed": true,
+        "selected_model_available": true,
+        "model_required": "yes"
+      },
+      "expected": {
+        "action": "reject",
+        "state": "ready",
+        "reason": "model_requirement_unknown"
+      }
+    },
+    {
+      "id": "preflight_required_model_availability_missing",
+      "kind": "preflight",
+      "input": {
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "approval_persisted": true,
+        "scope_digest_match": true,
+        "budget_ok": true,
+        "privacy_ok": true,
+        "module_allowed": true,
+        "model_required": true
+      },
+      "expected": {
+        "action": "reject",
+        "state": "ready",
+        "reason": "model_availability_unknown"
+      }
+    },
+    {
+      "id": "preflight_required_model_availability_not_boolean",
+      "kind": "preflight",
+      "input": {
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "approval_persisted": true,
+        "scope_digest_match": true,
+        "budget_ok": true,
+        "privacy_ok": true,
+        "module_allowed": true,
+        "selected_model_available": "yes",
+        "model_required": true
+      },
+      "expected": {
+        "action": "reject",
+        "state": "ready",
+        "reason": "model_availability_unknown"
+      }
+    },
+    {
+      "id": "transition_model_independent_selected_unavailable_accepted",
+      "kind": "transition",
+      "input": {
+        "from": "ready",
+        "to": "run_registered",
+        "facts": {
+          "now": 1000,
+          "issued_at": 900,
+          "expires_at": 1100,
+          "approval_persisted": true,
+          "scope_digest_match": true,
+          "budget_ok": true,
+          "privacy_ok": true,
+          "module_allowed": true,
+          "selected_model_available": false,
+          "model_required": false
+        }
+      },
+      "expected": {
+        "action": "apply_transition",
+        "state": "run_registered"
+      }
+    },
+    {
+      "id": "transition_required_model_unavailable_blocked",
+      "kind": "transition",
+      "input": {
+        "from": "ready",
+        "to": "run_registered",
+        "facts": {
+          "now": 1000,
+          "issued_at": 900,
+          "expires_at": 1100,
+          "approval_persisted": true,
+          "scope_digest_match": true,
+          "budget_ok": true,
+          "privacy_ok": true,
+          "module_allowed": true,
+          "selected_model_available": false,
+          "model_required": true
+        }
+      },
+      "expected": {
+        "action": "retain_state",
+        "state": "ready",
+        "reason": "transition_or_fact_not_allowed"
+      }
+    },
+    {
+      "id": "transition_remote_model_privacy_ok_accepted",
+      "kind": "transition",
+      "input": {
+        "from": "ready",
+        "to": "run_registered",
+        "facts": {
+          "now": 1000,
+          "issued_at": 900,
+          "expires_at": 1100,
+          "approval_persisted": true,
+          "scope_digest_match": true,
+          "budget_ok": true,
+          "privacy_ok": true,
+          "module_allowed": true,
+          "selected_model_available": true,
+          "model_required": true,
+          "selected_model_location": "remote"
+        }
+      },
+      "expected": {
+        "action": "apply_transition",
+        "state": "run_registered"
+      }
+    },
+    {
+      "id": "transition_remote_model_privacy_failed_blocked",
+      "kind": "transition",
+      "input": {
+        "from": "ready",
+        "to": "run_registered",
+        "facts": {
+          "now": 1000,
+          "issued_at": 900,
+          "expires_at": 1100,
+          "approval_persisted": true,
+          "scope_digest_match": true,
+          "budget_ok": true,
+          "privacy_ok": false,
+          "module_allowed": true,
+          "selected_model_available": true,
+          "model_required": true,
+          "selected_model_location": "remote"
+        }
+      },
+      "expected": {
+        "action": "retain_state",
+        "state": "ready",
+        "reason": "transition_or_fact_not_allowed"
+      }
+    },
+    {
+      "id": "transition_model_requirement_missing",
+      "kind": "transition",
+      "input": {
+        "from": "ready",
+        "to": "run_registered",
+        "facts": {
+          "now": 1000,
+          "issued_at": 900,
+          "expires_at": 1100,
+          "approval_persisted": true,
+          "scope_digest_match": true,
+          "budget_ok": true,
+          "privacy_ok": true,
+          "module_allowed": true,
+          "selected_model_available": true
+        }
+      },
+      "expected": {
+        "action": "retain_state",
+        "state": "ready",
+        "reason": "transition_or_fact_not_allowed"
+      }
+    },
+    {
+      "id": "transition_model_requirement_not_boolean",
+      "kind": "transition",
+      "input": {
+        "from": "ready",
+        "to": "run_registered",
+        "facts": {
+          "now": 1000,
+          "issued_at": 900,
+          "expires_at": 1100,
+          "approval_persisted": true,
+          "scope_digest_match": true,
+          "budget_ok": true,
+          "privacy_ok": true,
+          "module_allowed": true,
+          "selected_model_available": true,
+          "model_required": "yes"
+        }
+      },
+      "expected": {
+        "action": "retain_state",
+        "state": "ready",
+        "reason": "transition_or_fact_not_allowed"
+      }
+    },
+    {
+      "id": "transition_selected_model_availability_missing",
+      "kind": "transition",
+      "input": {
+        "from": "ready",
+        "to": "run_registered",
+        "facts": {
+          "now": 1000,
+          "issued_at": 900,
+          "expires_at": 1100,
+          "approval_persisted": true,
+          "scope_digest_match": true,
+          "budget_ok": true,
+          "privacy_ok": true,
+          "module_allowed": true,
+          "model_required": true
+        }
+      },
+      "expected": {
+        "action": "retain_state",
+        "state": "ready",
+        "reason": "transition_or_fact_not_allowed"
+      }
+    },
+    {
+      "id": "transition_selected_model_availability_not_boolean",
+      "kind": "transition",
+      "input": {
+        "from": "ready",
+        "to": "run_registered",
+        "facts": {
+          "now": 1000,
+          "issued_at": 900,
+          "expires_at": 1100,
+          "approval_persisted": true,
+          "scope_digest_match": true,
+          "budget_ok": true,
+          "privacy_ok": true,
+          "module_allowed": true,
+          "selected_model_available": "yes",
+          "model_required": true
+        }
+      },
+      "expected": {
+        "action": "retain_state",
+        "state": "ready",
+        "reason": "transition_or_fact_not_allowed"
+      }
+    },
+    {
+      "id": "recovery_model_independent_selected_unavailable_allowed",
+      "kind": "recovery",
+      "input": {
+        "state": "run_registered",
+        "start_call": "confirmed_not_sent_no_start",
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "same_run_id_present": true,
+        "approval_persisted": true,
+        "scope_digest_match": true,
+        "budget_ok": true,
+        "privacy_ok": true,
+        "module_allowed": true,
+        "selected_model_available": false,
+        "model_required": false
+      },
+      "expected": {
+        "action": "start_existing_run",
+        "state": "run_registered"
+      }
+    },
+    {
+      "id": "recovery_required_model_unavailable_held",
+      "kind": "recovery",
+      "input": {
+        "state": "run_registered",
+        "start_call": "confirmed_not_sent_no_start",
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "same_run_id_present": true,
+        "approval_persisted": true,
+        "scope_digest_match": true,
+        "budget_ok": true,
+        "privacy_ok": true,
+        "module_allowed": true,
+        "selected_model_available": false,
+        "model_required": true
+      },
+      "expected": {
+        "action": "hold_for_recheck",
+        "state": "run_registered",
+        "reason": "preflight_incomplete"
+      }
+    },
+    {
+      "id": "recovery_remote_model_privacy_ok_allowed",
+      "kind": "recovery",
+      "input": {
+        "state": "run_registered",
+        "start_call": "confirmed_not_sent_no_start",
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "same_run_id_present": true,
+        "approval_persisted": true,
+        "scope_digest_match": true,
+        "budget_ok": true,
+        "privacy_ok": true,
+        "module_allowed": true,
+        "selected_model_available": true,
+        "model_required": true,
+        "selected_model_location": "remote"
+      },
+      "expected": {
+        "action": "start_existing_run",
+        "state": "run_registered"
+      }
+    },
+    {
+      "id": "recovery_remote_model_privacy_failed_held",
+      "kind": "recovery",
+      "input": {
+        "state": "run_registered",
+        "start_call": "confirmed_not_sent_no_start",
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "same_run_id_present": true,
+        "approval_persisted": true,
+        "scope_digest_match": true,
+        "budget_ok": true,
+        "privacy_ok": false,
+        "module_allowed": true,
+        "selected_model_available": true,
+        "model_required": true,
+        "selected_model_location": "remote"
+      },
+      "expected": {
+        "action": "hold_for_recheck",
+        "state": "run_registered",
+        "reason": "preflight_incomplete"
+      }
+    },
+    {
+      "id": "recovery_model_requirement_missing",
+      "kind": "recovery",
+      "input": {
+        "state": "run_registered",
+        "start_call": "confirmed_not_sent_no_start",
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "same_run_id_present": true,
+        "approval_persisted": true,
+        "scope_digest_match": true,
+        "budget_ok": true,
+        "privacy_ok": true,
+        "module_allowed": true,
+        "selected_model_available": true
+      },
+      "expected": {
+        "action": "hold_for_recheck",
+        "state": "run_registered",
+        "reason": "preflight_incomplete"
+      }
+    },
+    {
+      "id": "recovery_model_requirement_not_boolean",
+      "kind": "recovery",
+      "input": {
+        "state": "run_registered",
+        "start_call": "confirmed_not_sent_no_start",
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "same_run_id_present": true,
+        "approval_persisted": true,
+        "scope_digest_match": true,
+        "budget_ok": true,
+        "privacy_ok": true,
+        "module_allowed": true,
+        "selected_model_available": true,
+        "model_required": "yes"
+      },
+      "expected": {
+        "action": "hold_for_recheck",
+        "state": "run_registered",
+        "reason": "preflight_incomplete"
+      }
+    },
+    {
+      "id": "recovery_selected_model_availability_missing",
+      "kind": "recovery",
+      "input": {
+        "state": "run_registered",
+        "start_call": "confirmed_not_sent_no_start",
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "same_run_id_present": true,
+        "approval_persisted": true,
+        "scope_digest_match": true,
+        "budget_ok": true,
+        "privacy_ok": true,
+        "module_allowed": true,
+        "model_required": true
+      },
+      "expected": {
+        "action": "hold_for_recheck",
+        "state": "run_registered",
+        "reason": "preflight_incomplete"
+      }
+    },
+    {
+      "id": "recovery_selected_model_availability_not_boolean",
+      "kind": "recovery",
+      "input": {
+        "state": "run_registered",
+        "start_call": "confirmed_not_sent_no_start",
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "same_run_id_present": true,
+        "approval_persisted": true,
+        "scope_digest_match": true,
+        "budget_ok": true,
+        "privacy_ok": true,
+        "module_allowed": true,
+        "selected_model_available": "yes",
+        "model_required": true
+      },
+      "expected": {
+        "action": "hold_for_recheck",
+        "state": "run_registered",
+        "reason": "preflight_incomplete"
       }
     }
   ]
