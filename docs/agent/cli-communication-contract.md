@@ -93,3 +93,7 @@ Hyphae 独立提供通信 CLI/daemon，Agent24 提供统一 CLI/UI 入口并调�
 - Agent24 拿同一二进制验证适配；跨仓未接线前只记录 Hyphae 侧 A 段通过。
 
 基础 UI 的对接与待确认项见上游协作 PR 的 `docs/cooperation/Agent24.md`。本契约不要求将 UI 实现在 Hyphae 中。
+
+## 文件正文输入
+
+`agent msg` 接受且只接受一种正文来源：既有 `--content`/`-c`，或 `--content-file PATH`。文件来源要求普通文件，最多 1 MiB，必须是非空 UTF-8；正文按原字节解释为 UTF-8 文本，保留尾随换行。文件路径 `-` 不代表 stdin。`--password-stdin` 仅用于读取 keystore 口令，不能复用为正文输入。正文来源、文件类型和文件内容均在解锁身份及写入 history/outbox/audit 前校验。敏感正文应使用文件方式，避免出现在进程参数中。

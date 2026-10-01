@@ -128,10 +128,13 @@ Example: hyphae agent msg --from alice --to bob --content "Hello!"`,
 			Required: true,
 		},
 		&cli.StringFlag{
-			Name:     "content",
-			Aliases:  []string{"c"},
-			Usage:    "Message content",
-			Required: true,
+			Name:    "content",
+			Aliases: []string{"c"},
+			Usage:   "Message content (avoid for sensitive text; visible in process arguments)",
+		},
+		&cli.StringFlag{
+			Name:  "content-file",
+			Usage: "Read message content from a regular file (max 1 MiB)",
 		},
 		&cli.StringSliceFlag{
 			Name:    "relay",
@@ -154,7 +157,19 @@ Example: hyphae agent msg --from alice --to bob --content "Hello!"`,
 		if strings.TrimSpace(to) == "" {
 			return common.NewExitError(common.ErrCodeUser, fmt.Errorf("recipient is required"))
 		}
+		contentSet := c.IsSet("content")
+		contentFileSet := c.IsSet("content-file")
+		if contentSet == contentFileSet {
+			return common.NewExitError(common.ErrCodeUser, fmt.Errorf("provide exactly one of --content or --content-file"))
+		}
 		content := c.String("content")
+		if contentFileSet {
+			var err error
+			content, err = readMessageContentFile(c.String("content-file"))
+			if err != nil {
+				return common.NewExitError(common.ErrCodeUser, err)
+			}
+		}
 		if content == "" {
 			return common.NewExitError(common.ErrCodeUser, fmt.Errorf("message content is required"))
 		}
