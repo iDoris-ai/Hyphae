@@ -212,7 +212,7 @@ func TestDaemonCLIConflictPrecedesPasswordRead(t *testing.T) {
 		if runtime.GOOS == "darwin" {
 			if sample, lookErr := exec.LookPath("sample"); lookErr == nil {
 				sampleCtx, stopSample := context.WithTimeout(ctx, 200*time.Millisecond)
-				goroutineSample, _ = exec.CommandContext(sampleCtx, sample, fmt.Sprint(cmd.Process.Pid), "10", "10").CombinedOutput()
+				goroutineSample, _ = exec.CommandContext(sampleCtx, sample, fmt.Sprint(cmd.Process.Pid), "0.15", "10").CombinedOutput()
 				stopSample()
 			}
 		}
