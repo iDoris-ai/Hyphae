@@ -1,10 +1,52 @@
 # E-M1 PR 依赖与合并顺序
 
-更新：2026-09-30。下表是本轮已验收实现的依赖关系；验收通过不代表已进入 main。用户已授权主代理按依赖顺序合并；每项仍需有效批准、main 基线和通过的 CI。
+12:33 UTC：#104 `aaa6d0f` / CI `36861579126` 与 #115 `2fa6f0b` / CI `36861616162` 完整 SUCCESS；#103 CI 成功，#102/#105/#106 Python discovery 两平台 16/20/23 项通过，#111–#114 CI 绿待外审。S2b 三个 FAIL 中两项是新增断言错误（分页应 3 页；stderr 可含诊断/明文）且已校正；ConflictPrecedesPasswordRead 完整套件重复超时、focused 通过但根因未知，generic helper 后全量/race 复验继续。细节见 [progress](progress.md)。
+
+12:46 UTC：#102/#103/#104 已按最新 head 外部批准与检查结果独立合入（merge `3be99fd`/`5f179d6`/`b1ddf97`）；#102 CI `36863563740` SUCCESS。当前 main `b1ddf97e3dce74de3eaf19784c174543b7b5831c` 的 CI `36863806313` 完整 SUCCESS（macOS、Ubuntu、ci-ok）；三个旧 worktree/本地分支已清理，远端同名分支已自动删除，原 main checkout 与 untracked `AGENTS.md`、`tmux.sh` 保留。#113 `3e9baf3` CI `36862751523` SUCCESS、待外审；#115 CI 成功、待外审。S2b 候选 `c55ffcd` full/race exit 0（44.182s），真实 relay、125 条补收/重启及中断路径已实跑；CLI conflict 3 秒超时仍未查明，详见 [progress](progress.md)。#103 的额外 O_NOFOLLOW/path 防护建议另开小 PR。#114/#115 合入前不发 S2b 生产提交；#105/#106 合入前不发 R2b；保持 PR 独立。
+
+12:04 UTC：Agent24 自有文档 #634 已在有效外部批准、六项检查通过后正常合并；新 main f5a76c01 的 CI 运行中。Hyphae #111/#112 为独立 main PR，待真实 CI/外部评审。#102/#105/#106 补 Python 工具单测的 CI 步骤由 Luna 处理中，变更后须按新 head 检查，不沿用旧绿色结果；其余队列依赖不变。
+
+11:58 UTC 队列：main fc6681c 的 CI 通过。#102/#105/#106 各自 CI 通过、待外部评审；#103/#104 的真实 CI 失败已定位到测试子进程重复构建与临时 HOME 缓存，Luna 修复并复验；#107/#108/#109/#110 新独立 PR 的 CI 运行中。最新 heads 与范围见 [带日期进展](progress.md)。这些 PR 都只含自身差异，可独立评审；G7/G9 与 G2-S1/S2a 后续独立提交。R2b 依赖 #102/#105/#106，待全部进入 main 后才基于新 main 提自身工作流/helper 差异，禁止将当前 integration 父分支作为 main PR 发布。Agent24 #634 六项检查通过、待评审；#626 有批准但仍 OPEN，#627 仍依赖草稿，对仓生产合并由其负责。下方旧快照按时间阅读。
+
+11:40 UTC 最新队列：#101 已按批准 head 合并，main fc6681c 的 ci.yml 实际通过。R1 [#102](https://github.com/iDoris-ai/Hyphae/pull/102) 26bfe6ab、G8 [#103](https://github.com/iDoris-ai/Hyphae/pull/103) 685e5dd3、daemon HOME [#104](https://github.com/iDoris-ai/Hyphae/pull/104) 82228178 为各自独立 main PR，等待真实 CI/外部 review。独立第一轮工具、R2a、R2b 及其余 CLI 改动由 Luna 整理，按实际依赖发小 PR，不合并汇总分支。Agent24 #601 已合并；根代理文档 #634 c7bcf70 独立待审；对仓 #626 ba30f104 已获新批准/CI通过，#627 500cc03e 仍依赖草稿，对仓实施/合并由其负责。下列带早期时间的队列是历史记录。
+
+2026-10-01 本地补充：R2a `cb374a2`（生产 491 行）和 R2b `343520d`（生产 397 行）已各自在独立 worktree 提交并通过根代理本地验收；最终四套工具共 39 项通过，workflow 的 Actionlint、YAML 结构及 bash 语法通过。真实固定 Go 构建、GitHub CI、制品传输与 relay 复测尚未执行通过。发布顺序为 R1、独立第一轮复测工具、R2a、R2b；组合基线仅作依赖，不发布汇总 PR。上述提交尚无远端 PR，不能进入自动合并队列。
+
+更新：2026-10-01。下表是本轮实现的依赖关系；验收通过不代表已进入 main。用户已授权主代理按依赖顺序合并；每项仍需有效批准、main 基线和通过的 CI。
+
+C1 候选 `427f631f` 是基于 `a4aa606` 的独立测试提交，生产 0 行，无生产依赖；根代理 contracts 包普通/race 和 102 样例逐 ID 验证通过。尚无远端 PR，发布后交外部 review/真实 CI；不能提前解除 T01-E/T07。
+
+08:47 UTC 最新对仓队列：#628/#630 已合并，main `be365232` CI `36830773430` 通过；#626 `5531abe0` 的 REQUEST_CHANGES 未解，#627 `95013516` 仍叠在它上面。下列 07:29 的“#628 未合并/失败”是历史快照，不能继续用作当前阻塞；#626 后续迁移必须保留已进 main 的 #628 接线。Hyphae #101、Agent24 #601 仍 OPEN且外部批准 head 未变；本会话写操作限制未变，不重复被拒合并。
+
+## 当前队列：2026-10-01
+
+07:29 UTC 对仓队列：#628 先解决实际 Linux scheduler CI 失败并取得批准；#626 修 locale/TZ 的孤儿标记后复审，二者后合者解决已记录的参数冲突；#627 随 #626 迁移 main 后跑完整 CI、再评审。#630 当前 head 已批准，仍等本次 CLA；它是运行记录，不代替候选代码合并与验收。对仓实现/合并由对应仓库推进，根代理不提交 GitHub review。
+
+当前 Hyphae main 为 `a4aa606eb81d5c040d94c51cdf94553e646d8674`；#37～#100 的已有任务均已合并。#101 `b3f9053eb5d117877656c5102d23f91fb8325eb9` 与 Agent24 #601 `67ddbce30cc7dd713191f63e16f682094e99dee8` 有最新 head 的外部批准及通过的 CI，仍 OPEN；工具审批层拒绝本轮合并调用，用户授权不变。
+
+
+06:58 UTC：Agent24 #620/#621/#622 已依次合并，#622 最终 head `48c866ac` 有匹配的外部批准，main `f1dbe1ef` CI 通过。后续 COMM-3/4a 从该 main 独立推进，不再等待 #622。制品 R1 已派 Luna 实现；R2 前置 R1 验收/合并，R3 前置真实构建/hash/联调通过，见 [交付任务](em1-artifact-delivery.md)。所有新增本地 feature 尚无远端 PR，不能列成待 review 的 GitHub PR。
+| 新工作 | 前置 | 交付门槛 |
+|---|---|---|
+| G7：会话历史 JSON | 当前 main | 独立小 PR；真实 CLI、身份隔离、三种 JSON 开关 |
+| G8：keystore 事务与陈旧写拒绝 | 当前 main | 独立小 PR；所有写路径、跨进程不丢私钥、密码迁移与轮换 |
+| G9：文件正文输入 | 当前 main | 独立小 PR；正文不在 argv，输入错误不改变历史/队列 |
+| Agent24 文档勘误 | Agent24 #601 合并 | 本地 `9bfb0df` 重新整理到其 main；另提纯文档 PR |
+| G7b：存储信息 JSON | 当前 main | 独立小 PR；未建库不创建目录，真实计数与三种 JSON 开关 |
+| G6：联系人输入错误 | 当前 main | 独立小 PR；非法 key 返回 1，真实存储失败保留 4；新锁采用时 Agent24 更新旧断言 |
+| daemon HOME 互斥 | 当前 main | 独立小 PR；同 HOME 冲突、退出释放、特殊路径无阻塞 |
+| 只读口令检查 | 当前 main | 独立小 PR；验证 legacy/current 不迁移，所有结果保持磁盘内容及元数据 |
+| G2-S1：JSON-lines 状态模型 | 当前 main | 独立小 PR；闭集统计、多行信封及短写失败，尚不启用 daemon |
+| G2-S2a：真实扫描结果 | 当前 main | 独立小 PR；分页/部分结果、durable 新增及取消分类，尚不启用状态流 |
+| G2-S2b：daemon 状态流接入 | G2-S1、G2-S2a、daemon HOME 互斥 | 本地 `7b29bf6f`，410 生产行，专项/race通过；独立小 PR，真实 relay/完整CI待验收；每条记录不作为永久同步证明 |
+| 组合并发回归 | G8、G1、daemon HOME 互斥 | 独立测试提交；保留源码、真实 CLI 并发及 race；待生产前置合入后整理到 main |
+| 第一轮 Agent24 CLI 联调 | #614/#620/#621/#622 已合并；Linux 构建/hash CI 已存在，仍缺下载制品及 Hyphae 独立复测 | 记录双方源码、构建配方/hash、实际入口及 zero-run 证据 |
+
+上述 CLI 改动独立实现，生产改动分别审核，不汇总合并。详见 [接线任务契约](em1-comm-followups.md)。定时扫描按用户要求停用，本轮不创建新计时器。
 
 后台 PR-daemon 可以并行评审这些 PR，包括 draft。评审范围是各 PR 相对其 base 的差异；draft 在这里表示等待前置合入 main，不等于尚未实现。自动 review 与合并是两个步骤，review 结论不自动解除依赖门槛。
 
-## 本轮合并进度
+## 历史队列：2026-09-30
 
 2026-09-30 本轮实时核对：主线基线为 `1948aadc551e360176711f9c50172ed6edccd253`。#37～#67、#68～#84、#93/#97 已合并；该 main 提交的 Linux/macOS CI 与隔离本机完整 CLI 验收通过。最低 Go 版本为 1.26，CI 按 go.mod 选择工具链。编号范围包含规划、CI 和维护 PR，整体 E-M1 仍待跨仓验收。
 
