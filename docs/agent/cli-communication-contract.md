@@ -21,6 +21,8 @@ Hyphae 独立提供通信 CLI/daemon，Agent24 提供统一 CLI/UI 入口并调�
 | `storage outbox list/retry/clear` | 人工诊断与操作 | JSON 列表/重试结果/清理计数；list 不输出 EventJSON 或消息正文；clear 在 JSON 模式要求明确 --yes，确认后并发新增项保留 |
 | `daemon` | 前台收件、重试、通知，可禁用自动回复 | 参数校验、离线消息补收、持久化去重；只在存储成功后记 seen/通知；连接失败可诊断；生命周期由调用方监督 |
 
+`agent msg` 接受且只接受一种正文来源：既有 `--content`/`-c`，或 `--content-file PATH`。文件来源要求普通文件，最多 1 MiB，必须是非空 UTF-8；正文按原字节解释为 UTF-8 文本，保留尾随换行。文件路径 `-` 不代表 stdin。`--password-stdin` 仅用于读取 keystore 口令，不能复用为正文输入。正文来源、文件类型和文件内容均在解锁身份及写入 history/outbox/audit 前校验。敏感正文应使用文件方式，避免出现在进程参数中。
+
 `relay set` 作为完整配置写入，不自动探测或连接新 relay；只读 `list` 不探网。relay 参数优先级为显式 `--relay` > 本地配置 > 既有默认。已入队事件继续使用入队时记录的 relay，避免修改配置后将待发私有消息投向新的公开 relay。
 
 配置接口固定为 `relay set --relay <URL>`（可重复）和 `relay list`；保存到 `~/.hyphae/relays.json`，格式为 `{"version":1,"relays":["wss://relay.example"]}`。列表及保存成功的 JSON data 为 `{"relays":[...],"source":"config"}`，未配置时 source 为 `default`。空集合、非法 URL、未知配置版本和损坏文件明确报错；只有文件不存在才使用既有默认。使用权限 0600 的唯一临时文件、同步和同目录替换，目录权限 0700。
