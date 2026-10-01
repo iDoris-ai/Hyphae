@@ -13,8 +13,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -27,32 +25,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 )
-
-const daemonLockHelperEnv = "HYPHAE_DAEMON_LOCK_HELPER"
-
-var daemonLockCLI string
-
-func TestMain(m *testing.M) {
-	if os.Getenv(daemonLockHelperEnv) != "" {
-		os.Exit(m.Run())
-	}
-	_, source, _, _ := runtime.Caller(0)
-	root := filepath.Clean(filepath.Join(filepath.Dir(source), "..", ".."))
-	buildDir, err := os.MkdirTemp("", "hyphae-daemon-lock-cli-")
-	if err != nil {
-		panic(err)
-	}
-	daemonLockCLI = filepath.Join(buildDir, "hyphae")
-	build := exec.Command("go", "build", "-o", daemonLockCLI, "./cmd/hyphae")
-	build.Dir = root
-	if output, err := build.CombinedOutput(); err != nil {
-		_ = os.RemoveAll(buildDir)
-		panic("build CLI: " + err.Error() + ": " + string(output))
-	}
-	code := m.Run()
-	_ = os.RemoveAll(buildDir)
-	os.Exit(code)
-}
 
 func TestDaemonHomeLockCreatesPrivateStableFile(t *testing.T) {
 	home := t.TempDir()
@@ -301,17 +273,6 @@ func startDaemonLockChild(t *testing.T, home string) (*exec.Cmd, io.WriteCloser)
 		t.Fatal("lock helper did not report that it holds the lock")
 	}
 	return cmd, stdin
-}
-
-func daemonLockCLIEnv(current []string, home string) []string {
-	env := make([]string, 0, len(current)+1)
-	for _, item := range current {
-		if strings.HasPrefix(item, "HOME=") || strings.HasPrefix(item, "HYPHAE_OUTPUT=") || strings.HasPrefix(item, "AGENT_SPEAKER_OUTPUT=") || strings.HasPrefix(item, daemonLockHelperEnv+"=") {
-			continue
-		}
-		env = append(env, item)
-	}
-	return append(env, "HOME="+home)
 }
 
 func createEncryptedIdentity(t *testing.T, home string) {
