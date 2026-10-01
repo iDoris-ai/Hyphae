@@ -2,12 +2,14 @@ package identity
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -38,6 +40,22 @@ func TestCreateIdentityWithPassword(t *testing.T) {
 
 	// Nsec should be encrypted (not a raw nsec1 string)
 	assert.NotContains(t, identity.Nsec, "nsec1")
+}
+
+func TestReproStaleSnapshotLosesConcurrentIdentity(t *testing.T) {
+	setupTempKeyStore(t)
+	a, err := LoadKeyStore()
+	require.NoError(t, err)
+	b, err := LoadKeyStore()
+	require.NoError(t, err)
+	_, err = CreateIdentityWithPassword(a, "alice", "")
+	require.NoError(t, err)
+	_, err = CreateIdentityWithPassword(b, "bob", "")
+	require.NoError(t, err)
+	final, err := LoadKeyStore()
+	require.NoError(t, err)
+	assert.Contains(t, final.Identities, "alice")
+	assert.Contains(t, final.Identities, "bob")
 }
 
 func TestGetSecretKey_Encrypted(t *testing.T) {
@@ -359,18 +377,44 @@ func TestSaveKeyStore_ConcurrentWritesNeverCorrupt(t *testing.T) {
 			Nsec:     strings.Repeat("y", 120),
 		}
 	}
+	require.NoError(t, SaveKeyStore(small))
 
 	var wg sync.WaitGroup
+	var ready sync.WaitGroup
+	var resultMu sync.Mutex
+	var successes, conflicts int
+	start := make(chan struct{})
 	for i := 0; i < 50; i++ {
+		ready.Add(1)
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			ks := small
-			if i%2 == 0 {
-				ks = large
+			ks, err := LoadKeyStore()
+			if err != nil {
+				t.Errorf("LoadKeyStore failed: %v", err)
+				ready.Done()
+				return
 			}
-			if err := SaveKeyStore(ks); err != nil {
-				t.Errorf("SaveKeyStore failed: %v", err)
+			if i%2 == 0 {
+				ks.Identities = large.Identities
+			} else {
+				ks.Identities = small.Identities
+			}
+			ks.PasswordHint = fmt.Sprintf("writer-%d", i)
+			ready.Done()
+			<-start
+			err = SaveKeyStore(ks)
+			resultMu.Lock()
+			defer resultMu.Unlock()
+			if err == nil {
+				successes++
+			} else {
+				var exitErr *common.ExitError
+				if errors.As(err, &exitErr) && exitErr.Code == common.ErrCodeWriteConflict {
+					conflicts++
+				} else {
+					t.Errorf("SaveKeyStore failed unexpectedly: %v", err)
+				}
 			}
 		}(i)
 		wg.Add(1)
@@ -383,7 +427,11 @@ func TestSaveKeyStore_ConcurrentWritesNeverCorrupt(t *testing.T) {
 			}
 		}()
 	}
+	ready.Wait()
+	close(start)
 	wg.Wait()
+	assert.Equal(t, 1, successes, "only one stale snapshot should commit")
+	assert.Equal(t, 49, conflicts, "every other stale snapshot should report write_conflict")
 
 	final, err := LoadKeyStore()
 	require.NoError(t, err, "keystore must be parseable after concurrent writes")

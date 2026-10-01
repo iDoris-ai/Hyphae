@@ -58,6 +58,14 @@ M1.5 已在 `internal/profile` 实现了这三模式的 profile 侧,M2 是把它
 | `~/.hyphae/outbox.json` | 待重试的发送队列 | ⚠️ **当前并发写不安全**,见 M2-F5-T2 |
 | `~/.hyphae/profile.enc` | 三层加密 profile | M2.5 计划 |
 
+Keystore writes also use the stable sibling lock `keystore.json.lock` (0600),
+which must not be removed while the store is in use. Identity creation,
+default selection, contact changes, password rotation, and legacy verification
+token upgrades reload and update the store while holding this cross-process
+lock. A process-local Tokio mutex does not replace this filesystem lock.
+External callers must not hold the lock and then launch Hyphae, because the
+child process will wait for the same lock.
+
 ### keystore 校验 token(跨持久化边界,改动需极度小心)
 
 `verifyToken` 会被**加密后写进** `keystore.json` 的 `Verification` 字段。改这个常量 = 让所有已加密的 keystore 拒绝正确密码。PR #33 踩过一次,现在的实现同时接受 legacy token 并静默升级。**任何未来的改名/改版都必须保留旧值。**
