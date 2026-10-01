@@ -25,6 +25,7 @@ import (
 	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/internal/messaging"
+	"github.com/iDoris-ai/hyphae/internal/relayconfig"
 	"github.com/iDoris-ai/hyphae/internal/relayquery"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/stretchr/testify/assert"
@@ -95,7 +96,7 @@ func TestStatusModelReplay125AcrossFreshScanReset(t *testing.T) {
 	first, firstNew, firstRelay, firstLines := runScan()
 	assert.Equal(t, 125, firstNew)
 	assert.Equal(t, 125, firstRelay.Stats.Fetched)
-	assert.Equal(t, 2, firstRelay.Stats.Pages)
+	assert.Equal(t, 3, firstRelay.Stats.Pages)
 	assert.Equal(t, 125, firstRelay.NewMessages)
 	assert.Equal(t, StatusScanIdle, first.Scan.State)
 	assert.False(t, first.Scan.Relays[0].FinishedHint, "ordinary EOSE is not a finish hint")
@@ -148,10 +149,11 @@ func TestDaemonJSONLocalRelay125AcrossProcessRestart(t *testing.T) {
 		require.NoError(t, events[i].Sign(sender))
 	}
 	relayURL, _ := startHistoryRelay(t, events)
-	first := runDaemonJSONChildForRelay(t, home, []string{relayURL}, func(line StatusEnvelope) bool {
+	first, firstStdout, _ := runDaemonJSONChildWithRelays(t, home, "flag", []string{relayURL}, func(line StatusEnvelope) bool {
 		return line.Data.Scan.State == StatusScanIdle && len(line.Data.Scan.Relays) == 1 && line.Data.Scan.Relays[0].NewMessages == 125
 	})
 	require.NotEmpty(t, first)
+	assert.NotContains(t, firstStdout, "cli-backlog-")
 	firstGeneration := first[0].Data.Generation
 	firstScan := findStatus(t, first, func(line StatusEnvelope) bool { return line.Data.Scan.State == StatusScanIdle })
 	require.Len(t, firstScan.Data.Scan.Relays, 1)
@@ -160,10 +162,11 @@ func TestDaemonJSONLocalRelay125AcrossProcessRestart(t *testing.T) {
 	assert.False(t, firstScan.Data.Scan.Relays[0].FinishedHint)
 	assert.Equal(t, StatusProcessStopped, first[len(first)-1].Data.Process)
 
-	second := runDaemonJSONChildForRelay(t, home, []string{relayURL}, func(line StatusEnvelope) bool {
+	second, secondStdout, _ := runDaemonJSONChildWithRelays(t, home, "flag", []string{relayURL}, func(line StatusEnvelope) bool {
 		return line.Data.Scan.State == StatusScanIdle && len(line.Data.Scan.Relays) == 1 && line.Data.Scan.Relays[0].Fetched == 125
 	})
 	require.NotEmpty(t, second)
+	assert.NotContains(t, secondStdout, "cli-backlog-")
 	secondScan := findStatus(t, second, func(line StatusEnvelope) bool { return line.Data.Scan.State == StatusScanIdle })
 	assert.NotEqual(t, firstGeneration, second[0].Data.Generation)
 	assert.Equal(t, 125, secondScan.Data.Scan.Relays[0].Fetched)
@@ -250,6 +253,139 @@ func TestDaemonJSONLocalRelayStorageFailure(t *testing.T) {
 	assert.Zero(t, scan.Data.Scan.Relays[0].NewMessages)
 	assert.NotContains(t, lineText(scan), "storage-error-fixture")
 	assert.NotEmpty(t, myIdentity.Npub)
+}
+
+func TestDaemonJSONConfigRelaySetAvailableAndUnavailable(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	ks := &types.KeyStore{Identities: make(map[string]*types.Identity), Contacts: make(map[string]*types.Contact)}
+	_, err := identity.CreateIdentityWithPassword(ks, "alice", "s2b-test-secret")
+	require.NoError(t, err)
+	require.NoError(t, identity.SaveKeyStore(ks))
+
+	availableURL, requests := startHistoryRelay(t, nil)
+	unavailableURL := "ws://127.0.0.1:1/config-failure-marker"
+	resolver, err := relayconfig.New()
+	require.NoError(t, err)
+	require.NoError(t, resolver.Set([]string{availableURL, unavailableURL}))
+	resolved, err := resolver.Resolve(nil)
+	require.NoError(t, err)
+	assert.Equal(t, "config", resolved.Source)
+	assert.Equal(t, []string{availableURL, unavailableURL}, resolved.Relays)
+
+	lines, stdout, _ := runDaemonJSONChildWithRelays(t, home, "flag", nil, func(line StatusEnvelope) bool {
+		return line.Data.Scan.State == StatusScanIncomplete
+	})
+	scan := findStatus(t, lines, func(line StatusEnvelope) bool { return line.Data.Scan.State == StatusScanIncomplete })
+	require.Len(t, scan.Data.Scan.Relays, 2)
+	assert.Equal(t, StatusRelayAvailable, scan.Data.Scan.Relays[0].State)
+	assert.Equal(t, StatusRelayIncomplete, scan.Data.Scan.Relays[1].State)
+	assert.False(t, scan.Data.Scan.Relays[0].FinishedHint, "ordinary EOSE only ends this query")
+	assert.Equal(t, int32(1), requests.Load(), "daemon must read the saved relay set without explicit --relay flags")
+	assert.NotContains(t, stdout, availableURL)
+	assert.NotContains(t, stdout, unavailableURL)
+	assert.NotContains(t, stdout, "s2b-test-secret")
+}
+
+func TestDaemonJSONSIGTERMLeavesUnvisitedRelayUnknown(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	ks := &types.KeyStore{Identities: make(map[string]*types.Identity), Contacts: make(map[string]*types.Contact)}
+	_, err := identity.CreateIdentityWithPassword(ks, "alice", "s2b-test-secret")
+	require.NoError(t, err)
+	require.NoError(t, identity.SaveKeyStore(ks))
+
+	firstRelay := startNoEOSERelay(t)
+	secondRelay, secondRequests := startHistoryRelay(t, nil)
+	lines, stdout, _ := runDaemonJSONChildWithRelays(t, home, "flag", []string{firstRelay, secondRelay}, func(line StatusEnvelope) bool {
+		return line.Data.Scan.State == StatusScanScanning && len(line.Data.Scan.Relays) == 2 && line.Data.Scan.Relays[0].State == StatusRelayScanning
+	})
+	scan := findStatus(t, lines, func(line StatusEnvelope) bool { return line.Data.Scan.State == StatusScanCanceled })
+	require.Len(t, scan.Data.Scan.Relays, 2)
+	assert.Equal(t, StatusRelayCanceled, scan.Data.Scan.Relays[0].State)
+	assert.Equal(t, StatusRelayUnknown, scan.Data.Scan.Relays[1].State)
+	assert.Equal(t, int32(0), secondRequests.Load(), "SIGTERM during the first local relay must prevent visiting the second")
+	assert.Equal(t, StatusProcessStopped, lines[len(lines)-1].Data.Process)
+	assert.NotContains(t, stdout, firstRelay)
+	assert.NotContains(t, stdout, secondRelay)
+	assert.NotContains(t, stdout, "s2b-test-secret")
+}
+
+func TestDaemonJSONLocalRelayDisconnectBeforeEOSE(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	messaging.ResetStoreForTest()
+	t.Cleanup(messaging.ResetStoreForTest)
+	ks := &types.KeyStore{Identities: make(map[string]*types.Identity), Contacts: make(map[string]*types.Contact)}
+	myIdentity, err := identity.CreateIdentityWithPassword(ks, "alice", "s2b-test-secret")
+	require.NoError(t, err)
+	require.NoError(t, identity.SaveKeyStore(ks))
+	mySK, err := identity.GetSecretKey(ks, "alice")
+	require.NoError(t, err)
+	compressed, err := messaging.CompressText("disconnect-private-body-marker")
+	require.NoError(t, err)
+	sender := nostr.Generate()
+	event := &nostr.Event{
+		CreatedAt: nostr.Now() - 1,
+		Kind:      messaging.AgentKind,
+		Tags:      nostr.Tags{{"p", common.PubKeyToHex(mySK.Public())}, {"z", messaging.CompressTag}},
+		Content:   compressed,
+		PubKey:    sender.Public(),
+	}
+	require.NoError(t, event.Sign(sender))
+	relayURL := startDisconnectRelay(t, []*nostr.Event{event})
+	lines, stdout, _ := runDaemonJSONChildWithRelays(t, home, "flag", []string{relayURL}, func(line StatusEnvelope) bool {
+		return line.Data.Scan.State == StatusScanIncomplete
+	})
+	scan := findStatus(t, lines, func(line StatusEnvelope) bool { return line.Data.Scan.State == StatusScanIncomplete })
+	require.Len(t, scan.Data.Scan.Relays, 1)
+	assert.Equal(t, StatusRelayIncomplete, scan.Data.Scan.Relays[0].State)
+	assert.Equal(t, StatusErrorQueryFailed, *scan.Data.Scan.Relays[0].Error)
+	assert.Equal(t, 1, scan.Data.Scan.Relays[0].Fetched)
+	assert.Equal(t, 1, scan.Data.Scan.Relays[0].NewMessages)
+	assert.Zero(t, scan.Data.Scan.Relays[0].ProcessingFailures)
+	inbox, err := messaging.GetInbox(nil, myIdentity.Npub, 10)
+	require.NoError(t, err)
+	require.Len(t, inbox, 1, "the event received before the disconnect remains durably stored")
+	assert.NotContains(t, stdout, "disconnect-private-body-marker")
+	assert.NotContains(t, stdout, relayURL)
+	assert.NotContains(t, stdout, "s2b-test-secret")
+}
+
+func TestDaemonJSONCLIBrokenStdoutExitsNonZero(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	ks := &types.KeyStore{Identities: make(map[string]*types.Identity), Contacts: make(map[string]*types.Contact)}
+	_, err := identity.CreateIdentityWithPassword(ks, "alice", "s2b-test-secret")
+	require.NoError(t, err)
+	require.NoError(t, identity.SaveKeyStore(ks))
+	readEnd, writeEnd, err := os.Pipe()
+	require.NoError(t, err)
+	command := exec.Command(daemonLockCLI, "--json", "daemon", "--identity", "alice", "--relay", "ws://127.0.0.1:1/broken-pipe-marker", "--retry-interval", "3600", "--watch-interval", "3600", "--notify=false", "--password-stdin")
+	command.Env = append(withoutDaemonOutputEnv(os.Environ()), "HOME="+home)
+	command.Stdin = strings.NewReader("s2b-test-secret\n")
+	command.Stdout = writeEnd
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	require.NoError(t, command.Start())
+	require.NoError(t, writeEnd.Close())
+	require.NoError(t, readEnd.Close())
+	done := make(chan error, 1)
+	go func() { done <- command.Wait() }()
+	select {
+	case waitErr := <-done:
+		require.Error(t, waitErr, "daemon must exit non-zero when status stdout is broken")
+		var exitErr *exec.ExitError
+		require.ErrorAs(t, waitErr, &exitErr)
+		assert.NotZero(t, exitErr.ExitCode())
+	case <-time.After(8 * time.Second):
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		t.Fatal("daemon kept running after stdout was closed")
+	}
+	assert.NotContains(t, stderr.String(), "s2b-test-secret")
+	assert.NotContains(t, stderr.String(), "private-message-body-marker")
+	assert.NotContains(t, stderr.String(), "broken-pipe-marker")
 }
 
 func findStatus(t *testing.T, lines []StatusEnvelope, match func(StatusEnvelope) bool) StatusEnvelope {
@@ -564,7 +700,8 @@ func TestDaemonJSONKillDoesNotClaimStopped(t *testing.T) {
 	require.NoError(t, identity.SaveKeyStore(ks))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, daemonLockCLI, "--json", "daemon", "--identity", "alice", "--relay", "ws://127.0.0.1:1/private-content-marker", "--retry-interval", "3600", "--watch-interval", "3600", "--notify=false", "--password-stdin")
+	firstRelay := startNoEOSERelay(t)
+	command := exec.CommandContext(ctx, daemonLockCLI, "--json", "daemon", "--identity", "alice", "--relay", firstRelay, "--retry-interval", "3600", "--watch-interval", "3600", "--notify=false", "--password-stdin")
 	command.Env = append(withoutDaemonOutputEnv(os.Environ()), "HOME="+home)
 	command.Stdin = strings.NewReader("s2b-test-secret\n")
 	stdoutPipe, err := command.StdoutPipe()
@@ -583,11 +720,21 @@ func TestDaemonJSONKillDoesNotClaimStopped(t *testing.T) {
 		_, _ = io.Copy(io.Discard, stderrPipe)
 		_ = command.Wait()
 	}()
-	firstLine, err := stdoutReader.ReadString('\n')
-	require.NoError(t, err)
-	var first StatusEnvelope
-	require.NoError(t, json.Unmarshal([]byte(firstLine), &first))
-	assert.Equal(t, StatusProcessStarting, first.Data.Process)
+	var killedLines strings.Builder
+	var firstGeneration string
+	for {
+		line, readErr := stdoutReader.ReadString('\n')
+		require.NoError(t, readErr)
+		killedLines.WriteString(line)
+		var envelope StatusEnvelope
+		require.NoError(t, json.Unmarshal([]byte(line), &envelope), "every stdout line must be a complete status envelope")
+		if firstGeneration == "" {
+			firstGeneration = envelope.Data.Generation
+		}
+		if envelope.Data.Scan.State == StatusScanScanning && len(envelope.Data.Scan.Relays) == 1 && envelope.Data.Scan.Relays[0].State == StatusRelayScanning {
+			break
+		}
+	}
 	require.NoError(t, command.Process.Kill())
 	rest, err := io.ReadAll(stdoutReader)
 	require.NoError(t, err)
@@ -596,8 +743,18 @@ func TestDaemonJSONKillDoesNotClaimStopped(t *testing.T) {
 	waitErr := command.Wait()
 	waited = true
 	require.Error(t, waitErr, "SIGKILL must terminate the producer without a success exit")
-	assert.NotContains(t, firstLine+string(rest), `"process":"stopped"`)
+	killedLines.Write(rest)
+	assert.NotContains(t, killedLines.String(), `"process":"stopped"`)
 	assert.NotContains(t, string(stderr), "stopped")
+
+	secondRelay, _ := startHistoryRelay(t, nil)
+	second, _, _ := runDaemonJSONChildWithRelays(t, home, "flag", []string{secondRelay}, func(line StatusEnvelope) bool {
+		return line.Data.Scan.State == StatusScanIdle && len(line.Data.Scan.Relays) == 1
+	})
+	require.NotEmpty(t, second)
+	assert.NotEqual(t, firstGeneration, second[0].Data.Generation, "a restarted daemon must start a new generation after the killed stream reached EOF")
+	assert.Equal(t, StatusProcessStarting, second[0].Data.Process)
+	assert.Equal(t, StatusProcessStopped, second[len(second)-1].Data.Process)
 }
 
 func lineText(envelope StatusEnvelope) string {
@@ -736,6 +893,40 @@ func withoutDaemonOutputEnv(env []string) []string {
 		result = append(result, item)
 	}
 	return result
+}
+
+func startDisconnectRelay(t *testing.T, events []*nostr.Event) string {
+	t.Helper()
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		if _, request, err := conn.ReadMessage(); err != nil {
+			return
+		} else {
+			var fields []json.RawMessage
+			if json.Unmarshal(request, &fields) != nil || len(fields) < 2 {
+				return
+			}
+			var subID string
+			if json.Unmarshal(fields[1], &subID) != nil {
+				return
+			}
+			for _, event := range events {
+				wire, _ := json.Marshal([]any{"EVENT", subID, event})
+				if conn.WriteMessage(websocket.TextMessage, wire) != nil {
+					return
+				}
+			}
+		}
+		// Close the TCP connection without EOSE or a websocket close frame.
+		_ = conn.UnderlyingConn().Close()
+	}))
+	t.Cleanup(srv.Close)
+	return "ws" + strings.TrimPrefix(srv.URL, "http")
 }
 
 func startNoEOSERelay(t *testing.T) string {
