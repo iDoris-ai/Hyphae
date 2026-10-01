@@ -10,9 +10,9 @@
 
 G2-S2b 已在独立 worktree 提交 `7b29bf6f2f76663fcbddb7bf69bb37d13fba25b7`，生产差异 410 行，测试 760 行：实际 daemon 生命周期、每 relay 扫描结果及 JSON-lines，stdout 仅状态、stderr 诊断，输出失败停止后续任务。已修复并保留多 relay 索引回归、测试数据库隔离和子进程异常回收。Luna 最终正常/race 专项及根代理独立 race 均 exit 0。真实 CLI 的 JSON 模式、未知 relay、generation、SIGTERM 与 kill 专项通过；真实 relay/125 条进程重启用例源码已保留，未在本沙箱运行通过。完整测试唯一尝试因 listener denied exit 1。开发组合仅作依赖基线；S2b 只提自己的小改动，不发布汇总分支。
 
-第一轮同 hash 独立复测仍未通过。用户提供 laptop 的 `~/Dev/auraai/Agent24` 路径在本执行机不存在；实时读取 Hyphae Release 仅 v0.26.0、无二进制 assets；Agent24 Release 是 Agent24 包，不能替代锁定 Hyphae/relay。生产 lock 已读取并固定，不能换成 Go 1.27 构建或改 lock 来制造通过。复测工具缺制品实测 exit 1；单元测试只验工具编排，不验跨仓链路。
+独立 CLI 复测工具已提交 `3acedb216b09348fb649fe475924ce5f4ad0e2f1`，工具 499 行、独立测试 195 行，工作树干净；11 项编排/制品/超时单元测试及根代理无外部环境变量的 fixture 复验通过。生产 lock 夹具固定真实公开文件原始字节，实际集成仍必须显式提供外部 lock。第一轮同 hash 独立复测仍未通过。用户提供 laptop 的 `~/Dev/auraai/Agent24` 路径在本执行机不存在；实时读取 Hyphae Release 仅 v0.26.0、无二进制 assets；Agent24 Release 是 Agent24 包，不能替代锁定 Hyphae/relay。生产 lock 已读取并固定，不能换成 Go 1.27 构建或改 lock 来制造通过。复测工具缺制品实测 exit 1；单元测试只验工具编排，不验跨仓链路。
 
-第二轮协作出口：#622 最新 head 评审及 CI 完成后逐项合并；COMM-3 收发/history/outbox 与 COMM-4a 托管可先各自开发草稿，再分别迁移 main。正式 CLI/REST 驱动托管、补收历史可见、配置重启和异常退出，六类入站 run/model/module 零计数及有效正对照都须提供证据。#601 回复已准备但工具审批层拒绝发布，不能记送达。整体仍为 E-M1/T20，基础 UI、T01-E 和四仓验收未完成。
+第二轮协作出口：#622 最新 head 评审及 CI 完成后逐项合并；COMM-3 收发/history/outbox 与 COMM-4a 托管可先各自开发草稿，再分别迁移 main。正式 CLI/REST 驱动托管、补收历史可见、配置重启和异常退出，六类入站 run/model/module 零计数及有效正对照都须提供证据。#601 回复及用户明确要求的制品 Release/asset URL 评论均已准备并尝试，但工具审批层在执行前拒绝发布，不能记送达。制品要求包含两个可执行文件、生产 lock、SHA256SUMS、固定 tag 与构建配方；Agent24 包不能替代 Hyphae 制品。整体仍为 E-M1/T20，基础 UI、T01-E 和四仓验收未完成。
 
 以下记录固定当时版本，后续状态以上述更新及 GitHub 为准。
 
