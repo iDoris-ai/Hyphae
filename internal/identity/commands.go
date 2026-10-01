@@ -20,6 +20,7 @@ var IdentityCmd = &cli.Command{
 	Description: `Create and manage local identities with secure key storage.
 Identities are stored in ~/.hyphae/ with 600 permissions.`,
 	Commands: []*cli.Command{
+		checkPasswordCommand(),
 		{
 			Name:  "create",
 			Usage: "Create a new identity",
