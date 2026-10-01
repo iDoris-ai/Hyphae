@@ -21,7 +21,23 @@
 
 Hyphae 侧独立复测工具正在新 worktree 实现：读取生产 lock、校验并复制制品、隔离双方 HOME、严格双向和重试断言、超时及异常清理。它不调用 Rust Runner，不替代 Agent24 接线验收；未执行真实 relay 前不记录运行通过。
 
-### 当前代码与交付边界
+### 后续实时更新：#620 合并、#621/#622 与第二轮准备
+
+Agent24 main 已推进到 `65a5c5115482522539496bc5c5cd8cdbec9a2f6e`，对应 [main CI 36821229359](https://github.com/iDoris-ai/Agent24/actions/runs/36821229359) 通过。[#620](https://github.com/iDoris-ai/Agent24/pull/620) 已在 `b00b51d7808df46519931b036514f051e3328467` 合并：文档已删口令夹具原文，拉取前空历史和非法发送错误码已改为严格断言。前节针对 `a9c4bd63` 的这两项发现已解决；缺制品变量仍返回、B 无超时、relay 异常清理及双向范围仍需按最新源码补齐。F1 的 history/daemon 表述仍建议改为本节开头确认的精确定义。
+
+[#621 COMM-1b](https://github.com/iDoris-ai/Agent24/pull/621) head `f6d055ff5e75df00d29d03913430e83f5b172acb` 当前 OPEN，暂无正式 review；七项检查通过。其 [Hyphae lock verify 36815881473](https://github.com/iDoris-ai/Agent24/actions/runs/36815881473) 真实执行锁定源码、Go 配方与 Linux hash 比对并通过。它已补写锁及凭据接口的候选实现，尚未合入；不能继续把“没有 Linux 构建/hash CI”作为当前候选缺口，也不能把它算作已进 main。
+
+[#622 COMM-2a](https://github.com/iDoris-ai/Agent24/pull/622) head `13604363992a97ba82d11d6e20447f3e4f504584` 为 #621 分支上的草稿，已有正式 `agent24 comm identity/contact/relay` 和 REST 接线。旧 main 缺 CLI 的观察继续成立，但候选已提供实现；#621 合入后再 rebase/change base、核对差异及审批。
+
+建议对应仓库现在基于 #622 开发 COMM-4a 草稿，COMM-3 收发路由可并行。合并仍按 621→622→各独立后续 PR；避免把整条依赖链作为一个大 PR。COMM-5b 的 zero-run 依赖 COMM-3 和 COMM-4a，两项必须一起就绪，不能仅托管 daemon 就宣告第二轮通过。当前旧 lock 可用于基础监管实现；新 G2 流和命令必须等 Hyphae 独立改动合入、更新 source/hash 后采用。
+
+COMM-4a 的具体接点：#622 `CommState::ready` 当前共享 runner/password_store/home，监管器应复用同一状态实例；路由构建只发生一次，stop/关机需要在 agent24d 中保留监管句柄。不能为 daemon 生命周期一直持有 keystore 写锁；identity/relay 变化需协调停机/重启，并保留相同通信 HOME。启动前读取配置 relay 和默认身份，禁止默认公共 relay 回落；固定关闭 notify/auto-reply。当前基线只报告 unknown/incomplete；G2 消费端另收口 EOF、generation 与失败状态。#622 `comm_routes.rs` 仍留有过时的路由碰撞说明，但同 PR 已修改 RESERVED_KERNEL_SEGMENTS；建议同步文档，并落实 COMM-0 要求的相对二进制路径拒绝。
+
+第二轮证据：实际 `agent24 comm` / REST 驱动 daemon 启停与配置重启；入站可在 history 读取；断线、进程退出/kill、错误口令与孤儿 PID 复用有明确状态；六类入站的 run/model/module 计数为零，正对照实际增加。125 条与重启零新增继续作为完整 CLI 联调门槛保留。Hyphae 的同 hash 独立复测及 G2 runtime 均未最终验收，不记通过。
+
+已基于这些新事实再次准备并尝试发布 #601 回复；工具仍在执行前拒绝 `MCP tool call requires approval, but approval policy is never`。完整回复已留存于本地交付目录，尚未送达，不能将准备文档记为已完成对仓沟通。原七项及 G2 的代码交付继续推进。
+
+### 固定旧版本代码与交付边界
 
 Hyphae 当前固定 main 为 `a4aa606eb81d5c040d94c51cdf94553e646d8674`。[Agent24 COMM-0 #612](https://github.com/iDoris-ai/Agent24/pull/612) 已合并，采用统一 Rust 通信服务和 `/api/v1/comm/*`，CLI/UI 共用配置与状态；[COMM-1a #614](https://github.com/iDoris-ai/Agent24/pull/614) 已在 `77655f48` 合并，最终双平台 Rust CI 全绿。其 runner 和环境扫描修复已进入 main；CI 尚未构建锁定版本 Hyphae，真实二进制测试仍可跳过，这部分交付仍待补齐。
 

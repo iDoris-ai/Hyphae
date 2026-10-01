@@ -4,6 +4,8 @@
 
 ## 2026-10-01：CLI 联调缺口与当前出口
 
+- 后续实时核对：Agent24 main `65a5c511` CI 通过，#620 `b00b51d7` 已合并，口令文档和两处缺断言已修复。#621 `f6d055ff` 尚无正式 review，但七项检查含真实 Hyphae Linux 锁定构建/hash 验证通过；#622 `13604363` 是叠在 #621 上的正式 CLI/REST 候选草稿。第二轮建议 COMM-4a 和 COMM-3 并行准备，合并仍按前置逐项进行，zero-run 需两项都就绪。详细接口接点与剩余门槛见 [Agent24 更新](../cooperation/Agent24.md)。下面固定旧 head 的评审记录仅代表当时事实。
+
 - Agent24 [#620](https://github.com/iDoris-ai/Agent24/pull/620) `a9c4bd63` 已提供第一轮真实 CLI/relay 结果及 harness。Hyphae 已核对其 F1：history 只读本地库；单次 inbox 或 daemon 补收持久化后才可见新消息。daemon 内部直接 Walk，不启动 inbox 子进程。确认与下一轮建议已写入 [Agent24 协作记录](../cooperation/Agent24.md)；#601 评论发布被工具审批层拒绝，不能记为已沟通送达。第一轮已运行证据与未覆盖的 daemon/REST/UI/125 条/zero-run 明确分开，不把对仓测试报告当 Hyphae 独立复测。
 - 根代理进一步审阅 #620 harness：显式验收缺变量会返回 PASS，relay 在 panic 后没有自动回收，B CLI 无超时，两个发现仅打印不失败，实际只测 A→B。具体位置及补齐要求已写入协作记录。Luna 正在新的独立 worktree 实现 Hyphae 侧生产 lock 双向复测工具；未运行真实制品前不记通过。G2-S2b 初稿的多 relay 完成回调索引遗漏已在评审指出，等待修复及保留回归测试。
 
