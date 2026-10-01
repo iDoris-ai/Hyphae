@@ -152,8 +152,8 @@ func TestDaemonProcessStopsOnSIGTERMWhileRelayIsStalled(t *testing.T) {
 
 	command := exec.Command(os.Args[0], "-test.run=^TestDaemonSignalChild$")
 	command.Stdin = strings.NewReader("daemon-test-password\n")
-	command.Env = append(os.Environ(),
-		"HOME="+home,
+	command.Env = append(daemonLockCLIEnv(os.Environ(), home),
+		daemonLockHelperEnv+"=1",
 		"HYPHAE_DAEMON_SIGNAL_CHILD=1",
 		"HYPHAE_DAEMON_SIGNAL_RELAY="+relayURL,
 	)
@@ -173,6 +173,9 @@ func TestDaemonProcessStopsOnSIGTERMWhileRelayIsStalled(t *testing.T) {
 	select {
 	case err := <-wait:
 		require.NoError(t, err, output.String())
+		lock, lockErr := acquireDaemonHomeLock()
+		require.NoError(t, lockErr, "SIGTERM shutdown must release the daemon home lock")
+		require.NoError(t, lock.Close())
 	case <-time.After(2 * time.Second):
 		_ = command.Process.Kill()
 		<-wait
@@ -184,6 +187,7 @@ func TestDaemonSignalChild(t *testing.T) {
 	if os.Getenv("HYPHAE_DAEMON_SIGNAL_CHILD") != "1" {
 		return
 	}
+	requireSubprocessGoEnv(t)
 	relayURL := os.Getenv("HYPHAE_DAEMON_SIGNAL_RELAY")
 	app := &cli.Command{Name: "hyphae", Commands: []*cli.Command{DaemonCmd}}
 	args := []string{"hyphae", "daemon", "--relay", relayURL, "--retry-interval", "3600", "--watch-interval", "3600", "--notify=false", "--password-stdin"}
