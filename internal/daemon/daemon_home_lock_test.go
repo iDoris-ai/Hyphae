@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"testing"
 	"time"
@@ -201,7 +202,37 @@ func TestDaemonCLIConflictPrecedesPasswordRead(t *testing.T) {
 	cmd.Env = daemonLockCLIEnv(os.Environ(), home)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err = cmd.Run()
+	require.NoError(t, cmd.Start())
+	waited := make(chan error, 1)
+	go func() { waited <- cmd.Wait() }()
+	var processSample, goroutineSample []byte
+	select {
+	case err = <-waited:
+	case <-time.After(2500 * time.Millisecond):
+		if runtime.GOOS == "darwin" {
+			if sample, lookErr := exec.LookPath("sample"); lookErr == nil {
+				sampleCtx, stopSample := context.WithTimeout(ctx, 200*time.Millisecond)
+				goroutineSample, _ = exec.CommandContext(sampleCtx, sample, fmt.Sprint(cmd.Process.Pid), "10", "10").CombinedOutput()
+				stopSample()
+			}
+		}
+		select {
+		case err = <-waited:
+		case <-time.After(250 * time.Millisecond):
+			// Preserve the original three-second deadline, but capture the live
+			// CLI's process state and Go stacks before CommandContext kills it.
+			processSample, _ = exec.Command("ps", "-o", "pid=,ppid=,stat=,etime=,command=", "-p", fmt.Sprint(cmd.Process.Pid)).CombinedOutput()
+			_ = cmd.Process.Signal(syscall.SIGQUIT)
+			select {
+			case err = <-waited:
+			case <-time.After(25 * time.Millisecond):
+				_ = cmd.Process.Kill()
+				err = <-waited
+			}
+			_ = stdin.Close()
+			t.Fatalf("conflict CLI remained live near the three-second deadline; process=%q; sampled stacks=%q; SIGQUIT stderr=%q; wait=%v", processSample, goroutineSample, stderr.String(), err)
+		}
+	}
 	_ = stdin.Close()
 	if ctx.Err() != nil {
 		t.Fatalf("conflicting daemon tried to read password stdin: %v; stdout=%q stderr=%q", ctx.Err(), stdout.String(), stderr.String())

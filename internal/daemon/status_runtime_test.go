@@ -380,8 +380,8 @@ func TestDaemonJSONCLIBrokenStdoutExitsNonZero(t *testing.T) {
 		assert.NotZero(t, exitErr.ExitCode())
 	case <-time.After(8 * time.Second):
 		_ = command.Process.Kill()
-		_ = command.Wait()
-		t.Fatal("daemon kept running after stdout was closed")
+		waitErr := <-done
+		t.Fatalf("daemon kept running after stdout was closed; after kill Wait returned %v", waitErr)
 	}
 	assert.NotContains(t, stderr.String(), "s2b-test-secret")
 	assert.NotContains(t, stderr.String(), "private-message-body-marker")
