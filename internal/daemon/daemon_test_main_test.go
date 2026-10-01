@@ -1,13 +1,16 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 const daemonLockHelperEnv = "HYPHAE_DAEMON_LOCK_HELPER"
@@ -37,9 +40,40 @@ func TestMain(m *testing.M) {
 		_ = os.RemoveAll(buildDir)
 		panic("build CLI: " + err.Error() + ": " + string(output))
 	}
+	if err := preflightDaemonCLIStartup(); err != nil {
+		_ = os.RemoveAll(buildDir)
+		panic(err)
+	}
 	code := m.Run()
 	_ = os.RemoveAll(buildDir)
 	os.Exit(code)
+}
+
+func preflightDaemonCLIStartup() error {
+	home, err := os.MkdirTemp("", "hyphae-daemon-cli-preflight-home-")
+	if err != nil {
+		return fmt.Errorf("create isolated HOME for CLI startup preflight: %w", err)
+	}
+	defer os.RemoveAll(home)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, daemonLockCLI, "--version")
+	cmd.Env = daemonLockCLIEnv(os.Environ(), home)
+	started := time.Now()
+	output, err := cmd.CombinedOutput()
+	elapsed := time.Since(started)
+	if err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("CLI cold-start preflight exceeded 15s after %s: %w; output=%q", elapsed, ctx.Err(), output)
+		}
+		return fmt.Errorf("CLI cold-start preflight failed after %s: %w; output=%q", elapsed, err, output)
+	}
+	if !strings.Contains(string(output), "hyphae version dev") {
+		return fmt.Errorf("CLI cold-start preflight returned unexpected version after %s: %q", elapsed, output)
+	}
+	fmt.Printf("daemon CLI startup preflight passed in %s: %s\n", elapsed, strings.TrimSpace(string(output)))
+	return nil
 }
 
 func resolveSubprocessGoEnv() []string {
