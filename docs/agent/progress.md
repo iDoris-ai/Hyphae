@@ -5,6 +5,7 @@
 ## 2026-10-01：CLI 联调缺口与当前出口
 
 - Agent24 [#620](https://github.com/iDoris-ai/Agent24/pull/620) `a9c4bd63` 已提供第一轮真实 CLI/relay 结果及 harness。Hyphae 已核对其 F1：history 只读本地库；单次 inbox 或 daemon 补收持久化后才可见新消息。daemon 内部直接 Walk，不启动 inbox 子进程。确认与下一轮建议已写入 [Agent24 协作记录](../cooperation/Agent24.md)；#601 评论发布被工具审批层拒绝，不能记为已沟通送达。第一轮已运行证据与未覆盖的 daemon/REST/UI/125 条/zero-run 明确分开，不把对仓测试报告当 Hyphae 独立复测。
+- 根代理进一步审阅 #620 harness：显式验收缺变量会返回 PASS，relay 在 panic 后没有自动回收，B CLI 无超时，两个发现仅打印不失败，实际只测 A→B。具体位置及补齐要求已写入协作记录。Luna 正在新的独立 worktree 实现 Hyphae 侧生产 lock 双向复测工具；未运行真实制品前不记通过。G2-S2b 初稿的多 relay 完成回调索引遗漏已在评审指出，等待修复及保留回归测试。
 
 - 当前 Hyphae main 为 `a4aa606eb81d5c040d94c51cdf94553e646d8674`。#85～#92、#94～#100 已合并；此前固定版本的全量、真实 relay、构建及双平台 CI 证据保留在 [CLI 验收记录](em1-cli-acceptance.md)。Hyphae 单仓 CLI 通过，E-M1 整体未通过。
 - [Hyphae #101](https://github.com/iDoris-ai/Hyphae/pull/101) `b3f9053eb5d117877656c5102d23f91fb8325eb9` 与 [Agent24 #601](https://github.com/iDoris-ai/Agent24/pull/601) `67ddbce30cc7dd713191f63e16f682094e99dee8` 已有匹配 head 的外部批准，实际 CI 全绿。合并调用被本会话工具审批层拒绝；实时复查仍为 OPEN，不能记为已合并。用户合并授权持续有效，无须重新确认。

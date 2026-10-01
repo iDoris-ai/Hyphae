@@ -10,6 +10,17 @@
 
 #620 报告了生产 lock 校验、加密创建、发送、同 event_id 断线重试和错误路径的实际测试；尚未覆盖 daemon/REST/UI、125 条积压、zero-run 和秘密扫描。建议下一轮补充 daemon 补收后 history 可见、重启去重、断线恢复与失败状态、实际 run/model/module 零调用计数。本文是 Hyphae 源码核验，不替代同 hash 的独立真实 relay 复测。针对 #601 的确认评论已准备；评论工具在执行前返回 `MCP tool call requires approval, but approval policy is never`，尚未发布。
 
+### #620 验收工具源码评审
+
+固定 [joint_round1.rs @a9c4bd63](https://github.com/iDoris-ai/Agent24/blob/a9c4bd634504bcaf9491019ab4e5b6a8c680872c/rust/crates/agent24-comm/tests/joint_round1.rs)：本轮实测记录可保留，但用于后续验收前应补齐以下断言与运行保障，由 Agent24 侧落实。
+
+- L207/L214：显式运行 ignored 测试时，缺少任一真实二进制变量会直接 return，测试结果仍为 PASS。应让指定的联合验收调用失败，日常测试可继续用 ignore 排除。
+- L260/L561：relay 启动后，仅正常路径 L495/L759 调用 stop_child。readiness 或后续断言 panic 会跳过清理；应由 RAII guard 在异常退出时 kill 并 wait，CLI 子进程也应受控。
+- L131：B 侧 wait_with_output 无期限；应给 CLI 和管道写入设置有界超时，超时后回收并报告失败。
+- L458/L748：拉取前非空、非法发送错误分类不符只写入 findings，最终仍可通过。冻结后的验收要求应严格断言；报告中的 B encrypted=true、重试 sent=true、正文与 ID 一致也应各有断言。本轮实际脚本只验证 A→B，不能将结果概括为已验证双向发送。
+
+Hyphae 侧独立复测工具正在新 worktree 实现：读取生产 lock、校验并复制制品、隔离双方 HOME、严格双向和重试断言、超时及异常清理。它不调用 Rust Runner，不替代 Agent24 接线验收；未执行真实 relay 前不记录运行通过。
+
 ### 当前代码与交付边界
 
 Hyphae 当前固定 main 为 `a4aa606eb81d5c040d94c51cdf94553e646d8674`。[Agent24 COMM-0 #612](https://github.com/iDoris-ai/Agent24/pull/612) 已合并，采用统一 Rust 通信服务和 `/api/v1/comm/*`，CLI/UI 共用配置与状态；[COMM-1a #614](https://github.com/iDoris-ai/Agent24/pull/614) 已在 `77655f48` 合并，最终双平台 Rust CI 全绿。其 runner 和环境扫描修复已进入 main；CI 尚未构建锁定版本 Hyphae，真实二进制测试仍可跳过，这部分交付仍待补齐。
