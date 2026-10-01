@@ -1,0 +1,1273 @@
+{
+  "metadata": {
+    "format": "hyphae-execution-recovery-fixtures-v1",
+    "base_commit": "a4aa606eb81d5c040d94c51cdf94553e646d8674",
+    "authorization_candidate_source_sha256": "9ac0b52db70ad5e0e156ac8276e8aa7e13025e34cf3349ba6af49f21b9aa47b3",
+    "contract_gates_source_sha256": "f739451f4821d321f465f565b69488c31d5468bb6c6dce3c28f8a28643de227a",
+    "semantics": "test-observation-only",
+    "case_count": 79
+  },
+  "cases": [
+    {
+      "id": "clock_ttl_zero",
+      "kind": "clock",
+      "input": {
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 900
+      },
+      "expected": {
+        "action": "reject",
+        "reason": "invalid_lifecycle"
+      }
+    },
+    {
+      "id": "clock_ttl_one",
+      "kind": "clock",
+      "input": {
+        "now": 900,
+        "issued_at": 900,
+        "expires_at": 901
+      },
+      "expected": {
+        "action": "allow_start",
+        "reason": ""
+      }
+    },
+    {
+      "id": "clock_ttl_86400",
+      "kind": "clock",
+      "input": {
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 87300
+      },
+      "expected": {
+        "action": "allow_start",
+        "reason": ""
+      }
+    },
+    {
+      "id": "clock_ttl_86401",
+      "kind": "clock",
+      "input": {
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 87301
+      },
+      "expected": {
+        "action": "reject",
+        "reason": "invalid_lifecycle"
+      }
+    },
+    {
+      "id": "clock_future_300",
+      "kind": "clock",
+      "input": {
+        "now": 1000,
+        "issued_at": 1300,
+        "expires_at": 1400
+      },
+      "expected": {
+        "action": "allow_start",
+        "reason": ""
+      }
+    },
+    {
+      "id": "clock_future_301",
+      "kind": "clock",
+      "input": {
+        "now": 1000,
+        "issued_at": 1301,
+        "expires_at": 1400
+      },
+      "expected": {
+        "action": "reject",
+        "reason": "future_clock"
+      }
+    },
+    {
+      "id": "clock_exact_expiry",
+      "kind": "clock",
+      "input": {
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1000
+      },
+      "expected": {
+        "action": "deny_expired",
+        "reason": "expired"
+      }
+    },
+    {
+      "id": "clock_before_expiry",
+      "kind": "clock",
+      "input": {
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1001
+      },
+      "expected": {
+        "action": "allow_start",
+        "reason": ""
+      }
+    },
+    {
+      "id": "clock_unsafe_issued",
+      "kind": "clock",
+      "input": {
+        "now": 1000,
+        "issued_at": 9007199254740992,
+        "expires_at": 9007199254741000
+      },
+      "expected": {
+        "action": "reject",
+        "reason": "schema_integer"
+      }
+    },
+    {
+      "id": "clock_unsafe_now",
+      "kind": "clock",
+      "input": {
+        "now": 9007199254740992,
+        "issued_at": 900,
+        "expires_at": 9007199254740993
+      },
+      "expected": {
+        "action": "reject",
+        "reason": "schema_integer"
+      }
+    },
+    {
+      "id": "clock_fractional_now",
+      "kind": "clock",
+      "input": {
+        "now": 1000.5,
+        "issued_at": 900,
+        "expires_at": 1100
+      },
+      "expected": {
+        "action": "reject",
+        "reason": "schema_integer"
+      }
+    },
+    {
+      "id": "clock_exponent_now",
+      "kind": "clock",
+      "input": {
+        "now": 1e3,
+        "issued_at": 900,
+        "expires_at": 1100
+      },
+      "expected": {
+        "action": "reject",
+        "reason": "schema_integer"
+      }
+    },
+    {
+      "id": "preflight_all_gates_pass",
+      "kind": "preflight",
+      "input": {
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "approval_persisted": true,
+        "scope_digest_match": true,
+        "budget_ok": true,
+        "privacy_ok": true,
+        "module_allowed": true,
+        "local_model_available": true
+      },
+      "expected": {
+        "action": "register_run",
+        "state": "run_registered"
+      }
+    },
+    {
+      "id": "preflight_approval_persisted_false",
+      "kind": "preflight",
+      "input": {
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "approval_persisted": false,
+        "scope_digest_match": true,
+        "budget_ok": true,
+        "privacy_ok": true,
+        "module_allowed": true,
+        "local_model_available": true
+      },
+      "expected": {
+        "action": "reject",
+        "state": "ready",
+        "reason": "unauthorized"
+      }
+    },
+    {
+      "id": "preflight_scope_digest_match_false",
+      "kind": "preflight",
+      "input": {
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "approval_persisted": true,
+        "scope_digest_match": false,
+        "budget_ok": true,
+        "privacy_ok": true,
+        "module_allowed": true,
+        "local_model_available": true
+      },
+      "expected": {
+        "action": "reject",
+        "state": "ready",
+        "reason": "scope_or_digest_mismatch"
+      }
+    },
+    {
+      "id": "preflight_budget_ok_false",
+      "kind": "preflight",
+      "input": {
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "approval_persisted": true,
+        "scope_digest_match": true,
+        "budget_ok": false,
+        "privacy_ok": true,
+        "module_allowed": true,
+        "local_model_available": true
+      },
+      "expected": {
+        "action": "reject",
+        "state": "ready",
+        "reason": "budget_rejected"
+      }
+    },
+    {
+      "id": "preflight_privacy_ok_false",
+      "kind": "preflight",
+      "input": {
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "approval_persisted": true,
+        "scope_digest_match": true,
+        "budget_ok": true,
+        "privacy_ok": false,
+        "module_allowed": true,
+        "local_model_available": true
+      },
+      "expected": {
+        "action": "reject",
+        "state": "ready",
+        "reason": "privacy_requirement_unmet"
+      }
+    },
+    {
+      "id": "preflight_module_allowed_false",
+      "kind": "preflight",
+      "input": {
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "approval_persisted": true,
+        "scope_digest_match": true,
+        "budget_ok": true,
+        "privacy_ok": true,
+        "module_allowed": false,
+        "local_model_available": true
+      },
+      "expected": {
+        "action": "reject",
+        "state": "ready",
+        "reason": "module_forbidden"
+      }
+    },
+    {
+      "id": "preflight_local_model_available_false",
+      "kind": "preflight",
+      "input": {
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "approval_persisted": true,
+        "scope_digest_match": true,
+        "budget_ok": true,
+        "privacy_ok": true,
+        "module_allowed": true,
+        "local_model_available": false
+      },
+      "expected": {
+        "action": "reject",
+        "state": "ready",
+        "reason": "local_model_unavailable"
+      }
+    },
+    {
+      "id": "preflight_expires_at_equal_now",
+      "kind": "preflight",
+      "input": {
+        "now": 1100,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "approval_persisted": true,
+        "scope_digest_match": true,
+        "budget_ok": true,
+        "privacy_ok": true,
+        "module_allowed": true,
+        "local_model_available": true
+      },
+      "expected": {
+        "action": "reject",
+        "state": "expired",
+        "reason": "expired"
+      }
+    },
+    {
+      "id": "replay_same_content_serial",
+      "kind": "replay",
+      "input": {
+        "same_author": true,
+        "same_target": true,
+        "same_request_id": true,
+        "same_immutable_content": true,
+        "concurrent": false
+      },
+      "expected": {
+        "action": "reuse_existing",
+        "reason": ""
+      }
+    },
+    {
+      "id": "replay_same_content_concurrent",
+      "kind": "replay",
+      "input": {
+        "same_author": true,
+        "same_target": true,
+        "same_request_id": true,
+        "same_immutable_content": true,
+        "concurrent": true
+      },
+      "expected": {
+        "action": "reuse_existing",
+        "reason": ""
+      }
+    },
+    {
+      "id": "replay_changed_params",
+      "kind": "replay",
+      "input": {
+        "same_author": true,
+        "same_target": true,
+        "same_request_id": true,
+        "same_immutable_content": false,
+        "changed": "params"
+      },
+      "expected": {
+        "action": "reject",
+        "reason": "request_conflict"
+      }
+    },
+    {
+      "id": "replay_changed_budget",
+      "kind": "replay",
+      "input": {
+        "same_author": true,
+        "same_target": true,
+        "same_request_id": true,
+        "same_immutable_content": false,
+        "changed": "budget"
+      },
+      "expected": {
+        "action": "reject",
+        "reason": "request_conflict"
+      }
+    },
+    {
+      "id": "replay_changed_expiry",
+      "kind": "replay",
+      "input": {
+        "same_author": true,
+        "same_target": true,
+        "same_request_id": true,
+        "same_immutable_content": false,
+        "changed": "expiry"
+      },
+      "expected": {
+        "action": "reject",
+        "reason": "request_conflict"
+      }
+    },
+    {
+      "id": "replay_other_request_key",
+      "kind": "replay",
+      "input": {
+        "same_author": true,
+        "same_target": true,
+        "same_request_id": false,
+        "same_immutable_content": false
+      },
+      "expected": {
+        "action": "new_request",
+        "reason": ""
+      }
+    },
+    {
+      "id": "replay_same_id_other_author",
+      "kind": "replay",
+      "input": {
+        "same_author": false,
+        "same_target": true,
+        "same_request_id": true,
+        "same_immutable_content": false
+      },
+      "expected": {
+        "action": "new_request",
+        "reason": ""
+      }
+    },
+    {
+      "id": "replay_same_id_other_target",
+      "kind": "replay",
+      "input": {
+        "same_author": true,
+        "same_target": false,
+        "same_request_id": true,
+        "same_immutable_content": false
+      },
+      "expected": {
+        "action": "new_request",
+        "reason": ""
+      }
+    },
+    {
+      "id": "transition_legal_01_received_to_approval_pending",
+      "kind": "transition",
+      "input": {
+        "from": "received",
+        "to": "approval_pending",
+        "facts": {}
+      },
+      "expected": {
+        "action": "apply_transition",
+        "state": "approval_pending"
+      }
+    },
+    {
+      "id": "transition_legal_02_received_to_ready",
+      "kind": "transition",
+      "input": {
+        "from": "received",
+        "to": "ready",
+        "facts": {
+          "approval_persisted": true,
+          "scope_digest_match": true
+        }
+      },
+      "expected": {
+        "action": "apply_transition",
+        "state": "ready"
+      }
+    },
+    {
+      "id": "transition_legal_03_received_to_rejected",
+      "kind": "transition",
+      "input": {
+        "from": "received",
+        "to": "rejected",
+        "facts": {}
+      },
+      "expected": {
+        "action": "apply_transition",
+        "state": "rejected"
+      }
+    },
+    {
+      "id": "transition_legal_04_received_to_expired",
+      "kind": "transition",
+      "input": {
+        "from": "received",
+        "to": "expired",
+        "facts": {
+          "now": 1100,
+          "expires_at": 1100
+        }
+      },
+      "expected": {
+        "action": "apply_transition",
+        "state": "expired"
+      }
+    },
+    {
+      "id": "transition_legal_05_approval_pending_to_ready",
+      "kind": "transition",
+      "input": {
+        "from": "approval_pending",
+        "to": "ready",
+        "facts": {
+          "approval_persisted": true,
+          "scope_digest_match": true
+        }
+      },
+      "expected": {
+        "action": "apply_transition",
+        "state": "ready"
+      }
+    },
+    {
+      "id": "transition_legal_06_approval_pending_to_rejected",
+      "kind": "transition",
+      "input": {
+        "from": "approval_pending",
+        "to": "rejected",
+        "facts": {}
+      },
+      "expected": {
+        "action": "apply_transition",
+        "state": "rejected"
+      }
+    },
+    {
+      "id": "transition_legal_07_approval_pending_to_expired",
+      "kind": "transition",
+      "input": {
+        "from": "approval_pending",
+        "to": "expired",
+        "facts": {
+          "now": 1100,
+          "expires_at": 1100
+        }
+      },
+      "expected": {
+        "action": "apply_transition",
+        "state": "expired"
+      }
+    },
+    {
+      "id": "transition_legal_08_ready_to_run_registered",
+      "kind": "transition",
+      "input": {
+        "from": "ready",
+        "to": "run_registered",
+        "facts": {
+          "now": 1000,
+          "issued_at": 900,
+          "expires_at": 1100,
+          "approval_persisted": true,
+          "scope_digest_match": true,
+          "budget_ok": true,
+          "privacy_ok": true,
+          "module_allowed": true,
+          "local_model_available": true
+        }
+      },
+      "expected": {
+        "action": "apply_transition",
+        "state": "run_registered"
+      }
+    },
+    {
+      "id": "transition_legal_09_ready_to_rejected",
+      "kind": "transition",
+      "input": {
+        "from": "ready",
+        "to": "rejected",
+        "facts": {}
+      },
+      "expected": {
+        "action": "apply_transition",
+        "state": "rejected"
+      }
+    },
+    {
+      "id": "transition_legal_10_ready_to_expired",
+      "kind": "transition",
+      "input": {
+        "from": "ready",
+        "to": "expired",
+        "facts": {
+          "now": 1100,
+          "expires_at": 1100
+        }
+      },
+      "expected": {
+        "action": "apply_transition",
+        "state": "expired"
+      }
+    },
+    {
+      "id": "transition_legal_11_run_registered_to_running",
+      "kind": "transition",
+      "input": {
+        "from": "run_registered",
+        "to": "running",
+        "facts": {
+          "start_call": "confirmed_started"
+        }
+      },
+      "expected": {
+        "action": "apply_transition",
+        "state": "running"
+      }
+    },
+    {
+      "id": "transition_legal_12_run_registered_to_failed",
+      "kind": "transition",
+      "input": {
+        "from": "run_registered",
+        "to": "failed",
+        "facts": {
+          "executor_outcome": "explicit_failure",
+          "same_run": true,
+          "result_saved": true
+        }
+      },
+      "expected": {
+        "action": "apply_transition",
+        "state": "failed"
+      }
+    },
+    {
+      "id": "transition_legal_13_run_registered_to_expired",
+      "kind": "transition",
+      "input": {
+        "from": "run_registered",
+        "to": "expired",
+        "facts": {
+          "start_call": "confirmed_not_sent_no_start",
+          "now": 1100,
+          "expires_at": 1100
+        }
+      },
+      "expected": {
+        "action": "apply_transition",
+        "state": "expired"
+      }
+    },
+    {
+      "id": "transition_legal_14_run_registered_to_unknown",
+      "kind": "transition",
+      "input": {
+        "from": "run_registered",
+        "to": "unknown",
+        "facts": {
+          "start_call": "uncertain"
+        }
+      },
+      "expected": {
+        "action": "apply_transition",
+        "state": "unknown"
+      }
+    },
+    {
+      "id": "transition_legal_15_running_to_succeeded",
+      "kind": "transition",
+      "input": {
+        "from": "running",
+        "to": "succeeded",
+        "facts": {
+          "executor_outcome": "explicit_success",
+          "same_run": true,
+          "result_saved": true
+        }
+      },
+      "expected": {
+        "action": "apply_transition",
+        "state": "succeeded"
+      }
+    },
+    {
+      "id": "transition_legal_16_running_to_failed",
+      "kind": "transition",
+      "input": {
+        "from": "running",
+        "to": "failed",
+        "facts": {
+          "executor_outcome": "explicit_failure",
+          "same_run": true,
+          "result_saved": true
+        }
+      },
+      "expected": {
+        "action": "apply_transition",
+        "state": "failed"
+      }
+    },
+    {
+      "id": "transition_legal_17_running_to_unknown",
+      "kind": "transition",
+      "input": {
+        "from": "running",
+        "to": "unknown",
+        "facts": {
+          "executor_outcome": "uncertain"
+        }
+      },
+      "expected": {
+        "action": "apply_transition",
+        "state": "unknown"
+      }
+    },
+    {
+      "id": "transition_legal_18_unknown_to_running",
+      "kind": "transition",
+      "input": {
+        "from": "unknown",
+        "to": "running",
+        "facts": {
+          "same_run": true,
+          "same_run_confirmed_started": true
+        }
+      },
+      "expected": {
+        "action": "apply_transition",
+        "state": "running"
+      }
+    },
+    {
+      "id": "transition_legal_19_unknown_to_succeeded",
+      "kind": "transition",
+      "input": {
+        "from": "unknown",
+        "to": "succeeded",
+        "facts": {
+          "same_run": true,
+          "executor_outcome": "explicit_success",
+          "result_saved": true
+        }
+      },
+      "expected": {
+        "action": "apply_transition",
+        "state": "succeeded"
+      }
+    },
+    {
+      "id": "transition_legal_20_unknown_to_failed",
+      "kind": "transition",
+      "input": {
+        "from": "unknown",
+        "to": "failed",
+        "facts": {
+          "same_run": true,
+          "executor_outcome": "explicit_failure",
+          "result_saved": true
+        }
+      },
+      "expected": {
+        "action": "apply_transition",
+        "state": "failed"
+      }
+    },
+    {
+      "id": "transition_ready_without_approval",
+      "kind": "transition",
+      "input": {
+        "from": "received",
+        "to": "ready",
+        "facts": {
+          "scope_digest_match": true
+        }
+      },
+      "expected": {
+        "action": "retain_state",
+        "state": "received",
+        "reason": "transition_or_fact_not_allowed"
+      }
+    },
+    {
+      "id": "transition_ready_scope_mismatch",
+      "kind": "transition",
+      "input": {
+        "from": "approval_pending",
+        "to": "ready",
+        "facts": {
+          "approval_persisted": true,
+          "scope_digest_match": false
+        }
+      },
+      "expected": {
+        "action": "retain_state",
+        "state": "approval_pending",
+        "reason": "transition_or_fact_not_allowed"
+      }
+    },
+    {
+      "id": "transition_register_budget_false",
+      "kind": "transition",
+      "input": {
+        "from": "ready",
+        "to": "run_registered",
+        "facts": {
+          "now": 1000,
+          "issued_at": 900,
+          "expires_at": 1100,
+          "approval_persisted": true,
+          "scope_digest_match": true,
+          "budget_ok": false,
+          "privacy_ok": true,
+          "module_allowed": true,
+          "local_model_available": true
+        }
+      },
+      "expected": {
+        "action": "retain_state",
+        "state": "ready",
+        "reason": "transition_or_fact_not_allowed"
+      }
+    },
+    {
+      "id": "transition_registered_timeout_uncertain",
+      "kind": "transition",
+      "input": {
+        "from": "run_registered",
+        "to": "expired",
+        "facts": {
+          "start_call": "uncertain",
+          "now": 1200,
+          "expires_at": 1100
+        }
+      },
+      "expected": {
+        "action": "retain_state",
+        "state": "run_registered",
+        "reason": "transition_or_fact_not_allowed"
+      }
+    },
+    {
+      "id": "transition_registered_timeout_not_failure",
+      "kind": "transition",
+      "input": {
+        "from": "run_registered",
+        "to": "failed",
+        "facts": {
+          "executor_outcome": "timeout"
+        }
+      },
+      "expected": {
+        "action": "retain_state",
+        "state": "run_registered",
+        "reason": "transition_or_fact_not_allowed"
+      }
+    },
+    {
+      "id": "transition_unknown_run_not_found",
+      "kind": "transition",
+      "input": {
+        "from": "unknown",
+        "to": "running",
+        "facts": {
+          "same_run_confirmed_started": false,
+          "run_lookup": "not_found"
+        }
+      },
+      "expected": {
+        "action": "retain_state",
+        "state": "unknown",
+        "reason": "transition_or_fact_not_allowed"
+      }
+    },
+    {
+      "id": "transition_unknown_other_run_success",
+      "kind": "transition",
+      "input": {
+        "from": "unknown",
+        "to": "succeeded",
+        "facts": {
+          "executor_outcome": "explicit_success",
+          "same_run": false,
+          "result_saved": true
+        }
+      },
+      "expected": {
+        "action": "retain_state",
+        "state": "unknown",
+        "reason": "transition_or_fact_not_allowed"
+      }
+    },
+    {
+      "id": "transition_running_result_not_saved",
+      "kind": "transition",
+      "input": {
+        "from": "running",
+        "to": "succeeded",
+        "facts": {
+          "executor_outcome": "explicit_success",
+          "result_saved": false
+        }
+      },
+      "expected": {
+        "action": "retain_state",
+        "state": "running",
+        "reason": "transition_or_fact_not_allowed"
+      }
+    },
+    {
+      "id": "transition_unknown_result_not_saved",
+      "kind": "transition",
+      "input": {
+        "from": "unknown",
+        "to": "failed",
+        "facts": {
+          "executor_outcome": "explicit_failure",
+          "same_run": true,
+          "result_saved": false
+        }
+      },
+      "expected": {
+        "action": "retain_state",
+        "state": "unknown",
+        "reason": "transition_or_fact_not_allowed"
+      }
+    },
+    {
+      "id": "transition_unknown_other_run_failure",
+      "kind": "transition",
+      "input": {
+        "from": "unknown",
+        "to": "failed",
+        "facts": {
+          "executor_outcome": "explicit_failure",
+          "same_run": false,
+          "result_saved": true
+        }
+      },
+      "expected": {
+        "action": "retain_state",
+        "state": "unknown",
+        "reason": "transition_or_fact_not_allowed"
+      }
+    },
+    {
+      "id": "transition_running_other_run_success",
+      "kind": "transition",
+      "input": {
+        "from": "running",
+        "to": "succeeded",
+        "facts": {
+          "executor_outcome": "explicit_success",
+          "same_run": false,
+          "result_saved": true
+        }
+      },
+      "expected": {
+        "action": "retain_state",
+        "state": "running",
+        "reason": "transition_or_fact_not_allowed"
+      }
+    },
+    {
+      "id": "transition_running_other_run_failure",
+      "kind": "transition",
+      "input": {
+        "from": "running",
+        "to": "failed",
+        "facts": {
+          "executor_outcome": "explicit_failure",
+          "same_run": false,
+          "result_saved": true
+        }
+      },
+      "expected": {
+        "action": "retain_state",
+        "state": "running",
+        "reason": "transition_or_fact_not_allowed"
+      }
+    },
+    {
+      "id": "transition_succeeded_is_terminal",
+      "kind": "transition",
+      "input": {
+        "from": "succeeded",
+        "to": "running",
+        "facts": {}
+      },
+      "expected": {
+        "action": "retain_state",
+        "state": "succeeded",
+        "reason": "transition_or_fact_not_allowed"
+      }
+    },
+    {
+      "id": "transition_failed_is_terminal",
+      "kind": "transition",
+      "input": {
+        "from": "failed",
+        "to": "unknown",
+        "facts": {}
+      },
+      "expected": {
+        "action": "retain_state",
+        "state": "failed",
+        "reason": "transition_or_fact_not_allowed"
+      }
+    },
+    {
+      "id": "transition_rejected_is_terminal",
+      "kind": "transition",
+      "input": {
+        "from": "rejected",
+        "to": "ready",
+        "facts": {}
+      },
+      "expected": {
+        "action": "retain_state",
+        "state": "rejected",
+        "reason": "transition_or_fact_not_allowed"
+      }
+    },
+    {
+      "id": "transition_expired_is_terminal",
+      "kind": "transition",
+      "input": {
+        "from": "expired",
+        "to": "rejected",
+        "facts": {}
+      },
+      "expected": {
+        "action": "retain_state",
+        "state": "expired",
+        "reason": "transition_or_fact_not_allowed"
+      }
+    },
+    {
+      "id": "transition_unknown_cannot_register_new_run",
+      "kind": "transition",
+      "input": {
+        "from": "unknown",
+        "to": "run_registered",
+        "facts": {}
+      },
+      "expected": {
+        "action": "retain_state",
+        "state": "unknown",
+        "reason": "transition_or_fact_not_allowed"
+      }
+    },
+    {
+      "id": "transition_invalid_state_name",
+      "kind": "transition",
+      "input": {
+        "from": "mystery",
+        "to": "ready",
+        "facts": {}
+      },
+      "expected": {
+        "action": "retain_state",
+        "state": "mystery",
+        "reason": "transition_or_fact_not_allowed"
+      }
+    },
+    {
+      "id": "recovery_before_call_known_unexpired",
+      "kind": "recovery",
+      "input": {
+        "state": "run_registered",
+        "start_call": "confirmed_not_sent_no_start",
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "same_run_id_present": true,
+        "approval_persisted": true,
+        "scope_digest_match": true,
+        "budget_ok": true,
+        "privacy_ok": true,
+        "module_allowed": true,
+        "local_model_available": true
+      },
+      "expected": {
+        "action": "start_existing_run",
+        "state": "run_registered",
+        "reason": ""
+      }
+    },
+    {
+      "id": "recovery_before_call_missing_budget",
+      "kind": "recovery",
+      "input": {
+        "state": "run_registered",
+        "start_call": "confirmed_not_sent_no_start",
+        "now": 1000,
+        "issued_at": 900,
+        "expires_at": 1100,
+        "same_run_id_present": true,
+        "approval_persisted": true,
+        "scope_digest_match": true,
+        "privacy_ok": true,
+        "module_allowed": true,
+        "local_model_available": true
+      },
+      "expected": {
+        "action": "hold_for_recheck",
+        "state": "run_registered",
+        "reason": "preflight_incomplete"
+      }
+    },
+    {
+      "id": "recovery_before_call_expired",
+      "kind": "recovery",
+      "input": {
+        "state": "run_registered",
+        "start_call": "confirmed_not_sent_no_start",
+        "now": 1100,
+        "expires_at": 1100,
+        "same_run_id_present": true
+      },
+      "expected": {
+        "action": "expire",
+        "state": "expired",
+        "reason": ""
+      }
+    },
+    {
+      "id": "recovery_after_call_uncertain",
+      "kind": "recovery",
+      "input": {
+        "state": "run_registered",
+        "start_call": "uncertain",
+        "same_run_id_present": true
+      },
+      "expected": {
+        "action": "query_same_run",
+        "state": "unknown",
+        "reason": ""
+      }
+    },
+    {
+      "id": "recovery_confirm_running",
+      "kind": "recovery",
+      "input": {
+        "state": "unknown",
+        "executor_observation": "same_run_running",
+        "same_run_id_present": true,
+        "same_run": true
+      },
+      "expected": {
+        "action": "query_same_run",
+        "state": "running",
+        "reason": ""
+      }
+    },
+    {
+      "id": "recovery_explicit_success",
+      "kind": "recovery",
+      "input": {
+        "state": "unknown",
+        "executor_observation": "same_run_succeeded",
+        "same_run_id_present": true,
+        "same_run": true,
+        "result_saved": true
+      },
+      "expected": {
+        "action": "query_same_run",
+        "state": "succeeded",
+        "reason": ""
+      }
+    },
+    {
+      "id": "recovery_not_found_keeps_unknown",
+      "kind": "recovery",
+      "input": {
+        "state": "unknown",
+        "executor_observation": "not_found",
+        "same_run_id_present": true,
+        "same_run": true
+      },
+      "expected": {
+        "action": "query_same_run",
+        "state": "unknown",
+        "reason": ""
+      }
+    },
+    {
+      "id": "recovery_result_transaction_failed",
+      "kind": "recovery",
+      "input": {
+        "state": "running",
+        "executor_observation": "same_run_succeeded",
+        "result_transaction": "failed",
+        "same_run_id_present": true
+      },
+      "expected": {
+        "action": "query_same_run",
+        "state": "running",
+        "reason": "no_completion_receipt"
+      }
+    },
+    {
+      "id": "recovery_saved_result_receipt_retry_after_expiry",
+      "kind": "recovery",
+      "input": {
+        "state": "succeeded",
+        "result_saved": true,
+        "receipt_pending": true,
+        "request_expired": true
+      },
+      "expected": {
+        "action": "resend_receipt",
+        "state": "succeeded",
+        "reason": ""
+      }
+    },
+    {
+      "id": "recovery_executor_terminal_local_txn_failed",
+      "kind": "recovery",
+      "input": {
+        "state": "unknown",
+        "executor_observation": "same_run_failed",
+        "same_run_id_present": true,
+        "same_run": true,
+        "result_saved": false
+      },
+      "expected": {
+        "action": "query_same_run",
+        "state": "unknown",
+        "reason": "result_not_saved_no_completion_receipt"
+      }
+    },
+    {
+      "id": "recovery_other_run_observation_ignored",
+      "kind": "recovery",
+      "input": {
+        "state": "unknown",
+        "executor_observation": "same_run_succeeded",
+        "same_run_id_present": true,
+        "same_run": false
+      },
+      "expected": {
+        "action": "query_same_run",
+        "state": "unknown",
+        "reason": "observation_mismatch"
+      }
+    },
+    {
+      "id": "recovery_saved_result_no_pending_receipt",
+      "kind": "recovery",
+      "input": {
+        "state": "succeeded",
+        "result_saved": true,
+        "receipt_pending": false,
+        "request_expired": true
+      },
+      "expected": {
+        "action": "no_action",
+        "state": "succeeded",
+        "reason": ""
+      }
+    },
+    {
+      "id": "recovery_failed_saved_result_receipt_retry",
+      "kind": "recovery",
+      "input": {
+        "state": "failed",
+        "result_saved": true,
+        "receipt_pending": true,
+        "request_expired": true
+      },
+      "expected": {
+        "action": "resend_receipt",
+        "state": "failed",
+        "reason": ""
+      }
+    }
+  ]
+}
