@@ -10,8 +10,12 @@
 - Agent24 [COMM-1a #614](https://github.com/iDoris-ai/Agent24/pull/614) 已在最终 head `77655f48444e45e3ee0ec37e160bccccfbe8b8b2` 合并，双平台 Rust CI 通过。其测试扫描已排除 Cargo 的 `tests/` 目录，保留生产变量正对照；此前失败已解决。Agent24 当前 main 的 [CI 36812871955](https://github.com/iDoris-ai/Agent24/actions/runs/36812871955) 也通过。真实二进制测试仍在未设置 `HYPHAE_TEST_BIN` 时跳过，CI 尚未按锁构建 Hyphae；COMM-1a 的全部验收出口不能仅凭合并记通过。
 - 反馈核验已完成，Agent24 文档勘误本地提交为 `9bfb0df6e01cd5492ea3022c4c2852d22360d172`，尚未发布；待 #601 合并后另提文档 PR。11 项 CLI 差异和后续独立任务见 [CLI 联调缺口](em1-comm-followups.md)。
 - G7 会话历史 JSON、G8 keystore 完整并发写保护、G9 文件正文输入均已在独立 checkout/worktree 本地提交。G7 head `2a8de30083d1312f1f891d0647fcaf459237d977`，G9 head `3472f935cd319e6a028b1d364d63fa3691f937f4`，G8 head `087832c50c83e549ec3991cbeeb47f0d1bbe61cc`；两项专项真实 CLI 测试通过，G9 的 Linux amd64 测试交叉编译通过。G8 已在旧版复现两个陈旧快照写入丢私钥，新版对应回归及 identity/types、identity race 通过；评审发现的口令校验绕过已修复并有回归断言。三项尚未发布，不能记为已进入 main。
-- G7/G8/G9 的本地组合 `16d28d543a28fd905772496638faa3a5f5c8d39a` 已通过会话 JSON、文件正文加密入队和 CLI 错误信封专项；生产代码无冲突，文档插入冲突已保留两段。组合仅用于验收，不创建汇总 PR。daemon 互斥 `7ea7ad8f` 的真实 CLI 和 race 通过，特殊锁路径修订已提交为 `6765d1d9632afd41f4e98393ce1c8e561b7f3da9` 并通过有界进程、race 与 Linux 编译；只读口令检查、存储信息 JSON 和联系人输入分类已按独立任务派发。新分支创建被本会话工具审批层拒绝，独立 commits、补丁、bundle 与测试证据保留待发布。
+- G7/G8/G9 的本地组合 `16d28d543a28fd905772496638faa3a5f5c8d39a` 已通过会话 JSON、文件正文加密入队和 CLI 错误信封专项；生产代码无冲突，文档插入冲突已保留两段。组合仅用于验收，不创建汇总 PR。daemon 互斥 `7ea7ad8f` 的真实 CLI 和 race 通过，特殊锁路径修订已提交为 `6765d1d9632afd41f4e98393ce1c8e561b7f3da9` 并通过有界进程、race 与 Linux 编译；只读口令检查 `7fa3e7bcd93d081be6e1b0645fbcbb9168f1c271`、存储信息 JSON `7dadc7a980309facd714b7563a522600dc862da3`、联系人输入分类 `574f049b7d8761583f41193d8287c3a30afd0d3e` 已本地提交并通过各自专项/race。密码校验测试初稿曾失败，修正后的独立正常测试 exit 0 与 race exit 0 已核对；旧失败日志保留。七项本地组合最终为 `ef99b130116b79e2a0b9ada988995562bbc530b9`；完整 identity、messaging/CLI/daemon 专项、identity race 与构建 exit 0。组合不提汇总 PR。一项额外 daemon/identity 交互 race 的临时源码未保留，虽有 exit 0 日志，不能作为可复现验收；已派 Luna 补永久回归源码。新分支创建被本会话工具审批层拒绝，独立 commits、补丁、bundle 与测试证据保留待发布。
 - 主仓仍停在原 checkout，用户文件保留。测试使用临时 HOME；原指定 Go 缓存写入受当前沙箱限制，使用临时缓存复验并记录偏离。新改动的全量 `go test ./...` 已运行，多个既有 httptest 因 `bind: operation not permitted` 失败；这不能记为完整回归通过，需发布后的真实 CI 验证。
+
+新增生产改动分别为 G7 69、G8 407、G9 73、daemon 锁 97、G1 159、G7b 151、G6 3 行；各项独立分支，测试与纯文档不计，没有汇总大 PR。其专项证据不能替代未完成的完整 CI 和 relay 联调。
+
+补收状态设计已对照 Agent24 已合并 COMM-0 G2 改为 `daemon --json` 的 JSON-lines；stdout 仅完整状态信封，诊断留在 stderr。状态编码 S1 已派 Luna 在独立分支实现，S2 接入在 S1 本地验收及生命周期锁基础上推进。快照区分当前扫描成功、失败与取消，不声明完全同步或送达。
 
 阶段：T20 仍为 IN_PROGRESS；T21/T22 基础 UI 未验收；T01-E 未通过，T07 生产实现不启动。下一步是逐项验收上述小改动，发布后更新双方源码/hash 锁，完成 Agent24 实际 CLI 与真实 relay 的联合测试，再推进基础 UI。模型隐私预算、模块权限恢复和真实语音链路均仍待四仓交付与验收。
 

@@ -16,6 +16,9 @@
 | G6：联系人输入错误 | 当前 main | 独立小 PR；非法 key 返回 1，真实存储失败保留 4；新锁采用时 Agent24 更新旧断言 |
 | daemon HOME 互斥 | 当前 main | 独立小 PR；同 HOME 冲突、退出释放、特殊路径无阻塞 |
 | 只读口令检查 | 当前 main | 独立小 PR；验证 legacy/current 不迁移，所有结果保持磁盘内容及元数据 |
+| G2-S1：JSON-lines 状态模型 | 当前 main | 独立小 PR；闭集统计、多行信封及短写失败，尚不启用 daemon |
+| G2-S2：daemon 状态流接入 | G2-S1、daemon HOME 互斥 | 独立小 PR；stdout 无人工文字，真实 relay/取消与输出失败；每条记录不作为永久同步证明 |
+| 组合并发回归 | G8、G1、daemon HOME 互斥 | 独立测试提交；保留源码、真实 CLI 并发及 race；待生产前置合入后整理到 main |
 | 第一轮 Agent24 CLI 联调 | #614 已合并；仍需真实制品/hash CI 及后续路由/凭据交付 | 记录双方源码、构建配方/hash、实际入口及 zero-run 证据 |
 
 上述 CLI 改动独立实现，生产改动分别审核，不汇总合并。详见 [接线任务契约](em1-comm-followups.md)。定时扫描按用户要求停用，本轮不创建新计时器。
