@@ -74,16 +74,16 @@ func TestDaemonCLIConflictColdStartupInitTrace(t *testing.T) {
 	}()
 	var first initLineResult
 	firstTraceReceived := false
-	var processSample, processStacks []byte
+	var versionProcessSample, versionProcessStacks []byte
 	select {
 	case first = <-firstTraceCh:
 		firstTraceReceived = true
 	case <-time.After(2500 * time.Millisecond):
-		processSample, _ = exec.Command("ps", "-o", "pid=,ppid=,stat=,etime=,command=", "-p", fmt.Sprint(versionCommand.Process.Pid)).CombinedOutput()
+		versionProcessSample, _ = exec.Command("ps", "-o", "pid=,ppid=,stat=,etime=,command=", "-p", fmt.Sprint(versionCommand.Process.Pid)).CombinedOutput()
 		if runtime.GOOS == "darwin" {
 			if sample, lookErr := exec.LookPath("sample"); lookErr == nil {
 				sampleCtx, stopSample := context.WithTimeout(versionCtx, 200*time.Millisecond)
-				processStacks, _ = exec.CommandContext(sampleCtx, sample, fmt.Sprint(versionCommand.Process.Pid), "0.15", "10").CombinedOutput()
+				versionProcessStacks, _ = exec.CommandContext(sampleCtx, sample, fmt.Sprint(versionCommand.Process.Pid), "0.15", "10").CombinedOutput()
 				stopSample()
 			}
 		}
@@ -124,7 +124,7 @@ func TestDaemonCLIConflictColdStartupInitTrace(t *testing.T) {
 	if firstTraceReceived {
 		firstTraceElapsed = first.elapsed.String()
 	}
-	t.Logf("cold --version binary=%s sha256=%s build=%s@%s go=%s spawn-to-first-inittrace=%s exit=%s err=%v process=%q sample=%q", daemonLockCLI, hex.EncodeToString(hash.Sum(nil)), build.Main.Path, build.Main.Version, build.GoVersion, firstTraceElapsed, versionElapsed, versionErr, processSample, processStacks)
+	t.Logf("cold --version binary=%s sha256=%s build=%s@%s go=%s spawn-to-first-inittrace=%s exit=%s err=%v process=%q sample=%q", daemonLockCLI, hex.EncodeToString(hash.Sum(nil)), build.Main.Path, build.Main.Version, build.GoVersion, firstTraceElapsed, versionElapsed, versionErr, versionProcessSample, versionProcessStacks)
 	t.Logf("cold --version inittrace=%q stdout=%q", versionTrace.String(), versionOut.String())
 	if !firstTraceReceived || first.err != nil || !strings.HasPrefix(strings.TrimSpace(first.line), "init ") {
 		t.Skipf("cold --version did not emit an inittrace line before exit; lock-phase comparison skipped; read=%v", first.err)
@@ -156,16 +156,16 @@ func TestDaemonCLIConflictColdStartupInitTrace(t *testing.T) {
 	require.NoError(t, conflictCommand.Start())
 	waited := make(chan error, 1)
 	go func() { waited <- conflictCommand.Wait() }()
-	var processSample, processStacks []byte
+	var conflictProcessSample, conflictProcessStacks []byte
 	var conflictErr error
 	select {
 	case conflictErr = <-waited:
 	case <-time.After(2500 * time.Millisecond):
-		processSample, _ = exec.Command("ps", "-o", "pid=,ppid=,stat=,etime=,command=", "-p", fmt.Sprint(conflictCommand.Process.Pid)).CombinedOutput()
+		conflictProcessSample, _ = exec.Command("ps", "-o", "pid=,ppid=,stat=,etime=,command=", "-p", fmt.Sprint(conflictCommand.Process.Pid)).CombinedOutput()
 		if runtime.GOOS == "darwin" {
 			if sample, lookErr := exec.LookPath("sample"); lookErr == nil {
 				sampleCtx, stopSample := context.WithTimeout(conflictCtx, 200*time.Millisecond)
-				processStacks, _ = exec.CommandContext(sampleCtx, sample, fmt.Sprint(conflictCommand.Process.Pid), "0.15", "10").CombinedOutput()
+				conflictProcessStacks, _ = exec.CommandContext(sampleCtx, sample, fmt.Sprint(conflictCommand.Process.Pid), "0.15", "10").CombinedOutput()
 				stopSample()
 			}
 		}
@@ -179,7 +179,7 @@ func TestDaemonCLIConflictColdStartupInitTrace(t *testing.T) {
 				_ = conflictCommand.Process.Kill()
 				conflictErr = <-waited
 			}
-			t.Fatalf("locked conflict CLI remained live near its three-second bound; process=%q stacks=%q inittrace/stderr=%q wait=%v", processSample, processStacks, stderr.String(), conflictErr)
+			t.Fatalf("locked conflict CLI remained live near its three-second bound; process=%q stacks=%q inittrace/stderr=%q wait=%v", conflictProcessSample, conflictProcessStacks, stderr.String(), conflictErr)
 		}
 	}
 	conflictElapsed := time.Since(conflictStarted)
