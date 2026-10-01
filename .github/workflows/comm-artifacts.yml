@@ -1,0 +1,237 @@
+name: Communication artifact build and runtime checks
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/comm-artifacts.yml
+      - scripts/artifact_ci.py
+      - scripts/test_artifact_ci.py
+      - scripts/build_release_artifacts.py
+      - scripts/test_build_release_artifacts.py
+      - scripts/verify_artifact_bundle.py
+      - scripts/test_verify_artifact_bundle.py
+      - scripts/test_comm_round1.py
+      - scripts/test_comm_round1_test.py
+      - scripts/fixtures/comm-round1/**
+      - docs/agent/artifact-bundle-verifier.md
+      - docs/agent/comm-artifact-ci.md
+      - docs/agent/reproducible-artifact-bundles.md
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/comm-artifacts.yml
+      - scripts/artifact_ci.py
+      - scripts/test_artifact_ci.py
+      - scripts/build_release_artifacts.py
+      - scripts/test_build_release_artifacts.py
+      - scripts/verify_artifact_bundle.py
+      - scripts/test_verify_artifact_bundle.py
+      - scripts/test_comm_round1.py
+      - scripts/test_comm_round1_test.py
+      - scripts/fixtures/comm-round1/**
+      - docs/agent/artifact-bundle-verifier.md
+      - docs/agent/comm-artifact-ci.md
+      - docs/agent/reproducible-artifact-bundles.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-bundle:
+    name: Build and verify locked bundle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: tools
+    outputs:
+      linux_relay_sha256: ${{ steps.bundle.outputs.linux_relay_sha256 }}
+      darwin_relay_sha256: ${{ steps.bundle.outputs.darwin_relay_sha256 }}
+    steps:
+      - name: Checkout workflow tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: tools
+          persist-credentials: false
+          submodules: false
+
+      - name: Checkout fixed Hyphae source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: iDoris-ai/Hyphae
+          ref: a4aa606eb81d5c040d94c51cdf94553e646d8674
+          path: hyphae-source
+          persist-credentials: false
+          submodules: false
+
+      - name: Checkout pinned Agent24 production lock
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: iDoris-ai/Agent24
+          ref: 65a5c5115482522539496bc5c5cd8cdbec9a2f6e
+          path: agent24-lock
+          sparse-checkout: rust/crates/agent24-comm/hyphae.lock.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+          submodules: false
+
+      - name: Set up Go 1.26.4
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: 1.26.4
+          check-latest: false
+          cache: false
+
+      - name: Verify production lock and run tool tests
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          HYPHAE_COMM_ROUND1_TEST_LOCK: ${{ github.workspace }}/agent24-lock/rust/crates/agent24-comm/hyphae.lock.json
+        run: |
+          set -euo pipefail
+          python3 scripts/artifact_ci.py check-lock --path "$HYPHAE_COMM_ROUND1_TEST_LOCK"
+          python3 -m unittest -v \
+            scripts.test_build_release_artifacts \
+            scripts.test_artifact_ci \
+            scripts.test_verify_artifact_bundle \
+            scripts.test_comm_round1_test
+
+      - name: Build both locked targets and verify the bundle
+        id: bundle
+        env:
+          SOURCE_DIR: ${{ github.workspace }}/hyphae-source
+          LOCK_PATH: ${{ github.workspace }}/agent24-lock/rust/crates/agent24-comm/hyphae.lock.json
+          BUNDLE_DIR: ${{ runner.temp }}/hyphae-bundle
+          RELEASE_TAG: ci-${{ github.run_id }}-${{ github.run_attempt }}
+          SOURCE_SHA: a4aa606eb81d5c040d94c51cdf94553e646d8674
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          set -euo pipefail
+          python3 scripts/build_release_artifacts.py \
+            --source-dir "$SOURCE_DIR" \
+            --source-sha "$SOURCE_SHA" \
+            --output "$BUNDLE_DIR" \
+            --release-tag "$RELEASE_TAG"
+          python3 scripts/artifact_ci.py check-lock --path "$LOCK_PATH"
+          python3 scripts/verify_artifact_bundle.py \
+            --bundle-dir "$BUNDLE_DIR" \
+            --production-lock "$LOCK_PATH" \
+            --platform all > "$RUNNER_TEMP/bundle-verification.json"
+          linux_sha="$(python3 scripts/artifact_ci.py relay-sha \
+            --verification-json "$RUNNER_TEMP/bundle-verification.json" \
+            --platform linux-x64)"
+          darwin_sha="$(python3 scripts/artifact_ci.py relay-sha \
+            --verification-json "$RUNNER_TEMP/bundle-verification.json" \
+            --platform darwin-arm64)"
+          echo "linux_relay_sha256=$linux_sha" >> "$GITHUB_OUTPUT"
+          echo "darwin_relay_sha256=$darwin_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Upload this run's verified bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hyphae-bundle-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/hyphae-bundle/
+          if-no-files-found: error
+          retention-days: 7
+
+  run-round-one:
+    name: Run locked bundle on ${{ matrix.platform }}
+    needs: build-bundle
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux-x64
+          - runner: macos-15
+            platform: darwin-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: tools
+    env:
+      PLATFORM: ${{ matrix.platform }}
+      LINUX_RELAY_SHA256: ${{ needs.build-bundle.outputs.linux_relay_sha256 }}
+      DARWIN_RELAY_SHA256: ${{ needs.build-bundle.outputs.darwin_relay_sha256 }}
+      EXPECTED_RECIPE: GOTOOLCHAIN=go1.26.4 CGO_ENABLED=0 GOOS=<os> GOARCH=<arch> go build -trimpath -buildvcs=false -ldflags='-buildid=' -o hyphae ./cmd/hyphae
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Checkout workflow tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: tools
+          persist-credentials: false
+          submodules: false
+
+      - name: Checkout pinned Agent24 production lock
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: iDoris-ai/Agent24
+          ref: 65a5c5115482522539496bc5c5cd8cdbec9a2f6e
+          path: agent24-lock
+          sparse-checkout: rust/crates/agent24-comm/hyphae.lock.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+          submodules: false
+
+      - name: Download this run's verified bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: hyphae-bundle-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/hyphae-download
+          digest-mismatch: error
+
+      - name: Verify downloaded bundle and select build relay hash
+        id: verified
+        env:
+          LOCK_PATH: ${{ github.workspace }}/agent24-lock/rust/crates/agent24-comm/hyphae.lock.json
+          BUNDLE_DIR: ${{ runner.temp }}/hyphae-download
+          VERIFIED_DIR: ${{ runner.temp }}/hyphae-verified
+        run: |
+          set -euo pipefail
+          python3 scripts/artifact_ci.py check-lock --path "$LOCK_PATH"
+          python3 scripts/artifact_ci.py prepare-download --bundle-dir "$BUNDLE_DIR"
+          python3 scripts/verify_artifact_bundle.py \
+            --bundle-dir "$BUNDLE_DIR" \
+            --production-lock "$LOCK_PATH" \
+            --platform "$PLATFORM" \
+            --extract-dir "$VERIFIED_DIR" > "$RUNNER_TEMP/runtime-verification.json"
+          downloaded_sha="$(python3 scripts/artifact_ci.py relay-sha \
+            --verification-json "$RUNNER_TEMP/runtime-verification.json" \
+            --platform "$PLATFORM")"
+          if [[ "$PLATFORM" == "linux-x64" ]]; then
+            build_sha="$LINUX_RELAY_SHA256"
+          else
+            build_sha="$DARWIN_RELAY_SHA256"
+          fi
+          test -n "$build_sha"
+          test "$downloaded_sha" = "$build_sha"
+          echo "relay_sha256=$build_sha" >> "$GITHUB_OUTPUT"
+          echo "verified_dir=$VERIFIED_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Run strict round-one relay integration
+        env:
+          LOCK_PATH: ${{ github.workspace }}/agent24-lock/rust/crates/agent24-comm/hyphae.lock.json
+          VERIFIED_DIR: ${{ steps.verified.outputs.verified_dir }}
+          RELAY_SHA256: ${{ steps.verified.outputs.relay_sha256 }}
+        run: |
+          set -euo pipefail
+          python3 scripts/test_comm_round1.py \
+            --cli "$VERIFIED_DIR/hyphae" \
+            --relay "$VERIFIED_DIR/hyphae-relay" \
+            --lock "$LOCK_PATH" \
+            --expected-recipe "$EXPECTED_RECIPE" \
+            --expected-relay-sha256 "$RELAY_SHA256" \
+            --timeout 30 \
+            --readiness-timeout 10 2>&1 | tee "$RUNNER_TEMP/comm-round1.log"
+
+      - name: Save public round-one log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: comm-round1-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.platform }}
+          path: ${{ runner.temp }}/comm-round1.log
+          if-no-files-found: ignore
+          retention-days: 7
