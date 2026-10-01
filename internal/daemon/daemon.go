@@ -301,18 +301,39 @@ func watchInbox(
 	useNotify bool,
 	autoReply bool,
 ) (int, error) {
+	count, _, err := watchInboxWithResults(ctx, myIdentity, ks, seen, relays, useNotify, autoReply, relayquery.Walk)
+	return count, err
+}
+
+// watchInboxWithResults retains one result per configured relay, including
+// unvisited relays when cancellation stops the scan early. A consumer can use
+// RelayIndex and Visited to keep those relays unknown rather than imply success.
+func watchInboxWithResults(
+	ctx context.Context,
+	myIdentity *types.Identity,
+	ks *types.KeyStore,
+	seen *seenSet,
+	relays []string,
+	useNotify bool,
+	autoReply bool,
+	walk relayWalkFunc,
+) (int, []relayScanResult, error) {
+	results := make([]relayScanResult, len(relays))
+	for index := range results {
+		results[index].RelayIndex = index
+	}
 	if ctx.Err() != nil {
-		return 0, ctx.Err()
+		return 0, results, ctx.Err()
 	}
 	recipientPK, err := identity.GetPublicKey(ks, myIdentity.Nickname)
 	if err != nil {
 		fmt.Printf("[%s] ⚠️  Failed to get public key: %v\n", time.Now().Format("15:04:05"), err)
-		return 0, fmt.Errorf("get recipient public key: %w", err)
+		return 0, results, fmt.Errorf("get recipient public key: %w", err)
 	}
 	recipientSK, err := identity.GetSecretKey(ks, myIdentity.Nickname)
 	if err != nil {
 		fmt.Printf("[%s] ⚠️  Failed to get secret key: %v\n", time.Now().Format("15:04:05"), err)
-		return 0, fmt.Errorf("get recipient secret key: %w", err)
+		return 0, results, fmt.Errorf("get recipient secret key: %w", err)
 	}
 
 	filter := nostr.Filter{
@@ -323,12 +344,15 @@ func watchInbox(
 	newCount := 0
 	var scanErrors []error
 
-	for _, url := range relays {
+	for index, url := range relays {
 		if ctx.Err() != nil {
-			return newCount, errors.Join(append(scanErrors, ctx.Err())...)
+			return newCount, results, errors.Join(append(scanErrors, ctx.Err())...)
 		}
-		count, err := watchOneRelay(ctx, url, filter, ks, recipientSK, seen, useNotify, autoReply, myIdentity, relays)
-		newCount += count
+		result, err := watchOneRelayResult(ctx, url, filter, ks, recipientSK, seen, useNotify, autoReply, myIdentity, relays, walk)
+		result.RelayIndex = index
+		result.Visited = true
+		results[index] = result
+		newCount += result.NewMessages
 		if err != nil {
 			scanErrors = append(scanErrors, fmt.Errorf("relay %s: %w", url, err))
 			if ctx.Err() != nil {
@@ -338,12 +362,12 @@ func watchInbox(
 	}
 
 	if len(scanErrors) > 0 {
-		return newCount, errors.Join(scanErrors...)
+		return newCount, results, errors.Join(scanErrors...)
 	}
 	if newCount == 0 {
 		fmt.Printf("[%s] Watching... (no new messages)\r", time.Now().Format("15:04:05"))
 	}
-	return newCount, nil
+	return newCount, results, nil
 }
 
 // watchOneRelay scans available history from a single relay and returns the
@@ -360,8 +384,25 @@ func watchOneRelay(
 	myIdentity *types.Identity,
 	relays []string,
 ) (int, error) {
+	result, err := watchOneRelayResult(ctx, url, filter, ks, recipientSK, seen, useNotify, autoReply, myIdentity, relays, relayquery.Walk)
+	return result.NewMessages, err
+}
+
+func watchOneRelayResult(
+	ctx context.Context,
+	url string,
+	filter nostr.Filter,
+	ks *types.KeyStore,
+	recipientSK nostr.SecretKey,
+	seen *seenSet,
+	useNotify bool,
+	autoReply bool,
+	myIdentity *types.Identity,
+	relays []string,
+	walk relayWalkFunc,
+) (relayScanResult, error) {
 	var replies sync.WaitGroup
-	processed, err := watchOneRelayWithHooks(ctx, url, filter, ks, recipientSK, seen, useNotify, autoReply, myIdentity, relays, incomingReceiveHooks{
+	result, err := watchOneRelayWithHooksResult(ctx, url, filter, ks, recipientSK, seen, useNotify, autoReply, myIdentity, relays, incomingReceiveHooks{
 		store: messaging.StoreIncomingMessageOnce,
 		notify: func(title, message string) {
 			notify.DesktopNotification(title, message)
@@ -374,9 +415,9 @@ func watchOneRelay(
 				sendAutoReply(ctx, myIdentity, ks, senderNpub, content, relays)
 			}()
 		},
-	})
+	}, walk)
 	replies.Wait()
-	return processed, err
+	return result, err
 }
 
 type incomingReceiveHooks struct {
@@ -398,11 +439,45 @@ func watchOneRelayWithHooks(
 	relays []string,
 	hooks incomingReceiveHooks,
 ) (int, error) {
+	result, err := watchOneRelayWithHooksResult(ctx, url, filter, ks, recipientSK, seen, useNotify, autoReply, myIdentity, relays, hooks, relayquery.Walk)
+	return result.NewMessages, err
+}
+
+// relayScanResult preserves the query work and incoming-event outcomes from a
+// single relay scan. QueryFailed is scoped to the Walk call: a Walk deadline
+// with a live parent is a query failure, while Canceled means the caller's
+// context was canceled. Neither flag implies that the relay history is complete.
+type relayScanResult struct {
+	RelayIndex         int
+	Visited            bool
+	Stats              relayquery.Stats
+	NewMessages        int
+	ProcessingFailures int
+	QueryFailed        bool
+	Canceled           bool
+}
+
+type relayWalkFunc func(context.Context, string, nostr.Filter, func(nostr.Event) error) (relayquery.Stats, error)
+
+func watchOneRelayWithHooksResult(
+	ctx context.Context,
+	url string,
+	filter nostr.Filter,
+	ks *types.KeyStore,
+	recipientSK nostr.SecretKey,
+	seen *seenSet,
+	useNotify bool,
+	autoReply bool,
+	myIdentity *types.Identity,
+	relays []string,
+	hooks incomingReceiveHooks,
+	walk relayWalkFunc,
+) (relayScanResult, error) {
 	newCount := 0
 	errorCount := 0
 	errorSamples := make([]string, 0, 5)
 	filter.Limit = 0 // Walk owns pagination limits and bounds.
-	_, queryErr := relayquery.Walk(ctx, url, filter, func(evt nostr.Event) error {
+	stats, queryErr := walk(ctx, url, filter, func(evt nostr.Event) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -425,7 +500,11 @@ func watchOneRelayWithHooks(
 	if errorCount > 0 {
 		receiveErr = fmt.Errorf("%d incoming event(s) failed processing (samples: %s)", errorCount, strings.Join(errorSamples, ", "))
 	}
-	return newCount, errors.Join(queryErr, receiveErr)
+	return relayScanResult{
+		Stats: stats, NewMessages: newCount, ProcessingFailures: errorCount,
+		QueryFailed: queryErr != nil && ctx.Err() == nil,
+		Canceled:    ctx.Err() != nil,
+	}, errors.Join(queryErr, receiveErr)
 }
 
 func incomingErrorKind(err error) string {
