@@ -3,9 +3,9 @@ package storage
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/iDoris-ai/hyphae/internal/audit"
+	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/urfave/cli/v3"
 )
 
@@ -19,60 +19,27 @@ var StorageCmd = &cli.Command{
 			Name:  "info",
 			Usage: "Show storage information",
 			Action: func(ctx context.Context, c *cli.Command) error {
-				dbPath, err := GetDBPath()
-				if err != nil {
-					return fmt.Errorf("failed to get database path: %w", err)
-				}
-
-				// Check if database exists
-				info, err := os.Stat(dbPath)
-				if err != nil {
-					if os.IsNotExist(err) {
-						fmt.Println("📭 Database not created yet")
-						fmt.Printf("   Path: %s\n", dbPath)
-						return nil
-					}
-					return fmt.Errorf("failed to stat database: %w", err)
-				}
-
-				fmt.Println("💾 Storage Information")
-				fmt.Println("======================")
-				fmt.Printf("Database: %s\n", dbPath)
-				fmt.Printf("Size:     %d bytes (%.2f KB)\n", info.Size(), float64(info.Size())/1024)
-				fmt.Printf("Mode:     %s\n", info.Mode())
-
-				// Initialize to get stats (open a separate connection)
-				db, err := InitDB()
-				if err != nil {
-					return fmt.Errorf("failed to open database: %w", err)
-				}
-				defer db.Close()
-
-				// Get message count
-				var count int
-				err = db.QueryRow("SELECT COUNT(*) FROM messages").Scan(&count)
-				if err != nil {
-					return fmt.Errorf("failed to count messages: %w", err)
-				}
-
-				fmt.Printf("Messages: %d\n", count)
-
-				// Get table info
-				fmt.Println("\n📊 Tables:")
-				rows, err := db.Query("SELECT name FROM sqlite_master WHERE type='table'")
+				info, err := inspectStorageInfo(ctx)
 				if err != nil {
 					return err
 				}
-				defer rows.Close()
-
-				for rows.Next() {
-					var name string
-					if err := rows.Scan(&name); err != nil {
-						continue
+				common.Emit(common.JSONMode(c), info, func() {
+					if !info.Exists {
+						fmt.Println("📭 Database not created yet")
+						fmt.Printf("   Path: %s\n", info.Path)
+						return
 					}
-					fmt.Printf("   - %s\n", name)
-				}
-
+					fmt.Println("💾 Storage Information")
+					fmt.Println("======================")
+					fmt.Printf("Database: %s\n", info.Path)
+					fmt.Printf("Size:     %d bytes (%.2f KB)\n", info.SizeBytes, float64(info.SizeBytes)/1024)
+					fmt.Printf("Mode:     %s\n", info.Mode)
+					fmt.Printf("Messages: %d\n", info.MessageCount)
+					fmt.Println("\n📊 Tables:")
+					for _, name := range info.Tables {
+						fmt.Printf("   - %s\n", name)
+					}
+				})
 				return nil
 			},
 		},
