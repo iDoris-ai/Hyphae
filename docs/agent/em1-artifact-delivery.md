@@ -1,6 +1,6 @@
 # E-M1 固定制品交付与独立联调
 
-2026-10-01。状态：R1 实现中；R2/R3 待前置验收。关联 [FU-1](followups.md)、[T20](ecosystem-tasks.md) 与 [Agent24 协作](../cooperation/Agent24.md)。这项交付补齐可下载的 CLI/relay，不修改 E-M1 的执行协议或四仓验收出口。
+2026-10-01。状态：R1 本地工具验收通过，真实构建未通过；R2 已派独立开发，R3 待前置验收。关联 [FU-1](followups.md)、[T20](ecosystem-tasks.md) 与 [Agent24 协作](../cooperation/Agent24.md)。这项交付补齐可下载的 CLI/relay，不修改 E-M1 的执行协议或四仓验收出口。
 
 ## 固定版本
 

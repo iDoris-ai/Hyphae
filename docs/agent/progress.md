@@ -6,6 +6,8 @@
 
 ### 本轮收尾：托管状态流与依赖推进
 
+07:17 UTC：FU-1/R1 已在独立 worktree 提交 `5fe391edae239aa99849b77afdb861d5d6622a77`，343 生产行、332 测试行；工作树干净。Luna 7 项黑盒及根代理最终提交、隔离 HOME 的独立 7 项均 exit 0。真实全脚本在干净 a4 checkout 上因本机 Go 1.27.1 被固定 1.26.4 门禁拒绝，exit 1；未切换/下载工具链，也未生成真实二进制。R1 仅通过本地工具源码/编排验收，未发布、未通过真实 CI。根代理已派同一 Luna 新独立 R2：真实固定 Go 构建、下载/安全解包/生产 lock 校验、Linux/macOS arm64 第一轮运行；前置开发基线只作组合，不发布汇总 PR。FU-1、T20 和 E-M1 仍未完成。
+
 最新实时更新（2026-10-01 06:58 UTC）：Agent24 [#622](https://github.com/iDoris-ai/Agent24/pull/622) 已在 `48c866ace755f2ae92464f3e12e59c9ea9c77a73` 获最新 head 的外部 APPROVED 后合并；旧 `c660319a` 的 REQUEST_CHANGES 不是最终结论。Agent24 main 为 `f1dbe1efe01766a31e4cff3768c7375c5ab0f2ae`，[CI 36826098337](https://github.com/iDoris-ai/Agent24/actions/runs/36826098337) 通过；正式 CLI/REST 的身份、联系人、relay 接线已进入 main，真实联合验收仍未完成。Hyphae main `a4aa606` 的 CI `36738033201` 通过。
 
 Goal 已恢复为 `active`，未设置 token 预算；此前 usageLimited 只作为历史状态保留。根代理可以在既有 CI/依赖条件满足时 merge 外部批准的最新 head；禁止批准任何 PR 或提交 GitHub PR review，所有 PR review 由外部完成。
