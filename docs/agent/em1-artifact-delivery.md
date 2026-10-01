@@ -1,6 +1,6 @@
 # E-M1 固定制品交付与独立联调
 
-11:40 UTC 更新：执行权限已解除，原 lock 的真实 macOS arm64 CLI/relay 第一轮独立复测 exit 0，原始日志见 [progress](progress.md)。构建工具 R1 已发布 [#102](https://github.com/iDoris-ai/Hyphae/pull/102) 26bfe6ab；独立 runner/R2a/R2b 正逐项整理，尚未完成真实 Actions 和下载验收，R3 不提前发布。下列 09:01/09:10 段落保留历史证据。
+14:03 UTC 当前状态：R1 #102、R2a #106 与 runner #105 已合入 #113 最终 main `57494422d17051dc5440d2dbed9411df8acd5536`；main CI `36871057418` SUCCESS。R2b [#119](https://github.com/iDoris-ai/Hyphae/pull/119) head `0114d622b3ae6b09c1247a8b0eef5bb46b8921a4` 仍 OPEN，artifact run [`36873124352`](https://github.com/iDoris-ai/Hyphae/actions/runs/36873124352) 的生产 lock、39 项工具测试、Linux/macOS 原生构建及制品执行均 SUCCESS。R2b 匹配 PR 会自动触发真实两平台构建、传输和执行。普通 PR CI `36873124154` 仍待最终核对。R3 未开始，没有发布 Release。固定第一轮 artifacts 与原失败证据保留。下方“当前边界与后续”中的审批层拒绝及尚未发 PR 状态是早期历史快照，不是当前情况；保留作历史记录。
 
 2026-10-01 09:01 UTC。状态：R1/R2a/R2b 本地工具/编排验收通过；固定 Go 1.26.4 两平台真实制品已构建并经根代理生产 lock/归档/编译信息校验，本机加密身份 smoke 通过。真实下载、Actions、Linux 实机及 relay 联调未验收；R3 待真实前置验收。关联 [FU-1](followups.md)、[T20](ecosystem-tasks.md) 与 [Agent24 协作](../cooperation/Agent24.md)。这项交付补齐可下载的 CLI/relay，不修改 E-M1 的执行协议或四仓验收出口。
 
@@ -74,8 +74,8 @@ R2 通过后才发布固定 tag 的 Release。发布前核对 tag 指向完整�
 
 FU-1 的安装验收还需覆盖 install.sh 已识别的 darwin/linux × amd64/arm64 全部平台，提供缺失的归档，真实执行下载安装与 smoke，并检查 Release latest 的选择。当前第一轮两个平台只解除联调制品缺口，不能直接关闭 FU-1。若要改安装器的校验或 sudo 行为，另外提独立小 PR。
 
-## 当前边界与后续
+## 历史边界快照（早期）
 
-本会话尚未发布新分支、PR 或 Release；相关 GitHub 写操作被工具执行审批层拒绝。制品请求评论正文已保存，尚未送达。恢复可用的发布路径后按 R1→R2→R3 分别审查和交付，不创建汇总 PR。
+以下文字记录本地首次整理时的状态；其中“尚未发布 PR”及工具审批受阻已过时，不代表当前状态。R1/R2a/runner 已合入，R2b #119 正等待真实 Actions 双平台 job 完成；R3 仍须等待这些前置验收。
 
 第一轮复测通过后再推进 Agent24 COMM-3 与 COMM-4a 的第二轮托管、history 可见、故障恢复及 zero-run 验收。基础 UI、T01-E、模型/模块/语音和四仓闭环继续按原门槛验收。

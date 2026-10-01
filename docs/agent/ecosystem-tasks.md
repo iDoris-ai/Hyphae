@@ -2,7 +2,7 @@
 
 更新：2026-10-01。范围依据 [生态里程碑草案](ecosystem-roadmap.md)。保留历史 M1～M5 编号；本表用 E-M 编号关联旧任务，不覆盖旧台账。
 
-13:52 UTC：Hyphae main 已推进到 `57494422d17051dc5440d2dbed9411df8acd5536`（#105–#117 独立 PR 全部合入）；新 main CI 尚未核实。#114/#115、#105/#106 前置已满足，S2b runtime 与 R2b 制品 workflow 分别开发、验收和发 PR，不组合成汇总提交。候选组合 `b88a219` 的本机/race/CLI relay 结果不替代最终 main runtime 或生产实现验收。T20 仍 IN_PROGRESS；T01-E、生产 T07 与 T19 四仓验收未完成。固定第一轮 artifacts 和 tracked acceptance report 保留；旧 `/tmp` worktree/诊断日志当前不可读，不推测原因，新的 G2 日志位置见 [进展](progress.md)。
+14:03 UTC：Hyphae #105–#117 已合入最终 main `57494422d17051dc5440d2dbed9411df8acd5536`，main CI `36871057418` SUCCESS。#118 runtime `94532e77` 本机 full/race/9 个真实 relay case 通过、四项 CI SUCCESS、待 review；#119 R2b `0114d622` 独立 PR 的 Actions artifact run `36873124352` 双平台锁定制品构建、传输与执行均 SUCCESS；普通 PR CI 仍待最终核对。T20 仍 IN_PROGRESS；T01-E、生产 T07、T19 四仓验收未通过。固定第一轮制品及 tracked report 保留；旧 `/tmp` 原始诊断日志没有恢复。handoff 与下一步顺序见 [接手记录](handoff-20261001.md)。
 
 12:25 UTC：T10/T11 按 iDoris `ffed37a107a2e152963caea845450c9515d12044` 与 Agent24 `f5a76c015a7026c64fc872f47c6c160485cfed37` 的只读源码审阅修订，完整边界和固定源码链接见 [iDoris 协作记录](../cooperation/iDoris.md)。服务端 ledger/usage/tenant 身份与 capabilities 合同先行，再做 Agent24 专用 adapter；不假定双 endpoint 已存在。本轮不是服务或构建验收，T01-E/T07 门槛不变。
 
