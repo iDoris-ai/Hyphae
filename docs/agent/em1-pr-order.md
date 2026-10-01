@@ -1,6 +1,6 @@
 # E-M1 PR 依赖与合并顺序
 
-14:03 UTC：#105–#117 已依序独立合入，最终 main `57494422d17051dc5440d2dbed9411df8acd5536`，main CI `36871057418` SUCCESS。#118 runtime `94532e77` 四项 CI SUCCESS、待 review；#119 R2b `0114d622` OPEN，真实 Actions artifact run `36873124352` 的 Linux 与 macOS 锁定制品构建、传输后执行均 SUCCESS；普通 PR CI `36873124154` 待最终核对。二者保持独立，不汇总。#102/#105/#106 的 R1/R2a/runner 前置现均已合入；#119 匹配 PR 已自动触发并完成双平台制品构建、传输与执行。R3 未开始、无 Release。候选 `b88a219` 及 #118 本机测试不能替代 Actions artifact 结果或 E-M1 验收。Agent24 当前队列与缺失旧 `/tmp` 原始日志见 [progress](progress.md)；T20/T01-E/T07/T19 门槛不变。
+14:23 UTC：Hyphae #105–#117 已合入 final main `57494422d17051dc5440d2dbed9411df8acd5536`，main CI `36871057418` SUCCESS。#118 head `94532e77`、#119 head `3a837d1a` 均 OPEN、REVIEW_REQUIRED（无 reviews），两者最新 CI 已全绿；#118 的本机 full/race/9 个真实 relay case也通过。#119 旧head普通CI `36873124154` Ubuntu `TestDaemonParentCancellationReleasesHomeLock` 3.01s timeout/ci-ok FAIL，macOS成功；旧artifact run `36873124352` 三job成功。测试主动轮询争锁竞态已修正；新head普通CI `36875227363` 和artifact run `36875227369` 均SUCCESS。失败/修复证据见handoff。R3未开始、无Release；E-M1与T01-E/T07/T19未完成。
 
 12:33 UTC：#104 `aaa6d0f` / CI `36861579126` 与 #115 `2fa6f0b` / CI `36861616162` 完整 SUCCESS；#103 CI 成功，#102/#105/#106 Python discovery 两平台 16/20/23 项通过，#111–#114 CI 绿待外审。S2b 三个 FAIL 中两项是新增断言错误（分页应 3 页；stderr 可含诊断/明文）且已校正；ConflictPrecedesPasswordRead 完整套件重复超时、focused 通过但根因未知，generic helper 后全量/race 复验继续。细节见 [progress](progress.md)。
 
