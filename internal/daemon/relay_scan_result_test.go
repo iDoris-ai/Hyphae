@@ -58,6 +58,7 @@ func TestWatchOneRelayWithHooksResultPreservesPartialWork(t *testing.T) {
 }
 
 func TestWatchOneRelayWithHooksResultCountsOnlyDurableFirstWrites(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	ks := &types.KeyStore{Identities: make(map[string]*types.Identity), Contacts: make(map[string]*types.Contact)}
 	myIdentity, err := identity.CreateIdentity(ks, "alice")
 	require.NoError(t, err)
@@ -128,6 +129,13 @@ func TestWatchOneRelayWithHooksResultSeparatesWalkDeadlineFromParentCancellation
 	assert.False(t, result.QueryFailed)
 	assert.True(t, result.Canceled)
 	assert.Equal(t, 2, result.Stats.Fetched)
+}
+
+func TestWatchOneRelayWithHooksResultRejectsNilWalk(t *testing.T) {
+	result, err := watchOneRelayWithHooksResult(context.Background(), "wss://relay.invalid", nostr.Filter{}, nil, nostr.SecretKey{}, newSeenSet(), false, false, nil, nil, incomingReceiveHooks{}, nil)
+	require.EqualError(t, err, "relay history walk is required")
+	assert.False(t, result.Visited)
+	assert.False(t, result.QueryFailed, "an invalid hook is not a relay query result")
 }
 
 func TestWatchInboxWithResultsLeavesUnvisitedRelayUnknown(t *testing.T) {
