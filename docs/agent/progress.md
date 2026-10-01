@@ -6,6 +6,8 @@
 
 12:25 UTC：iDoris T01-D 接口审阅更新见 [iDoris 协作记录](../cooperation/iDoris.md)；只读固定 iDoris `ffed37a` / Agent24 `f5a76c01`，未运行服务/编译/付费 provider。确认 iDoris Rust router 已有 SQLite ledger 模块但正式入口未启用；Agent24 默认 provider 尚未接线。T10/T11 先服务端合同、后专用 adapter；T01-E/T07 门槛不变。
 
+12:46 UTC：#102、#103、#104 最新 head 分别获外部 APPROVED 和四项检查绿，根代理核对独立差异后正常 squash merge：#102 `3be99fd`（12:42:25Z，CI `36863563740` SUCCESS）、#103 `5f179d6`（12:43:56Z）、#104 `b1ddf97e3dce74de3eaf19784c174543b7b5831c`（12:44:33Z）。当前 Hyphae main `b1ddf97` 的 CI `36863806313` 已完整 SUCCESS（macOS、Ubuntu、ci-ok）。三个已合并 PR 的旧 worktree/本地分支已删除；确认远端同名分支已自动删除；原 main checkout 与 untracked `AGENTS.md`、`tmux.sh` 保留。独立 #113 head `3e9baf3` 的 CI `36862751523` SUCCESS，待外审。S2b 新候选 `c55ffcd` full/race 44.182s 通过，真实 relay 配置、125 条补收/重启及 SIGTERM/SIGKILL、断线、broken pipe 已运行；仍有 `TestDaemonCLIConflictPrecedesPasswordRead` 完整套件重复 3 秒超时三次，focused 单项通过但根因未证实（psS+SIGQUIT 未取到 Go 栈）。标准分页页数与 stderr 正文禁令两项新增断言已纠正；这不能证明生产 acceptance，也不能记作 timeout 根因修复。原始日志均保留。#103 非阻塞 O_NOFOLLOW/path 防护建议另交 CLI Luna 做独立小 PR，不改已合并 head。S2b 生产提交仍等 #114/#115 合入；R2b 仍等 #105/#106 合入，不做汇总 PR。E-M1 未完成。
+
 12:04 UTC 补充：Agent24 自有文档 [#634](https://github.com/iDoris-ai/Agent24/pull/634) 已获 `clestons` 对 `c7bcf702` 的外部 APPROVE，六项检查通过；根代理重新核对 main base 与唯一文件 +17/-3 的实际差异后按 head SHA 正常 squash merge。合并为 `f5a76c015a7026c64fc872f47c6c160485cfed37`，该新 main 的 [CI 36859330529](https://github.com/iDoris-ai/Agent24/actions/runs/36859330529) 正在运行。已清理自有干净 worktree/本地分支，远端分支确认自动删除。Hyphae G7 [#111](https://github.com/iDoris-ai/Hyphae/pull/111) `74c47319`、G9 [#112](https://github.com/iDoris-ai/Hyphae/pull/112) `c53a09f0` 也已独立发布。另核对发现 #102/#105/#106 原 ci.yml 尚未执行各自 Python 工具单测，已派 Luna 给三个 PR 加同一自动发现步骤；原 CI 的 Go/integration 通过不作为这些 Python 工具的双平台验收。
 
 ## 2026-10-01 11:58 UTC：独立交付进入评审，CI 缺陷已定位

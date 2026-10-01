@@ -2,6 +2,8 @@
 
 12:33 UTC：#104 `aaa6d0f` / CI `36861579126` 与 #115 `2fa6f0b` / CI `36861616162` 完整 SUCCESS；#103 CI 成功，#102/#105/#106 Python discovery 两平台 16/20/23 项通过，#111–#114 CI 绿待外审。S2b 三个 FAIL 中两项是新增断言错误（分页应 3 页；stderr 可含诊断/明文）且已校正；ConflictPrecedesPasswordRead 完整套件重复超时、focused 通过但根因未知，generic helper 后全量/race 复验继续。细节见 [progress](progress.md)。
 
+12:46 UTC：#102/#103/#104 已按最新 head 外部批准与检查结果独立合入（merge `3be99fd`/`5f179d6`/`b1ddf97`）；#102 CI `36863563740` SUCCESS。当前 main `b1ddf97e3dce74de3eaf19784c174543b7b5831c` 的 CI `36863806313` 完整 SUCCESS（macOS、Ubuntu、ci-ok）；三个旧 worktree/本地分支已清理，远端同名分支已自动删除，原 main checkout 与 untracked `AGENTS.md`、`tmux.sh` 保留。#113 `3e9baf3` CI `36862751523` SUCCESS、待外审；#115 CI 成功、待外审。S2b 候选 `c55ffcd` full/race exit 0（44.182s），真实 relay、125 条补收/重启及中断路径已实跑；CLI conflict 3 秒超时仍未查明，详见 [progress](progress.md)。#103 的额外 O_NOFOLLOW/path 防护建议另开小 PR。#114/#115 合入前不发 S2b 生产提交；#105/#106 合入前不发 R2b；保持 PR 独立。
+
 12:04 UTC：Agent24 自有文档 #634 已在有效外部批准、六项检查通过后正常合并；新 main f5a76c01 的 CI 运行中。Hyphae #111/#112 为独立 main PR，待真实 CI/外部评审。#102/#105/#106 补 Python 工具单测的 CI 步骤由 Luna 处理中，变更后须按新 head 检查，不沿用旧绿色结果；其余队列依赖不变。
 
 11:58 UTC 队列：main fc6681c 的 CI 通过。#102/#105/#106 各自 CI 通过、待外部评审；#103/#104 的真实 CI 失败已定位到测试子进程重复构建与临时 HOME 缓存，Luna 修复并复验；#107/#108/#109/#110 新独立 PR 的 CI 运行中。最新 heads 与范围见 [带日期进展](progress.md)。这些 PR 都只含自身差异，可独立评审；G7/G9 与 G2-S1/S2a 后续独立提交。R2b 依赖 #102/#105/#106，待全部进入 main 后才基于新 main 提自身工作流/helper 差异，禁止将当前 integration 父分支作为 main PR 发布。Agent24 #634 六项检查通过、待评审；#626 有批准但仍 OPEN，#627 仍依赖草稿，对仓生产合并由其负责。下方旧快照按时间阅读。
