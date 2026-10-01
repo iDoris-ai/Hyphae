@@ -2,6 +2,16 @@
 
 ## 2026-10-01 接线更新
 
+### 第一轮联调 F1：历史查询与补收
+
+已阅读 [#601 第一轮结果](https://github.com/iDoris-ai/Agent24/pull/601#issuecomment-5924511217) 与 [#620](https://github.com/iDoris-ai/Agent24/pull/620) `a9c4bd634504bcaf9491019ab4e5b6a8c680872c` 的记录，并对照 Hyphae `a4aa606` 源码确认：`history inbox` 仅查询本地历史，不主动拉取 relay。默认解密的单次补收使用 `agent inbox --as <nick> --password-stdin`；`--decrypt` 默认 true。口令由 stdin 传递，成功持久化后才会在 history 出现新消息。这个顺序同样适用于未加密身份，区别在于解锁需求。
+
+托管模式由 Agent24 监管的 Hyphae daemon 在启动时及 watch interval 周期内直接执行 `watchInbox` / `relayquery.Walk`，解密并持久化消息；它不周期性启动 `agent inbox` 子进程。单次 inbox 有 limit，不能代替完整补收。daemon 接管后无需手动 inbox，但断线、查询/解密/落库失败仍可能延迟可见性；进程存活和空历史不证明同步完成。显式关闭 notify/auto-reply 的约定继续有效。
+
+#620 报告了生产 lock 校验、加密创建、发送、同 event_id 断线重试和错误路径的实际测试；尚未覆盖 daemon/REST/UI、125 条积压、zero-run 和秘密扫描。建议下一轮补充 daemon 补收后 history 可见、重启去重、断线恢复与失败状态、实际 run/model/module 零调用计数。本文是 Hyphae 源码核验，不替代同 hash 的独立真实 relay 复测。针对 #601 的确认评论已准备；评论工具在执行前返回 `MCP tool call requires approval, but approval policy is never`，尚未发布。
+
+### 当前代码与交付边界
+
 Hyphae 当前固定 main 为 `a4aa606eb81d5c040d94c51cdf94553e646d8674`。[Agent24 COMM-0 #612](https://github.com/iDoris-ai/Agent24/pull/612) 已合并，采用统一 Rust 通信服务和 `/api/v1/comm/*`，CLI/UI 共用配置与状态；[COMM-1a #614](https://github.com/iDoris-ai/Agent24/pull/614) 已在 `77655f48` 合并，最终双平台 Rust CI 全绿。其 runner 和环境扫描修复已进入 main；CI 尚未构建锁定版本 Hyphae，真实二进制测试仍可跳过，这部分交付仍待补齐。
 
 Hyphae 已核验 [运行反馈](https://github.com/iDoris-ai/Agent24/pull/601#issuecomment-5923235533)。G7 会话历史 JSON、G9 文件正文已本地实现并通过专项测试，G8 keystore 完整并发写保护及专项/race 回归已通过；尚未发布，具体契约与验收见 [联调缺口](../agent/em1-comm-followups.md)。daemon 互斥 `6765d1d` 已通过特殊锁路径、专项/race 与 Linux 编译；只读口令校验 `7fa3e7bc`、存储信息 JSON `7dadc7a9`、联系人输入错误 `574f049b` 已本地提交并通过对应专项/race。补收状态按 COMM-0 G2 请求的 JSON-lines [设计](../agent/em1-daemon-status-candidate.md) 继续实现；stdout 仅完整状态信封，诊断在 stderr，未提供状态文件替代。消费端仍待对应仓库实现与验收。不要提前调用尚未发布的命令。
@@ -9,6 +19,20 @@ Hyphae 已核验 [运行反馈](https://github.com/iDoris-ai/Agent24/pull/601#is
 当前 Agent24 main `c9f5f9cab1c208b09f7ebf9d13a3e1481adcaf12` 的启动入口已默认停止 F4b 入站执行分派；直接 `InboundBridge.handle` 仍保留旧执行逻辑。联合验收须从正式入口验证普通消息、answer、未知版本的 runs/模型/模块计数为零，不能仅根据配置或源码判断通过。
 
 Agent24 提案 [#601](https://github.com/iDoris-ai/Agent24/pull/601) 在 `67ddbce` 已获批准和全绿 CI；用户已授权合并，本会话工具拒绝了合并调用。勘误 `9bfb0df` 尚在独立本地 worktree，待 #601 合入后另提文档 PR。Hyphae 接口变化合入后须更新 Agent24 的源码/构建配方/hash lock，再固定联合测试版本。只读口令命令实际为 `identity check-password --password-stdin`；新锁采用时需同步 G6 的非法联系人输入断言由 exit 4 改为 1。当前 `cmd/hyphae/main.go` 已有可注入的 `main.version`；若 release 配方加入版本 ldflags，必须同时更新 binary hash，不能沿用当前无版本注入的配方 hash。
+
+### 当前实现出口与对仓下一批
+
+再次按 `c9f5f9c` 核对：`agent24-comm/src/lib.rs` 只公开 binary/password/runner；`HyphaeRunner` 只有 command/run，没有 COMM-0 中的 `KeystoreWriteLock`、`keystore_lock` 或 `run_keystore_write`。`agent24d/Cargo.toml` 尚未依赖该 crate，正式 CLI 的 Command 枚举也没有 Comm。故 #614 只交付运行器的基础层，不能记为正式 CLI 已接通。Hyphae G8 的文件事务保护覆盖本仓写入，但不能替代 Agent24 导入流程的停机/调用序列监管。
+
+| 对仓顺序 | 必须交付 | 验收出口 |
+|---|---|---|
+| COMM-1a 收尾 | 锁定源码/Go/平台/完整配方的真实构建/hash CI；补写调用与 import 的监管接口 | 未设置真实二进制不得静默跳过；篡改/hash 不一致失败；并发写不丢身份 |
+| COMM-1b → 2a | 凭据存储、Pending→Salt；接入 agent24d 和实际 `agent24 comm` identity/contact/relay | 实际 CLI create/list/use/contact/relay 往返；错误密码无秘密输出；未配置 relay 不回落公共网络 |
+| COMM-2b、3、4a | 停机导入、send/history/outbox、daemon 监管；显式关闭 auto-reply/notify | 源数据不变；原 event_id 重试；错误部分 data 保留；取消/退出/恢复和配置重启可验证 |
+| COMM-4b、5b | 消费 G2 JSON-lines；进程/probe/扫描三种证据分开；zero-run 正负对照 | 失败/EOF 不显示健康；普通消息、查询、通知和回执不启动 run；计数正对照实际增加 |
+| COMM-6 → 7 | CLI/UI 共用同一服务、配置和状态，真实双仓联调 | UI 不另起 Nostr 栈；入队/relay 接受/未确认分别呈现；125 条积压及重启零新增 |
+
+Hyphae 七项及 G2 合入并固定新制品之后再启用新命令；上述表是由用户推动的对应仓库交付，不表示已派本会话 Luna 修改 Agent24。后续 T01-E、高层执行和四仓验收仍按原依赖推进。
 
 以下是 2026-09-30 的固定版本核查与约定，旧待审描述不代表当前队列。
 

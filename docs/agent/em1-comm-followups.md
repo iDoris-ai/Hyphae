@@ -23,7 +23,7 @@
 | G1：只读口令检查 | `identity check-password --password-stdin`；成功仅输出 valid/encrypted | 不创建 HOME，不迁移 legacy token，不改 keystore、history、outbox 或审计；错误不回显秘密 | 本地 `7fa3e7bc`，最终 identity/真实 CLI/race 通过，待发布/完整 CI |
 | G6：联系人输入分类 | 保留有效 npub/hex；非法公钥在 keystore 读取前返回 `user_error`/1 | 输入不回显，拒绝不写盘；真实存储错误不伪装成输入错误 | 本地 `574f049b`，identity/真实 CLI/race 通过，待发布/完整 CI |
 | G7b：存储信息 JSON | `storage info`；存在/不存在数据库均输出单一机器信封 | 未建库不创建 HOME/目录/DB；真实计数、稳定 table 顺序、读取失败不先输出成功 | 本地 `7dadc7a9`，storage/真实 CLI/race 通过，待发布/完整 CI |
-| 补收状态 | `daemon --json` 的带版本 JSON-lines 完整快照，区分进程、relay 与扫描状态 | 失败/取消/不完整不显示完成；每轮完成不等于永远同步；不记录正文和秘密 | [CLI 设计](em1-daemon-status-candidate.md)，按 COMM-0 G2 请求实现，消费端待接线验收 |
+| 补收状态 | `daemon --json` 的带版本 JSON-lines 完整快照，区分进程、relay 与扫描状态 | 失败/取消/不完整不显示完成；每轮完成不等于永远同步；不记录正文和秘密 | S1 `82de8549` / S2a `6f7daa14` 已本地提交及专项/race通过；S2b 实现中，消费端与真实 relay 待验收 |
 
 G7 的 JSON 数组沿用查询返回的最新在前顺序；人类模式维持原有最早在前展示。`--as` 未提供时使用默认身份。历史没有对端回执字段，不构造该状态。
 
