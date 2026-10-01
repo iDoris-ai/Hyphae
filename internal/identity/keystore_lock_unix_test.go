@@ -100,6 +100,7 @@ func TestKeystoreLockRejectsDirectory(t *testing.T) {
 	lockPath, _ := prepareKeystoreLockPathTest(t)
 	require.NoError(t, os.Remove(lockPath))
 	require.NoError(t, os.Mkdir(lockPath, 0755))
+	require.NoError(t, os.Chmod(lockPath, 0755))
 
 	called := false
 	err := withKeyStoreLock(func() error { called = true; return nil })
