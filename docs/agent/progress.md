@@ -2,7 +2,7 @@
 
 最后更新：2026-10-01。本文记录实际交付与验收边界；各节固定其对应版本，新审批及合并以 GitHub 为准。
 
-12:25 UTC：#634 已 merge 到 Agent24 main `f5a76c015a7026c64fc872f47c6c160485cfed37`，CI `36859330529` 成功。Hyphae #104 新 head `aaa6d0f` 已 push；双平台测试成功，`ci-ok` 刚 queued，待根代理最终核验。Windows compile 旧失败/新通过，daemon race 9.415s。#103 `9ee5cca` 的 CI `36859748709` 通过。#102 `73b9bb07`、#105 `358d7e9d`、#106 `a41b882d` 的 Python discovery 已分别在新 CI 两平台实际通过 16/20/23 项；#111–#114 新 CI 已绿，等待外审。新 #115 `2fa6f0b` CI `36861616162` 成功（生产差异 113 行、测试 165 行）。#634 与上述结果不代表 E-M1 完成。G2-S2b 新增“stderr 不得含正文”断言与现行状态流契约不符：设计允许 stderr 诊断/明文；正在修正该测试。另有 `TestDaemonCLIConflictPrecedesPasswordRead` 和 `TestStatusModelReplay125AcrossFreshScanReset` 失败，仍在排查。四项之前验证的局部结果保留范围，但不能记录第二轮全通过。定时扫描保持停止。全 E-M1 未完成。
+12:33 UTC：#104 head `aaa6d0f` / CI `36861579126` 与 #115 head `2fa6f0b` / CI `36861616162` 均完整 SUCCESS；#104 的双平台检查及 `ci-ok` 已通过。#103 `9ee5cca` / CI `36859748709` 成功；#102/#105/#106 Python discovery 两平台实跑分别 16/20/23 项通过；#111–#114 CI 绿待外审。#104 Windows compile 旧失败/新通过，daemon race 9.415s。G2-S2b 近期 3 项 FAIL 中两项为新测试断言错误：标准分页应为 3 页而非 2 页，另一个“stderr 不得含正文”超出现行契约（状态设计允许 stderr 诊断/明文）；两处已校正。`TestDaemonCLIConflictPrecedesPasswordRead` 在完整套件重复时 3 秒超时，focused 单项通过但根因未证实；补入 #104 generic helper 后继续跑全量/race，不能称已修复。保留所有原始日志及其路径；四项此前通过仍限于原范围，不能记第二轮全通过。定时扫描保持停止；全 E-M1 未完成。
 
 12:25 UTC：iDoris T01-D 接口审阅更新见 [iDoris 协作记录](../cooperation/iDoris.md)；只读固定 iDoris `ffed37a` / Agent24 `f5a76c01`，未运行服务/编译/付费 provider。确认 iDoris Rust router 已有 SQLite ledger 模块但正式入口未启用；Agent24 默认 provider 尚未接线。T10/T11 先服务端合同、后专用 adapter；T01-E/T07 门槛不变。
 
