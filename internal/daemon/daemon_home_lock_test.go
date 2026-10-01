@@ -188,6 +188,10 @@ func TestDaemonCLIConflictPrecedesPasswordRead(t *testing.T) {
 		_ = child.Process.Kill()
 		_ = child.Wait()
 	}()
+	t.Setenv("HOME", home)
+	lock, lockErr := acquireDaemonHomeLock()
+	require.ErrorIs(t, lockErr, errDaemonHomeLocked, "the helper must hold this exact home lock before the CLI conflict check")
+	assert.Nil(t, lock)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
