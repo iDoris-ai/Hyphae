@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"os/signal"
@@ -131,8 +132,9 @@ Run this in a separate terminal or as a system service.`,
 		}
 		defer homeLock.Close()
 
+		jsonMode := common.JSONMode(c)
 		ks, err := identity.LoadKeyStoreForCommand(identity.KeyStoreCommandOptions{
-			JSONMode: common.JSONMode(c), RequireSecret: true, PasswordStdin: c.Bool("password-stdin"), Stdin: os.Stdin,
+			JSONMode: jsonMode, RequireSecret: true, PasswordStdin: c.Bool("password-stdin"), Stdin: os.Stdin,
 		})
 		if err != nil {
 			return err
@@ -150,62 +152,76 @@ Run this in a separate terminal or as a system service.`,
 		if len(relays) == 0 {
 			relays = []string{relayconfig.DefaultRelay}
 		}
-		daemonCtx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
-		defer stop()
 		useNotify := c.Bool("notify")
 		autoReply := c.Bool("auto-reply")
 
-		fmt.Printf("🚀 Starting daemon for '%s'\n", myIdentity.Nickname)
-		fmt.Printf("   Relays: %v\n", relays)
-		fmt.Printf("   Outbox retry interval: %v\n", retryInterval)
-		fmt.Printf("   Inbox watch interval: %v\n", watchInterval)
-		fmt.Printf("   Notifications: %v\n", useNotify)
-		fmt.Printf("   Auto-reply: %v\n", autoReply)
-		fmt.Println("   Press Ctrl+C to stop")
+		logWriter := io.Writer(os.Stdout)
+		if jsonMode {
+			logWriter = os.Stderr
+		}
+		logger := newDaemonLogger(logWriter)
+		var status *StatusStream
+		if jsonMode {
+			generation, err := newDaemonStatusGeneration()
+			if err != nil {
+				return err
+			}
+			status, err = NewStatusStream(os.Stdout, generation, os.Getpid(), myIdentity.Npub, time.Now(), len(relays))
+			if err != nil {
+				return err
+			}
+		}
+		daemonCtx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		daemonCtx = withDaemonLogger(daemonCtx, logger)
 
-		// Create tickers
-		retryTicker := time.NewTicker(retryInterval)
-		watchTicker := time.NewTicker(watchInterval)
-		cleanupTicker := time.NewTicker(1 * time.Hour) // Cleanup every hour
-		defer retryTicker.Stop()
-		defer watchTicker.Stop()
-		defer cleanupTicker.Stop()
+		if !jsonMode {
+			logger.printf("🚀 Starting daemon for '%s'\n", myIdentity.Nickname)
+			logger.printf("   Relays: %v\n", relays)
+			logger.printf("   Outbox retry interval: %v\n", retryInterval)
+			logger.printf("   Inbox watch interval: %v\n", watchInterval)
+			logger.printf("   Notifications: %v\n", useNotify)
+			logger.printf("   Auto-reply: %v\n", autoReply)
+			logger.println("   Press Ctrl+C to stop")
+		}
 
 		// The in-memory set avoids repeated work during this process. The
 		// atomic SQLite incoming-once write is the durable duplicate guard
 		// when events are delivered again after a restart.
 		seen := newSeenSet()
-		preloadRecentSeen(seen, myIdentity.Npub)
-
-		// Run immediately
-		processOutbox(daemonCtx, myIdentity, relays)
-		if daemonCtx.Err() != nil {
-			fmt.Println("\n👋 Stopping daemon...")
-			return nil
-		}
-		if _, err := watchInbox(daemonCtx, myIdentity, ks, seen, relays, useNotify, autoReply); err != nil && daemonCtx.Err() == nil {
-			fmt.Printf("[%s] ⚠️  Inbox scan incomplete: %v\n", time.Now().Format("15:04:05"), err)
-		}
-		if daemonCtx.Err() != nil {
-			fmt.Println("\n👋 Stopping daemon...")
-			return nil
-		}
-
-		for {
-			select {
-			case <-retryTicker.C:
+		preloadRecentSeenWithLogger(seen, myIdentity.Npub, logger)
+		work := daemonRuntimeWork{
+			processOutbox: func() error {
 				processOutbox(daemonCtx, myIdentity, relays)
-			case <-watchTicker.C:
-				if _, err := watchInbox(daemonCtx, myIdentity, ks, seen, relays, useNotify, autoReply); err != nil && daemonCtx.Err() == nil {
-					fmt.Printf("[%s] ⚠️  Inbox scan incomplete: %v\n", time.Now().Format("15:04:05"), err)
-				}
-			case <-cleanupTicker.C:
-				cleanupOutbox()
-			case <-daemonCtx.Done():
-				fmt.Println("\n👋 Stopping daemon...")
 				return nil
-			}
+			},
+			scanInbox: func() error {
+				if status == nil {
+					_, _, err := watchInboxObserved(daemonCtx, myIdentity, ks, seen, relays, useNotify, autoReply, relayquery.Walk, logger, relayScanObserver{})
+					return err
+				}
+				if err := status.BeginScan(time.Now()); err != nil {
+					return err
+				}
+				observer := relayScanObserver{
+					begin: func(index int) error { return status.BeginRelay(index, time.Now()) },
+					finish: func(result relayScanResult) error {
+						return status.FinishRelay(result.RelayIndex, result.Stats, result.NewMessages, result.ProcessingFailures, result.QueryFailed, result.Canceled, time.Now())
+					},
+				}
+				_, _, scanErr := watchInboxObserved(daemonCtx, myIdentity, ks, seen, relays, useNotify, autoReply, relayquery.Walk, logger, observer)
+				if errors.Is(scanErr, errStatusOutput) || errors.Is(scanErr, errStatusTransition) {
+					return scanErr
+				}
+				finishErr := status.FinishScan(daemonCtx.Err() != nil, time.Now())
+				if errors.Is(finishErr, errStatusOutput) || errors.Is(finishErr, errStatusTransition) {
+					return finishErr
+				}
+				return errors.Join(scanErr, finishErr)
+			},
+			cleanup: func() { cleanupOutboxWithLogger(logger) },
 		}
+		return runDaemonRuntime(daemonCtx, logger, status, retryInterval, watchInterval, time.Hour, work)
 	},
 }
 
@@ -234,12 +250,16 @@ func validateDaemonIntervals(retrySeconds, watchSeconds int64) (time.Duration, t
 // before the matching entry is removed can still cause a later retry; this
 // loop does not claim exactly-once delivery.
 func processOutbox(ctx context.Context, myIdentity *types.Identity, relays []string) {
+	processOutboxWithLogger(ctx, myIdentity, relays, daemonLoggerForContext(ctx))
+}
+
+func processOutboxWithLogger(ctx context.Context, myIdentity *types.Identity, relays []string, logger *daemonLogger) {
 	if ctx.Err() != nil {
 		return
 	}
 	outbox, err := messaging.LoadOutbox()
 	if err != nil {
-		fmt.Printf("[%s] ⚠️  Failed to load outbox: %v\n", time.Now().Format("15:04:05"), err)
+		logger.printf("[%s] ⚠️  Failed to load outbox: %v\n", time.Now().Format("15:04:05"), err)
 		return
 	}
 
@@ -248,7 +268,7 @@ func processOutbox(ctx context.Context, myIdentity *types.Identity, relays []str
 		return
 	}
 
-	fmt.Printf("[%s] 📤 Processing %d pending messages...\n",
+	logger.printf("[%s] 📤 Processing %d pending messages...\n",
 		time.Now().Format("15:04:05"), len(pending))
 
 	successCount := 0
@@ -274,29 +294,29 @@ func processOutbox(ctx context.Context, myIdentity *types.Identity, relays []str
 			// Never got as far as dialing a relay (e.g. unparseable
 			// EventJSON) -- skip without counting as a send failure, same
 			// as the original inline "continue" on a parse error.
-			fmt.Printf("   ⚠️  %s...: %v\n", safePrefix(entry.ID, 16), err)
+			logger.printf("   ⚠️  %s...: %v\n", safePrefix(entry.ID, 16), err)
 			continue
 		}
 		if err != nil {
 			// A bookkeeping error (status update/remove/history-store)
 			// alongside an already-known Sent/MarkedFailed outcome --
 			// surfaced, but doesn't change how this attempt is counted.
-			fmt.Printf("   ⚠️  %s...: %v\n", safePrefix(entry.ID, 16), err)
+			logger.printf("   ⚠️  %s...: %v\n", safePrefix(entry.ID, 16), err)
 		}
 
 		if result.Sent {
 			successCount++
-			fmt.Printf("   ✅ Sent: %s...\n", safePrefix(entry.ID, 16))
+			logger.printf("   ✅ Sent: %s...\n", safePrefix(entry.ID, 16))
 		} else {
 			if result.MarkedFailed {
-				fmt.Printf("   ❌ Failed (max retries): %s...\n", safePrefix(entry.ID, 16))
+				logger.printf("   ❌ Failed (max retries): %s...\n", safePrefix(entry.ID, 16))
 			}
 			failCount++
 		}
 	}
 
 	if successCount > 0 || failCount > 0 {
-		fmt.Printf("   Result: %d sent, %d failed\n", successCount, failCount)
+		logger.printf("   Result: %d sent, %d failed\n", successCount, failCount)
 	}
 }
 
@@ -327,6 +347,26 @@ func watchInboxWithResults(
 	autoReply bool,
 	walk relayWalkFunc,
 ) (int, []relayScanResult, error) {
+	return watchInboxObserved(ctx, myIdentity, ks, seen, relays, useNotify, autoReply, walk, daemonLoggerForContext(ctx), relayScanObserver{})
+}
+
+type relayScanObserver struct {
+	begin  func(int) error
+	finish func(relayScanResult) error
+}
+
+func watchInboxObserved(
+	ctx context.Context,
+	myIdentity *types.Identity,
+	ks *types.KeyStore,
+	seen *seenSet,
+	relays []string,
+	useNotify bool,
+	autoReply bool,
+	walk relayWalkFunc,
+	logger *daemonLogger,
+	observer relayScanObserver,
+) (int, []relayScanResult, error) {
 	results := make([]relayScanResult, len(relays))
 	for index := range results {
 		results[index].RelayIndex = index
@@ -339,12 +379,12 @@ func watchInboxWithResults(
 	}
 	recipientPK, err := identity.GetPublicKey(ks, myIdentity.Nickname)
 	if err != nil {
-		fmt.Printf("[%s] ⚠️  Failed to get public key: %v\n", time.Now().Format("15:04:05"), err)
+		logger.printf("[%s] ⚠️  Failed to get public key: %v\n", time.Now().Format("15:04:05"), err)
 		return 0, results, fmt.Errorf("get recipient public key: %w", err)
 	}
 	recipientSK, err := identity.GetSecretKey(ks, myIdentity.Nickname)
 	if err != nil {
-		fmt.Printf("[%s] ⚠️  Failed to get secret key: %v\n", time.Now().Format("15:04:05"), err)
+		logger.printf("[%s] ⚠️  Failed to get secret key: %v\n", time.Now().Format("15:04:05"), err)
 		return 0, results, fmt.Errorf("get recipient secret key: %w", err)
 	}
 
@@ -360,11 +400,27 @@ func watchInboxWithResults(
 		if ctx.Err() != nil {
 			return newCount, results, errors.Join(append(scanErrors, ctx.Err())...)
 		}
-		result, err := watchOneRelayResult(ctx, url, filter, ks, recipientSK, seen, useNotify, autoReply, myIdentity, relays, walk)
+		if observer.begin != nil {
+			if err := observer.begin(index); err != nil {
+				return newCount, results, err
+			}
+		}
+		var onComplete func(relayScanResult) error
+		if observer.finish != nil {
+			onComplete = func(result relayScanResult) error {
+				result.RelayIndex = index
+				result.Visited = true
+				return observer.finish(result)
+			}
+		}
+		result, err := watchOneRelayResult(ctx, url, filter, ks, recipientSK, seen, useNotify, autoReply, myIdentity, relays, walk, logger, onComplete)
 		result.RelayIndex = index
 		result.Visited = true
 		results[index] = result
 		newCount += result.NewMessages
+		if errors.Is(err, errStatusOutput) || errors.Is(err, errStatusTransition) {
+			return newCount, results, err
+		}
 		if err != nil {
 			scanErrors = append(scanErrors, fmt.Errorf("relay %s: %w", url, err))
 			if ctx.Err() != nil {
@@ -377,7 +433,7 @@ func watchInboxWithResults(
 		return newCount, results, errors.Join(scanErrors...)
 	}
 	if newCount == 0 {
-		fmt.Printf("[%s] Watching... (no new messages)\r", time.Now().Format("15:04:05"))
+		logger.printf("[%s] Watching... (no new messages)\r", time.Now().Format("15:04:05"))
 	}
 	return newCount, results, nil
 }
@@ -396,7 +452,7 @@ func watchOneRelay(
 	myIdentity *types.Identity,
 	relays []string,
 ) (int, error) {
-	result, err := watchOneRelayResult(ctx, url, filter, ks, recipientSK, seen, useNotify, autoReply, myIdentity, relays, relayquery.Walk)
+	result, err := watchOneRelayResult(ctx, url, filter, ks, recipientSK, seen, useNotify, autoReply, myIdentity, relays, relayquery.Walk, daemonLoggerForContext(ctx), nil)
 	return result.NewMessages, err
 }
 
@@ -412,8 +468,16 @@ func watchOneRelayResult(
 	myIdentity *types.Identity,
 	relays []string,
 	walk relayWalkFunc,
+	logger *daemonLogger,
+	onComplete func(relayScanResult) error,
 ) (relayScanResult, error) {
 	var replies sync.WaitGroup
+	type replyRequest struct {
+		senderNpub string
+		content    string
+	}
+	var replyMu sync.Mutex
+	var deferredReplies []replyRequest
 	result, err := watchOneRelayWithHooksResult(ctx, url, filter, ks, recipientSK, seen, useNotify, autoReply, myIdentity, relays, incomingReceiveHooks{
 		store: messaging.StoreIncomingMessageOnce,
 		notify: func(title, message string) {
@@ -421,21 +485,46 @@ func watchOneRelayResult(
 			notify.PlaySound()
 		},
 		reply: func(senderNpub, content string) {
-			replies.Add(1)
-			go func() {
-				defer replies.Done()
-				sendAutoReply(ctx, myIdentity, ks, senderNpub, content, relays)
-			}()
+			if onComplete == nil {
+				replies.Add(1)
+				go func() {
+					defer replies.Done()
+					sendAutoReply(ctx, myIdentity, ks, senderNpub, content, relays)
+				}()
+				return
+			}
+			replyMu.Lock()
+			deferredReplies = append(deferredReplies, replyRequest{senderNpub: senderNpub, content: content})
+			replyMu.Unlock()
 		},
+		logf: logger.printf,
 	}, walk)
+	var completeErr error
+	if onComplete != nil {
+		completeErr = onComplete(result)
+	}
+	if errors.Is(completeErr, errStatusOutput) || errors.Is(completeErr, errStatusTransition) {
+		return result, completeErr
+	}
+	replyMu.Lock()
+	queuedReplies := append([]replyRequest(nil), deferredReplies...)
+	replyMu.Unlock()
+	for _, reply := range queuedReplies {
+		replies.Add(1)
+		go func(reply replyRequest) {
+			defer replies.Done()
+			sendAutoReply(ctx, myIdentity, ks, reply.senderNpub, reply.content, relays)
+		}(reply)
+	}
 	replies.Wait()
-	return result, err
+	return result, errors.Join(err, completeErr)
 }
 
 type incomingReceiveHooks struct {
 	store  func(*nostr.Event, string, string, bool) (bool, error)
 	notify func(title, message string)
 	reply  func(senderNpub, content string)
+	logf   func(string, ...any)
 }
 
 func watchOneRelayWithHooks(
@@ -569,7 +658,11 @@ func processIncomingEvent(
 			break
 		}
 	}
-	fmt.Printf("\n📨 New message from %s: %s\n", senderName, common.TruncateString(content, 40))
+	if hooks.logf != nil {
+		hooks.logf("\n📨 New message from %s: %s\n", senderName, common.TruncateString(content, 40))
+	} else {
+		fmt.Printf("\n📨 New message from %s: %s\n", senderName, common.TruncateString(content, 40))
+	}
 	if useNotify && hooks.notify != nil {
 		hooks.notify("Hyphae - "+senderName, common.TruncateString(content, 100))
 	}
@@ -580,13 +673,17 @@ func processIncomingEvent(
 }
 
 func cleanupOutbox() {
+	cleanupOutboxWithLogger(nil)
+}
+
+func cleanupOutboxWithLogger(logger *daemonLogger) {
 	outbox, err := messaging.LoadOutbox()
 	if err != nil {
 		return
 	}
 	// Remove entries older than 7 days
 	if err := messaging.CleanupOutbox(outbox, 7*24*time.Hour); err != nil {
-		fmt.Printf("   ⚠️  Cleanup outbox: %v\n", err)
+		logger.printf("   ⚠️  Cleanup outbox: %v\n", err)
 	}
 }
 
@@ -597,10 +694,14 @@ func cleanupOutbox() {
 // This cache is an optimization; SQLite's unique incoming write handles IDs
 // that are not loaded here.
 func preloadRecentSeen(seen *seenSet, npub string) {
+	preloadRecentSeenWithLogger(seen, npub, nil)
+}
+
+func preloadRecentSeenWithLogger(seen *seenSet, npub string, logger *daemonLogger) {
 	ids, err := messaging.RecentIncomingEventIDs(npub, maxSeenMessages)
 	if err != nil {
 		// Non-fatal — worst case we re-notify recent messages once.
-		fmt.Printf("[%s] ⚠️  preload seen: %v\n", time.Now().Format("15:04:05"), err)
+		logger.printf("[%s] ⚠️  preload seen: %v\n", time.Now().Format("15:04:05"), err)
 		return
 	}
 	for _, id := range ids {
@@ -649,7 +750,7 @@ func safePrefix(s string, n int) string {
 func sendAutoReply(ctx context.Context, myIdentity *types.Identity, ks *types.KeyStore, toNpub string, originalContent string, relays []string) {
 	result, err := sendAutoReplyWithEncryptor(ctx, myIdentity, ks, toNpub, originalContent, relays, crypto.EncryptMessage)
 	for _, line := range autoReplyOutcomeLines(result, err) {
-		fmt.Println(line)
+		logDaemonf(ctx, "%s\n", line)
 	}
 }
 
