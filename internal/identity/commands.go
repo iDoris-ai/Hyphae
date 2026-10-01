@@ -396,6 +396,9 @@ Contacts are stored locally and mapped to their npubs.`,
 				if nickname == "" || npub == "" {
 					return common.NewExitError(common.ErrCodeUser, fmt.Errorf("--nickname and --npub are required"))
 				}
+				if _, err := common.ParsePublicKey(npub); err != nil {
+					return common.NewExitError(common.ErrCodeUser, fmt.Errorf("--npub must be a valid public key"))
+				}
 				ks, err := LoadKeyStore()
 				if err != nil {
 					return fmt.Errorf("failed to load keystore: %w", err)
