@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import http.server
 import importlib.util
@@ -202,6 +203,57 @@ class JointRunnerTests(unittest.TestCase):
             self.assertIsNotNone(proc.poll())
             self.assertFalse(joint.process_alive(pid))
 
+    def test_owned_group_term_race_after_complete_exit_is_confirmed_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            home.mkdir()
+            proc = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(30)"],
+                                    env=joint.child_env(home, root), start_new_session=True,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            pgid = proc.pid
+            os.killpg(pgid, signal.SIGKILL)
+            proc.wait(timeout=2)
+            self.assertFalse(joint.owned_group_exists(pgid))
+            joint.stop_owned_group(proc)
+            self.assertFalse(joint.owned_group_exists(pgid))
+
+    def test_owned_group_kill_escalation_race_only_passes_after_group_disappears(self):
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            home.mkdir()
+            proc = subprocess.Popen(
+                [sys.executable, "-c", "import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);print('ready',flush=True);time.sleep(30)"],
+                env=joint.child_env(home, root), start_new_session=True,
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            assert proc.stdout is not None
+            self.assertEqual(proc.stdout.readline().strip(), b"ready")
+            real_killpg = os.killpg
+            escalated = False
+
+            def vanish_during_kill(pgid, sig):
+                nonlocal escalated
+                if sig == signal.SIGKILL:
+                    escalated = True
+                    real_killpg(pgid, sig)
+                    proc.wait(timeout=2)
+                    raise ProcessLookupError(errno.ESRCH, "group disappeared during escalation")
+                return real_killpg(pgid, sig)
+
+            try:
+                with mock.patch.object(joint.os, "killpg", side_effect=vanish_during_kill):
+                    joint.stop_owned_group(proc, force=True)
+                self.assertTrue(escalated)
+                self.assertFalse(joint.owned_group_exists(proc.pid))
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=2)
+                proc.stdout.close()
+
     def test_signal_cleanup_escalates_only_the_owned_group(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -243,6 +295,39 @@ class JointRunnerTests(unittest.TestCase):
                 joint.stop_owned_group(proc, force=True)
                 if proc.stdout:
                     proc.stdout.close()
+
+    def test_owned_group_lookup_race_with_remaining_member_still_fails(self):
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            home.mkdir()
+            proc = subprocess.Popen(
+                [sys.executable, "-c", "import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);print('ready',flush=True);time.sleep(30)"],
+                env=joint.child_env(home, root), start_new_session=True,
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            assert proc.stdout is not None
+            self.assertEqual(proc.stdout.readline().strip(), b"ready")
+            real_killpg = os.killpg
+
+            def report_kill_race_but_leave_group(pgid, sig):
+                if sig == signal.SIGKILL:
+                    raise ProcessLookupError(errno.ESRCH, "simulated ESRCH while group still exists")
+                return real_killpg(pgid, sig)
+
+            try:
+                with mock.patch.object(joint.os, "killpg", side_effect=report_kill_race_but_leave_group):
+                    with self.assertRaisesRegex(joint.SafeFailure, "^owned-process-group-signal-failed$"):
+                        joint.stop_owned_group(proc, force=True)
+                self.assertTrue(joint.owned_group_exists(proc.pid), "live owned group must not be accepted as clean")
+            finally:
+                try:
+                    real_killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                proc.wait(timeout=2)
+                proc.stdout.close()
 
     def test_real_pid_start_marker_matches_and_group_cleanup_confirms_empty(self):
         with tempfile.TemporaryDirectory() as tmp:

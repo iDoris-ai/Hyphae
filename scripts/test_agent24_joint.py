@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import errno
 import hashlib
 import math
 import json
@@ -214,40 +215,62 @@ def stop_owned_group(proc: subprocess.Popen[bytes], force: bool = False) -> None
     if getattr(proc, "_joint_group_stopped", False):
         return
     proc._joint_group_stopped = True
+    pgid = proc.pid
     try:
-        os.killpg(proc.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
-    except OSError:
+        os.killpg(pgid, signal.SIGTERM)
+    except OSError as error:
+        if error.errno == errno.ESRCH and wait_owned_group_gone(pgid, 0.1) and proc.poll() is not None:
+            return
         raise SafeFailure("owned-process-group-signal-failed") from None
     try:
         proc.wait(timeout=2)
     except subprocess.TimeoutExpired:
         force = True
+    # The leader may exit while a descendant still owns an inherited pipe.
+    # A live original PGID proves there is still a group member to clean.
+    if owned_group_exists(pgid):
+        force = True
     if force:
         # An exited leader can be reaped before its descendants finish. Only
         # escalate while the original owned group still exists; an empty PGID
         # cannot be reused while any of its original members remain.
-        try:
-            os.killpg(proc.pid, 0)
-        except ProcessLookupError:
+        if not owned_group_exists(pgid):
+            require(proc.poll() is not None, "owned-process-group-cleanup-failed")
             return
-        except PermissionError:
-            # The group exists but is not signalable under this credential;
-            # the following KILL attempt will fail closed if that persists.
-            pass
-        except OSError:
-            raise SafeFailure("owned-process-group-probe-failed") from None
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            return
-        except OSError:
+            os.killpg(pgid, signal.SIGKILL)
+        except OSError as error:
+            if error.errno == errno.ESRCH and wait_owned_group_gone(pgid, 0.1) and proc.poll() is not None:
+                return
             raise SafeFailure("owned-process-group-signal-failed") from None
         try:
             proc.wait(timeout=3)
         except subprocess.TimeoutExpired:
             raise SafeFailure("owned-process-group-cleanup-failed") from None
+    if not wait_owned_group_gone(pgid, 3) or proc.poll() is None:
+        raise SafeFailure("owned-process-group-cleanup-failed") from None
+
+
+def owned_group_exists(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except OSError as error:
+        if error.errno == errno.ESRCH:
+            return False
+        if error.errno == errno.EPERM:
+            return True
+        raise SafeFailure("owned-process-group-probe-failed") from None
+
+
+def wait_owned_group_gone(pgid: int, timeout: float) -> bool:
+    end = time.monotonic() + timeout
+    while True:
+        if not owned_group_exists(pgid):
+            return True
+        if time.monotonic() >= end:
+            return False
+        time.sleep(0.02)
 
 
 def run_child(argv: list[str], env: dict[str, str], stdin: bytes = b"", timeout: float = 30.0,
