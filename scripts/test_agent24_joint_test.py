@@ -218,6 +218,70 @@ class JointRunnerTests(unittest.TestCase):
             joint.stop_owned_group(proc)
             self.assertFalse(joint.owned_group_exists(pgid))
 
+    def test_owned_group_signal_errors_remain_retryable_and_unmarked(self):
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            home.mkdir()
+            proc = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(30)"],
+                                    env=joint.child_env(home, root), start_new_session=True,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            real_killpg = os.killpg
+            for failure in (PermissionError(errno.EPERM, "denied"), OSError(errno.EIO, "injected error")):
+                with self.subTest(error=type(failure).__name__):
+                    with mock.patch.object(joint.os, "killpg", side_effect=failure):
+                        with self.assertRaisesRegex(joint.SafeFailure, "^owned-process-group-signal-failed$"):
+                            joint.stop_owned_group(proc)
+                        self.assertFalse(getattr(proc, "_joint_group_stopped", False))
+                        with self.assertRaisesRegex(joint.SafeFailure, "^owned-process-group-signal-failed$"):
+                            joint.stop_owned_group(proc)
+                        self.assertFalse(getattr(proc, "_joint_group_stopped", False))
+            try:
+                real_killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            proc.wait(timeout=2)
+
+    def test_run_child_failure_evidence_never_marks_failed_cleanup_completed(self):
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            home.mkdir()
+            recorder = joint.RunRecorder()
+            previous = joint._ACTIVE_RECORDER
+            joint._ACTIVE_RECORDER = recorder
+            real_popen = subprocess.Popen
+            real_killpg = os.killpg
+            children = []
+
+            def capture_popen(*args, **kwargs):
+                proc = real_popen(*args, **kwargs)
+                children.append(proc)
+                return proc
+
+            try:
+                with mock.patch.object(joint.subprocess, "Popen", side_effect=capture_popen), \
+                     mock.patch.object(joint.os, "killpg", side_effect=PermissionError(errno.EPERM, "denied")):
+                    with self.assertRaisesRegex(joint.SafeFailure, "^child-cleanup-failed$"):
+                        joint.run_child([sys.executable, "-c", "import time;time.sleep(30)"],
+                                        joint.child_env(home, root), timeout=0.1)
+            finally:
+                joint._ACTIVE_RECORDER = previous
+                for child in children:
+                    try:
+                        real_killpg(child.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    child.wait(timeout=2)
+            self.assertEqual(len(recorder.executions), 1)
+            self.assertEqual(recorder.executions[0]["cleanup"], "failed")
+            self.assertEqual(recorder.executions[0]["failure"], "child-cleanup-failed")
+            self.assertNotEqual(recorder.executions[0]["cleanup"], "completed")
+
     def test_owned_group_kill_escalation_race_only_passes_after_group_disappears(self):
         from unittest import mock
 
@@ -525,7 +589,7 @@ class JointRunnerTests(unittest.TestCase):
             self.assertEqual(saved["executions"][0]["exit"], 7)
             self.assertTrue(saved["executions"][0]["started_at"])
             self.assertTrue(saved["executions"][0]["ended_at"])
-            self.assertEqual(saved["executions"][0]["cleanup"], "not-needed")
+            self.assertEqual(saved["executions"][0]["cleanup"], "completed")
             self.assertEqual(saved["cleanup"][0]["status"], "failed")
             self.assertNotIn("private-message-body", evidence.read_text(encoding="utf-8"))
 

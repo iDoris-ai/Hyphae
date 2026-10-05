@@ -214,12 +214,17 @@ def stop_owned_group(proc: subprocess.Popen[bytes], force: bool = False) -> None
     """Signal only the session/process group created for this exact child."""
     if getattr(proc, "_joint_group_stopped", False):
         return
-    proc._joint_group_stopped = True
     pgid = proc.pid
+    # If the leader already exited and the exact PGID is empty, do not signal
+    # a possibly reused numeric id; record success only after both checks.
+    if proc.poll() is not None and not owned_group_exists(pgid):
+        proc._joint_group_stopped = True
+        return
     try:
         os.killpg(pgid, signal.SIGTERM)
     except OSError as error:
         if error.errno == errno.ESRCH and wait_owned_group_gone(pgid, 0.1) and proc.poll() is not None:
+            proc._joint_group_stopped = True
             return
         raise SafeFailure("owned-process-group-signal-failed") from None
     try:
@@ -236,11 +241,13 @@ def stop_owned_group(proc: subprocess.Popen[bytes], force: bool = False) -> None
         # cannot be reused while any of its original members remain.
         if not owned_group_exists(pgid):
             require(proc.poll() is not None, "owned-process-group-cleanup-failed")
+            proc._joint_group_stopped = True
             return
         try:
             os.killpg(pgid, signal.SIGKILL)
         except OSError as error:
             if error.errno == errno.ESRCH and wait_owned_group_gone(pgid, 0.1) and proc.poll() is not None:
+                proc._joint_group_stopped = True
                 return
             raise SafeFailure("owned-process-group-signal-failed") from None
         try:
@@ -249,6 +256,7 @@ def stop_owned_group(proc: subprocess.Popen[bytes], force: bool = False) -> None
             raise SafeFailure("owned-process-group-cleanup-failed") from None
     if not wait_owned_group_gone(pgid, 3) or proc.poll() is None:
         raise SafeFailure("owned-process-group-cleanup-failed") from None
+    proc._joint_group_stopped = True
 
 
 def owned_group_exists(pgid: int) -> bool:
@@ -307,7 +315,7 @@ def run_child(argv: list[str], env: dict[str, str], stdin: bytes = b"", timeout:
     finally:
         cleanup_failed = False
         if proc is not None:
-            if proc.poll() is None:
+            if not getattr(proc, "_joint_group_stopped", False):
                 cleanup = "attempted"
                 try:
                     stop_owned_group(proc)
