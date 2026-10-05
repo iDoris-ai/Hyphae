@@ -1,6 +1,6 @@
 # Agent24 × Hyphae 本机联合调试 runner
 
-状态：runner 与编排单测已完成；本分支不含真实联调结果。真实四进程验收须等 Hyphae、Agent24 COMM-5b 与 lock 更新合并后，由根代理在本机执行。禁止使用其他机器上的 Codex。该脚本不构建源码、不访问 GitHub，也不读取或修改当前用户的 `~/.hyphae`、`~/.agent24`。
+状态：2026-10-05 已在当前本机完成真实四进程联合调试，最终结果 `PASS`。本次使用 Hyphae `671c584f9e9eb807a15968e2aa42fd7507e178b8` 与 Agent24 本地组合提交 `4e0f255e061c78845fe9b372f5cfca7f2f372048`；后者包含 production lock 更新、COMM unlock 与 COMM-5b 验收门。禁止使用其他机器上的 Codex。该脚本不构建源码、不访问 GitHub，也不读取或修改当前用户的 `~/.hyphae`、`~/.agent24`。
 
 ## 范围与输入
 
@@ -44,6 +44,24 @@ Runner 输出 `PASS <stage>`。所有断言都成功后生成 `result: PASS` 的
 
 `scripts/test_agent24_joint_test.py` 只验证 runner 编排的安全边界，包括缺输入/缺文件/hash 错误/重复 lock 字段、positive-control 失败、隔离环境、进程组超时清理以及 SIGTERM/SIGKILL。它不等价于上述真实验收，也不会伪造 relay/HTTP/CLI 成功。
 
+## 2026-10-05 本机真实联调结果
+
+最终证据使用 schema `agent24-hyphae-joint-evidence/1`，运行时间为 `2026-10-05T15:57:43Z` 至 `15:59:16Z`，结果为 `PASS`，且 `failure` 与 `cleanup_failure` 均为空。原始脱敏证据保存在执行机 `/tmp/agent24-joint-evidence-20261005/agent24-joint-20261005T155743Z-071a4064/evidence.json`，不会提交包含临时 HOME、数据库、密码或 bearer token 的运行目录。
+
+固定输入如下：
+
+- Hyphae source：`671c584f9e9eb807a15968e2aa42fd7507e178b8`
+- Agent24 组合 source：`4e0f255e061c78845fe9b372f5cfca7f2f372048`
+- Hyphae CLI SHA-256：`d1171421e91ae62c40374bd00049cd51dd6ac1135b6cd7b31908968b9158df60`
+- Agent24 CLI SHA-256：`3b841aa21b7990b6c4bc03e625a950db4c62efa8b9ee0d0b4f2d4f5b87e95125`
+- `agent24d` SHA-256：`ce893b402262c3d9400c1409bf5eacef6fbad610b446b0f7a0efe31eb22498a9`
+- Hyphae relay SHA-256：`a012d86e549cbeb564d5a5932c54f9b3511c2434203846537096420c89f36aef`
+- production lock SHA-256：`a83b7a586b1e19693d4abbbe4d1c737cf9fb5d6e2f63b7d8ebc6a252e1032ffd`
+
+通过的硬门包括：未认证 HTTP 为 401、认证与 Agent24 CLI 配置一致；首次及 `agent24d` 重启后 `remember:false` 解锁；Agent24→Hyphae 与 Hyphae→Agent24 的正文和 event ID 一致；relay 断线时 L1 入 outbox、恢复后原 ID 只投递一次；停止接收后发送 125 条，恢复全部补收且重启不重复；配置变化 generation 从 2 变为 3 且 failure counter 保持 0；SIGTERM、SIGKILL 与托管 Hyphae 进程组均按所有权校验完成清理。
+
+同一最终组合上，COMM-5b 真实 ignored T3、dependency allowlist、六类零运行 fixture、默认 ignored 行为，以及 production-lock 匹配的 unlock real-binary test 均通过。runner 编排测试为 20 项通过。
+
 ## 验收证据格式
 
 成功、FAIL 和 BLOCKED 都会尝试在输出目录新建的 `agent24-joint-<UTC 时间>-<随机后缀>/evidence.json` 保存脱敏证据，字段包含：
@@ -61,9 +79,9 @@ Runner 输出 `PASS <stage>`。所有断言都成功后生成 `result: PASS` 的
 
 ## 当前困难与 Agent24 需要调整的事项
 
-本地联合 runner 按已冻结的 COMM unlock 契约接线；真实验收运行时仍须使用本次显式传入的 Agent24 构建产物与 SHA。本包目前只完成编排与单测，尚无三包合并后的真实运行证据；若路由返回 404，前序认证/CLI/Hyphae relay 正对照照常执行并留证，之后依赖解锁的步骤停止并记为 `BLOCKED`；若 endpoint 已存在但认证、状态码或 data 不符合契约，则判 `FAIL`。
+本轮真实联调已通过，不再存在阻止本机 Agent24×Hyphae 基础通信闭环的已知 blocker。过程中发现并关闭了三类问题：旧 Agent24 lock 与 Hyphae main 不一致；memory password store 缺少安全解锁入口；两个验收夹具分别存在本地 counter readiness 竞态和重复预置联系人。首轮 runner 失败证据保留为 `/tmp/agent24-joint-evidence-20261005/agent24-joint-20261005T155435Z-777881f9/evidence.json`，其 cleanup 全部完成；修复后以全新隔离 HOME 重跑通过。
 
-请 Agent24 在合并/实机联调时协助确认这些稳定性要求：
+请 Agent24 仓库在合并与后续优化中保持这些稳定性要求：
 
 - 确保 `POST /api/v1/comm/unlock` 持续遵循已冻结契约：bearer 鉴权、`{password, remember:false}` 请求、`data.{unlocked,remembered}` 成功字段；memory backend 重启后可用临时密码重新登记，且后续 CLI/daemon 共用该账户密码。
 - 明确 `comm daemon status` 的 generation 来源与生命周期：默认身份/relay 配置变化后应重启 Hyphae daemon 并返回可比较的新 generation；daemon stop/start 也需可观测。
@@ -71,4 +89,4 @@ Runner 输出 `PASS <stage>`。所有断言都成功后生成 `result: PASS` 的
 - 保持断线发送的 CLI 成功 envelope 稳定为 exit 0，并持续提供 `event_id`、`published_to`、`queued_for_retry` 和 `layer` 字段，确保 runner 能用原 ID 调用 `comm outbox retry`。
 - 保持 daemon 入站历史按 event ID 持久去重；离线 125 条批次必须可在启动后补收，正常重启不得产生新历史行或重复消息效果。
 
-这些是待真实联调证据确认的稳定性要求，不代表已向 Agent24 仓库提交 issue 或评论。当前 runner 仅在本分支提交；按用户流程后续由根代理合并本地工作包和其他依赖后运行，不在本任务内 push 或创建 PR。
+建议 Agent24 后续再做两项非阻塞优化：把本次真实 runner 纳入可重复的本机/CI 验收入口，并为 counter/provider fixture 提供统一 readiness helper，避免各测试重复实现启动同步。这些建议不阻塞本轮 PR；production lock、unlock 和 COMM-5b 门应先完成 PR-Daemon review 与精确 HEAD CI，再合并到 main。
