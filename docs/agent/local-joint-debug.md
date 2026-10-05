@@ -1,0 +1,74 @@
+# Agent24 × Hyphae 本机联合调试 runner
+
+状态：runner 与编排单测已完成；本分支不含真实联调结果。真实四进程验收须等 Hyphae、Agent24 COMM-5b 与 lock 更新合并后，由根代理在本机执行。禁止使用其他机器上的 Codex。该脚本不构建源码、不访问 GitHub，也不读取或修改当前用户的 `~/.hyphae`、`~/.agent24`。
+
+## 范围与输入
+
+`scripts/test_agent24_joint.py` 使用 Python 标准库启动四个预构建程序：Hyphae CLI、Agent24 CLI、`agent24d` 和 Hyphae relay。每个二进制都必须给出本机实际文件路径及完整 SHA-256；同时必须给出两仓完整 40 位源码 SHA、Hyphae production lock 和 lock 的 SHA-256、独立输出目录。lock 的 `source_sha` 必须等于传入的 Hyphae SHA，当前平台的 `binaries` 摘要必须等于 Hyphae CLI 预期摘要。任何参数缺失、lock/制品 hash 错误、认证正对照失败或功能断言失败都返回非零，不能降级为 skip。
+
+联调全程使用 runner 自建的临时 `HOME`、relay 数据目录和随机身份/正文。Agent24d 以 `A24_HYPHAE_BIN` 指向本次显式传入的 Hyphae CLI，并设置 `A24_COMM_PASSWORD_STORE=memory`；Agent24 托管 keystore 位于隔离 HOME 的 `.agent24/comm/hyphae-home`。随机密码只经 Hyphae CLI stdin 或 loopback HTTP 请求体传递，不写入 argv、日志或证据。HTTP bearer token 只从隔离 HOME 的 `daemon.json` 读取，用于验证未授权请求收到 401/403、授权请求成功；token 不写入证据。
+
+示例命令（所有路径和摘要需替换成这次本机产物的真实值；不要复制示例值作为基线）：
+
+```sh
+python3 scripts/test_agent24_joint.py \
+  --hyphae-bin /absolute/path/to/hyphae \
+  --expected-hyphae-sha256 <64-hex> \
+  --agent24-bin /absolute/path/to/agent24 \
+  --expected-agent24-sha256 <64-hex> \
+  --agent24d-bin /absolute/path/to/agent24d \
+  --expected-agent24d-sha256 <64-hex> \
+  --relay-bin /absolute/path/to/hyphae-relay \
+  --expected-relay-sha256 <64-hex> \
+  --hyphae-sha <40-hex> \
+  --agent24-sha <40-hex> \
+  --lock /absolute/path/to/hyphae.lock.json \
+  --expected-lock-sha256 <64-hex> \
+  --output-dir /absolute/path/to/joint-evidence
+```
+
+runner 在首次启动及每次重建 Agent24d 后，重新读取当前 `daemon.json` 中的 bearer token/loopback 端口，并发送 `POST /api/v1/comm/unlock`，JSON 为 `{"password": <临时密码>, "remember": false}`。成功必须是 HTTP 200 且 envelope 的 `data.unlocked=true`、`data.remembered=false`；仅 HTTP 404 是 `BLOCKED` 并停止后续依赖步骤，其余状态或响应形状不匹配都是 `FAIL`。密码只存在于请求体，不会写入执行记录或证据。
+
+## 硬断言与阶段
+
+Runner 输出 `PASS <stage>`。所有断言都成功后生成 `result: PASS` 的 `evidence.json` 并返回 0；unlock 返回 404 时生成 `result: BLOCKED`，保留前序证据并以退出码 2 停止。主要门槛为：
+
+1. 四个本机二进制与 production lock 精确匹配；隔离 HOME 中启动真实 relay 和 agent24d。
+2. Bearer HTTP 鉴权负向/正向控制，以及 Agent24 CLI 通过真实 daemon API 的正向控制。HTTP 与 CLI relay 配置结果一致。
+3. 解锁成功后执行 Agent24 → Hyphae 和 Hyphae → Agent24 双向收发，逐项比对完整正文与相同 `event_id`。
+4. `/comm/unlock` 返回 404 时，保留鉴权 HTTP、Agent24 CLI 只读/配置和 Hyphae 侧联调证据后记为 `BLOCKED`，不执行后续依赖步骤。
+5. relay 断开时 Agent24 CLI send 仍应退出 0 且 `published_to=0`、`queued_for_retry=true`、`layer=L1`；恢复后 retry 保留原 `event_id`，对端历史恰有一条正文，outbox 中原 ID 不再 pending。
+6. 停止接收 daemon 后发送 125 条；恢复后以 history 中 125 个完整 event ID 作为补收条件；重启后等待 process 状态为 running，再发送唯一 sentinel 并有界等待其入史，之后断言 125 条旧 ID 仍各一条且集合只新增 sentinel，不使用固定 sleep 判成功。
+7. 切换默认身份触发托管 Hyphae daemon 重启；CLI 直接返回的 data 中 `process.generation` 必须是整数且变化，`process.state` 回到 running，前后 `consecutive_failures` 不变。
+8. `memory` password store 在 Agent24d 重启后必须重新解锁；分别验证首次启动与 SIGTERM 重建后获取新 bearer/base、unlock，再启动并等待托管 daemon running。SIGKILL 仅作用于本 runner 持有的 agent24d 进程组。孤儿清理前及每次 TERM/KILL 前核对隔离 HOME pidfile 的 pid/pgid、binary hash 和 `start_marker` 与当前进程出生标记相等；信号后轮询整个 PGID 确认无成员，不以 leader 退出代替整组清理。身份变化则拒绝信号并以 cleanup failure 结束。禁止按名称批量杀进程。
+
+`scripts/test_agent24_joint_test.py` 只验证 runner 编排的安全边界，包括缺输入/缺文件/hash 错误/重复 lock 字段、positive-control 失败、隔离环境、进程组超时清理以及 SIGTERM/SIGKILL。它不等价于上述真实验收，也不会伪造 relay/HTTP/CLI 成功。
+
+## 验收证据格式
+
+成功、FAIL 和 BLOCKED 都会尝试在输出目录新建的 `agent24-joint-<UTC 时间>-<随机后缀>/evidence.json` 保存脱敏证据，字段包含：
+
+- `schema`: `agent24-hyphae-joint-evidence/1`
+- `hyphae_sha`、`agent24_sha`：两仓实际源码 SHA
+- `binaries`：四个实际二进制的 SHA-256
+- `production_lock_sha256`、`platform`、`result`（`PASS`、`FAIL` 或 `BLOCKED`）
+- `started_at`、`ended_at`、`result`、`failure`/`blocked_at_stage`、`cleanup_failure`
+- `assertions`：每个验收 stage，以及双向/retry event ID、HTTP 状态码、125 条数量和 generation
+- `executions`：阶段、脱敏命令、exit/status、起止时间、输出字节数、cleanup 状态；stdout/stderr 和 HTTP 响应正文不保存
+- `cleanup`：各受控 relay、agent24d、Hyphae PID/PGID 清理结果。受控进程启动/停止也记录脱敏命令、阶段、退出码和起止时间；不会保存 stderr 内容。
+
+证据不包含密码、bearer token、消息正文、keystore、数据库、relay 内容或原始 stderr。失败命令保留脱敏参数形状、退出码、起止时间和子进程清理状态；失败本身写 `result: FAIL`，仅 unlock 路由缺失（404）写 `result: BLOCKED`。任何 cleanup 失败都使总体结果 FAIL，不能吞掉；PID 出生标记不匹配时拒绝 kill 并留下清理失败记录。不要把临时 HOME 或其数据库复制到共享仓库。通过证据应另行安全归档，文档链接只需指向本文件及已审阅的证据摘要。
+
+## 当前困难与 Agent24 需要调整的事项
+
+本地联合 runner 按已冻结的 COMM unlock 契约接线；真实验收运行时仍须使用本次显式传入的 Agent24 构建产物与 SHA。本包目前只完成编排与单测，尚无三包合并后的真实运行证据；若路由返回 404，前序认证/CLI/Hyphae relay 正对照照常执行并留证，之后依赖解锁的步骤停止并记为 `BLOCKED`；若 endpoint 已存在但认证、状态码或 data 不符合契约，则判 `FAIL`。
+
+请 Agent24 在合并/实机联调时协助确认这些稳定性要求：
+
+- 确保 `POST /api/v1/comm/unlock` 持续遵循已冻结契约：bearer 鉴权、`{password, remember:false}` 请求、`data.{unlocked,remembered}` 成功字段；memory backend 重启后可用临时密码重新登记，且后续 CLI/daemon 共用该账户密码。
+- 明确 `comm daemon status` 的 generation 来源与生命周期：默认身份/relay 配置变化后应重启 Hyphae daemon 并返回可比较的新 generation；daemon stop/start 也需可观测。
+- 将 `agent24d` 的 `A24_HYPHAE_BIN` 与 password store 配置从启动环境稳定传给真实服务；运行时必须校验传入 CLI 对应 production lock/hash。
+- 保持断线发送的 CLI 成功 envelope 稳定为 exit 0，并持续提供 `event_id`、`published_to`、`queued_for_retry` 和 `layer` 字段，确保 runner 能用原 ID 调用 `comm outbox retry`。
+- 保持 daemon 入站历史按 event ID 持久去重；离线 125 条批次必须可在启动后补收，正常重启不得产生新历史行或重复消息效果。
+
+这些是待真实联调证据确认的稳定性要求，不代表已向 Agent24 仓库提交 issue 或评论。当前 runner 仅在本分支提交；按用户流程后续由根代理合并本地工作包和其他依赖后运行，不在本任务内 push 或创建 PR。
