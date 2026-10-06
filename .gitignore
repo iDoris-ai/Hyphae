@@ -28,3 +28,5 @@ Thumbs.db
 
 # Local AI assistant config (contains absolute paths to user's machine)
 CLAUDE.md
+.codex/goals/
+.loopx/
