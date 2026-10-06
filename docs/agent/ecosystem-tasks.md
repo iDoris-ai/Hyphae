@@ -1,5 +1,23 @@
 # 生态里程碑任务与 Luna 分工
 
+## 当前快照（2026-10-06）
+
+- Agent24 #676 已合并至 `fc862cf3f765f3e59686e816aea6fa4792f10da2`；Hyphae #121 已合并至 `3fc1f02f67d6845fc8f1d08dd3bba44d7b678d6b`。本机 Hyphae 回归：runner 25 项、scripts suite 36 项与 `go test ./...` 全通过。具体固定基线、限制与交接见 [2026-10-06 联调交接](handoff-20261006.md)。
+- Agent24 main CI run `37460220289` 首次 Linux scheduler 单测失败（58 pass / 1 fail），但仅重跑失败项的 attempt 2 已全部 SUCCESS。该测试文件未被 #676 修改；本机定向重复 5 次通过，不能据此抹去首次 CI failure。
+- Hyphae #122 当前 CI run `37461668800` 仍 FAILURE：Ubuntu 和 CLA 通过；macOS Python tools 73 项中 1 项失败，`test_timeout_does_not_leak_descendants_holding_output_pipe` 得到 `child-cleanup-failed` 而非预期 `child-timeout`。本轮 PR 只改文档，失败测试代码属于既有 runner；建议对 macOS failed job 单独重跑一次作分类，若复现则另开 cleanup 生命周期修复。
+- T20 本机 CLI/relay merged-source 联调已完成：Agent24 `fc862cf` CLI/agent24d 与 lock 指向的 Hyphae `671c584` CLI/relay 精确匹配并通过 runner 十项验收；证据 hash 与二进制 hash 见[交接文档](handoff-20261006.md)。这不等于 E-M1 完成。
+- COMM6a 正由两位本机 Luna 分别推进 API 与 UI；COMM6b/COMM7、T01-E、T07、T19 尚未完成。E-M1 整体尚未完成，E-M2～E-M5 尚未启动。
+- #673 已批准合并其 `ab/m1-memory` 分支（不是 main）；#671 CI failed，暂不合并，且不属于本 COMM lane 修复范围。
+
+## 工作方式
+
+- **root**：规划、拆分任务、确定基础验收与出口；**Luna**：实现代码和相应测试；**PR-Daemon**：执行 PR-level review。联调结果按精确提交与证据记录，测试通过不自动代表里程碑完成。
+- 每项派工固定：目标、基线 commit、允许修改的文件、输入/输出契约、依赖、验收命令、边界用例和交付物。
+- 同一文件修改串行；需要并行时使用独立分支/工作树。未获授权不 push，不将本机测试包装为远端 CI 结果。
+- 状态为 `WAITING → READY → IN_PROGRESS → IN_REVIEW → DONE`；`DONE` 只对明确范围生效，需 root 验收。环境缺失单独记录，不能计作通过。
+
+下文日期较早的内容均为对应时间的历史快照；不得覆盖上面的当前状态。
+
 收尾快照（2026-10-01 14:38 UTC）：#119 head `3a837d1a7ee8c3b75a589e6556bab5f6fe32f564` 已于 14:32:14Z 独立 squash 合并为 `419d0e3b22ce4dbae28dcc7a6320ed63b519deee`；#118 head `94532e7701ed87e0137ae6ac4a48e62cb4a2304f` 于 14:32:54Z 独立 squash 合并为当前 main `884424167ef84bf1aaf1143df8486294f5c75425`。两项均获 clestons 对最新 head 的外部批准、全部检查通过，核对实际差异后按 SHA 正常合并。当前 main 的 [CI 36877200986](https://github.com/iDoris-ai/Hyphae/actions/runs/36877200986) SUCCESS；#119 合并版本的制品 [Actions 36877114664](https://github.com/iDoris-ai/Hyphae/actions/runs/36877114664) SUCCESS。本会话只剩交接文档 [#120](https://github.com/iDoris-ai/Hyphae/pull/120) 待外部评审；不等待新评审，不启动 R3 或其他开发，交接后按用户要求暂停 Goal。E-M1 尚未完成，定时扫描关闭。下方 14:23 状态为合并前历史快照。
 
 更新：2026-10-01。范围依据 [生态里程碑草案](ecosystem-roadmap.md)。保留历史 M1～M5 编号；本表用 E-M 编号关联旧任务，不覆盖旧台账。
@@ -22,10 +40,10 @@
 
 2026-10-01 09:01 UTC：原 a4/Go1.26.4 的真实两平台制品已构建、根代理验证生产 lock 和归档、本机加密 CLI smoke 通过，缺本地制品已解决。T20 剩余真实 relay/正式 main 联调、Release 下载与 UI/执行出口仍未通过；不把本地构建等同 R2 Actions 或 E-M1 完成。
 
-## 工作方式
+### 原工作约定补充（2026-10-01）
 
-- **主代理**：架构、契约、任务拆分、依赖协调、代码评审和验收；生产代码与测试实现交给 **GPT-6 Luna**。
-- **Luna**：按任务单实现、补测试、提供可复现证据；接口变化先交主代理评审。
+- **root**：架构、契约、任务拆分、依赖协调和基础验收；代码实现由 **Luna** 承担，PR-level review 由 **PR-Daemon** 承担。
+- **Luna**：按任务单实现、补测试、提供可复现证据；接口变化先交 root 确定契约。
 - 同时最多三位 Luna。每项实现使用独立分支/工作树；同一文件的修改串行，依赖通过验收后才派发。
 - 每次派工固定：目标、基线 commit、允许修改的文件、输入/输出契约、依赖、验收命令、边界用例和交付物。
 - 多个前置 PR 的共同开发基线使用 `integration/em1-cli-foundation`，仅组合已验收改动，不为它创建汇总大 PR。最初的组合验收快照为 `60715f3`，每次派工固定具体 commit。后续跨依赖的小 PR 暂以此分支为 base；不能把这些 PR 自身的改动提前合入其 base。前置 PR 合入主线后逐项改回 main，并核对差异及回归。主线已开始按依赖合并本轮 PR，仍保留固定组合提交作为验收证据。
@@ -92,7 +110,7 @@ T01 的交付包括：权威协议修改、字段/错误码表、跨仓共享正
 | T17 | 持久化结果与回执重试；bridge 回执存储/发送 | T16、T05 | 回执断线后补发；重启从已存结果发送；超时/重复回执不再次执行；发送错误可诊断 | WAITING |
 | T18 | 合规 relay 验收工具与跨仓 fixtures；新增独立脚本/测试数据 | T01 | 临时身份、临时数据目录、relay 生命周期可复现；签名/过滤/替换语义可验证；记录四仓 commit | WAITING |
 | T19 | 四仓真实联调；测试脚本与验收记录 | T06、T17、T18 | 下述三道门全部通过，语音→远端执行→播报及拒绝/断线/重启有证据 | WAITING |
-| T20 | Agent24 CLI 通信接线；Hyphae 配套 JSON/连接诊断/恢复接口，Agent24 CLI 与 bridge | T01 基础契约、T02～T05 | 不启动 UI/模型即可双向通信；配置、错误、入队/relay 接受状态可读；离线消息补收；跨仓部分由用户推动 | IN_PROGRESS |
+| T20 | Agent24 CLI 通信接线；Hyphae 配套 JSON/连接诊断/恢复接口，Agent24 CLI 与 bridge | T01 基础契约、T02～T05 | 不启动 UI/模型即可双向通信；配置、错误、入队/relay 接受状态可读；离线消息补收；跨仓部分由用户推动 | DONE（本机 CLI/relay 联调链路；不代表 E-M1 完成） |
 | T21 | Agent24 基础通信管理 UI：身份、联系人、relay 和连接状态 | T20 | CLI/UI 使用同一通信配置和服务；UI 不复制 Nostr 栈；对仓验收 | WAITING |
 | T22 | Agent24 消息 UI：收发、历史、待发与失败重试 | T21 | 正确显示入队/relay 接受/对端确认；重复操作不产生错误状态；对仓验收 | WAITING |
 
