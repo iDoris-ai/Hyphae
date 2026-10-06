@@ -4,6 +4,8 @@
 
 本文件仅记录列明源码/二进制 hash 与 production lock 下的 T20 本机 CLI/daemon/relay 联调，不代表 COMM6a 桌面 UI 或 E-M1 整体验收，也不外推至后续 API/UI/依赖升级。Hyphae 的 `671c584..3fc1f02` 生产树相同性仅限这两个 SHA。COMM6a API #678、UI #679 均已合并，但 targeted component tests 16/16 与 typecheck 不等同桌面 UI+真实 relay 验收；后续 UI 与当前项目状态见[2026-10-06 交接快照](handoff-20261006.md)。Hyphae PR #122（文档 head `31c0cd2`）fresh CI run `37463001377` 全绿后已并入 main `8bbaeb8`。旧 head `fb576411` 的 macOS Python timeout-fixture failure 保留为历史记录，详见交接文档；该 failure 根因仍未证实。
 
+后续文档 PR #128 的 CI 是独立阻塞，不否定上述精确输入范围的真实 CLI 十阶段 PASS：head `217115c21e00f6a9286573f4850c2e6ef00121e4`、run `37469204603` macOS job `112287952894` 在 `Test Python tools` 的 73 项中再次触发同一 timeout fixture（期望 `child-timeout`、实收 `child-cleanup-failed`）；Ubuntu、CLA 与 macOS 其他 Go 步骤通过。CI Python 3.14.7；本机 Python 3.14.6 对该 fixture 重复 5/5 PASS，根因未知且不能用本机通过替代 CI。旧 head clestons approval 不适用于更新后的 PR head；新 head 需要重新审批。当前阻塞、精确 trace 与交接建议见[交接记录](handoff-20261006.md)。
+
 ## 范围与输入
 
 `scripts/test_agent24_joint.py` 使用 Python 标准库启动四个预构建程序：Hyphae CLI、Agent24 CLI、`agent24d` 和 Hyphae relay。每个二进制都必须给出本机实际文件路径及完整 SHA-256；同时必须给出两仓完整 40 位源码 SHA、Hyphae production lock 和 lock 的 SHA-256、独立输出目录。lock 的 `source_sha` 必须等于传入的 Hyphae SHA，当前平台的 `binaries` 摘要必须等于 Hyphae CLI 预期摘要。任何参数缺失、lock/制品 hash 错误、认证正对照失败或功能断言失败都返回非零，不能降级为 skip。
@@ -90,6 +92,8 @@ Runner 输出 `PASS <stage>`。所有断言都成功后生成 `result: PASS` 的
 ## 当前困难与 Agent24 需要调整的事项
 
 本轮真实联调已通过，不再存在阻止本机 Agent24×Hyphae 基础通信闭环的已知 blocker。过程中发现并关闭了三类问题：旧 Agent24 lock 与 Hyphae main 不一致；memory password store 缺少安全解锁入口；两个验收夹具分别存在本地 counter readiness 竞态和重复预置联系人。首轮 runner 失败证据保留为 `/tmp/agent24-joint-evidence-20261005/agent24-joint-20261005T155435Z-777881f9/evidence.json`，其 cleanup 全部完成；修复后以全新隔离 HOME 重跑通过。
+
+当前额外的交接 blocker 是 #128 文档 PR 的 macOS Python CI，不是本机十阶段真实 CLI/relay 验收失败。#128 复现旧的 cleanup fixture failure，具体原因未从脱敏 trace 查明；更新 head 后须重新请求 PR-Daemon。后续建议在不放宽 timeout/owned-PGID 硬断言的前提下，记录脱敏 cleanup 细节，并用 readiness handshake 与同组 supervisor/reaper 设计确定的父子生命周期；回归仍需保留 leader 先退出而 descendant 持有输出 pipe 的场景，不能仅让 leader 一直存活来绕开竞态。此文档只记录建议，不扩大本次联调代码范围。
 
 请 Agent24 仓库在合并与后续优化中保持这些稳定性要求：
 

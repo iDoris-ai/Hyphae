@@ -2,7 +2,7 @@
 
 ## 当前快照（2026-10-06）
 
-- 当前 Hyphae main 为 `8bbaeb8cddecf598bed76c6b18866e2e46089dd5`。PR #122 head `31c0cd2db6079ed74f7bb3003c0fecc427290925` 的 fresh CI run `37463001377` 全绿并已合并。其先前 head `fb576411` 的 macOS failure（run `37461668800`）保留在[交接记录](handoff-20261006.md)：timeout fixture 得到 `child-cleanup-failed` 而非 `child-timeout`，根因未明；本机 Python3.14.6 的 5 次 fixture 重复及同模式73项 suite 均通过，不能抹去旧 CI 记录。
+- GitHub 查询时 Hyphae main/#128 base tip 为 `03a44abb2af5b8ea9aaa341b7149a98f43ed2c3a`；交接中的 `8bbaeb8` 是 #122 合并后的历史 CLI/CI 基线，不代表当前 main。PR #128 当前 head `217115c21e00f6a9286573f4850c2e6ef00121e4` 的 run `37469204603` 阻塞：macOS job `112287952894` / `Test Python tools` step 中 73 tests 有 1 fail，同一 timeout fixture 期望 `child-timeout`、实收 `child-cleanup-failed`；Ubuntu job、CLA 与 macOS 其余 Go 检查成功。CI Python 是 3.14.7，本机 Python 3.14.6 定向重复该 fixture 5/5 PASS，根因仍未明。该 head 的 clestons APPROVED 不能用于更新后的 head，CI 未全绿且 PR 不能合并；更新 head 后须重新请求 PR-Daemon 审批。详见[交接记录](handoff-20261006.md)。此前 PR #122 head `31c0cd2` fresh CI run `37463001377` 全绿并已合并；该历史成功与 #128 当前失败分别记录，不相互覆盖。真实 CLI 十阶段联调 PASS 与这次文档 PR CI blocker 是不同验收范围。
 - Agent24 #676 已合并至 `fc862cf3f765f3e59686e816aea6fa4792f10da2`。main CI run `37460220289` 首次 Linux scheduler failure 保留记录，但 attempt 2 重跑所有 jobs 已成功；该测试文件不在 #676 改动中。
 - T20 本机 merged-source CLI/relay 联调已完成：Agent24 `fc862cf` CLI/agent24d 与 production lock 指向的 Hyphae `671c584` CLI/relay hash 精确匹配，通过 runner 十项真实验收。它只完成 T20 本机 CLI 范围，不代表 E-M1 完成。
 - COMM6a API PR #678 已合并 commit `331666aecf37c55f2551ec7f75ca979e8c91215f`；UI PR #679 精确 head `47b2bc5a2260b01f2f07083c15026fb258447b17` 获 clestons 批准、required checks 全绿，已合并 commit `5e0b8506427d9dee890d05245b84bf1013b60160`。API/UI targeted component tests 16/16、typecheck 通过；尚未完成桌面+真实 relay 端到端验收。
