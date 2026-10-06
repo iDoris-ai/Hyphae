@@ -1,6 +1,6 @@
 # Agent24 × Hyphae 本机联合调试 runner
 
-状态：2026-10-05 本机真实四进程联合调试最终 `PASS`，使用当时 Hyphae `671c584f9e9eb807a15968e2aa42fd7507e178b8` 和 Agent24 本地组合 `4e0f255e061c78845fe9b372f5cfca7f2f372048`；Agent24 #676 后于 `fc862cf3f765f3e59686e816aea6fa4792f10da2` 合并，Hyphae #121 后于 `3fc1f02f67d6845fc8f1d08dd3bba44d7b678d6b` 合并。当前 runner 有 25 项单测。**该真实 PASS 是合并前固定二进制/lock 组合的证据，不是对 `fc862cf` Agent24 二进制的真实联调声明。**本轮已验证 Hyphae `671c584..3fc1f02` 生产源码相同；本机 Agent24 候选二进制未证明来自 `fc862cf`，因此本轮不重跑或声称 merged-binary 联调通过。禁止使用其他机器上的 Codex。该脚本不构建源码、不访问 GitHub，也不读取或修改当前用户的 `~/.hyphae`、`~/.agent24`。
+状态：2026-10-05 的固定旧组合与 2026-10-06 的 merged-source 组合均在本机真实四进程联调 `PASS`。新一轮使用 Agent24 `fc862cf3f765f3e59686e816aea6fa4792f10da2` 构建的 CLI/agent24d，与 production lock 指定的 Hyphae `671c584f9e9eb807a15968e2aa42fd7507e178b8` 二进制/relay；所有源 SHA、lock 和二进制 hash 均显式传入并匹配。Hyphae #121 合并于 `3fc1f02f67d6845fc8f1d08dd3bba44d7b678d6b`，其生产源码与 lock 的 `671c584` 一致。当前 runner 有 25 项单测。两次真实运行各自的固定输入和证据分列记录；不要把旧组合的 hash 套用至新组合。禁止使用其他机器上的 Codex。该 runner 本身不构建源码、不访问 GitHub，也不读取或修改当前用户的 `~/.hyphae`、`~/.agent24`。
 
 ## 范围与输入
 
@@ -61,6 +61,14 @@ Runner 输出 `PASS <stage>`。所有断言都成功后生成 `result: PASS` 的
 通过的硬门包括：未认证 HTTP 为 401、认证与 Agent24 CLI 配置一致；首次及 `agent24d` 重启后 `remember:false` 解锁；Agent24→Hyphae 与 Hyphae→Agent24 的正文和 event ID 一致；relay 断线时 L1 入 outbox、恢复后原 ID 只投递一次；停止接收后发送 125 条，恢复全部补收且重启不重复；配置变化 generation 从 2 变为 3 且 failure counter 保持 0；SIGTERM、SIGKILL 与托管 Hyphae 进程组均按所有权校验完成清理。
 
 同一最终组合上，COMM-5b 真实 ignored T3、dependency allowlist、六类零运行 fixture、默认 ignored 行为，以及 production-lock 匹配的 unlock real-binary test 均通过。runner 编排测试为 25 项通过。
+
+## 2026-10-06 merged-source 本机复验
+
+严格 runner 于 `2026-10-06T12:15:04.209Z` 至 `12:16:20.998Z` 运行并 `PASS`。本次 Agent24 CLI/agent24d 从 #676 合并提交 `fc862cf3f765f3e59686e816aea6fa4792f10da2` 构建；Hyphae CLI 与 relay 从 production lock 所指向的 `671c584f9e9eb807a15968e2aa42fd7507e178b8` 构建。该 lock SHA-256 为 `a83b7a586b1e19693d4abbbe4d1c737cf9fb5d6e2f63b7d8ebc6a252e1032ffd`，其 `source_sha` 和 darwin-arm64 CLI hash 均与实际输入匹配。
+
+本轮四个二进制 hash：Agent24 CLI `c5aa7559c70b3b37362cf1af3290a7e23f50ef554e6e5739e812775070e6e973`、agent24d `3c88466aa7f9d58715aa7adb1d3a50ddf30bc408bc9d3acce2d78cbb12896c5d`、Hyphae CLI `d1171421e91ae62c40374bd00049cd51dd6ac1135b6cd7b31908968b9158df60`、relay `a012d86e549cbeb564d5a5932c54f9b3511c2434203846537096420c89f36aef`。十个 stage 全部通过：隔离 HOME/真实 relay、初始及 agent24d 重启后 memory unlock、HTTP/CLI 正对照、双向 event_id/正文、断线后原 ID 恰投递一次、daemon 停机期间 125 条恢复且重启新增 0 条、配置重启 generation，以及 SIGTERM/SIGKILL/整个 PGID 清理。总体 `failure` 与 `cleanup_failure` 均为空。
+
+脱敏证据由 root 归档于原 Hyphae checkout 的 ignored 文件 `build/agent-handoff/20261006/evidence.json`，SHA-256 为 `b9afc7c558d86fe6e2ef9cc6a282bc7df31e8118ec5a03f56839badfcdd11d45`。该 runner 使用临时隔离 HOME；原始临时目录不提交。
 
 ## 验收证据格式
 
