@@ -2,6 +2,8 @@
 
 状态：2026-10-05 的固定旧组合与 2026-10-06 的 merged-source 组合均在本机真实四进程联调 `PASS`。新一轮使用 Agent24 `fc862cf3f765f3e59686e816aea6fa4792f10da2` 构建的 CLI/agent24d，与 production lock 指定的 Hyphae `671c584f9e9eb807a15968e2aa42fd7507e178b8` 二进制/relay；所有源 SHA、lock 和二进制 hash 均显式传入并匹配。Hyphae #121 合并于 `3fc1f02f67d6845fc8f1d08dd3bba44d7b678d6b`，其生产源码与 lock 的 `671c584` 一致。当前 runner 有 25 项单测。两次真实运行各自的固定输入和证据分列记录；不要把旧组合的 hash 套用至新组合。禁止使用其他机器上的 Codex。该 runner 本身不构建源码、不访问 GitHub，也不读取或修改当前用户的 `~/.hyphae`、`~/.agent24`。
 
+本文件仅记录列明源码/二进制 hash 与 production lock 下的 T20 本机 CLI/daemon/relay 联调，不代表 COMM6a 桌面 UI 或 E-M1 整体验收，也不外推至后续 API/UI/依赖升级。Hyphae 的 `671c584..3fc1f02` 生产树相同性仅限这两个 SHA。COMM6a API #678、UI #679 均已合并，但 targeted component tests 16/16 与 typecheck 不等同桌面 UI+真实 relay 验收；后续 UI 与当前项目状态见[2026-10-06 交接快照](handoff-20261006.md)。Hyphae PR #122（文档 head `31c0cd2`）fresh CI run `37463001377` 全绿后已并入 main `8bbaeb8`。旧 head `fb576411` 的 macOS Python timeout-fixture failure 保留为历史记录，详见交接文档；该 failure 根因仍未证实。
+
 ## 范围与输入
 
 `scripts/test_agent24_joint.py` 使用 Python 标准库启动四个预构建程序：Hyphae CLI、Agent24 CLI、`agent24d` 和 Hyphae relay。每个二进制都必须给出本机实际文件路径及完整 SHA-256；同时必须给出两仓完整 40 位源码 SHA、Hyphae production lock 和 lock 的 SHA-256、独立输出目录。lock 的 `source_sha` 必须等于传入的 Hyphae SHA，当前平台的 `binaries` 摘要必须等于 Hyphae CLI 预期摘要。任何参数缺失、lock/制品 hash 错误、认证正对照失败或功能断言失败都返回非零，不能降级为 skip。
