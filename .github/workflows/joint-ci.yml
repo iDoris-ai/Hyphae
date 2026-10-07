@@ -1,0 +1,286 @@
+name: Agent24 × Hyphae joint acceptance
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 4 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: joint-ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  produce:
+    name: Build locked production and PR candidate inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    outputs:
+      candidate_outputs: ${{ steps.provenance.outputs.candidate_outputs }}
+      production_outputs: ${{ steps.provenance.outputs.production_outputs }}
+    steps:
+      - name: Checkout Hyphae tools and candidate source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: tools
+          persist-credentials: false
+          submodules: false
+
+      - name: Load tracked cross-repository production pins
+        id: pins
+        run: |
+          set -euo pipefail
+          python3 - tools/.github/joint-ci-baseline.json >> "$GITHUB_OUTPUT" <<'PY'
+          import json, pathlib, sys
+          config = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+          assert config['schema'] == 1
+          for key in ('agent24_base_sha', 'production_hyphae_sha', 'production_lock_sha256', 'production_lock_path', 'go_version'):
+            print(f'{key}={config[key]}')
+          PY
+
+      - name: Checkout pinned production Hyphae source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: iDoris-ai/Hyphae
+          ref: ${{ steps.pins.outputs.production_hyphae_sha }}
+          path: hyphae-production
+          persist-credentials: false
+          submodules: false
+
+      - name: Checkout public pinned Agent24 base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: iDoris-ai/Agent24
+          ref: ${{ steps.pins.outputs.agent24_base_sha }}
+          path: agent24-base
+          persist-credentials: false
+          submodules: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: ${{ steps.pins.outputs.go_version }}
+          check-latest: false
+          cache: false
+
+      - name: Build candidate and pinned production bundles
+        id: build
+        env:
+          CANDIDATE_SHA: ${{ github.sha }}
+          AGENT24_SHA: ${{ steps.pins.outputs.agent24_base_sha }}
+          PRODUCTION_HYPHAE_SHA: ${{ steps.pins.outputs.production_hyphae_sha }}
+          PRODUCTION_LOCK_SHA256: ${{ steps.pins.outputs.production_lock_sha256 }}
+          PRODUCTION_LOCK_PATH: ${{ steps.pins.outputs.production_lock_path }}
+          GO_VERSION: ${{ steps.pins.outputs.go_version }}
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          set -euo pipefail
+          platform=linux-x64
+          out="$RUNNER_TEMP/joint-bundles"
+          mkdir -p "$out/candidate" "$out/pinned-production"
+          prod_lock="$RUNNER_TEMP/production-lock.json"
+          cp "agent24-base/$PRODUCTION_LOCK_PATH" "$prod_lock"
+          python3 - "$prod_lock" <<'PY'
+          import hashlib, pathlib, sys
+          p = pathlib.Path(sys.argv[1])
+          expected = __import__('os').environ['PRODUCTION_LOCK_SHA256']
+          assert hashlib.sha256(p.read_bytes()).hexdigest() == expected
+          PY
+
+          for mode in pinned-production candidate; do
+            work="$RUNNER_TEMP/$mode"
+            mkdir -p "$work"
+            if [ "$mode" = pinned-production ]; then
+              cp -a hyphae-production/. "$work/hyphae/"
+              source_sha="$PRODUCTION_HYPHAE_SHA"
+            else
+              cp -a tools/. "$work/hyphae/"
+              source_sha="$CANDIDATE_SHA"
+            fi
+            git -C "$work/hyphae" cat-file -e "$source_sha^{commit}"
+            test "$(git -C "$work/hyphae" rev-parse HEAD)" = "$source_sha"
+            build="$work/build"
+            mkdir -p "$build"
+            (
+              cd "$work/hyphae"
+              GOTOOLCHAIN="go$GO_VERSION" CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags='-buildid=' -o "$build/hyphae" ./cmd/hyphae
+              GOTOOLCHAIN="go$GO_VERSION" CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags='-buildid=' -o "$build/relay" ./cmd/hyphae-relay
+            )
+            if [ "$mode" = candidate ]; then
+              python3 tools/scripts/joint_ci.py derive-lock --production-lock "$prod_lock" \
+                --platform "$platform" --hyphae-sha "$source_sha" \
+                --hyphae-sha256 "$(sha256sum "$build/hyphae" | cut -d' ' -f1)" \
+                --output "$build/hyphae.lock.json"
+            else
+              cp "$prod_lock" "$build/hyphae.lock.json"
+            fi
+            agent="$RUNNER_TEMP/agent24-$mode"
+            cp -a agent24-base/. "$agent/"
+            cp "$build/hyphae.lock.json" "$agent/$PRODUCTION_LOCK_PATH"
+            CARGO_TARGET_DIR="$RUNNER_TEMP/agent24-target" cargo build --manifest-path "$agent/rust/Cargo.toml" --locked --release -p agent24-cli -p agent24d
+            cp "$RUNNER_TEMP/agent24-target/release/agent24" "$build/agent24"
+            cp "$RUNNER_TEMP/agent24-target/release/agent24d" "$build/agent24d"
+            chmod 755 "$build"/*
+            cp "$build"/* "$out/$mode/"
+            python3 tools/scripts/joint_ci.py write-manifest --mode "$mode" --platform "$platform" \
+              --hyphae-sha "$source_sha" --artifact-dir "$out/$mode" --production-lock "$prod_lock" \
+              --output "$out/$mode/manifest.json"
+          done
+          echo "bundle_dir=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Publish independent producer hashes
+        id: provenance
+        env:
+          BUNDLE_DIR: ${{ steps.build.outputs.bundle_dir }}
+        run: |
+          set -euo pipefail
+          python3 - "$BUNDLE_DIR" >> "$GITHUB_OUTPUT" <<'PY'
+          import hashlib, json, pathlib, sys
+          root = pathlib.Path(sys.argv[1])
+          for key, directory in [('candidate_outputs', 'candidate'), ('production_outputs', 'pinned-production')]:
+            folder = root / directory
+            manifest_path = folder / 'manifest.json'
+            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+            outputs = {
+              'validation_mode': manifest['validation_mode'], 'platform': manifest['platform'],
+              'hyphae_source_sha': manifest['hyphae_source_sha'],
+              'production_lock_sha256': manifest['production_lock_sha256'],
+              'derived_lock_sha256': manifest['derived_lock_sha256'],
+              'binary_sha256': manifest['binary_sha256'],
+              'manifest_sha256': hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+            }
+            print(f'{key}={json.dumps(outputs, sort_keys=True, separators=(",", ":"))}')
+          PY
+
+      - name: Upload producer bundles
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: joint-bundles-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.build.outputs.bundle_dir }}/
+          if-no-files-found: error
+          retention-days: 2
+
+  consume:
+    name: Strict ten-stage ${{ matrix.mode }} runner
+    needs: produce
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [pinned-production, candidate]
+    steps:
+      - name: Checkout Hyphae runner tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: tools
+          persist-credentials: false
+          submodules: false
+
+      - name: Load tracked cross-repository production pins
+        id: pins
+        run: |
+          set -euo pipefail
+          python3 - tools/.github/joint-ci-baseline.json >> "$GITHUB_OUTPUT" <<'PY'
+          import json, pathlib, sys
+          config = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+          assert config['schema'] == 1
+          for key in ('agent24_base_sha', 'production_hyphae_sha', 'production_lock_sha256', 'production_lock_path', 'go_version'):
+            print(f'{key}={config[key]}')
+          PY
+
+      - name: Checkout independently pinned Agent24 lock
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: iDoris-ai/Agent24
+          ref: ${{ steps.pins.outputs.agent24_base_sha }}
+          path: agent24-base
+          persist-credentials: false
+          submodules: false
+
+      - name: Download same-run producer artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: joint-bundles-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/joint-download
+          digest-mismatch: error
+
+      - name: Re-hash producer outputs and validate mode-specific lock chain
+        env:
+          MODE: ${{ matrix.mode }}
+          CANDIDATE_SHA: ${{ github.sha }}
+          PRODUCTION_HYPHAE_SHA: ${{ steps.pins.outputs.production_hyphae_sha }}
+          PRODUCTION_LOCK_PATH: ${{ steps.pins.outputs.production_lock_path }}
+          CANDIDATE_OUTPUTS: ${{ needs.produce.outputs.candidate_outputs }}
+          PRODUCTION_OUTPUTS: ${{ needs.produce.outputs.production_outputs }}
+        run: |
+          set -euo pipefail
+          producer_outputs="$PRODUCTION_OUTPUTS"
+          manifest_sha="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["manifest_sha256"])' "$producer_outputs")"
+          source_sha="$PRODUCTION_HYPHAE_SHA"
+          if [ "$MODE" = candidate ]; then
+            producer_outputs="$CANDIDATE_OUTPUTS"
+            manifest_sha="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["manifest_sha256"])' "$producer_outputs")"
+            source_sha="$CANDIDATE_SHA"
+          fi
+          python3 tools/scripts/joint_ci.py verify-candidate \
+            --manifest "$RUNNER_TEMP/joint-download/$MODE/manifest.json" \
+            --artifact-dir "$RUNNER_TEMP/joint-download/$MODE" \
+            --production-lock "agent24-base/$PRODUCTION_LOCK_PATH" \
+            --expected-manifest-sha256 "$manifest_sha" --expected-platform linux-x64 \
+            --expected-hyphae-sha "$source_sha" --expected-producer-outputs "$producer_outputs"
+
+      - name: Run unchanged strict ten-stage joint runner
+        id: run-joint
+        env:
+          MODE: ${{ matrix.mode }}
+          CANDIDATE_SHA: ${{ github.sha }}
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          set -euo pipefail
+          artifact="$RUNNER_TEMP/joint-download/$MODE"
+          manifest="$artifact/manifest.json"
+          output="$RUNNER_TEMP/joint-evidence"
+          safe_dir="$RUNNER_TEMP/joint-safe"
+          mkdir -p "$output"
+          mkdir -p "$safe_dir"
+          cp "$manifest" "$safe_dir/manifest.json"
+          python3 - "$manifest" > "$RUNNER_TEMP/runner-inputs.json" <<'PY'
+          import json, sys
+          m = json.load(open(sys.argv[1], encoding='utf-8'))
+          print(json.dumps({'hyphae_sha': m['hyphae_source_sha'], 'agent24_sha': m['agent24_built_sha'],
+            'lock_sha': m['derived_lock_sha256'], 'hashes': m['binary_sha256']}))
+          PY
+          set +e
+          python3 - "$RUNNER_TEMP/runner-inputs.json" <<'PY'
+          import json, os, pathlib, subprocess, sys
+          i = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          root = pathlib.Path(os.environ['GITHUB_WORKSPACE']) / 'tools'
+          a = pathlib.Path(os.environ['RUNNER_TEMP']) / 'joint-download' / os.environ['MODE']
+          cmd = [sys.executable, str(root / 'scripts/test_agent24_joint.py')]
+          for name in ('hyphae', 'agent24', 'agent24d', 'relay'):
+            cmd += [f'--{name}-bin', str(a / name), f'--expected-{name}-sha256', i['hashes'][name]]
+          cmd += ['--hyphae-sha', i['hyphae_sha'], '--agent24-sha', i['agent24_sha'],
+            '--lock', str(a / 'hyphae.lock.json'), '--expected-lock-sha256', i['lock_sha'],
+            '--output-dir', os.environ['RUNNER_TEMP'] + '/joint-evidence']
+          raise SystemExit(subprocess.run(cmd, cwd=root).returncode)
+          PY
+          runner_status=$?
+          set -e
+          evidence="$(find "$output" -type f -name evidence.json -print -quit)"
+          if [ -n "$evidence" ]; then
+            python3 tools/scripts/joint_ci.py normalize-evidence --evidence "$evidence" \
+              --manifest "$manifest" --output "$safe_dir/evidence.json" || runner_status=$?
+          fi
+          exit "$runner_status"
+
+      - name: Upload only normalized redacted evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: joint-evidence-${{ matrix.mode }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/joint-safe/
+          if-no-files-found: ignore
+          retention-days: 7
