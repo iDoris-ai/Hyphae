@@ -742,6 +742,8 @@ func TestAttemptSend_UnknownEncryptionOrCompressionKeepsQueue(t *testing.T) {
 func testHistoryEvent(t *testing.T, content string, tags nostr.Tags) nostr.Event {
 	t.Helper()
 	secret := nostr.Generate()
+	recipient := nostr.Generate().Public()
+	tags = append(nostr.Tags{{"p", hex.EncodeToString(recipient[:])}, {"c", AgentTag}, {"v", AgentVersion}}, tags...)
 	event := nostr.Event{
 		CreatedAt: nostr.Now(),
 		Kind:      AgentKind,
@@ -883,6 +885,41 @@ func TestOutboxUpdatesAcrossProcesses(t *testing.T) {
 		assert.False(t, exists, "each enqueue must get a unique queue id")
 		queueIDs[entry.QueueID] = struct{}{}
 	}
+}
+
+func TestOutboxClearSnapshotPreservesEntryAddedByAnotherProcess(t *testing.T) {
+	setupTempOutbox(t)
+	seed := &types.Outbox{Entries: []types.OutboxEntry{{
+		ID: "failed-before-prompt", QueueID: "queue-before-prompt", Status: "failed", RetryCount: 3,
+	}}}
+	require.NoError(t, SaveOutbox(seed))
+	snapshot, err := LoadOutbox()
+	require.NoError(t, err)
+	require.Len(t, snapshot.Entries, 1)
+
+	// Model a second process enqueueing while the CLI waits for the user's
+	// clear confirmation. The confirmed snapshot must not delete this later
+	// entry when the clear operation reloads and mutates the latest file.
+	cmd := exec.Command(os.Args[0], "-test.run=^TestOutboxProcessHelper$")
+	cmd.Env = append(os.Environ(), "HYPHAE_OUTBOX_HELPER_ID=arrived-during-clear-prompt")
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(output))
+
+	updated, removed, err := clearConfirmedOutboxEntries(snapshot.Entries)
+	require.NoError(t, err)
+	assert.Equal(t, 1, removed)
+	require.Len(t, updated.Entries, 1)
+	assert.Equal(t, "arrived-during-clear-prompt", updated.Entries[0].RecipientNpub)
+	assert.Equal(t, "pending", updated.Entries[0].Status)
+
+	path, err := GetOutboxPath()
+	require.NoError(t, err)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var persisted types.Outbox
+	require.NoError(t, json.Unmarshal(data, &persisted), "cross-process clear must leave valid complete JSON")
+	require.Len(t, persisted.Entries, 1)
+	assert.Equal(t, updated.Entries[0].QueueID, persisted.Entries[0].QueueID)
 }
 
 func TestUpdateOutboxDoesNotOverwriteCorruptJSON(t *testing.T) {

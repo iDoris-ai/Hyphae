@@ -1,6 +1,7 @@
 package messaging
 
 import (
+	"fmt"
 	"sync"
 
 	"fiatjaf.com/nostr"
@@ -111,6 +112,9 @@ func GetReceivedCount(ms *types.MessageStore, userNpub string) (int, error) {
 
 // StoreOutgoingMessage stores a sent message
 func StoreOutgoingMessage(event *nostr.Event, recipientNpub string, plaintext string, isEncrypted bool) error {
+	if err := ValidateAgentMessageEvent(event); err != nil {
+		return fmt.Errorf("refuse to store non-message event: %w", err)
+	}
 	s, err := GetStore()
 	if err != nil {
 		return err
@@ -121,6 +125,9 @@ func StoreOutgoingMessage(event *nostr.Event, recipientNpub string, plaintext st
 
 // StoreIncomingMessage stores a received message
 func StoreIncomingMessage(event *nostr.Event, plaintext string, isEncrypted bool) error {
+	if err := ValidateAgentMessageEvent(event); err != nil {
+		return fmt.Errorf("refuse to store non-message event: %w", err)
+	}
 	s, err := GetStore()
 	if err != nil {
 		return err
@@ -132,6 +139,9 @@ func StoreIncomingMessage(event *nostr.Event, plaintext string, isEncrypted bool
 // StoreIncomingMessageOnce persists the first arrival for an explicit recipient.
 // Callers must verify the event signature, kind, and filter conditions first.
 func StoreIncomingMessageOnce(event *nostr.Event, recipientNpub, plaintext string, isEncrypted bool) (bool, error) {
+	if err := ValidateAgentMessageEvent(event); err != nil {
+		return false, fmt.Errorf("refuse to store non-message event: %w", err)
+	}
 	s, err := GetStore()
 	if err != nil {
 		return false, err

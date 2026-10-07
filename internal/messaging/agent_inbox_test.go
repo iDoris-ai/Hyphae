@@ -411,7 +411,11 @@ func runAgentInboxCLI(ctx context.Context, args []string) error {
 
 func makeInboxEvent(t *testing.T, recipient nostr.PubKey, sender nostr.SecretKey, created nostr.Timestamp, content string, extra nostr.Tags) nostr.Event {
 	t.Helper()
-	tags := nostr.Tags{{"p", hex.EncodeToString(recipient[:])}}
+	tags := nostr.Tags{
+		{"p", hex.EncodeToString(recipient[:])},
+		{"c", AgentTag},
+		{"v", AgentVersion},
+	}
 	tags = append(tags, extra...)
 	event := nostr.Event{CreatedAt: created, Kind: AgentKind, Tags: tags, Content: content}
 	require.NoError(t, event.Sign(sender))

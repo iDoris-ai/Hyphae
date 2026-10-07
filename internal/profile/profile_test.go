@@ -1,6 +1,8 @@
 package profile
 
 import (
+	"encoding/hex"
+	"strings"
 	"testing"
 
 	"fiatjaf.com/nostr"
@@ -177,7 +179,26 @@ func TestEventToProfile_MissingTag(t *testing.T) {
 
 	_, err := EventToProfile(event)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "missing profile tag")
+	assert.Contains(t, err.Error(), "requires exactly one non-empty c tag")
+}
+
+func TestEventToProfileRejectsMessageDiscriminator(t *testing.T) {
+	sender := nostr.Generate()
+	recipient := nostr.Generate().Public()
+	event := &nostr.Event{
+		CreatedAt: nostr.Now(),
+		Kind:      ProfileKind,
+		Tags: nostr.Tags{
+			{"c", "agent"}, {"v", "v1"}, {"p", hex.EncodeToString(recipient[:])},
+			{"d", "agent-message:" + strings.Repeat("a", 64)},
+		},
+		Content: `{"name":"Not a profile"}`,
+		PubKey:  sender.Public(),
+	}
+	require.NoError(t, event.Sign(sender))
+
+	_, err := EventToProfile(event)
+	require.Error(t, err)
 }
 
 func TestIsProfileEvent(t *testing.T) {
@@ -206,7 +227,7 @@ func TestIsProfileEvent(t *testing.T) {
 func TestBuildFilter(t *testing.T) {
 	filter := BuildFilter(nil, 0)
 	assert.Equal(t, []nostr.Kind{ProfileKind}, filter.Kinds)
-	assert.Equal(t, nostr.TagMap{"c": []string{ProfileTag}}, filter.Tags)
+	assert.Equal(t, nostr.TagMap{"c": []string{ProfileTag}, "d": []string{ProfileDTag}}, filter.Tags)
 	assert.Empty(t, filter.Authors)
 	assert.Zero(t, filter.Limit)
 
