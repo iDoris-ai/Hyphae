@@ -11,6 +11,7 @@ import (
 	"fiatjaf.com/nostr"
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/internal/relay"
+	"github.com/iDoris-ai/hyphae/internal/relayquery"
 	"github.com/iDoris-ai/hyphae/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -90,6 +91,86 @@ waitForOverlap:
 	case <-time.After(3 * time.Second):
 		t.Fatal("watcher did not stop after context cancellation")
 	}
+}
+
+func TestWatchAgentInboxReceivesLatePublishedOldCreatedEvent(t *testing.T) {
+	recipient, recipientPK := setupAgentInbox(t)
+	store, err := GetStore()
+	require.NoError(t, err)
+	handler, closeRelay, err := relay.New(relay.Config{Address: "127.0.0.1:0", DataDir: t.TempDir()})
+	require.NoError(t, err)
+	server := httptest.NewServer(handler)
+	t.Cleanup(func() {
+		server.Close()
+		closeRelay()
+	})
+	relayURL := "ws" + strings.TrimPrefix(server.URL, "http")
+
+	watchCtx, cancelWatch := context.WithCancel(context.Background())
+	updates := make(chan AgentInboxWatchUpdate, 16)
+	watchDone := make(chan error, 1)
+	go func() {
+		watchDone <- WatchAgentInboxWithStore(watchCtx, recipient.Nickname, []string{relayURL}, store, func(update AgentInboxWatchUpdate) {
+			updates <- update
+		})
+	}()
+	t.Cleanup(func() {
+		cancelWatch()
+		select {
+		case <-watchDone:
+		case <-time.After(3 * time.Second):
+			t.Error("watcher did not stop during cleanup")
+		}
+	})
+
+	connected := false
+	connectDeadline := time.NewTimer(5 * time.Second)
+	defer connectDeadline.Stop()
+	for !connected {
+		select {
+		case update := <-updates:
+			if update.Err != nil && !update.Connected {
+				continue
+			}
+			connected = update.Connected && update.Err == nil
+		case <-connectDeadline.C:
+			t.Fatal("inbox watcher did not connect to the relay")
+		}
+	}
+
+	// This event was signed before the receiver's history scan but is only
+	// published after the live subscription is established, matching a durable
+	// outbox retry after the relay comes back online. A CreatedAt-based overlap
+	// cursor must not silently discard it.
+	createdAt := nostr.Now() - 10
+	event := makeInboxEvent(t, recipientPK, nostr.Generate(), createdAt, "late published offline event", nil)
+	publishCtx, cancelPublish := context.WithTimeout(context.Background(), 3*time.Second)
+	publisher, err := nostr.RelayConnect(publishCtx, relayURL, nostr.RelayOptions{})
+	require.NoError(t, err)
+	require.NoError(t, publisher.Publish(publishCtx, event))
+	publisher.Close()
+	cancelPublish()
+
+	oldOverlapFilter := BuildAgentMessageFilter(recipientPK.Hex())
+	oldOverlapFilter.Since = nostr.Now() - 1
+	historyCtx, cancelHistory := context.WithTimeout(context.Background(), 3*time.Second)
+	page, err := relayquery.Fetch(historyCtx, relayURL, oldOverlapFilter)
+	cancelHistory()
+	require.NoError(t, err)
+	assert.Empty(t, page.Events, "the previous 1-second CreatedAt overlap would have filtered out this unpublished-then-late event")
+
+	select {
+	case update := <-updates:
+		require.NoError(t, update.Err)
+		require.NotNil(t, update.Message)
+		assert.Equal(t, event.ID.Hex(), update.Message.EventID)
+		assert.Equal(t, "late published offline event", update.Message.Content)
+	case <-time.After(5 * time.Second):
+		t.Fatal("watcher did not receive the late-published event with an old CreatedAt")
+	}
+	stored, err := mustGetStoredMessage(t, event.ID.Hex())
+	require.NoError(t, err)
+	require.NotNil(t, stored, "late-published event must be durable in receiver history")
 }
 
 func TestWatchAgentInboxWithStoreRejectsInvalidInputs(t *testing.T) {
