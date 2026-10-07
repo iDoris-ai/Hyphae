@@ -2,12 +2,12 @@
 
 ## 当前快照（2026-10-06）
 
-- Agent24 #676 已合并至 `fc862cf3f765f3e59686e816aea6fa4792f10da2`；Hyphae #121 已合并至 `3fc1f02f67d6845fc8f1d08dd3bba44d7b678d6b`。本机 Hyphae 回归：runner 25 项、scripts suite 36 项与 `go test ./...` 全通过。具体固定基线、限制与交接见 [2026-10-06 联调交接](handoff-20261006.md)。
-- Agent24 main CI run `37460220289` 首次 Linux scheduler 单测失败（58 pass / 1 fail），但仅重跑失败项的 attempt 2 已全部 SUCCESS。该测试文件未被 #676 修改；本机定向重复 5 次通过，不能据此抹去首次 CI failure。
-- Hyphae #122 当前 CI run `37461668800` 仍 FAILURE：Ubuntu 和 CLA 通过；macOS Python tools 73 项中 1 项失败，`test_timeout_does_not_leak_descendants_holding_output_pipe` 得到 `child-cleanup-failed` 而非预期 `child-timeout`。本轮 PR 只改文档，失败测试代码属于既有 runner；建议对 macOS failed job 单独重跑一次作分类，若复现则另开 cleanup 生命周期修复。
-- T20 本机 CLI/relay merged-source 联调已完成：Agent24 `fc862cf` CLI/agent24d 与 lock 指向的 Hyphae `671c584` CLI/relay 精确匹配并通过 runner 十项验收；证据 hash 与二进制 hash 见[交接文档](handoff-20261006.md)。这不等于 E-M1 完成。
-- COMM6a 正由两位本机 Luna 分别推进 API 与 UI；COMM6b/COMM7、T01-E、T07、T19 尚未完成。E-M1 整体尚未完成，E-M2～E-M5 尚未启动。
-- #673 已批准合并其 `ab/m1-memory` 分支（不是 main）；#671 CI failed，暂不合并，且不属于本 COMM lane 修复范围。
+- GitHub 查询时 Hyphae main/#128 base tip 为 `03a44abb2af5b8ea9aaa341b7149a98f43ed2c3a`；交接中的 `8bbaeb8` 是 #122 合并后的历史 CLI/CI 基线，不代表当前 main。PR #128 当前 head `217115c21e00f6a9286573f4850c2e6ef00121e4` 的 run `37469204603` 阻塞：macOS job `112287952894` / `Test Python tools` step 中 73 tests 有 1 fail，同一 timeout fixture 期望 `child-timeout`、实收 `child-cleanup-failed`；Ubuntu job、CLA 与 macOS 其余 Go 检查成功。CI Python 是 3.14.7，本机 Python 3.14.6 定向重复该 fixture 5/5 PASS，根因仍未明。该 head 的 clestons APPROVED 不能用于更新后的 head，CI 未全绿且 PR 不能合并；更新 head 后须重新请求 PR-Daemon 审批。详见[交接记录](handoff-20261006.md)。此前 PR #122 head `31c0cd2` fresh CI run `37463001377` 全绿并已合并；该历史成功与 #128 当前失败分别记录，不相互覆盖。真实 CLI 十阶段联调 PASS 与这次文档 PR CI blocker 是不同验收范围。
+- Agent24 #676 已合并至 `fc862cf3f765f3e59686e816aea6fa4792f10da2`。main CI run `37460220289` 首次 Linux scheduler failure 保留记录，但 attempt 2 重跑所有 jobs 已成功；该测试文件不在 #676 改动中。
+- T20 本机 merged-source CLI/relay 联调已完成：Agent24 `fc862cf` CLI/agent24d 与 production lock 指向的 Hyphae `671c584` CLI/relay hash 精确匹配，通过 runner 十项真实验收。它只完成 T20 本机 CLI 范围，不代表 E-M1 完成。
+- COMM6a API PR #678 已合并 commit `331666aecf37c55f2551ec7f75ca979e8c91215f`；UI PR #679 精确 head `47b2bc5a2260b01f2f07083c15026fb258447b17` 获 clestons 批准、required checks 全绿，已合并 commit `5e0b8506427d9dee890d05245b84bf1013b60160`。API/UI targeted component tests 16/16、typecheck 通过；尚未完成桌面+真实 relay 端到端验收。
+- #679 合并后仍需桌面+真实 relay 验收；下一批先 COMM6b 配置管理，再 COMM7 消息/history/outbox。T01-E 执行链合同为硬 gate，不可跳过。COMM6b/COMM7、T01-E、T07、T19 仍未完成；E-M1 整体尚未完成，E-M2～E-M5 尚未启动。更完整范围与证据见[2026-10-06 联调交接](handoff-20261006.md)。
+- Agent24 #673 与 #677 均已合并到 `ab/m1-memory` 分支而非 main；#671 CI failed，暂不合并，且不属于本 COMM lane 修复范围。
 
 ## 工作方式
 
