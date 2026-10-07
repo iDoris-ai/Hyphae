@@ -5,16 +5,17 @@ import (
 	"fmt"
 
 	"fiatjaf.com/nostr"
+	"github.com/iDoris-ai/hyphae/internal/wireevent"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 )
 
 const (
 	// ProfileKind is the nostr kind for agent profiles (Kind 30078 extension)
-	ProfileKind = 30078
+	ProfileKind = wireevent.Kind30078
 	// ProfileTag marks this as a profile event
-	ProfileTag = "profile"
+	ProfileTag = wireevent.ProfileCategory
 	// ProfileDTag is the 'd' tag value for parameterized replaceable events
-	ProfileDTag = "agent-profile"
+	ProfileDTag = wireevent.ProfileDTag
 )
 
 // ProfileToEvent converts an AgentProfile to a nostr Event
@@ -47,17 +48,12 @@ func EventToProfile(event *nostr.Event) (*types.AgentProfile, error) {
 	if event.Kind != ProfileKind {
 		return nil, fmt.Errorf("expected kind %d, got %d", ProfileKind, event.Kind)
 	}
-
-	// Verify it's a profile event
-	isProfile := false
-	for _, tag := range event.Tags {
-		if len(tag) >= 2 && tag[0] == "c" && tag[1] == ProfileTag {
-			isProfile = true
-			break
-		}
+	class, err := wireevent.Classify30078(event.Tags)
+	if err != nil {
+		return nil, fmt.Errorf("classify profile event: %w", err)
 	}
-	if !isProfile {
-		return nil, fmt.Errorf("event missing profile tag")
+	if class != wireevent.ClassProfile {
+		return nil, fmt.Errorf("kind 30078 event is not an agent profile")
 	}
 
 	profile, err := types.AgentProfileFromJSON([]byte(event.Content))
@@ -71,22 +67,18 @@ func EventToProfile(event *nostr.Event) (*types.AgentProfile, error) {
 
 // IsProfileEvent checks if a nostr event is an agent profile event
 func IsProfileEvent(event *nostr.Event) bool {
-	if event.Kind != ProfileKind {
+	if event == nil || event.Kind != ProfileKind {
 		return false
 	}
-	for _, tag := range event.Tags {
-		if len(tag) >= 2 && tag[0] == "c" && tag[1] == ProfileTag {
-			return true
-		}
-	}
-	return false
+	class, err := wireevent.Classify30078(event.Tags)
+	return err == nil && class == wireevent.ClassProfile
 }
 
 // BuildFilter creates a nostr filter for agent profile events
 func BuildFilter(authors []nostr.PubKey, limit int) nostr.Filter {
 	filter := nostr.Filter{
 		Kinds: []nostr.Kind{ProfileKind},
-		Tags:  nostr.TagMap{"c": []string{ProfileTag}},
+		Tags:  nostr.TagMap{"c": []string{ProfileTag}, "d": []string{ProfileDTag}},
 	}
 	if len(authors) > 0 {
 		filter.Authors = authors

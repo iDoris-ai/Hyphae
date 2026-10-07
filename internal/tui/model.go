@@ -372,21 +372,30 @@ func (m *ChatModel) sendMessage(content string) tea.Cmd {
 		if err != nil {
 			return messageSentMsg{err: fmt.Errorf("compress: %w", err)}
 		}
+		createdAt := nostr.Now()
+		dTag, err := messaging.NewAgentMessageDTag(compressed, createdAt)
+		if err != nil {
+			return messageSentMsg{err: fmt.Errorf("generate message d tag: %w", err)}
+		}
 
 		tags := nostr.Tags{
 			{"p", common.PubKeyToHex(recipientPK)},
 			{"c", messaging.AgentTag},
 			{"z", messaging.CompressTag},
 			{"v", messaging.AgentVersion},
+			{"d", dTag},
 			{"enc", "nip44"},
 		}
 
 		event := &nostr.Event{
-			CreatedAt: nostr.Now(),
+			CreatedAt: createdAt,
 			Kind:      messaging.AgentKind,
 			Tags:      tags,
 			Content:   compressed,
 			PubKey:    senderSK.Public(),
+		}
+		if err := messaging.ValidateAgentMessageEvent(event); err != nil {
+			return messageSentMsg{err: fmt.Errorf("validate message tags: %w", err)}
 		}
 		event.Sign(senderSK)
 
