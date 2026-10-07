@@ -37,6 +37,12 @@ func TestVerifyIncomingChecksSignatureEncryptionAndRecipient(t *testing.T) {
 	_, err = VerifyIncoming(duplicateRecipient, bob)
 	require.Error(t, err)
 
+	badClassifierTag := event
+	badClassifierTag.Tags = append(badClassifierTag.Tags, nostr.Tag{"d", "agent-profile"})
+	require.NoError(t, badClassifierTag.Sign(alice))
+	_, err = VerifyIncoming(badClassifierTag, bob)
+	require.Error(t, err, "shared kind-30078 classifier must reject conflicting tags")
+
 	plain := testAgentEvent(t, payload, alice, bob, false)
 	_, err = VerifyIncoming(plain, bob)
 	require.Error(t, err, "group messages require NIP-44 encryption")

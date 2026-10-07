@@ -22,17 +22,33 @@ func TestEnvelopeCodecStrictTypedAndBounded(t *testing.T) {
 	decoded, err := Decode(encoded)
 	require.NoError(t, err)
 	require.Equal(t, envelope, decoded)
+	boundary := encoded + strings.Repeat(" ", MaxEnvelope-len(encoded))
+	require.Len(t, boundary, MaxEnvelope)
+	_, err = Decode(boundary)
+	require.NoError(t, err, "exactly 32 KiB is within the envelope limit")
+	_, err = Decode(boundary + " ")
+	require.ErrorContains(t, err, "exceeds")
 
 	_, err = Decode(`{"type":"message","body":"normal json"}`)
 	require.ErrorIs(t, err, ErrNotEnvelope)
+	_, err = Decode(ReservedPrefix + "missing-version-separator")
+	require.Error(t, err, "malformed reserved magic must fail closed")
 	_, err = Decode("hyphae.group/v9\n{}")
 	require.ErrorIs(t, err, ErrUnsupportedVersion)
+	_, err = Decode(MagicV1 + `{"type":"unknown","version":1,"group_id":"00000000000000000000000000000000"}`)
+	require.Error(t, err, "unknown envelope type must be rejected")
 	_, err = Decode(MagicV1 + `{"type":"message","type":"message"}`)
 	require.Error(t, err)
 	_, err = Decode(MagicV1 + `{"type":"message","version":1,"group_id":"00000000000000000000000000000000","logical_id":"00000000000000000000000000000000","body":"x","extra":true}`)
 	require.Error(t, err)
 	_, err = Decode(MagicV1 + `{"type":"message","version":1,"group_id":"00000000000000000000000000000000","logical_id":"00000000000000000000000000000000","body":"x"} {}`)
 	require.Error(t, err)
+	invalidUTF8 := MagicV1 + `{"type":"message","version":1,"group_id":"00000000000000000000000000000000","logical_id":"00000000000000000000000000000000","body":"` + string([]byte{0xff}) + `"}`
+	_, err = Decode(invalidUTF8)
+	require.Error(t, err, "JSON decoder must not normalize invalid UTF-8")
+	tooLarge := MagicV1 + strings.Repeat(" ", MaxEnvelope)
+	_, err = Decode(tooLarge)
+	require.ErrorContains(t, err, "exceeds")
 
 	bad := envelope
 	bad.Members = []string{alice, alice}
@@ -46,6 +62,9 @@ func TestEnvelopeCodecStrictTypedAndBounded(t *testing.T) {
 	bad.Body = "bad\x00body"
 	_, err = Encode(bad)
 	require.Error(t, err)
+	bad.Body = string([]byte{0xff})
+	_, err = Encode(bad)
+	require.Error(t, err, "encoder must reject invalid UTF-8")
 	bad.Body = strings.Repeat("好", MaxBodyRunes+1)
 	_, err = Encode(bad)
 	require.Error(t, err)

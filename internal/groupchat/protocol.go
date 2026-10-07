@@ -143,6 +143,9 @@ func Decode(content string) (Envelope, error) {
 	if !strings.HasPrefix(content, ReservedPrefix) {
 		return Envelope{}, ErrNotEnvelope
 	}
+	if !utf8.ValidString(content) {
+		return Envelope{}, errors.New("group envelope must be valid UTF-8")
+	}
 	if len(content) > MaxEnvelope {
 		return Envelope{}, fmt.Errorf("group envelope exceeds %d bytes", MaxEnvelope)
 	}
