@@ -1,8 +1,10 @@
 import json
+import signal
 import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import tui_offline_pty_acceptance as runner
@@ -29,6 +31,21 @@ class AcceptanceRunnerTests(unittest.TestCase):
         screen.feed(b"\x1b]11;?\x07\x1b[2J\x1b[HChat open")
         self.assertIn("Chat open", screen.text())
         self.assertNotIn("11;?", screen.text())
+
+    def test_owned_tui_child_surviving_sigkill_fails_closed(self):
+        process = object.__new__(runner.PtyProcess)
+        process.pid = 4242
+        process.fd = -1
+        with mock.patch.object(process, "wait", side_effect=[False, False]), \
+             mock.patch.object(runner.os, "kill") as kill, \
+             mock.patch.object(runner.os, "close") as close:
+            with self.assertRaisesRegex(RuntimeError, "owned TUI child did not stop after SIGKILL"):
+                process.stop()
+        self.assertEqual(kill.call_args_list, [
+            mock.call(4242, signal.SIGTERM),
+            mock.call(4242, signal.SIGKILL),
+        ])
+        close.assert_not_called()
 
     def test_gap_is_opt_in_and_never_passes_by_default(self):
         script = Path(runner.__file__).resolve()
