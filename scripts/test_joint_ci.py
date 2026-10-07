@@ -15,6 +15,20 @@ def sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def binary_fixture(platform: str, suffix: bytes = b"fixture") -> bytes:
+    header = bytearray(64)
+    if platform == "darwin-arm64":
+        header[:4] = b"\xcf\xfa\xed\xfe"
+        header[4:8] = (0x0100000C).to_bytes(4, "little")
+    elif platform == "linux-x64":
+        header[:4] = b"\x7fELF"
+        header[4:6] = bytes((2, 1))
+        header[18:20] = (62).to_bytes(2, "little")
+    else:
+        raise AssertionError(f"unexpected test platform: {platform}")
+    return bytes(header) + suffix
+
+
 def production_lock() -> bytes:
     return json.dumps({
         "schema": 1,
@@ -81,6 +95,35 @@ class JointCIGateTests(unittest.TestCase):
                                                declared_production_sha256=sha(self.prod),
                                                declared_derived_sha256=sha(derived))
 
+    def test_wrong_platform_producer_output_fails_closed_for_both_targets(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "manifest.json"
+            for actual_platform, expected_platform in (
+                ("linux-x64", "darwin-arm64"),
+                ("darwin-arm64", "linux-x64"),
+            ):
+                manifest = {"platform": actual_platform, "hyphae_source_sha": "a" * 40}
+                path.write_text(json.dumps(manifest))
+                with self.subTest(actual=actual_platform, expected=expected_platform):
+                    with self.assertRaisesRegex(joint_ci.GateError, "manifest-platform"):
+                        joint_ci.check_producer_outputs(
+                            path, manifest, expected_manifest_sha256=sha(path.read_bytes()),
+                            expected_platform=expected_platform, expected_hyphae_sha="a" * 40)
+
+    def test_binary_platform_gate_accepts_native_and_rejects_mixed_artifacts(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            linux = root / "linux-binary"
+            linux.write_bytes(binary_fixture("linux-x64"))
+            darwin = root / "darwin-binary"
+            darwin.write_bytes(binary_fixture("darwin-arm64"))
+            joint_ci.verify_binary_platform(linux, "linux-x64")
+            joint_ci.verify_binary_platform(darwin, "darwin-arm64")
+            with self.assertRaisesRegex(joint_ci.GateError, "artifact-platform-mismatch"):
+                joint_ci.verify_binary_platform(linux, "darwin-arm64")
+            with self.assertRaisesRegex(joint_ci.GateError, "artifact-platform-mismatch"):
+                joint_ci.verify_binary_platform(darwin, "linux-x64")
+
     def test_producer_output_binary_or_lock_hash_mismatch_rejected(self):
         manifest = {"validation_mode": "candidate", "platform": "linux-x64",
                     "hyphae_source_sha": "a" * 40, "production_lock_sha256": "c" * 64,
@@ -108,7 +151,7 @@ class JointCIGateTests(unittest.TestCase):
             artifact.mkdir()
             hashes = {}
             for name in joint_ci.ARTIFACTS:
-                content = ("safe-" + name).encode()
+                content = binary_fixture("darwin-arm64", ("safe-" + name).encode())
                 (artifact / name).write_bytes(content)
                 hashes[name] = sha(content)
             derived = joint_ci.derive_lock(self.prod, platform="darwin-arm64",
@@ -206,6 +249,9 @@ class JointCIGateTests(unittest.TestCase):
                 "binary_sha256": manifest["binary_sha256"],
                 "manifest_sha256": sha(manifest_path.read_bytes()),
             }
+            def assert_no_exec_modes():
+                self.assertTrue(all((artifact / name).stat().st_mode & 0o111 == 0
+                                    for name in joint_ci.ARTIFACTS))
             with mock.patch.object(joint_ci.os, "fchmod") as chmod:
                 with self.assertRaisesRegex(joint_ci.GateError, "manifest-producer-hash"):
                     joint_ci.verify_consumer_bundle(
@@ -213,6 +259,7 @@ class JointCIGateTests(unittest.TestCase):
                         expected_platform="linux-x64", expected_hyphae_sha="a" * 40,
                         expected_outputs=outputs)
                 chmod.assert_not_called()
+                assert_no_exec_modes()
                 wrong_outputs = dict(outputs)
                 wrong_outputs["derived_lock_sha256"] = "0" * 64
                 with self.assertRaisesRegex(joint_ci.GateError, "producer-output-mismatch"):
@@ -221,6 +268,9 @@ class JointCIGateTests(unittest.TestCase):
                         expected_platform="linux-x64", expected_hyphae_sha="a" * 40,
                         expected_outputs=wrong_outputs)
                 chmod.assert_not_called()
+                assert_no_exec_modes()
+                # agent24d is last in ARTIFACTS; reject it before changing
+                # permissions on any earlier binary.
                 (artifact / "agent24d").write_bytes(b"altered")
                 with self.assertRaisesRegex(joint_ci.GateError, "artifact-hash-mismatch"):
                     joint_ci.verify_consumer_bundle(
@@ -228,6 +278,98 @@ class JointCIGateTests(unittest.TestCase):
                         expected_platform="linux-x64", expected_hyphae_sha="a" * 40,
                         expected_outputs=outputs)
                 chmod.assert_not_called()
+                assert_no_exec_modes()
+
+    def test_pinned_production_requires_exact_lock_bytes_cli_hash_and_complete_set(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            artifact = root / "artifact"
+            artifact.mkdir()
+            hashes = {name: sha(binary_fixture("linux-x64", name.encode()))
+                      for name in joint_ci.ARTIFACTS}
+            lock_value = json.loads(self.prod)
+            lock_value["binaries"]["linux-x64"] = hashes["hyphae"]
+            pinned_lock = json.dumps(lock_value, sort_keys=True, indent=2).encode() + b"\n"
+            joint_ci.PRODUCTION_LOCK_SHA256 = sha(pinned_lock)
+            self.prod = pinned_lock
+            for name in joint_ci.ARTIFACTS:
+                (artifact / name).write_bytes(binary_fixture("linux-x64", name.encode()))
+            (artifact / "hyphae.lock.json").write_bytes(pinned_lock)
+            manifest = joint_ci.make_manifest(
+                mode="pinned-production", platform="linux-x64", hyphae_sha=lock_value["source_sha"],
+                agent24_sha=joint_ci.AGENT24_BASE_SHA, production_lock_sha256=sha(pinned_lock),
+                derived_lock_sha256=sha(pinned_lock), hashes=hashes)
+            manifest_path = artifact / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+            production_path = root / "production.lock.json"
+            production_path.write_bytes(pinned_lock)
+
+            self.assertEqual(joint_ci.validate_manifest(manifest_path, artifact, production_path), manifest)
+
+            (artifact / "hyphae.lock.json").write_bytes(pinned_lock + b" ")
+            with self.assertRaisesRegex(joint_ci.GateError, "production-lock-not-preserved"):
+                joint_ci.validate_manifest(manifest_path, artifact, production_path)
+            (artifact / "hyphae.lock.json").write_bytes(pinned_lock)
+
+            (artifact / "agent24").write_bytes(binary_fixture("linux-x64", b"tampered-cli"))
+            with self.assertRaisesRegex(joint_ci.GateError, "artifact-hash-mismatch"):
+                joint_ci.validate_manifest(manifest_path, artifact, production_path)
+            (artifact / "agent24").write_bytes(binary_fixture("linux-x64", b"agent24"))
+
+            (artifact / "relay").unlink()
+            with self.assertRaisesRegex(joint_ci.GateError, "artifact-file-set"):
+                joint_ci.validate_manifest(manifest_path, artifact, production_path)
+
+    def test_post_mode_restore_hash_change_fails_consumer_before_runner(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            artifact = root / "artifact"
+            artifact.mkdir()
+            hashes = {}
+            for name in joint_ci.ARTIFACTS:
+                content = binary_fixture("linux-x64", name.encode())
+                (artifact / name).write_bytes(content)
+                hashes[name] = sha(content)
+            derived = joint_ci.derive_lock(self.prod, platform="linux-x64", hyphae_sha="a" * 40,
+                                           hyphae_binary_sha256=hashes["hyphae"])
+            (artifact / "hyphae.lock.json").write_bytes(derived)
+            manifest = joint_ci.make_manifest(
+                mode="candidate", platform="linux-x64", hyphae_sha="a" * 40,
+                agent24_sha=joint_ci.AGENT24_BASE_SHA, production_lock_sha256=sha(self.prod),
+                derived_lock_sha256=sha(derived), hashes=hashes)
+            manifest_path = artifact / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+            production_path = root / "production.lock.json"
+            production_path.write_bytes(self.prod)
+            outputs = {
+                "validation_mode": manifest["validation_mode"], "platform": manifest["platform"],
+                "hyphae_source_sha": manifest["hyphae_source_sha"],
+                "production_lock_sha256": manifest["production_lock_sha256"],
+                "derived_lock_sha256": manifest["derived_lock_sha256"],
+                "binary_sha256": manifest["binary_sha256"],
+                "manifest_sha256": sha(manifest_path.read_bytes()),
+            }
+            real_fchmod = joint_ci.os.fchmod
+            calls = 0
+
+            def chmod_then_tamper(descriptor, mode):
+                nonlocal calls
+                real_fchmod(descriptor, mode)
+                calls += 1
+                if calls == len(joint_ci.ARTIFACTS):
+                    with (artifact / "agent24d").open("r+b") as stream:
+                        stream.write(b"corrupt")
+
+            with mock.patch.object(joint_ci.os, "fchmod", side_effect=chmod_then_tamper):
+                with self.assertRaisesRegex(joint_ci.GateError, "artifact-changed-during-mode-restore"):
+                    joint_ci.verify_consumer_bundle(
+                        manifest_path, artifact, production_path,
+                        expected_manifest_sha256=outputs["manifest_sha256"],
+                        expected_platform="linux-x64", expected_hyphae_sha="a" * 40,
+                        expected_outputs=outputs)
+            self.assertEqual(calls, len(joint_ci.ARTIFACTS))
+            self.assertTrue(all((artifact / name).stat().st_mode & 0o111 == 0o111
+                                for name in joint_ci.ARTIFACTS))
 
     def test_rejects_unexpected_lock_field_change(self):
         derived = joint_ci.derive_lock(self.prod, platform="linux-x64",
@@ -271,11 +413,30 @@ class JointCIGateTests(unittest.TestCase):
                                                    "cleanup_failure": {"stage": "term-signal", "category": "EPERM", "errno": 1}}])
 
     def test_workflow_has_no_fork_secrets_or_persisted_git_credentials(self):
-        workflow = (Path(__file__).parents[1] / ".github/workflows/joint-ci.yml").read_text()
+        workflows = Path(__file__).parents[1] / ".github/workflows"
+        workflow = (workflows / "joint-ci.yml").read_text()
+        producer = (workflows / "joint-ci-producer.yml").read_text()
         self.assertNotIn("pull_request_target", workflow)
-        self.assertNotIn("secrets.", workflow)
+        self.assertNotIn("secrets.", workflow + producer)
         self.assertIn("permissions:\n  contents: read", workflow)
-        self.assertGreaterEqual(workflow.count("persist-credentials: false"), 4)
+        self.assertGreaterEqual((workflow + producer).count("persist-credentials: false"), 5)
+
+    def test_each_platform_has_independent_producer_outputs_and_scoped_evidence(self):
+        workflows = Path(__file__).parents[1] / ".github" / "workflows"
+        workflow = (workflows / "joint-ci.yml").read_text()
+        producer = (workflows / "joint-ci-producer.yml").read_text()
+        self.assertIn("produce_linux:", workflow)
+        self.assertIn("produce_darwin:", workflow)
+        self.assertIn("needs.produce_linux.outputs.candidate_outputs", workflow)
+        self.assertIn("needs.produce_linux.outputs.production_outputs", workflow)
+        self.assertIn("needs.produce_darwin.outputs.candidate_outputs", workflow)
+        self.assertIn("needs.produce_darwin.outputs.production_outputs", workflow)
+        self.assertIn("joint-bundles-${{ inputs.platform }}-${{ github.run_id }}", producer)
+        self.assertIn("joint-bundles-${{ matrix.platform }}-${{ github.run_id }}", workflow)
+        self.assertIn("joint-evidence-${{ matrix.mode }}-${{ matrix.platform }}-${{ github.run_id }}", workflow)
+        self.assertIn("linux-x64:Linux:x86_64", producer)
+        self.assertIn("darwin-arm64:Darwin:arm64", producer)
+        self.assertIn("--expected-platform \"$TARGET_PLATFORM\"", workflow)
 
 
 if __name__ == "__main__":

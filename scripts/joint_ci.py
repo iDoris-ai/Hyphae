@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import struct
 import sys
 from typing import Any
 
@@ -109,6 +110,39 @@ def file_sha(path: Path) -> str:
         raise GateError("artifact-unreadable") from None
 
 
+def verify_binary_platform(path: Path, platform: str) -> None:
+    """Fail closed unless a regular executable has the requested native format."""
+    require(platform in PLATFORM_KEYS, "producer-platform-invalid")
+    try:
+        info = path.lstat()
+        require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and not path.is_symlink(),
+                "artifact-not-regular")
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            opened = os.fstat(descriptor)
+            require(stat.S_ISREG(opened.st_mode) and opened.st_nlink == 1 and opened.st_size == info.st_size,
+                    "artifact-not-regular")
+            header = os.read(descriptor, 64)
+        finally:
+            os.close(descriptor)
+    except OSError:
+        raise GateError("artifact-unreadable") from None
+    if platform in ("linux-x64", "linux-arm64"):
+        require(len(header) >= 20 and header[:4] == b"\x7fELF" and header[4] == 2,
+                "artifact-platform-mismatch")
+        endian = "little" if header[5] == 1 else "big" if header[5] == 2 else "invalid"
+        require(endian != "invalid", "artifact-platform-mismatch")
+        machine = int.from_bytes(header[18:20], endian)
+        expected_machine = 62 if platform == "linux-x64" else 183
+        require(machine == expected_machine, "artifact-platform-mismatch")
+    elif platform in ("darwin-arm64", "darwin-x64"):
+        require(len(header) >= 8 and header[:4] == b"\xcf\xfa\xed\xfe",
+                "artifact-platform-mismatch")
+        cpu_type = struct.unpack("<I", header[4:8])[0]
+        expected_cpu = 0x0100000C if platform == "darwin-arm64" else 0x01000007
+        require(cpu_type == expected_cpu, "artifact-platform-mismatch")
+
+
 def parse_json(data: bytes, label: str) -> Any:
     try:
         def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -201,6 +235,7 @@ def validate_manifest(path: Path, artifact_dir: Path, production_lock: Path) -> 
     mode = manifest.get("validation_mode")
     require(mode in ("candidate", "pinned-production"), "manifest-mode")
     platform = manifest.get("platform")
+    require(platform in PLATFORM_KEYS, "manifest-platform-invalid")
     hashes = manifest.get("binary_sha256")
     require(type(hashes) is dict and set(hashes) == set(ARTIFACTS), "manifest-binary-set")
     for name in ARTIFACTS:
@@ -289,6 +324,8 @@ def verify_consumer_bundle(manifest_path: Path, artifact_dir: Path, production_l
                            expected_platform=expected_platform,
                            expected_hyphae_sha=expected_hyphae_sha,
                            expected_outputs=expected_outputs)
+    for name in ARTIFACTS:
+        verify_binary_platform(artifact_dir / name, expected_platform)
     restore_executable_modes(artifact_dir, manifest)
     return manifest
 
@@ -392,6 +429,9 @@ def main(argv: list[str] | None = None) -> int:
     normalize.add_argument("--evidence", type=Path, required=True)
     normalize.add_argument("--manifest", type=Path, required=True)
     normalize.add_argument("--output", type=Path, required=True)
+    verify_platform = commands.add_parser("verify-platform")
+    verify_platform.add_argument("--platform", choices=sorted(PLATFORM_KEYS), required=True)
+    verify_platform.add_argument("--binary", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == "derive-lock":
@@ -415,6 +455,9 @@ def main(argv: list[str] | None = None) -> int:
             safe = normalized_evidence(args.evidence, manifest)
             args.output.write_text(json.dumps(safe, sort_keys=True, indent=2) + "\n", encoding="utf-8")
             return 0 if safe["result"] == "PASS" else 1
+        if args.command == "verify-platform":
+            verify_binary_platform(args.binary, args.platform)
+            return 0
         manifest = verify_consumer_bundle(
             args.manifest, args.artifact_dir, args.production_lock,
             expected_manifest_sha256=args.expected_manifest_sha256,

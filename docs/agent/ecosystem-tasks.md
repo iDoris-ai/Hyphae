@@ -3,7 +3,7 @@
 ## 当前快照（2026-10-07）
 
 - Hyphae PR #128 已合并。更新 head `b86a26f4c64552ed41336d81423db100ed29512e` 的 run `37470596622` macOS/Ubuntu/ci-ok 全绿，merge push run `37615070377` SUCCESS，main 为 `0b728c272491b077607941e9808c38a08f20a27d`。更早 head `217115c21e00f6a9286573f4850c2e6ef00121e4` / run `37469204603` 的 macOS timeout-cleanup fixture failure 仍作为历史结果保留；修复后新 run 是当前状态，不把旧失败称为 main blocker。详见[交接记录](handoff-20261006.md)。
-- #129 joint CI 与 #131 交接文档在独立 worktree 实现；本地 provenance helper unit tests 与 YAML parse 尚不是 Actions CI 或 candidate ten-stage 联调。#129 保留 pinned-production 与 candidate 两条来源链；candidate 只在临时 Agent24 checkout 派生 lock，不改生产 lock。macOS cleanup stress 需依赖 #130 runner 修复后再 rebase/验证；准确范围见[joint CI 验收文档](joint-ci-acceptance.md)。
+- #129/#131 已有真实 Actions 验收：run [37622440387](https://github.com/iDoris-ai/Hyphae/actions/runs/37622440387) 在 main `6c613b6` 基线上对 Linux x64 candidate/pinned-production 各通过 10/10；该旧 workflow 尚未覆盖 Mac joint runner。当前 #134 增加 native macOS ARM64 双 mode producer/consumer，新四 legs 待精确 head CI。candidate lock 仅在临时 Agent24 checkout 派生，不改生产 lock；细节见[joint CI 验收文档](joint-ci-acceptance.md)。
 - Agent24 #676 已合并至 `fc862cf3f765f3e59686e816aea6fa4792f10da2`。main CI run `37460220289` 首次 Linux scheduler failure 保留记录，但 attempt 2 重跑所有 jobs 已成功；该测试文件不在 #676 改动中。
 - T20 本机 merged-source CLI/relay 联调已完成：Agent24 `fc862cf` CLI/agent24d 与 production lock 指向的 Hyphae `671c584` CLI/relay hash 精确匹配，通过 runner 十项真实验收。它只完成 T20 本机 CLI 范围，不代表 E-M1 完成。
 - COMM6a API PR #678 已合并 commit `331666aecf37c55f2551ec7f75ca979e8c91215f`；UI PR #679 精确 head `47b2bc5a2260b01f2f07083c15026fb258447b17` 获 clestons 批准、required checks 全绿，已合并 commit `5e0b8506427d9dee890d05245b84bf1013b60160`。API/UI targeted component tests 16/16、typecheck 通过；尚未完成桌面+真实 relay 端到端验收。
