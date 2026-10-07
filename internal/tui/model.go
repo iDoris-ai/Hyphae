@@ -8,6 +8,7 @@ import (
 	"log"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"fiatjaf.com/nostr"
@@ -80,19 +81,29 @@ func safeTruncate(s string, n int) string {
 // lives in a local variable / goroutine stack. This limits exposure via core
 // dumps, debuggers, or accidental fmt.Printf("%+v", m) logging.
 type ChatModel struct {
-	viewport    viewport.Model
-	input       textinput.Model
-	messages    []types.StoredMessage
-	contactName string
-	contactNpub string
-	myIdentity  *types.Identity
-	store       *storage.MessageStore
-	db          *sql.DB
-	relays      []string
-	width       int
-	height      int
-	err         error
-	loading     bool
+	viewport              viewport.Model
+	input                 textinput.Model
+	messages              []types.StoredMessage
+	contactName           string
+	contactNpub           string
+	myIdentity            *types.Identity
+	store                 *storage.MessageStore
+	db                    *sql.DB
+	relays                []string
+	width                 int
+	height                int
+	err                   error
+	loading               bool
+	inboxCtx              context.Context
+	inboxCancel           context.CancelFunc
+	inboxUpdates          chan messaging.AgentInboxWatchUpdate
+	inboxDone             chan struct{}
+	inboxMu               sync.Mutex
+	inboxStarted          bool
+	inboxClosed           bool
+	inboxStatus           string
+	inboxReceived         int
+	messageLoadGeneration uint64
 }
 
 // NewChatModel creates a new chat model. relays may be empty, in which case
@@ -140,21 +151,38 @@ func NewChatModel(contactName string, relays ...string) (*ChatModel, error) {
 		relays = []string{defaultRelay}
 	}
 
+	inboxCtx, inboxCancel := context.WithCancel(context.Background())
 	return &ChatModel{
-		viewport:    vp,
-		input:       ti,
-		contactName: contactName,
-		contactNpub: contact.Npub,
-		myIdentity:  myIdentity,
-		store:       store,
-		db:          db,
-		relays:      relays,
-		loading:     true,
+		viewport:     vp,
+		input:        ti,
+		contactName:  contactName,
+		contactNpub:  contact.Npub,
+		myIdentity:   myIdentity,
+		store:        store,
+		db:           db,
+		relays:       relays,
+		loading:      true,
+		inboxCtx:     inboxCtx,
+		inboxCancel:  inboxCancel,
+		inboxUpdates: make(chan messaging.AgentInboxWatchUpdate, 256),
+		inboxDone:    make(chan struct{}),
+		inboxStatus:  "Connecting to relay…",
 	}, nil
 }
 
-// Close releases the database connection.
+// Close cancels and joins the inbox watcher before releasing the database.
 func (m *ChatModel) Close() error {
+	m.stopInboxWatcher()
+	m.inboxMu.Lock()
+	started := m.inboxStarted
+	m.inboxMu.Unlock()
+	if started {
+		select {
+		case <-m.inboxDone:
+		case <-time.After(5 * time.Second):
+			return errors.New("timed out stopping inbox watcher; database left open")
+		}
+	}
 	if m.db != nil {
 		return m.db.Close()
 	}
@@ -166,7 +194,67 @@ func (m *ChatModel) Init() tea.Cmd {
 	return tea.Batch(
 		textinput.Blink,
 		m.loadMessages(),
+		m.startInboxWatcher(),
 	)
+}
+
+type inboxWatchStartedMsg struct{}
+
+type inboxWatchUpdateMsg struct {
+	update messaging.AgentInboxWatchUpdate
+}
+
+func (m *ChatModel) startInboxWatcher() tea.Cmd {
+	return func() tea.Msg {
+		m.inboxMu.Lock()
+		if m.inboxClosed {
+			m.inboxMu.Unlock()
+			return inboxWatchStartedMsg{}
+		}
+		if m.inboxStarted {
+			m.inboxMu.Unlock()
+			return inboxWatchStartedMsg{}
+		}
+		m.inboxStarted = true
+		m.inboxMu.Unlock()
+
+		go func() {
+			defer close(m.inboxDone)
+			err := messaging.WatchAgentInboxWithStore(m.inboxCtx, m.myIdentity.Nickname, m.relays, m.store, func(update messaging.AgentInboxWatchUpdate) {
+				select {
+				case m.inboxUpdates <- update:
+				case <-m.inboxCtx.Done():
+				}
+			})
+			if err != nil && m.inboxCtx.Err() == nil {
+				select {
+				case m.inboxUpdates <- messaging.AgentInboxWatchUpdate{Err: err}:
+				case <-m.inboxCtx.Done():
+				}
+			}
+		}()
+		return inboxWatchStartedMsg{}
+	}
+}
+
+func (m *ChatModel) waitInboxUpdate() tea.Cmd {
+	return func() tea.Msg {
+		select {
+		case update := <-m.inboxUpdates:
+			return inboxWatchUpdateMsg{update: update}
+		case <-m.inboxCtx.Done():
+			return nil
+		}
+	}
+}
+
+func (m *ChatModel) stopInboxWatcher() {
+	m.inboxMu.Lock()
+	m.inboxClosed = true
+	if m.inboxCancel != nil {
+		m.inboxCancel()
+	}
+	m.inboxMu.Unlock()
 }
 
 // Update handles messages
@@ -177,11 +265,13 @@ func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		// In error state any key exits, otherwise the user would be stuck.
 		if m.err != nil {
+			m.stopInboxWatcher()
 			return m, tea.Quit
 		}
 
 		switch msg.Type {
 		case tea.KeyCtrlC, tea.KeyEsc:
+			m.stopInboxWatcher()
 			return m, tea.Quit
 
 		case tea.KeyEnter:
@@ -207,6 +297,9 @@ func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.input.Width = msg.Width - 10
 
 	case messagesMsg:
+		if msg.generation != m.messageLoadGeneration {
+			break
+		}
 		m.messages = msg.messages
 		m.loading = false
 		m.updateViewportContent()
@@ -222,6 +315,23 @@ func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case errorMsg:
 		m.err = msg.err
 		m.loading = false
+	case inboxWatchStartedMsg:
+		cmds = append(cmds, m.waitInboxUpdate())
+	case inboxWatchUpdateMsg:
+		if msg.update.Err != nil {
+			if msg.update.Connected {
+				m.inboxStatus = "Connected; history sync warning: " + msg.update.Err.Error()
+			} else {
+				m.inboxStatus = "Relay reconnecting: " + msg.update.Err.Error()
+			}
+		} else if msg.update.Connected {
+			m.inboxStatus = "Connected"
+		} else if msg.update.Message != nil {
+			m.inboxReceived++
+			m.inboxStatus = fmt.Sprintf("Connected • %d new received", m.inboxReceived)
+			cmds = append(cmds, m.loadMessages())
+		}
+		cmds = append(cmds, m.waitInboxUpdate())
 	}
 
 	var cmd tea.Cmd
@@ -251,6 +361,8 @@ func (m *ChatModel) View() string {
 	b.WriteString("\n\n")
 
 	b.WriteString(m.viewport.View())
+	b.WriteString("\n")
+	b.WriteString(helpStyle.Render("Inbox: " + m.inboxStatus))
 	b.WriteString("\n")
 
 	b.WriteString(inputStyle.Render(m.input.View()))
@@ -317,7 +429,8 @@ func (m *ChatModel) formatMessage(msg types.StoredMessage) string {
 
 // Message types for tea.Cmd results
 type messagesMsg struct {
-	messages []types.StoredMessage
+	messages   []types.StoredMessage
+	generation uint64
 }
 
 type messageSentMsg struct {
@@ -330,12 +443,14 @@ type errorMsg struct {
 
 // loadMessages loads conversation messages from the database.
 func (m *ChatModel) loadMessages() tea.Cmd {
+	m.messageLoadGeneration++
+	generation := m.messageLoadGeneration
 	return func() tea.Msg {
-		messages, err := m.store.GetConversation(m.myIdentity.Npub, m.contactNpub, 100)
+		messages, err := m.store.GetConversation(m.myIdentity.Npub, m.contactNpub, -1)
 		if err != nil {
 			return errorMsg{err: err}
 		}
-		return messagesMsg{messages: messages}
+		return messagesMsg{messages: messages, generation: generation}
 	}
 }
 
