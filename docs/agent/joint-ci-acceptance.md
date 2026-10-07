@@ -1,6 +1,6 @@
 # Agent24 × Hyphae joint CI acceptance
 
-Status: workflow and provenance helper are under development on `codex/joint-ci-handoff-20261007`; no Actions run has exercised this workflow yet. Local unit/YAML validation is not ten-stage CLI/relay acceptance.
+Status: workflow and provenance helper are implemented on `codex/joint-ci-handoff-20261007`. Actions run [37620371296](https://github.com/iDoris-ai/Hyphae/actions/runs/37620371296) exercised the candidate and pinned-production consumers successfully (10/10 stages each), and its macOS CPython 3.14.7 stress job passed 50 repetitions. This run used PR #134's merge source while it was stacked on #133; it does not validate the later main commit `d333c25`. Local unit/YAML validation is not ten-stage CLI/relay acceptance.
 
 ## Independent inputs
 
