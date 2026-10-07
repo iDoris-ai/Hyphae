@@ -1,8 +1,8 @@
 # CI 与本机联调交接（2026-10-07）
 
-132 已合并到 main，当前 main 为 `d333c25`；#133/#134 已提交，待 Daemon 精确 head review。
-#129/#130 的 Actions 验证已完成；M1 尚未完成：[PR #135](https://github.com/iDoris-ai/Hyphae/pull/135) 本机 paired PTY 六方向（含接收方保持打开、无 daemon 与 restart）及 Go/race 均 PASS，待 Daemon/CI；group 与 TX offline retry 尚未实现。
-最近通过 CI 的代码 head 是 `b8cac1d6b770a4fb8e5e147e14dfbdc718c26145`；该结果属于 #134 仍以 #133 分支为 base 的旧栈，不是当前 main `d333c25` 的验证。
+132、133 已合并到 main `6c613b64e8ce95fc89ac81a0d6d56a0e486e5d22`；#134 已只重放自身提交并 retarget main，新 CI 与精确 head review 待完成。
+#129/#130 Actions 验证已完成；M1 尚未完成：[PR #135](https://github.com/iDoris-ai/Hyphae/pull/135) 本机 paired PTY 六方向（含接收方保持打开、无 daemon 与 restart）及 Go/race 均 PASS，等待 CI/review；[PR #136](https://github.com/iDoris-ai/Hyphae/pull/136) protocol 已发布，但 group UI 与 outbox 尚未完成。
+最近通过 CI 的代码 head 仍是 `b8cac1d6b770a4fb8e5e147e14dfbdc718c26145`，验证属于 #134 旧栈；不是新 main `6c613b64e8ce95fc89ac81a0d6d56a0e486e5d22` 或 rebased #134 的验收。
 
 ## CI 证据
 
@@ -17,13 +17,13 @@ candidate lock 是临时 Agent24 checkout 中为候选源码派生的验证输�
 
 ## 下一步（有序依赖）
 
-1. **#133 owner / Daemon reviewer**：在精确 head `42f5a8cc076036930a205699bcd65d9bc29e8321` 上完成审批；当前 CI 全绿但 review 尚缺、状态 `REVIEW_REQUIRED` / `BLOCKED`。随后由授权 merge owner 正常合并 #133 到 main。
-2. **#134 owner**：待 #133 合并后，只将 #134 自身提交 rebase 到实际 main merge SHA，retarget `main`，重新跑 CI，并请求 Daemon 对新精确 head review。不要把旧 #133 栈代码重复带入 #134，也不要把此次旧栈 run 当作新 main 的验收。
-3. **Agent24 owner / COMM7 owner**：生产 lock 升级必须单独审阅并改动真实生产输入；candidate 派生 lock 不得混作 production lock。COMM7 仅在 M1 完成后进入。
+1. **#134 owner / Daemon**：对 rebase 到 main 后的新精确 head 等 CI 完成并请求 review；run 37620371296 仍只是旧 #133 栈结果。
+2. **#135/#136 owner**：跟进本机六方向已过的 #135 新 CI/review；推进已发布的 #136 protocol，但 group UI/outbox 仍未交付。
+3. **Agent24 owner / COMM7 owner**：生产 lock 升级需独立修改真实生产输入；candidate 派生 lock 不是 production lock。COMM7 在 M1 完成后推进。
 4. **PR 132 文档兼容待办（非 blocker）**：v0.20 无 `c/v` 的历史行为不回查；三元素 `p` hint 不接受。
 
 ## PR/验收边界
 
-#133 当前精确 head `42f5a8cc076036930a205699bcd65d9bc29e8321` 的 Ubuntu、macOS、CLA 与 `ci-ok` 检查均 SUCCESS；尚无 clestons review，故不可称 CLEAN/已批准。#134 最近通过 CI 的代码 head 是 `b8cac1d6b770a4fb8e5e147e14dfbdc718c26145`；后续纯文档提交 `0aad5ea478f2c49115aba7fa14852deeb877a71f` 尚待 CI。本文档提交也尚待 CI。
+#133 已按精确 head `42f5a8cc076036930a205699bcd65d9bc29e8321` 审批并合并为 main `6c613b64e8ce95fc89ac81a0d6d56a0e486e5d22`。#134 最近通过 CI 的仍是旧栈代码 head `b8cac1d6b770a4fb8e5e147e14dfbdc718c26145`；rebase 后新 head 与本文档提交均尚待 CI。
 
-main 尚未合并 #135；#135 本机已验证实时收件（接收方保持 TUI 打开），group broadcast 与 TX offline retry 尚未实现。
+#135 本机已验证实时收件（接收方保持 TUI 打开）；该 PR 尚待 CI/review/merge。group UI 与 outbox 尚未完成。
