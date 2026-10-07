@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -320,6 +321,72 @@ func TestSendQueuedAgentMessage_PostAckStoreErrorRetainsOutcomeData(t *testing.T
 	require.NoError(t, err)
 	require.Len(t, ob.Entries, 1)
 	assert.Equal(t, event.ID.Hex(), ob.Entries[0].ID)
+}
+
+func TestQueuedAgentMessageDeliveryStateIsTypedAndSafe(t *testing.T) {
+	tests := []struct {
+		name   string
+		result agentMsgResult
+		err    error
+		state  AgentMessageDeliveryState
+		issue  AgentMessageDeliveryIssue
+	}{
+		{
+			name:   "durably queued after relay failure",
+			result: agentMsgResult{HistoryStored: true, QueuedForRetry: true},
+			state:  AgentMessageQueued,
+		},
+		{
+			name:   "relay ACK is accepted but not recipient delivery",
+			result: agentMsgResult{HistoryStored: true, PublishedTo: 1, RelayCount: 2},
+			state:  AgentMessageRelayAccepted,
+		},
+		{
+			name:   "relay ACK never masks failed history persistence",
+			result: agentMsgResult{PublishedTo: 1, HistoryStored: false},
+			err:    errors.New("private underlying details"),
+			state:  AgentMessageRelayAccepted,
+			issue:  AgentMessageIssueHistoryNotStored,
+		},
+		{
+			name:   "post ACK bookkeeping error has a separate safe issue",
+			result: agentMsgResult{PublishedTo: 1, HistoryStored: true},
+			err:    errors.New("private underlying details"),
+			state:  AgentMessageRelayAccepted,
+			issue:  AgentMessageIssueOutboxBookkeepingFailed,
+		},
+		{
+			name:   "relay ACK and failed history remain visible",
+			result: agentMsgResult{PublishedTo: 1, QueueStateUnknown: true},
+			err:    errors.New("private underlying details"),
+			state:  AgentMessageRelayAccepted,
+			issue:  AgentMessageIssueQueueStateUnknown,
+		},
+		{
+			name:   "uncertain enqueue is never called queued",
+			result: agentMsgResult{HistoryStored: true, QueueStateUnknown: true},
+			err:    errors.New("private underlying details"),
+			state:  AgentMessageFailed,
+			issue:  AgentMessageIssueQueueStateUnknown,
+		},
+		{
+			name:   "failed send keeps safe category",
+			result: agentMsgResult{HistoryStored: true},
+			err:    errors.New("private underlying details"),
+			state:  AgentMessageFailed,
+			issue:  AgentMessageIssueSendFailed,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			gotState := deliveryState(test.result)
+			gotIssue := deliveryIssue(test.result, test.err)
+			assert.Equal(t, test.state, gotState)
+			assert.Equal(t, test.issue, gotIssue)
+			assert.NotContains(t, string(gotIssue), "private")
+		})
+	}
 }
 
 func TestSendQueuedAgentMessage_UncertainEnqueueNeverPublishes(t *testing.T) {
