@@ -20,6 +20,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 SCRIPT = Path(__file__).with_name("test_agent24_joint.py")
+TIMEOUT_FIXTURE = Path(__file__).with_name("agent24_joint_cleanup_fixture.py")
 SPEC = importlib.util.spec_from_file_location("agent24_joint", SCRIPT)
 assert SPEC and SPEC.loader
 joint = importlib.util.module_from_spec(SPEC)
@@ -229,13 +230,17 @@ class JointRunnerTests(unittest.TestCase):
                                     env=joint.child_env(home, root), start_new_session=True,
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             real_killpg = os.killpg
-            for failure in (PermissionError(errno.EPERM, "denied"), OSError(errno.EIO, "injected error")):
+            failures = (
+                (PermissionError(errno.EPERM, "denied"), "owned-process-group-term-signal-failed"),
+                (OSError(errno.EIO, "injected error"), "owned-process-group-term-signal-failed"),
+            )
+            for failure, expected in failures:
                 with self.subTest(error=type(failure).__name__):
                     with mock.patch.object(joint.os, "killpg", side_effect=failure):
-                        with self.assertRaisesRegex(joint.SafeFailure, "^owned-process-group-signal-failed$"):
+                        with self.assertRaisesRegex(joint.SafeFailure, f"^{expected}$"):
                             joint.stop_owned_group(proc)
                         self.assertFalse(getattr(proc, "_joint_group_stopped", False))
-                        with self.assertRaisesRegex(joint.SafeFailure, "^owned-process-group-signal-failed$"):
+                        with self.assertRaisesRegex(joint.SafeFailure, f"^{expected}$"):
                             joint.stop_owned_group(proc)
                         self.assertFalse(getattr(proc, "_joint_group_stopped", False))
             try:
@@ -243,6 +248,32 @@ class JointRunnerTests(unittest.TestCase):
             except ProcessLookupError:
                 pass
             proc.wait(timeout=2)
+            self.assertFalse(joint.owned_group_exists(proc.pid))
+
+    def test_owned_group_probe_error_is_structured_and_fail_closed(self):
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            home.mkdir()
+            proc = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(30)"],
+                                    env=joint.child_env(home, root), start_new_session=True,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            real_killpg = os.killpg
+            try:
+                with mock.patch.object(proc, "poll", return_value=0), \
+                     mock.patch.object(joint.os, "killpg", side_effect=OSError(errno.EIO, "probe detail")):
+                    with self.assertRaisesRegex(joint.SafeFailure,
+                                                "^owned-process-group-pgid-probe-before-term-failed$") as raised:
+                        joint.stop_owned_group(proc)
+                self.assertEqual(raised.exception.evidence(), {
+                    "stage": "pgid-probe-before-term", "category": "EIO", "errno": errno.EIO})
+                self.assertFalse(getattr(proc, "_joint_group_stopped", False))
+            finally:
+                real_killpg(proc.pid, signal.SIGKILL)
+                proc.wait(timeout=2)
+            self.assertFalse(joint.owned_group_exists(proc.pid))
 
     def test_run_child_failure_evidence_never_marks_failed_cleanup_completed(self):
         from unittest import mock
@@ -280,6 +311,12 @@ class JointRunnerTests(unittest.TestCase):
             self.assertEqual(len(recorder.executions), 1)
             self.assertEqual(recorder.executions[0]["cleanup"], "failed")
             self.assertEqual(recorder.executions[0]["failure"], "child-cleanup-failed")
+            self.assertEqual(recorder.executions[0]["primary_failure"], "child-timeout")
+            self.assertEqual(recorder.executions[0]["cleanup_failure"], {
+                "stage": "term-signal", "category": "EPERM", "errno": errno.EPERM})
+            evidence = json.dumps(recorder.executions[0])
+            self.assertNotIn("denied", evidence)
+            self.assertNotIn("time.sleep(30)", evidence)
             self.assertNotEqual(recorder.executions[0]["cleanup"], "completed")
 
     def test_owned_group_kill_escalation_race_only_passes_after_group_disappears(self):
@@ -315,6 +352,31 @@ class JointRunnerTests(unittest.TestCase):
             finally:
                 if proc.poll() is None:
                     proc.kill()
+                    proc.wait(timeout=2)
+                proc.stdout.close()
+
+    def test_owned_group_really_escalates_to_kill_after_term_grace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            home.mkdir()
+            proc = subprocess.Popen(
+                [sys.executable, "-c", "import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);print('ready',flush=True);time.sleep(30)"],
+                env=joint.child_env(home, root), start_new_session=True,
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            assert proc.stdout is not None
+            self.assertEqual(proc.stdout.readline().strip(), b"ready")
+            started = time.monotonic()
+            try:
+                joint.stop_owned_group(proc, force=True)
+                elapsed = time.monotonic() - started
+                self.assertGreaterEqual(elapsed, joint.OWNED_GROUP_TERM_GRACE_SECONDS * 0.8)
+                self.assertLess(elapsed, 4.5)
+                self.assertIsNotNone(proc.poll())
+                self.assertFalse(joint.owned_group_exists(proc.pid))
+            finally:
+                if proc.poll() is None:
+                    os.killpg(proc.pid, signal.SIGKILL)
                     proc.wait(timeout=2)
                 proc.stdout.close()
 
@@ -382,8 +444,13 @@ class JointRunnerTests(unittest.TestCase):
 
             try:
                 with mock.patch.object(joint.os, "killpg", side_effect=report_kill_race_but_leave_group):
-                    with self.assertRaisesRegex(joint.SafeFailure, "^owned-process-group-signal-failed$"):
+                    with self.assertRaisesRegex(joint.SafeFailure,
+                                                "^owned-process-group-kill-signal-failed$") as raised:
                         joint.stop_owned_group(proc, force=True)
+                # The public failure label and serialized detail are distinct;
+                # no OS error string is persisted.
+                self.assertEqual(raised.exception.evidence(), {
+                    "stage": "kill-signal", "category": "ESRCH", "errno": errno.ESRCH})
                 self.assertTrue(joint.owned_group_exists(proc.pid), "live owned group must not be accepted as clean")
             finally:
                 try:
@@ -392,6 +459,72 @@ class JointRunnerTests(unittest.TestCase):
                     pass
                 proc.wait(timeout=2)
                 proc.stdout.close()
+
+    def test_owned_group_bounded_disappearance_failure_is_structured(self):
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            home.mkdir()
+            proc = subprocess.Popen(
+                [sys.executable, "-c", "import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);print('ready',flush=True);time.sleep(30)"],
+                env=joint.child_env(home, root), start_new_session=True,
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            assert proc.stdout is not None
+            self.assertEqual(proc.stdout.readline().strip(), b"ready")
+            real_killpg = os.killpg
+
+            def hold_group_until_deadline(pgid, sig):
+                if sig == signal.SIGKILL:
+                    return None
+                return real_killpg(pgid, sig)
+
+            try:
+                with mock.patch.object(joint.os, "killpg", side_effect=hold_group_until_deadline):
+                    with self.assertRaisesRegex(joint.SafeFailure,
+                                                "^owned-process-group-bounded-disappearance-failed$") as raised:
+                        joint.stop_owned_group(proc, force=True)
+                self.assertEqual(raised.exception.evidence(), {
+                    "stage": "bounded-disappearance", "category": "TIMEOUT"})
+                self.assertFalse(getattr(proc, "_joint_group_stopped", False))
+            finally:
+                real_killpg(proc.pid, signal.SIGKILL)
+                proc.wait(timeout=2)
+                proc.stdout.close()
+            self.assertFalse(joint.owned_group_exists(proc.pid))
+
+    def test_owned_group_leader_wait_failure_is_structured(self):
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            home.mkdir()
+            proc = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(30)"],
+                                    env=joint.child_env(home, root), start_new_session=True,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            real_killpg = os.killpg
+
+            def report_group_gone(pgid, sig):
+                if sig == 0:
+                    raise ProcessLookupError(errno.ESRCH, "simulated empty group")
+                return None
+
+            try:
+                with mock.patch.object(proc, "poll", return_value=None), \
+                     mock.patch.object(proc, "wait", side_effect=subprocess.TimeoutExpired("fixture", 0.1)), \
+                     mock.patch.object(joint.os, "killpg", side_effect=report_group_gone):
+                    with self.assertRaisesRegex(joint.SafeFailure,
+                                                "^owned-process-group-leader-wait-failed$") as raised:
+                        joint.stop_owned_group(proc)
+                self.assertEqual(raised.exception.evidence(), {
+                    "stage": "leader-wait", "category": "TIMEOUT"})
+                self.assertFalse(getattr(proc, "_joint_group_stopped", False))
+            finally:
+                real_killpg(proc.pid, signal.SIGKILL)
+                proc.wait(timeout=2)
+            self.assertFalse(joint.owned_group_exists(proc.pid))
 
     def test_real_pid_start_marker_matches_and_group_cleanup_confirms_empty(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -594,15 +727,195 @@ class JointRunnerTests(unittest.TestCase):
             self.assertNotIn("private-message-body", evidence.read_text(encoding="utf-8"))
 
     def test_timeout_does_not_leak_descendants_holding_output_pipe(self):
+        from unittest import mock
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             home = root / "home"
             home.mkdir()
-            code = "import subprocess,sys; subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)']); print('ready',flush=True)"
+            ready_file = root / "fixture-ready.json"
+            state_file = root / "fixture-state.json"
+            recorder = joint.RunRecorder()
+            previous_recorder = joint._ACTIVE_RECORDER
+            joint._ACTIVE_RECORDER = recorder
+            real_popen = subprocess.Popen
+            real_stop = joint.stop_owned_group
+            captured: list[subprocess.Popen[bytes]] = []
+            fixture_details: dict[str, object] = {}
+            start_markers: dict[int, str] = {}
+            stop_observations: list[tuple[bool, bool]] = []
+
+            def marker_for(pid: int) -> str:
+                ps_bin = next(path for path in ("/bin/ps", "/usr/bin/ps") if Path(path).exists())
+                ps = real_popen([ps_bin, "-o", "lstart=", "-p", str(pid)],
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                text=True, env={"LC_ALL": "C", "TZ": "UTC"})
+                output, _ = ps.communicate(timeout=2)
+                self.assertEqual(ps.returncode, 0)
+                self.assertTrue(output.strip())
+                return output.strip()
+
+            def load_state_markers() -> None:
+                if not state_file.exists():
+                    return
+                try:
+                    state = json.loads(state_file.read_text(encoding="ascii"))
+                except (OSError, json.JSONDecodeError):
+                    return
+                for key in ("supervisor_pid", "holder_pid"):
+                    try:
+                        child_pid = int(state[key])
+                        if child_pid not in start_markers:
+                            start_markers[child_pid] = marker_for(child_pid)
+                    except (KeyError, ValueError, AssertionError, subprocess.SubprocessError):
+                        continue
+
+            def cleanup_failed_launch(proc: subprocess.Popen[bytes]) -> None:
+                load_state_markers()
+                pgid = proc.pid
+                if not joint.owned_group_exists(pgid):
+                    proc.wait(timeout=2)
+                    return
+                verified_member = False
+                for pid, start_marker in start_markers.items():
+                    try:
+                        verified_member = (os.getpgid(pid) == pgid and
+                                           joint.process_start_marker(pid) == start_marker)
+                    except (ProcessLookupError, joint.SafeFailure):
+                        verified_member = False
+                    if verified_member:
+                        break
+                if not verified_member:
+                    self.fail("startup failed with a residual PGID but no verified fixture member")
+                os.killpg(pgid, signal.SIGTERM)
+                group_gone = joint.wait_owned_group_gone(pgid, 0.5)
+                if not group_gone:
+                    verified_member = False
+                    for pid, start_marker in start_markers.items():
+                        try:
+                            verified_member = (os.getpgid(pid) == pgid and
+                                               joint.process_start_marker(pid) == start_marker)
+                        except (ProcessLookupError, joint.SafeFailure):
+                            verified_member = False
+                        if verified_member:
+                            break
+                    if not verified_member:
+                        self.fail("refusing SIGKILL for an unverified fixture PGID")
+                    os.killpg(pgid, signal.SIGKILL)
+                    group_gone = joint.wait_owned_group_gone(pgid, 2)
+                self.assertTrue(group_gone, "startup-failure fixture PGID remained after cleanup")
+                proc.wait(timeout=2)
+
+            def capture_ready_popen(*args, **kwargs):
+                proc = real_popen(*args, **kwargs)
+                captured.append(proc)
+                start_markers[proc.pid] = marker_for(proc.pid)
+                deadline = time.monotonic() + 1.0
+                ready = False
+                while time.monotonic() < deadline:
+                    if ready_file.exists() and proc.poll() is not None:
+                        fixture_details.update(json.loads(ready_file.read_text(encoding="ascii")))
+                        expected_pgid = int(fixture_details["pgid"])
+                        self.assertEqual(expected_pgid, proc.pid)
+                        self.assertEqual(int(fixture_details["leader_pid"]), proc.pid)
+                        self.assertIsNotNone(fixture_details.get("supervisor_pid"))
+                        self.assertIsNotNone(fixture_details.get("holder_pid"))
+                        self.assertTrue(joint.owned_group_exists(expected_pgid))
+                        ready = True
+                        break
+                    time.sleep(0.005)
+                if ready:
+                    for name in ("supervisor_pid", "holder_pid"):
+                        child_pid = int(fixture_details[name])
+                        self.assertEqual(os.getpgid(child_pid), proc.pid)
+                        start_markers[child_pid] = marker_for(child_pid)
+                    return proc
+                # run_child has not yet received the Popen object, so fail only
+                # after cleaning this exact newly-created session ourselves.
+                cleanup_failed_launch(proc)
+                self.fail("fixture readiness/leader-exit handshake exceeded 1 second")
+
+            def observe_stop(proc, force=False):
+                stop_observations.append((proc.poll() is not None,
+                                          joint.owned_group_exists(proc.pid)))
+                return real_stop(proc, force=force)
+
             started = time.monotonic()
-            with self.assertRaisesRegex(joint.SafeFailure, "^child-timeout$"):
-                joint.run_child([sys.executable, "-c", code], joint.child_env(home, root), timeout=0.2)
+            try:
+                with mock.patch.object(joint.subprocess, "Popen", side_effect=capture_ready_popen), \
+                     mock.patch.object(joint, "stop_owned_group", side_effect=observe_stop):
+                    with self.assertRaisesRegex(joint.SafeFailure, "^child-timeout$"):
+                        joint.run_child([sys.executable, str(TIMEOUT_FIXTURE), "leader", str(ready_file),
+                                         str(state_file)],
+                                        joint.child_env(home, root), timeout=0.2)
+            finally:
+                joint._ACTIVE_RECORDER = previous_recorder
+                # The test owns this single fresh session. If runner cleanup
+                # failed, only signal it when a recorded helper still proves
+                # membership and start identity; never target a reused PGID.
+                if captured:
+                    leader_proc = captured[0]
+                    pgid = leader_proc.pid
+                    load_state_markers()
+                    if fixture_details:
+                        for name in ("supervisor_pid", "holder_pid"):
+                            try:
+                                child_pid = int(fixture_details[name])
+                                if child_pid not in start_markers:
+                                    start_markers[child_pid] = joint.process_start_marker(child_pid)
+                            except (KeyError, ValueError, joint.SafeFailure):
+                                pass
+                    if joint.owned_group_exists(pgid):
+                        verified_member = False
+                        for child_pid, start_marker in start_markers.items():
+                            try:
+                                verified_member = (os.getpgid(child_pid) == pgid and
+                                                   joint.process_start_marker(child_pid) == start_marker)
+                            except (ProcessLookupError, joint.SafeFailure):
+                                verified_member = False
+                            if verified_member:
+                                break
+                        if verified_member:
+                            os.killpg(pgid, signal.SIGTERM)
+                            group_gone = joint.wait_owned_group_gone(pgid, 0.5)
+                            if not group_gone:
+                                still_owned = False
+                                for child_pid, start_marker in start_markers.items():
+                                    if not joint.process_alive(child_pid):
+                                        continue
+                                    try:
+                                        still_owned = (os.getpgid(child_pid) == pgid and
+                                                       joint.process_start_marker(child_pid) == start_marker)
+                                    except (ProcessLookupError, joint.SafeFailure):
+                                        still_owned = False
+                                    if still_owned:
+                                        break
+                                self.assertTrue(still_owned, "refusing to signal an unverified fixture PGID")
+                                os.killpg(pgid, signal.SIGKILL)
+                                group_gone = joint.wait_owned_group_gone(pgid, 2)
+                            self.assertTrue(group_gone, "test-owned fixture PGID remained after final cleanup")
+                        else:
+                            self.fail("fixture group remained without a verified spawned member")
+                    if leader_proc.poll() is None:
+                        leader_proc.wait(timeout=2)
+
             self.assertLess(time.monotonic() - started, 5)
+            self.assertTrue(fixture_details, "readiness handshake did not complete")
+            self.assertTrue(stop_observations, "runner cleanup did not execute")
+            self.assertEqual(stop_observations[0], (True, True),
+                             "runner must see exited leader and live descendant group before TERM")
+            self.assertFalse(joint.owned_group_exists(int(fixture_details["pgid"])))
+            for name in ("supervisor_pid", "holder_pid"):
+                child_pid = int(fixture_details[name])
+                self.assertFalse(joint.process_alive(child_pid), f"fixture {name} leaked")
+            execution = recorder.executions[-1]
+            self.assertEqual(execution["primary_failure"], "child-timeout")
+            self.assertIsNone(execution["cleanup_failure"])
+            self.assertEqual(execution["cleanup"], "completed")
+            self.assertTrue(execution["output_redacted"])
+            saved = json.dumps(execution, sort_keys=True)
+            self.assertNotIn('"supervisor_pid"', saved)
+            self.assertNotIn('"holder_pid"', saved)
 
 
 if __name__ == "__main__":
