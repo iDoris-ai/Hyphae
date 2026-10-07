@@ -30,14 +30,33 @@ func TestVerifyIncomingChecksSignatureEncryptionAndRecipient(t *testing.T) {
 	mutated.Content += "x"
 	_, err = VerifyIncoming(mutated, bob)
 	require.Error(t, err)
+	badSignature := event
+	badSignature.CreatedAt++
+	badSignature.ID = badSignature.GetID()
+	require.True(t, badSignature.CheckID(), "fixture must isolate signature verification")
+	require.False(t, badSignature.VerifySignature())
+	_, err = VerifyIncoming(badSignature, bob)
+	require.Error(t, err)
 
 	duplicateRecipient := event
+	duplicateRecipient.Tags = cloneTestTags(event.Tags)
 	duplicateRecipient.Tags = append(duplicateRecipient.Tags, nostr.Tag{"p", common.PubKeyToHex(carol.Public())})
 	require.NoError(t, duplicateRecipient.Sign(alice))
 	_, err = VerifyIncoming(duplicateRecipient, bob)
 	require.Error(t, err)
+	misroutedTag := event
+	misroutedTag.Tags = cloneTestTags(event.Tags)
+	for i := range misroutedTag.Tags {
+		if len(misroutedTag.Tags[i]) == 2 && misroutedTag.Tags[i][0] == "p" {
+			misroutedTag.Tags[i][1] = common.PubKeyToHex(carol.Public())
+		}
+	}
+	require.NoError(t, misroutedTag.Sign(alice))
+	_, err = VerifyIncoming(misroutedTag, bob)
+	require.Error(t, err, "ciphertext recipient alone cannot override signed p routing")
 
 	badClassifierTag := event
+	badClassifierTag.Tags = cloneTestTags(event.Tags)
 	badClassifierTag.Tags = append(badClassifierTag.Tags, nostr.Tag{"d", "agent-profile"})
 	require.NoError(t, badClassifierTag.Sign(alice))
 	_, err = VerifyIncoming(badClassifierTag, bob)
@@ -46,6 +65,14 @@ func TestVerifyIncomingChecksSignatureEncryptionAndRecipient(t *testing.T) {
 	plain := testAgentEvent(t, payload, alice, bob, false)
 	_, err = VerifyIncoming(plain, bob)
 	require.Error(t, err, "group messages require NIP-44 encryption")
+}
+
+func cloneTestTags(tags nostr.Tags) nostr.Tags {
+	copyTags := make(nostr.Tags, len(tags))
+	for i := range tags {
+		copyTags[i] = append(nostr.Tag(nil), tags[i]...)
+	}
+	return copyTags
 }
 
 // testAgentEvent uses the existing NIP-44 and compression functions to build

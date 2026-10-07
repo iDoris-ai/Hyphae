@@ -284,8 +284,6 @@ func validOpaqueID(value string) bool {
 	return true
 }
 
-func validEventID(value string) bool { return len(value) == 64 && isLowerHex(value) }
-
 func isLowerHex(value string) bool {
 	if value == "" || strings.ToLower(value) != value {
 		return false
@@ -351,6 +349,9 @@ func scanJSONValue(decoder *json.Decoder) error {
 			if !ok {
 				return errors.New("group envelope JSON object has a non-string key")
 			}
+			if !isEnvelopeJSONField(key) {
+				return fmt.Errorf("unknown or non-canonical group envelope field %q", key)
+			}
 			if _, exists := seen[key]; exists {
 				return fmt.Errorf("duplicate group envelope field %q", key)
 			}
@@ -377,4 +378,14 @@ func scanJSONValue(decoder *json.Decoder) error {
 		return errors.New("unexpected group envelope JSON delimiter")
 	}
 	return nil
+}
+
+func isEnvelopeJSONField(key string) bool {
+	switch key {
+	case "type", "version", "group_id", "creator_npub", "invite_id", "roster_hash",
+		"invitee_npub", "name", "members", "logical_id", "body":
+		return true
+	default:
+		return false
+	}
 }

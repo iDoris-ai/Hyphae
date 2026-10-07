@@ -21,6 +21,8 @@ M1 固定初始 roster，creator 是唯一 authority，不委派 admin。信任�
 
 状态变化与去重需事务化：先 durable 写入再标记 seen、通知界面或报告处理成功。收到 group envelope 不得作为 DM 正文保存，也不得作为 auto-reply 输入。
 
+后续 state consumer 必须先拒绝零值/非 `VerifyIncoming` 构造的 `VerifiedIncoming`，再按信封类型逐条核对签名作者：invite/activate/cancel 的 sender 必须是已绑定 creator；accept/decline 的 sender 必须是对应 invitee。还要核对 event recipient 等于 envelope target，并把 creator + group ID + invite ID + roster hash 与本机已保存 invitation 完整绑定；invite/activate 还须比对规范完整 roster。协议层的 `Decode` 成功仅代表格式和自包含 roster hash 正确，不代表发送者已获授权，控制 envelope 目标也必须由 state 查表验证。
+
 ## 单一收件器与界面接口
 
 复用 TUI worker 的单一 `WatchAgentInbox`，不再创建第二条 relay 订阅或重复解密。当前 watcher 在发 update 前直接写 DM，且 update 未带足够路由元数据。群实现需要在 event/签名/收件人校验和解密后、DM 持久化前插入可组合 router/store；以下是未来接口草案，不修改 worker 当前 API：

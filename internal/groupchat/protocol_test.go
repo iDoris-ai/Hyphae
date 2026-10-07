@@ -1,6 +1,7 @@
 package groupchat
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -32,13 +33,17 @@ func TestEnvelopeCodecStrictTypedAndBounded(t *testing.T) {
 	_, err = Decode(`{"type":"message","body":"normal json"}`)
 	require.ErrorIs(t, err, ErrNotEnvelope)
 	_, err = Decode(ReservedPrefix + "missing-version-separator")
-	require.Error(t, err, "malformed reserved magic must fail closed")
+	require.ErrorContains(t, err, "malformed group envelope magic")
 	_, err = Decode("hyphae.group/v9\n{}")
 	require.ErrorIs(t, err, ErrUnsupportedVersion)
 	_, err = Decode(MagicV1 + `{"type":"unknown","version":1,"group_id":"00000000000000000000000000000000"}`)
 	require.Error(t, err, "unknown envelope type must be rejected")
+	_, err = Decode(MagicV1 + `{"TYPE":"message","Version":1,"Group_ID":"00000000000000000000000000000000","Logical_ID":"00000000000000000000000000000000","Body":"hello"}`)
+	require.Error(t, err, "case-variant field names must be rejected")
+	_, err = Decode(MagicV1 + `{"type":"message","version":1,"group_id":"00000000000000000000000000000000","logical_id":"00000000000000000000000000000000","body":"first","BODY":"last"}`)
+	require.Error(t, err, "case-variant duplicates must be rejected")
 	_, err = Decode(MagicV1 + `{"type":"message","type":"message"}`)
-	require.Error(t, err)
+	require.ErrorContains(t, err, "duplicate group envelope field")
 	_, err = Decode(MagicV1 + `{"type":"message","version":1,"group_id":"00000000000000000000000000000000","logical_id":"00000000000000000000000000000000","body":"x","extra":true}`)
 	require.Error(t, err)
 	_, err = Decode(MagicV1 + `{"type":"message","version":1,"group_id":"00000000000000000000000000000000","logical_id":"00000000000000000000000000000000","body":"x"} {}`)
@@ -68,6 +73,91 @@ func TestEnvelopeCodecStrictTypedAndBounded(t *testing.T) {
 	bad.Body = strings.Repeat("好", MaxBodyRunes+1)
 	_, err = Encode(bad)
 	require.Error(t, err)
+}
+
+func TestInviteRosterHashAndMembershipGuards(t *testing.T) {
+	alice := common.EncodeNpub(nostr.Generate().Public())
+	bob := common.EncodeNpub(nostr.Generate().Public())
+	carol := common.EncodeNpub(nostr.Generate().Public())
+	groupID := mustOpaque(t)
+	inviteID := mustOpaque(t)
+	hash, roster, err := CanonicalRosterHash(groupID, alice, "planning", []string{alice, bob, carol})
+	require.NoError(t, err)
+	valid := Envelope{Type: EnvelopeInvite, Version: Version, GroupID: groupID, CreatorNpub: alice,
+		InviteID: inviteID, RosterHash: hash, InviteeNpub: bob, Name: "planning", Members: roster}
+
+	wrongHash := strings.Repeat("0", 64)
+	if wrongHash == hash {
+		wrongHash = strings.Repeat("1", 64)
+	}
+	mutatedHash := valid
+	mutatedHash.RosterHash = wrongHash
+	err = ValidateEnvelope(mutatedHash)
+	require.ErrorContains(t, err, "hash does not match")
+	raw, err := json.Marshal(mutatedHash)
+	require.NoError(t, err)
+	_, err = Decode(MagicV1 + string(raw))
+	require.ErrorContains(t, err, "hash does not match")
+	_, err = Encode(mutatedHash)
+	require.ErrorContains(t, err, "hash does not match")
+
+	outsideHash, outsideRoster, err := CanonicalRosterHash(groupID, alice, "planning", []string{alice, carol})
+	require.NoError(t, err)
+	outside := valid
+	outside.RosterHash, outside.Members, outside.InviteeNpub = outsideHash, outsideRoster, bob
+	err = ValidateEnvelope(outside)
+	require.ErrorContains(t, err, "non-creator roster member")
+
+	selfHash, selfRoster, err := CanonicalRosterHash(groupID, alice, "planning", []string{alice, bob})
+	require.NoError(t, err)
+	self := valid
+	self.RosterHash, self.Members, self.InviteeNpub = selfHash, selfRoster, alice
+	err = ValidateEnvelope(self)
+	require.ErrorContains(t, err, "non-creator roster member")
+
+	_, _, err = CanonicalRosterHash(groupID, alice, "planning", []string{bob, carol})
+	require.ErrorContains(t, err, "creator must be in roster")
+	creatorOutside := valid
+	creatorOutside.Members, creatorOutside.RosterHash = []string{bob, carol}, wrongHash
+	err = ValidateEnvelope(creatorOutside)
+	require.ErrorContains(t, err, "creator must be in roster")
+}
+
+func TestControlEnvelopeRoundTripsAndRejectsEveryForbiddenField(t *testing.T) {
+	creator := common.EncodeNpub(nostr.Generate().Public())
+	invitee := common.EncodeNpub(nostr.Generate().Public())
+	groupID, inviteID := mustOpaque(t), mustOpaque(t)
+	hash := strings.Repeat("a", 64)
+	for _, kind := range []EnvelopeType{EnvelopeAccept, EnvelopeDecline, EnvelopeCancel} {
+		base := Envelope{Type: kind, Version: Version, GroupID: groupID, CreatorNpub: creator,
+			InviteID: inviteID, RosterHash: hash, InviteeNpub: invitee}
+		encoded, err := Encode(base)
+		require.NoError(t, err, "legal %s envelope encodes", kind)
+		decoded, err := Decode(encoded)
+		require.NoError(t, err, "legal %s envelope decodes", kind)
+		require.Equal(t, base, decoded)
+
+		for field, mutate := range map[string]func(*Envelope){
+			"name":       func(e *Envelope) { e.Name = "extra" },
+			"members":    func(e *Envelope) { e.Members = []string{invitee} },
+			"logical_id": func(e *Envelope) { e.LogicalID = mustOpaque(t) },
+			"body":       func(e *Envelope) { e.Body = "extra" },
+		} {
+			bad := base
+			mutate(&bad)
+			require.ErrorContains(t, ValidateEnvelope(bad), "unrelated fields", "%s forbids %s", kind, field)
+		}
+	}
+
+	activationHash, members, err := CanonicalRosterHash(groupID, creator, "planning", []string{creator, invitee})
+	require.NoError(t, err)
+	activation := Envelope{Type: EnvelopeActivate, Version: Version, GroupID: groupID, CreatorNpub: creator,
+		InviteID: inviteID, RosterHash: activationHash, InviteeNpub: invitee, Name: "planning", Members: members}
+	encoded, err := Encode(activation)
+	require.NoError(t, err)
+	decoded, err := Decode(encoded)
+	require.NoError(t, err)
+	require.Equal(t, activation, decoded)
 }
 
 func TestRosterLimitsAndRandomOpaqueIDs(t *testing.T) {

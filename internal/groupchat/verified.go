@@ -75,8 +75,6 @@ func VerifyIncoming(event nostr.Event, recipientSecret nostr.SecretKey) (Verifie
 	}, nil
 }
 
-func (v VerifiedIncoming) valid() bool { return v.verified && v.eventID != "" }
-
 func (v VerifiedIncoming) EventID() string       { return v.eventID }
 func (v VerifiedIncoming) SenderNpub() string    { return v.senderNpub }
 func (v VerifiedIncoming) RecipientNpub() string { return v.recipientNpub }
