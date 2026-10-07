@@ -83,25 +83,48 @@ func TestDecompressText_InvalidZstd(t *testing.T) {
 // encryption disabled) still produces distinct d values, so consecutive
 // messages from one sender keep separate coordinates and don't overwrite
 // each other.
-func TestDeriveMessageDTag_UniqueEvenForIdenticalContentAndTimestamp(t *testing.T) {
+func TestNewAgentMessageDTag_UniqueEvenForIdenticalContentAndTimestamp(t *testing.T) {
 	content := "identical-payload"
 	ts := nostr.Now()
 
-	first, err := deriveMessageDTag(content, ts)
+	first, err := NewAgentMessageDTag(content, ts)
 	require.NoError(t, err)
-	second, err := deriveMessageDTag(content, ts)
+	second, err := NewAgentMessageDTag(content, ts)
 	require.NoError(t, err)
 
 	assert.NotEqual(t, first, second)
 }
 
-func TestDeriveMessageDTag_ReturnsValidHex(t *testing.T) {
-	d, err := deriveMessageDTag("some content", nostr.Now())
+func TestNewAgentMessageDTag_ReturnsNamespacedUniqueToken(t *testing.T) {
+	d, err := NewAgentMessageDTag("some content", nostr.Now())
 	require.NoError(t, err)
 
-	assert.Len(t, d, 16)
-	_, err = hex.DecodeString(d)
+	require.True(t, strings.HasPrefix(d, "agent-message:"))
+	suffix := strings.TrimPrefix(d, "agent-message:")
+	assert.Len(t, suffix, 16)
+	_, err = hex.DecodeString(suffix)
 	assert.NoError(t, err)
+}
+
+func TestFormatAgentMessageDTagPreservesUniqueToken(t *testing.T) {
+	for _, token := range []string{strings.Repeat("a", 16), strings.Repeat("B", 32)} {
+		d, err := FormatAgentMessageDTag(token)
+		require.NoError(t, err)
+		assert.Equal(t, "agent-message:"+strings.ToLower(token), d)
+	}
+	_, err := FormatAgentMessageDTag("not-hex")
+	assert.Error(t, err)
+}
+
+func TestBuildAgentMessageFilterKeepsLegacyMessagesQueryable(t *testing.T) {
+	filter := BuildAgentMessageFilter(strings.Repeat("a", 64))
+	assert.Equal(t, []nostr.Kind{AgentKind}, filter.Kinds)
+	assert.Equal(t, nostr.TagMap{
+		"c": []string{AgentTag},
+		"v": []string{AgentVersion},
+		"p": []string{strings.Repeat("a", 64)},
+	}, filter.Tags)
+	assert.NotContains(t, filter.Tags, "d", "d filtering would drop legacy messages without d")
 }
 
 func TestAgentMsgCmd_AcknowledgedEventIsQueuedBeforePublishAndRemovedAfter(t *testing.T) {
@@ -131,6 +154,14 @@ func TestAgentMsgCmd_AcknowledgedEventIsQueuedBeforePublishAndRemovedAfter(t *te
 	}
 	assert.Equal(t, response.Data.EventID, published.ID.Hex())
 	assert.NotEqual(t, [64]byte{}, published.Sig)
+	require.NoError(t, ValidateAgentMessageEvent(&published))
+	dTag := ""
+	for _, tag := range published.Tags {
+		if len(tag) == 2 && tag[0] == "d" {
+			dTag = tag[1]
+		}
+	}
+	assert.True(t, strings.HasPrefix(dTag, "agent-message:"), "new sends must use the message d namespace")
 
 	ob, err := LoadOutbox()
 	require.NoError(t, err)
@@ -139,6 +170,22 @@ func TestAgentMsgCmd_AcknowledgedEventIsQueuedBeforePublishAndRemovedAfter(t *te
 	require.NoError(t, err)
 	assert.Equal(t, "reliable send test", stored.Plaintext)
 	assert.False(t, stored.IsEncrypted)
+}
+
+func TestStoreIncomingMessageOnceRejectsProfileEvent(t *testing.T) {
+	resetStore(t)
+	event := &nostr.Event{
+		Kind:    AgentKind,
+		Tags:    nostr.Tags{{"d", "agent-profile"}, {"c", "profile"}},
+		Content: `{"name":"profile must not enter message storage"}`,
+	}
+	event.ID[31] = 7
+	first, err := StoreIncomingMessageOnce(event, "npub1recipient", "not a message", false)
+	require.Error(t, err)
+	assert.False(t, first)
+	inbox, getErr := GetInbox(nil, "npub1recipient", 10)
+	require.NoError(t, getErr)
+	assert.Empty(t, inbox)
 }
 
 func TestAgentMsgCmd_UnavailableRelayLeavesSameSignedEventQueued(t *testing.T) {
@@ -235,9 +282,11 @@ func TestAgentMsgCmd_HistoryOrOutboxFailureNeverPublishes(t *testing.T) {
 
 func TestSendQueuedAgentMessage_PostAckStoreErrorRetainsOutcomeData(t *testing.T) {
 	setupAgentMsgCLI(t)
-	event := nostr.Event{CreatedAt: nostr.Now(), Kind: AgentKind, Content: "signed event"}
 	secret := nostr.Generate()
-	event.PubKey = secret.Public()
+	recipient := nostr.Generate().Public()
+	event := nostr.Event{CreatedAt: nostr.Now(), Kind: AgentKind, Content: "signed event", PubKey: secret.Public(), Tags: nostr.Tags{
+		{"p", hex.EncodeToString(recipient[:])}, {"c", AgentTag}, {"v", AgentVersion},
+	}}
 	require.NoError(t, event.Sign(secret))
 	storeCalls := 0
 	store := func(event *nostr.Event, recipient, plaintext string, encrypted bool) error {
@@ -276,7 +325,10 @@ func TestSendQueuedAgentMessage_PostAckStoreErrorRetainsOutcomeData(t *testing.T
 func TestSendQueuedAgentMessage_UncertainEnqueueNeverPublishes(t *testing.T) {
 	setupAgentMsgCLI(t)
 	secret := nostr.Generate()
-	event := nostr.Event{CreatedAt: nostr.Now(), Kind: AgentKind, Content: "durability uncertain", PubKey: secret.Public()}
+	recipient := nostr.Generate().Public()
+	event := nostr.Event{CreatedAt: nostr.Now(), Kind: AgentKind, Content: "durability uncertain", PubKey: secret.Public(), Tags: nostr.Tags{
+		{"p", hex.EncodeToString(recipient[:])}, {"c", AgentTag}, {"v", AgentVersion},
+	}}
 	require.NoError(t, event.Sign(secret))
 	originalPersist := persistOutbox
 	persistOutbox = func(path string, outbox *types.Outbox) error {

@@ -112,7 +112,8 @@ func TestSendAutoReplyQueuedSendPublishesEncryptedHistory(t *testing.T) {
 	assert.Equal(t, "agent", autoReplyTag(t, event.Tags, "c"))
 	assert.Equal(t, messaging.AgentVersion, autoReplyTag(t, event.Tags, "v"))
 	dTag := autoReplyTag(t, event.Tags, "d")
-	assert.Len(t, dTag, 32, "d must contain at least 128 random bits")
+	assert.True(t, strings.HasPrefix(dTag, "agent-message:"))
+	assert.Len(t, strings.TrimPrefix(dTag, "agent-message:"), 32, "auto-reply preserves its original 16-byte random token")
 	assert.Equal(t, common.PubKeyToHex(recipientPK), autoReplyTag(t, event.Tags, "p"))
 
 	messages, err := messaging.GetConversation(nil, myIdentity.Npub, toNpub, 10)
@@ -145,9 +146,11 @@ func runWatchOneRelayAutoReplyLifecycle(t *testing.T, cancelParent bool) {
 	incoming := &nostr.Event{
 		CreatedAt: nostr.Now(),
 		Kind:      messaging.AgentKind,
-		Tags:      nostr.Tags{{"p", common.PubKeyToHex(recipientSK.Public())}},
-		Content:   compressed,
-		PubKey:    senderSK.Public(),
+		Tags: nostr.Tags{
+			{"p", common.PubKeyToHex(recipientSK.Public())}, {"c", messaging.AgentTag}, {"v", messaging.AgentVersion},
+		},
+		Content: compressed,
+		PubKey:  senderSK.Public(),
 	}
 	require.NoError(t, incoming.Sign(senderSK))
 	incomingJSON, err := json.Marshal(incoming)

@@ -3,6 +3,7 @@ package messaging
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -156,7 +157,10 @@ func TestOutboxRetryJSONUnreachableRelayRemainsQueued(t *testing.T) {
 func signedOutboxRetryFixture(t *testing.T, content string, relays []string) (nostr.Event, types.OutboxEntry) {
 	t.Helper()
 	secret := nostr.Generate()
-	event := nostr.Event{CreatedAt: nostr.Now(), Kind: AgentKind, PubKey: secret.Public(), Content: content}
+	recipient := nostr.Generate().Public()
+	event := nostr.Event{CreatedAt: nostr.Now(), Kind: AgentKind, PubKey: secret.Public(), Content: content, Tags: nostr.Tags{
+		{"p", hex.EncodeToString(recipient[:])}, {"c", AgentTag}, {"v", AgentVersion},
+	}}
 	if err := event.Sign(secret); err != nil {
 		t.Fatal(err)
 	}

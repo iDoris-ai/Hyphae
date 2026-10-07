@@ -388,10 +388,7 @@ func watchInboxObserved(
 		return 0, results, fmt.Errorf("get recipient secret key: %w", err)
 	}
 
-	filter := nostr.Filter{
-		Kinds: []nostr.Kind{messaging.AgentKind},
-		Tags:  nostr.TagMap{"p": []string{common.PubKeyToHex(recipientPK)}},
-	}
+	filter := messaging.BuildAgentMessageFilter(common.PubKeyToHex(recipientPK))
 
 	newCount := 0
 	var scanErrors []error
@@ -632,6 +629,19 @@ func processIncomingEvent(
 	ks *types.KeyStore,
 	hooks incomingReceiveHooks,
 ) (bool, error) {
+	if err := messaging.ValidateAgentMessageEvent(event); err != nil {
+		return false, fmt.Errorf("classify incoming event: %w", err)
+	}
+	recipientHex := common.PubKeyToHex(recipientSK.Public())
+	matchedRecipient := false
+	for _, tag := range event.Tags {
+		if len(tag) > 0 && tag[0] == "p" {
+			matchedRecipient = tag[1] == recipientHex
+		}
+	}
+	if !matchedRecipient {
+		return false, fmt.Errorf("incoming message does not target this identity")
+	}
 	eventID := hex.EncodeToString(event.ID[:])
 	if seen.Has(eventID) {
 		return false, nil
@@ -804,6 +814,10 @@ func buildAutoReplyEvent(myIdentity *types.Identity, senderSK nostr.SecretKey, r
 	if _, err := cryptorand.Read(nonce[:]); err != nil {
 		return "", nil, fmt.Errorf("generate auto-reply d tag: %w", err)
 	}
+	dTag, err := messaging.FormatAgentMessageDTag(hex.EncodeToString(nonce[:]))
+	if err != nil {
+		return "", nil, fmt.Errorf("format auto-reply d tag: %w", err)
+	}
 	createdAt := nostr.Now()
 	event := &nostr.Event{
 		CreatedAt: createdAt,
@@ -813,11 +827,14 @@ func buildAutoReplyEvent(myIdentity *types.Identity, senderSK nostr.SecretKey, r
 			{"c", messaging.AgentTag},
 			{"z", messaging.CompressTag},
 			{"v", messaging.AgentVersion},
-			{"d", hex.EncodeToString(nonce[:])},
+			{"d", dTag},
 			{"enc", "nip44"},
 		},
 		Content: compressed,
 		PubKey:  senderSK.Public(),
+	}
+	if err := messaging.ValidateAgentMessageEvent(event); err != nil {
+		return "", nil, fmt.Errorf("validate auto-reply tags: %w", err)
 	}
 	if err := event.Sign(senderSK); err != nil {
 		return "", nil, fmt.Errorf("sign auto-reply event: %w", err)

@@ -66,9 +66,11 @@ func TestStatusModelReplay125AcrossFreshScanReset(t *testing.T) {
 		events[i] = &nostr.Event{
 			CreatedAt: timestamp,
 			Kind:      messaging.AgentKind,
-			Tags:      nostr.Tags{{"p", common.PubKeyToHex(mySK.Public())}, {"z", messaging.CompressTag}},
-			Content:   compressed,
-			PubKey:    sender.Public(),
+			Tags: nostr.Tags{
+				{"p", common.PubKeyToHex(mySK.Public())}, {"c", messaging.AgentTag}, {"v", messaging.AgentVersion}, {"z", messaging.CompressTag},
+			},
+			Content: compressed,
+			PubKey:  sender.Public(),
 		}
 		require.NoError(t, events[i].Sign(sender))
 	}
@@ -142,9 +144,11 @@ func TestDaemonJSONLocalRelay125AcrossProcessRestart(t *testing.T) {
 		events[i] = &nostr.Event{
 			CreatedAt: timestamp,
 			Kind:      messaging.AgentKind,
-			Tags:      nostr.Tags{{"p", common.PubKeyToHex(mySK.Public())}, {"z", messaging.CompressTag}},
-			Content:   compressed,
-			PubKey:    sender.Public(),
+			Tags: nostr.Tags{
+				{"p", common.PubKeyToHex(mySK.Public())}, {"c", messaging.AgentTag}, {"v", messaging.AgentVersion}, {"z", messaging.CompressTag},
+			},
+			Content: compressed,
+			PubKey:  sender.Public(),
 		}
 		require.NoError(t, events[i].Sign(sender))
 	}
@@ -235,9 +239,11 @@ func TestDaemonJSONLocalRelayStorageFailure(t *testing.T) {
 	event := &nostr.Event{
 		CreatedAt: nostr.Now() - 1,
 		Kind:      messaging.AgentKind,
-		Tags:      nostr.Tags{{"p", common.PubKeyToHex(mySK.Public())}, {"z", messaging.CompressTag}},
-		Content:   compressed,
-		PubKey:    sender.Public(),
+		Tags: nostr.Tags{
+			{"p", common.PubKeyToHex(mySK.Public())}, {"c", messaging.AgentTag}, {"v", messaging.AgentVersion}, {"z", messaging.CompressTag},
+		},
+		Content: compressed,
+		PubKey:  sender.Public(),
 	}
 	require.NoError(t, event.Sign(sender))
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".hyphae"), 0o700))
@@ -328,9 +334,11 @@ func TestDaemonJSONLocalRelayDisconnectBeforeEOSE(t *testing.T) {
 	event := &nostr.Event{
 		CreatedAt: nostr.Now() - 1,
 		Kind:      messaging.AgentKind,
-		Tags:      nostr.Tags{{"p", common.PubKeyToHex(mySK.Public())}, {"z", messaging.CompressTag}},
-		Content:   compressed,
-		PubKey:    sender.Public(),
+		Tags: nostr.Tags{
+			{"p", common.PubKeyToHex(mySK.Public())}, {"c", messaging.AgentTag}, {"v", messaging.AgentVersion}, {"z", messaging.CompressTag},
+		},
+		Content: compressed,
+		PubKey:  sender.Public(),
 	}
 	require.NoError(t, event.Sign(sender))
 	relayURL := startDisconnectRelay(t, []*nostr.Event{event})

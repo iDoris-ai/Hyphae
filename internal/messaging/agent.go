@@ -19,6 +19,7 @@ import (
 	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/internal/relayquery"
+	"github.com/iDoris-ai/hyphae/internal/wireevent"
 	"github.com/iDoris-ai/hyphae/pkg/crypto"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/klauspost/compress/zstd"
@@ -26,10 +27,10 @@ import (
 )
 
 const (
-	AgentKind    = 30078
-	AgentVersion = "v1"
+	AgentKind    = wireevent.Kind30078
+	AgentVersion = wireevent.MessageVersion
 	CompressTag  = "zstd"
-	AgentTag     = "agent"
+	AgentTag     = wireevent.MessageCategory
 	EncryptTag   = "encrypted"
 )
 
@@ -86,18 +87,24 @@ func DecompressText(encoded string) (string, error) {
 	return string(decompressed), nil
 }
 
-// deriveMessageDTag returns a per-message "d" tag value for kind 30078
-// agent messages. Kind 30078 falls in NIP-01's addressable/parameterized-
-// replaceable range (30000-39999): a compliant relay keeps only the latest
-// event per (pubkey, kind, d) coordinate, treating a missing "d" as "". Since
-// profile publish (internal/profile/profile.go) uses a fixed ProfileDTag on
-// the same kind to intentionally keep one replaceable profile per identity,
-// agent messages need a value that's unique per message instead, or
-// consecutive messages from the same sender would evict each other on such
-// relays -- see CC-82. The random component guarantees uniqueness even for
-// byte-identical content sent twice within the same second (e.g. retries
-// with encryption disabled, where the ciphertext wouldn't otherwise differ).
-func deriveMessageDTag(content string, createdAt nostr.Timestamp) (string, error) {
+// FormatAgentMessageDTag namespaces a unique hex token for kind 30078 message
+// events. It preserves the token so callers with established retry semantics
+// can continue to reuse it without changing event identity policy.
+func FormatAgentMessageDTag(uniqueToken string) (string, error) {
+	if (len(uniqueToken) != 16 && len(uniqueToken) != 32 && len(uniqueToken) != 64) || !isHexString(uniqueToken) {
+		return "", fmt.Errorf("agent message d-tag token must be 16, 32, or 64 hex characters")
+	}
+	return wireevent.MessageDPrefix + strings.ToLower(uniqueToken), nil
+}
+
+func isHexString(value string) bool {
+	_, err := hex.DecodeString(value)
+	return err == nil
+}
+
+// NewAgentMessageDTag gives a new message a namespaced, per-event d tag. Its
+// random component keeps byte-identical messages distinct within one second.
+func NewAgentMessageDTag(content string, createdAt nostr.Timestamp) (string, error) {
 	nonce := make([]byte, 8)
 	if _, err := cryptorand.Read(nonce); err != nil {
 		return "", err
@@ -106,7 +113,38 @@ func deriveMessageDTag(content string, createdAt nostr.Timestamp) (string, error
 	h.Write([]byte(content))
 	h.Write([]byte(strconv.FormatInt(int64(createdAt), 10)))
 	h.Write(nonce)
-	return hex.EncodeToString(h.Sum(nil))[:16], nil
+	return FormatAgentMessageDTag(hex.EncodeToString(h.Sum(nil))[:16])
+}
+
+// ValidateAgentMessageEvent rejects kind-30078 events whose application tags
+// do not unambiguously identify them as agent messages. Signature and
+// recipient-specific checks remain the responsibility of the caller.
+func ValidateAgentMessageEvent(event *nostr.Event) error {
+	if event == nil || event.Kind != AgentKind {
+		return fmt.Errorf("unexpected agent message event kind")
+	}
+	class, err := wireevent.Classify30078(event.Tags)
+	if err != nil {
+		return fmt.Errorf("classify agent message event: %w", err)
+	}
+	if class != wireevent.ClassMessage {
+		return fmt.Errorf("kind 30078 event is not an agent message")
+	}
+	return nil
+}
+
+// BuildAgentMessageFilter uses only stable message discriminator tags. It
+// deliberately omits d so relays still return legacy messages published
+// without a d tag; the client classifier validates every returned event.
+func BuildAgentMessageFilter(recipientHex string) nostr.Filter {
+	return nostr.Filter{
+		Kinds: []nostr.Kind{AgentKind},
+		Tags: nostr.TagMap{
+			"c": []string{AgentTag},
+			"v": []string{AgentVersion},
+			"p": []string{recipientHex},
+		},
+	}
 }
 
 // AgentMsgCmd - Send message using nicknames
@@ -218,7 +256,7 @@ Example: hyphae agent msg --from alice --to bob --content "Hello!"`,
 			return fmt.Errorf("failed to compress message: %w", err)
 		}
 		createdAt := nostr.Now()
-		dTag, err := deriveMessageDTag(compressed, createdAt)
+		dTag, err := NewAgentMessageDTag(compressed, createdAt)
 		if err != nil {
 			return fmt.Errorf("failed to derive d tag: %w", err)
 		}
@@ -247,6 +285,9 @@ Example: hyphae agent msg --from alice --to bob --content "Hello!"`,
 			Tags:      tags,
 			Content:   compressed,
 			PubKey:    senderSK.Public(),
+		}
+		if err := ValidateAgentMessageEvent(event); err != nil {
+			return fmt.Errorf("validate outgoing message tags: %w", err)
 		}
 		if err := event.Sign(senderSK); err != nil {
 			return fmt.Errorf("failed to sign event: %w", err)
@@ -468,11 +509,8 @@ var AgentInboxCmd = &cli.Command{
 			return err
 		}
 		jsonMode := common.JSONMode(c)
-		filter := nostr.Filter{
-			Kinds: []nostr.Kind{AgentKind},
-			Tags:  nostr.TagMap{"p": []string{common.PubKeyToHex(recipientPK)}},
-			Limit: limit,
-		}
+		filter := BuildAgentMessageFilter(common.PubKeyToHex(recipientPK))
+		filter.Limit = limit
 
 		allEvents := make(map[string]nostr.Event)
 		successfulRelays := 0
@@ -604,18 +642,16 @@ func validateInboxEvent(event nostr.Event, recipientHex string) error {
 	if !event.CheckID() || !event.VerifySignature() {
 		return fmt.Errorf("invalid event ID or signature")
 	}
-	pTags := 0
-	matchedRecipient := false
+	if err := ValidateAgentMessageEvent(&event); err != nil {
+		return err
+	}
+	var messageRecipient string
 	for _, tag := range event.Tags {
 		if len(tag) > 0 && tag[0] == "p" {
-			pTags++
-			if len(tag) < 2 {
-				return fmt.Errorf("recipient filter tag is malformed")
-			}
-			matchedRecipient = tag[1] == recipientHex
+			messageRecipient = tag[1]
 		}
 	}
-	if pTags != 1 || !matchedRecipient {
+	if messageRecipient != recipientHex {
 		return fmt.Errorf("event does not match recipient filter with exactly one p tag")
 	}
 	return nil

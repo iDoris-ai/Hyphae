@@ -128,9 +128,13 @@ func TestGetReceivedCount(t *testing.T) {
 
 func TestStoreOutgoingMessage(t *testing.T) {
 	resetStore(t)
+	recipient := nostr.Generate().Public()
 	event := &nostr.Event{
 		Kind:    30078,
 		Content: "compressed content",
+		Tags: nostr.Tags{
+			{"p", hex.EncodeToString(recipient[:])}, {"c", AgentTag}, {"v", AgentVersion},
+		},
 	}
 	event.ID = [32]byte{1}
 	event.PubKey = nostr.PubKey{}
@@ -155,7 +159,9 @@ func TestStoreIncomingMessage(t *testing.T) {
 	event := &nostr.Event{
 		Kind:    30078,
 		Content: "compressed content",
-		Tags:    nostr.Tags{{"p", "b029a5dc3d6dd7fc6407949053ac55637faf49dba942af908e3ad5e938d30a1f"}},
+		Tags: nostr.Tags{
+			{"p", "b029a5dc3d6dd7fc6407949053ac55637faf49dba942af908e3ad5e938d30a1f"}, {"c", AgentTag}, {"v", AgentVersion},
+		},
 	}
 	event.ID = [32]byte{2}
 	event.PubKey = nostr.PubKey{}
@@ -176,7 +182,12 @@ func TestStoreIncomingMessageOnceWrapper(t *testing.T) {
 	resetStore(t)
 	recipient := nostr.Generate().Public()
 	sender := nostr.Generate()
-	event := &nostr.Event{PubKey: sender.Public(), Content: "ciphertext", Tags: nostr.Tags{{"p", hex.EncodeToString(recipient[:])}}}
+	event := &nostr.Event{
+		Kind: AgentKind, PubKey: sender.Public(), Content: "ciphertext",
+		Tags: nostr.Tags{
+			{"p", hex.EncodeToString(recipient[:])}, {"c", AgentTag}, {"v", AgentVersion},
+		},
+	}
 	event.ID = [32]byte{9}
 	npub := common.EncodeNpub(recipient)
 	first, err := StoreIncomingMessageOnce(event, npub, "first plaintext", true)

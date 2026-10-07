@@ -203,11 +203,13 @@ func TestPreloadRecentSeen_MarksStoredIDsAsSeen(t *testing.T) {
 	myNpub := common.EncodeNpub(mySK.Public())
 
 	// StoreIncomingMessage reads the recipient out of the event's "p" tag,
-	// not from any argument -- an event with no "p" tag stores against an
-	// empty recipient_npub and would never match a query for myNpub.
+	// not from any argument; the c/v tags also identify this kind-30078 event
+	// as an agent message rather than a profile.
 	event := &nostr.Event{
-		Kind: 1, Content: "hi", PubKey: senderSK.Public(),
-		Tags: nostr.Tags{{"p", common.PubKeyToHex(mySK.Public())}},
+		Kind: messaging.AgentKind, Content: "hi", PubKey: senderSK.Public(),
+		Tags: nostr.Tags{
+			{"p", common.PubKeyToHex(mySK.Public())}, {"c", messaging.AgentTag}, {"v", messaging.AgentVersion},
+		},
 	}
 	event.ID = [32]byte{7}
 	require.NoError(t, messaging.StoreIncomingMessage(event, "hi", false))
@@ -389,9 +391,11 @@ func TestWatchInbox_ReceivesEventMarksSeenAndAutoReplies(t *testing.T) {
 	incoming := &nostr.Event{
 		CreatedAt: nostr.Now(),
 		Kind:      messaging.AgentKind,
-		Tags:      nostr.Tags{{"p", common.PubKeyToHex(myPK)}},
-		Content:   compressed,
-		PubKey:    senderSK.Public(),
+		Tags: nostr.Tags{
+			{"p", common.PubKeyToHex(myPK)}, {"c", messaging.AgentTag}, {"v", messaging.AgentVersion},
+		},
+		Content: compressed,
+		PubKey:  senderSK.Public(),
 	}
 	require.NoError(t, incoming.Sign(senderSK))
 	eventJSON, err := json.Marshal(incoming)
@@ -502,7 +506,11 @@ func TestWatchInbox_ReceivesEventMarksSeenAndAutoReplies(t *testing.T) {
 
 func signedIncomingEvent(t *testing.T, sender nostr.SecretKey, recipient nostr.PubKey, content string, tags nostr.Tags) *nostr.Event {
 	t.Helper()
-	eventTags := nostr.Tags{{"p", common.PubKeyToHex(recipient)}}
+	eventTags := nostr.Tags{
+		{"p", common.PubKeyToHex(recipient)},
+		{"c", messaging.AgentTag},
+		{"v", messaging.AgentVersion},
+	}
 	eventTags = append(eventTags, tags...)
 	event := &nostr.Event{CreatedAt: nostr.Now(), Kind: messaging.AgentKind, Tags: eventTags, Content: content, PubKey: sender.Public()}
 	require.NoError(t, event.Sign(sender))
@@ -656,7 +664,9 @@ func TestWatchOneRelay_WalksSameSecondBacklogPastOneHundred(t *testing.T) {
 		require.NoError(t, err)
 		events[i] = &nostr.Event{
 			CreatedAt: timestamp, Kind: messaging.AgentKind,
-			Tags:    nostr.Tags{{"p", common.PubKeyToHex(mySK.Public())}, {"z", messaging.CompressTag}},
+			Tags: nostr.Tags{
+				{"p", common.PubKeyToHex(mySK.Public())}, {"c", messaging.AgentTag}, {"v", messaging.AgentVersion}, {"z", messaging.CompressTag},
+			},
 			Content: compressed, PubKey: sender.Public(),
 		}
 		require.NoError(t, events[i].Sign(sender))
@@ -664,7 +674,11 @@ func TestWatchOneRelay_WalksSameSecondBacklogPastOneHundred(t *testing.T) {
 	relayURL, requests := startHistoryRelay(t, events)
 	count, err := watchOneRelay(context.Background(), relayURL, nostr.Filter{
 		Kinds: []nostr.Kind{messaging.AgentKind},
-		Tags:  nostr.TagMap{"p": []string{common.PubKeyToHex(mySK.Public())}},
+		Tags: nostr.TagMap{
+			"c": []string{messaging.AgentTag},
+			"v": []string{messaging.AgentVersion},
+			"p": []string{common.PubKeyToHex(mySK.Public())},
+		},
 	}, ks, mySK, newSeenSet(), false, false, myIdentity, []string{relayURL})
 	require.NoError(t, err)
 	assert.Equal(t, len(events), count)
