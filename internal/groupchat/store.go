@@ -477,7 +477,7 @@ func (s *Store) ReceiveAcceptance(v VerifiedIncoming) ([]Envelope, error) {
 // MarkActivationQueued records that the original signed activation event is
 // durably published or queued for retry. Relay ACK is not recipient receipt.
 func (s *Store) MarkActivationQueued(localNpub, groupID, inviteID, eventID string, queued bool) error {
-	if !queued || !validEventID(eventID) {
+	if !queued || len(eventID) != 64 || !isLowerHex(eventID) {
 		return errors.New("activation must be durably queued before marking it")
 	}
 	localNpub, err := canonicalNpub(localNpub)
@@ -909,6 +909,24 @@ func envelopeFrom(v VerifiedIncoming, expected EnvelopeType) (Envelope, error) {
 		return Envelope{}, fmt.Errorf("unexpected group envelope type %q", e.Type)
 	}
 	return e, nil
+}
+
+// valid is the state layer's fail-closed gate for opaque incoming values. The
+// protocol decoder validates the envelope, while the constructor establishes
+// authenticity; state transitions additionally require a non-zero value with
+// canonical signed identities and a well-formed event ID before consulting DB.
+func (v VerifiedIncoming) valid() bool {
+	if !v.verified || v.kind != wireevent.Kind30078 || !v.isEncrypted ||
+		len(v.eventID) != 64 || !isLowerHex(v.eventID) || !validProtocolText(v.plaintext) {
+		return false
+	}
+	for _, identity := range []string{v.senderNpub, v.recipientNpub} {
+		canonical, err := canonicalNpub(identity)
+		if err != nil || canonical != identity {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeMemberList(values []string) []string {

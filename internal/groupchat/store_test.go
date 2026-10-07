@@ -201,6 +201,100 @@ func TestCreatorAuthorityRosterBindingAndLocalLeave(t *testing.T) {
 	require.Equal(t, StateActive, creatorGroup.State)
 }
 
+func TestStateLayerRejectsZeroValueAndWrongSignerForEveryControl(t *testing.T) {
+	t.Run("zero value", func(t *testing.T) {
+		g := newThreeMemberGroup(t)
+		_, err := g.bob.store.ReceiveMessage(VerifiedIncoming{})
+		require.Error(t, err)
+		require.ErrorContains(t, err, "verified encrypted Agent event")
+	})
+
+	t.Run("invite", func(t *testing.T) {
+		g := newThreeMemberGroup(t)
+		invite := g.invites[g.bob.npub]
+		_, err := g.bob.store.ReceiveInvite(buildIncoming(t, g.carol, g.bob, invite))
+		require.ErrorIs(t, err, ErrProtocolMismatch)
+	})
+
+	t.Run("acceptance", func(t *testing.T) {
+		g := newThreeMemberGroup(t)
+		accept, err := g.bob.store.AcceptInvite(g.invites[g.bob.npub].InviteID, g.bob.npub)
+		require.NoError(t, err)
+		_, err = g.alice.store.ReceiveAcceptance(buildIncoming(t, g.carol, g.alice, accept))
+		require.ErrorIs(t, err, ErrProtocolMismatch)
+		group, err := g.alice.store.GetGroup(g.alice.npub, g.draft.Group.ID)
+		require.NoError(t, err)
+		require.Equal(t, StatePending, group.State)
+	})
+
+	t.Run("activation", func(t *testing.T) {
+		g := newThreeMemberGroup(t)
+		invite := g.invites[g.bob.npub]
+		_, err := g.bob.store.AcceptInvite(invite.InviteID, g.bob.npub)
+		require.NoError(t, err)
+		activation := Envelope{Type: EnvelopeActivate, Version: Version, GroupID: invite.GroupID,
+			CreatorNpub: invite.CreatorNpub, InviteID: invite.InviteID, RosterHash: invite.RosterHash,
+			InviteeNpub: invite.InviteeNpub, Name: invite.Name, Members: invite.Members}
+		_, err = g.bob.store.ReceiveActivation(buildIncoming(t, g.carol, g.bob, activation))
+		require.ErrorIs(t, err, ErrProtocolMismatch)
+		group, err := g.bob.store.GetGroup(g.bob.npub, invite.GroupID)
+		require.NoError(t, err)
+		require.Equal(t, StatePending, group.State)
+	})
+
+	t.Run("decline", func(t *testing.T) {
+		g := newThreeMemberGroup(t)
+		decline, err := g.bob.store.DeclineInvite(g.invites[g.bob.npub].InviteID, g.bob.npub)
+		require.NoError(t, err)
+		_, err = g.alice.store.ReceiveDecline(buildIncoming(t, g.carol, g.alice, decline))
+		require.ErrorIs(t, err, ErrProtocolMismatch)
+		group, err := g.alice.store.GetGroup(g.alice.npub, g.draft.Group.ID)
+		require.NoError(t, err)
+		require.Equal(t, StatePending, group.State)
+	})
+
+	t.Run("cancel", func(t *testing.T) {
+		g := newThreeMemberGroup(t)
+		cancellations, err := g.alice.store.CancelGroup(g.alice.npub, g.draft.Group.ID)
+		require.NoError(t, err)
+		var forBob Envelope
+		for _, cancellation := range cancellations {
+			if cancellation.InviteeNpub == g.bob.npub {
+				forBob = cancellation
+			}
+		}
+		require.NotEmpty(t, forBob.InviteID)
+		err = g.bob.store.ReceiveCancel(buildIncoming(t, g.carol, g.bob, forBob))
+		require.ErrorIs(t, err, ErrProtocolMismatch)
+		group, err := g.bob.store.GetGroup(g.bob.npub, g.draft.Group.ID)
+		require.NoError(t, err)
+		require.Equal(t, StatePending, group.State)
+	})
+}
+
+func TestOpaqueIncomingStateGateRejectsMalformedValues(t *testing.T) {
+	g := newThreeMemberGroup(t)
+	g.activate()
+	valid := buildIncoming(t, g.alice, g.bob, Envelope{Type: EnvelopeMessage, Version: Version,
+		GroupID: g.draft.Group.ID, LogicalID: mustOpaque(t), Body: "valid"})
+	mutations := map[string]func(*VerifiedIncoming){
+		"unverified":          func(v *VerifiedIncoming) { v.verified = false },
+		"bad event id":        func(v *VerifiedIncoming) { v.eventID = "not-an-event-id" },
+		"wrong kind":          func(v *VerifiedIncoming) { v.kind = 1 },
+		"unencrypted":         func(v *VerifiedIncoming) { v.isEncrypted = false },
+		"noncanonical sender": func(v *VerifiedIncoming) { v.senderNpub = "not-an-npub" },
+		"invalid plaintext":   func(v *VerifiedIncoming) { v.plaintext = string([]byte{0xff}) },
+	}
+	for name, mutate := range mutations {
+		t.Run(name, func(t *testing.T) {
+			incoming := valid
+			mutate(&incoming)
+			_, err := g.bob.store.ReceiveMessage(incoming)
+			require.Error(t, err)
+		})
+	}
+}
+
 func TestExplicitDeclineCancelsInsteadOfShrinkingRoster(t *testing.T) {
 	g := newThreeMemberGroup(t)
 	decline, err := g.bob.store.DeclineInvite(g.invites[g.bob.npub].InviteID, g.bob.npub)
