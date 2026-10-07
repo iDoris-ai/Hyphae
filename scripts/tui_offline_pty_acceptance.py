@@ -695,7 +695,7 @@ def run_offline_acceptance(args: argparse.Namespace) -> int:
                     and entry.get("relays") == [relay_url]
                 )
                 evidence["queued_event"] = {
-                    "event_id": event_id,
+                    "event_id_sha256_16": safe_hash(event_id),
                     "sender_pubkey_sha256_16": safe_hash(str(queued_event.get("pubkey", ""))),
                     "recipient_p_tag_sha256_16": safe_hash(next((tag[1] for tag in queued_event.get("tags", [])
                                                                   if isinstance(tag, list) and len(tag) >= 2 and tag[0] == "p"), "")),
