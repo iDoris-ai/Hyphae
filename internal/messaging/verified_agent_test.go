@@ -59,6 +59,13 @@ func TestVerifyAgentMessageRejectsInvalidIdentityRoutingAndCiphertext(t *testing
 		_, err := VerifyAgentMessage(event, recipient)
 		require.Error(t, err)
 	})
+	t.Run("wrong signed event kind", func(t *testing.T) {
+		event := valid
+		event.Kind = nostr.Kind(1)
+		require.NoError(t, event.Sign(sender))
+		_, err := VerifyAgentMessage(event, recipient)
+		require.Error(t, err)
+	})
 	t.Run("wrong recipient key", func(t *testing.T) {
 		_, err := VerifyAgentMessage(valid, stranger)
 		require.Error(t, err)
