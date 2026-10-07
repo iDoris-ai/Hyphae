@@ -36,4 +36,10 @@ CI acceptance must run this command on the macOS runner's Python 3.14.7, report 
 
 ## Local run record
 
-Local implementation run on macOS Python `3.14.6`: the repeated command above completed **50/50** in 20.359 seconds (aggregate, approximately 0.407 seconds per iteration). `python3.14 -m unittest discover -s scripts -p '*_test.py' -v` completed **40 tests, PASS** in 9.912 seconds. These are local results only; they do not establish the CI root cause or substitute for CI. The required follow-up CI check remains a macOS Python 3.14.7 `workflow_dispatch` run; this document does not claim it has run.
+Local results on macOS Python `3.14.6`:
+
+- The repeated command above completed **50/50** in 20.359 seconds (aggregate, approximately 0.407 seconds per iteration).
+- `python3.14 -m unittest discover -s scripts -p '*_test.py' -v` completed **40 tests, PASS** in 9.912 seconds.
+- The CI-pattern command `python3.14 -m unittest discover -s scripts -p 'test_*.py'` completed **77/77 tests, PASS** in 27.728 seconds (run by the root agent). This discovery set overlaps the 40-test `*_test.py` set; the counts are not additive. It emitted an HTTP 404 `ResourceWarning`, but the suite exited successfully.
+
+These are local results only; they do not establish the CI root cause or substitute for CI. The required follow-up CI check remains a macOS Python 3.14.7 `workflow_dispatch` run of the 50-repeat command; this document does not claim it has run.
