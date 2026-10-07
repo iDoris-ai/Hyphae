@@ -67,6 +67,45 @@ func TestVerifyIncomingChecksSignatureEncryptionAndRecipient(t *testing.T) {
 	require.Error(t, err, "group messages require NIP-44 encryption")
 }
 
+func TestFromVerifiedAgentMessageRequiresEncryptedReservedCandidate(t *testing.T) {
+	alice, bob := nostr.Generate(), nostr.Generate()
+	payload, err := Encode(Envelope{Type: EnvelopeMessage, Version: Version,
+		GroupID: mustOpaque(t), LogicalID: mustOpaque(t), Body: "group body"})
+	require.NoError(t, err)
+	event := testAgentEvent(t, payload, alice, bob, true)
+	message, err := messaging.VerifyAgentMessage(event, bob)
+	require.NoError(t, err)
+	adapted, err := FromVerifiedAgentMessage(message)
+	require.NoError(t, err)
+	require.Equal(t, message.EventID(), adapted.EventID())
+	require.Equal(t, message.SenderNpub(), adapted.SenderNpub())
+	require.Equal(t, message.RecipientNpub(), adapted.RecipientNpub())
+	require.Equal(t, payload, adapted.Plaintext())
+
+	_, err = FromVerifiedAgentMessage(messaging.VerifiedAgentMessage{})
+	require.Error(t, err, "zero opaque value must not cross into group state")
+
+	direct, err := messaging.VerifyAgentMessage(testAgentEvent(t, "ordinary DM", alice, bob, true), bob)
+	require.NoError(t, err)
+	_, err = FromVerifiedAgentMessage(direct)
+	require.Error(t, err, "ordinary direct messages must not enter group state")
+
+	plainGroup, err := messaging.VerifyAgentMessage(testAgentEvent(t, payload, alice, bob, false), bob)
+	require.NoError(t, err)
+	_, err = FromVerifiedAgentMessage(plainGroup)
+	require.Error(t, err, "group adapter must require encryption")
+
+	for _, malformed := range []string{"hyphae.group/v99\n{}", "hyphae.group/broken"} {
+		candidate, err := messaging.VerifyAgentMessage(testAgentEvent(t, malformed, alice, bob, true), bob)
+		require.NoError(t, err)
+		require.Equal(t, messaging.AgentRouteReservedGroup, candidate.Route())
+		incoming, err := FromVerifiedAgentMessage(candidate)
+		require.NoError(t, err, "reserved candidates are passed only to strict group decoding")
+		_, err = envelopeFrom(incoming, EnvelopeMessage)
+		require.Error(t, err, "malformed/unknown reserved payload must not become a direct message")
+	}
+}
+
 func cloneTestTags(tags nostr.Tags) nostr.Tags {
 	copyTags := make(nostr.Tags, len(tags))
 	for i := range tags {
