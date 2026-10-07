@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import stat
@@ -53,11 +54,57 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def hash_descriptor(descriptor: int) -> str:
+    before = os.fstat(descriptor)
+    require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1, "artifact-not-regular")
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    digest = hashlib.sha256()
+    size = 0
+    with os.fdopen(descriptor, "rb", closefd=False) as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            size += len(chunk)
+            digest.update(chunk)
+    after = os.fstat(descriptor)
+    require(stat.S_ISREG(after.st_mode) and after.st_nlink == 1 and size == after.st_size == before.st_size,
+            "artifact-changed-during-read")
+    return digest.hexdigest()
+
+
+def read_regular(path: Path, limit: int) -> bytes:
+    try:
+        info = path.lstat()
+        require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_size <= limit,
+                "input-not-regular-or-too-large")
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError:
+        raise GateError("input-unreadable") from None
+    try:
+        opened = os.fstat(descriptor)
+        require(stat.S_ISREG(opened.st_mode) and opened.st_nlink == 1 and opened.st_size == info.st_size
+                and opened.st_size <= limit, "input-not-regular-or-too-large")
+        data = bytearray()
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            for chunk in iter(lambda: stream.read(64 * 1024), b""):
+                data.extend(chunk)
+                require(len(data) <= limit, "input-too-large")
+        require(len(data) == opened.st_size, "input-changed-during-read")
+        return bytes(data)
+    finally:
+        os.close(descriptor)
+
+
 def file_sha(path: Path) -> str:
     try:
         info = path.lstat()
         require(stat.S_ISREG(info.st_mode) and not path.is_symlink(), "artifact-not-regular")
-        return sha256(path.read_bytes())
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            opened = os.fstat(descriptor)
+            require(stat.S_ISREG(opened.st_mode) and opened.st_nlink == 1 and opened.st_size == info.st_size,
+                    "artifact-not-regular")
+            return hash_descriptor(descriptor)
+        finally:
+            os.close(descriptor)
     except OSError:
         raise GateError("artifact-unreadable") from None
 
@@ -129,10 +176,25 @@ def make_manifest(*, mode: str, platform: str, hyphae_sha: str, agent24_sha: str
 
 def validate_manifest(path: Path, artifact_dir: Path, production_lock: Path) -> dict[str, Any]:
     try:
-        manifest_bytes = path.read_bytes()
+        directory_info = artifact_dir.lstat()
+        parent_info = artifact_dir.parent.lstat()
+    except OSError:
+        raise GateError("artifact-directory-unreadable") from None
+    require(stat.S_ISDIR(directory_info.st_mode) and not artifact_dir.is_symlink()
+            and stat.S_ISDIR(parent_info.st_mode) and not artifact_dir.parent.is_symlink(),
+            "artifact-directory-not-regular")
+    expected_entries = set(ARTIFACTS) | {"hyphae.lock.json", "manifest.json"}
+    try:
+        entries = {item.name for item in artifact_dir.iterdir()}
+    except OSError:
+        raise GateError("artifact-directory-unreadable") from None
+    require(entries == expected_entries and path.absolute() == (artifact_dir / "manifest.json").absolute(),
+            "artifact-file-set")
+    try:
+        manifest_bytes = read_regular(path, 128 * 1024)
         manifest = parse_json(manifest_bytes, "manifest-json")
-        prod = production_lock.read_bytes()
-        derived = (artifact_dir / "hyphae.lock.json").read_bytes()
+        prod = read_regular(production_lock, 64 * 1024)
+        derived = read_regular(artifact_dir / "hyphae.lock.json", 64 * 1024)
     except OSError:
         raise GateError("manifest-input-unreadable") from None
     require(type(manifest) is dict and manifest.get("schema") == "agent24-hyphae-joint-ci-manifest/1", "manifest-schema")
@@ -183,6 +245,52 @@ def check_producer_outputs(manifest_path: Path, manifest: dict[str, Any], *,
             "manifest_sha256": sha256(manifest_path.read_bytes()),
         }
         require(actual == expected_outputs, "producer-output-mismatch")
+
+
+def restore_executable_modes(artifact_dir: Path, manifest: dict[str, Any]) -> None:
+    """Restore ZIP-lost executable bits only after independent hash validation."""
+    hashes = manifest.get("binary_sha256")
+    require(type(hashes) is dict and set(hashes) == set(ARTIFACTS), "manifest-binary-set")
+    descriptors: list[tuple[int, str]] = []
+    try:
+        # Open and validate the entire fixed binary set before changing any
+        # mode; a bad final artifact must not leave earlier files chmodded.
+        for name in ARTIFACTS:
+            path = artifact_dir / name
+            try:
+                info = path.lstat()
+                require(stat.S_ISREG(info.st_mode) and not path.is_symlink() and info.st_nlink == 1,
+                        "artifact-not-regular")
+                descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            except OSError:
+                raise GateError("artifact-open-failed") from None
+            descriptors.append((descriptor, name))
+            opened = os.fstat(descriptor)
+            if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
+                raise GateError("artifact-not-regular")
+            if hash_descriptor(descriptor) != hashes[name]:
+                raise GateError("artifact-hash-mismatch")
+        for descriptor, _ in descriptors:
+            os.fchmod(descriptor, 0o755)
+            require(os.fstat(descriptor).st_mode & 0o111 == 0o111, "artifact-mode-restore-failed")
+        for descriptor, name in descriptors:
+            require(hash_descriptor(descriptor) == hashes[name], "artifact-changed-during-mode-restore")
+    finally:
+        for descriptor, _ in descriptors:
+            os.close(descriptor)
+
+
+def verify_consumer_bundle(manifest_path: Path, artifact_dir: Path, production_lock: Path, *,
+                           expected_manifest_sha256: str, expected_platform: str,
+                           expected_hyphae_sha: str, expected_outputs: dict[str, Any]) -> dict[str, Any]:
+    manifest = validate_manifest(manifest_path, artifact_dir, production_lock)
+    check_producer_outputs(manifest_path, manifest,
+                           expected_manifest_sha256=expected_manifest_sha256,
+                           expected_platform=expected_platform,
+                           expected_hyphae_sha=expected_hyphae_sha,
+                           expected_outputs=expected_outputs)
+    restore_executable_modes(artifact_dir, manifest)
+    return manifest
 
 
 def normalized_evidence(path: Path, manifest: dict[str, Any]) -> dict[str, Any]:
@@ -307,12 +415,13 @@ def main(argv: list[str] | None = None) -> int:
             safe = normalized_evidence(args.evidence, manifest)
             args.output.write_text(json.dumps(safe, sort_keys=True, indent=2) + "\n", encoding="utf-8")
             return 0 if safe["result"] == "PASS" else 1
-        manifest = validate_manifest(args.manifest, args.artifact_dir, args.production_lock)
-        check_producer_outputs(args.manifest, manifest,
-                               expected_manifest_sha256=args.expected_manifest_sha256,
-                               expected_platform=args.expected_platform,
-                               expected_hyphae_sha=args.expected_hyphae_sha,
-                               expected_outputs=parse_json(args.expected_producer_outputs.encode(), "producer-output-json"))
+        manifest = verify_consumer_bundle(
+            args.manifest, args.artifact_dir, args.production_lock,
+            expected_manifest_sha256=args.expected_manifest_sha256,
+            expected_platform=args.expected_platform,
+            expected_hyphae_sha=args.expected_hyphae_sha,
+            expected_outputs=parse_json(args.expected_producer_outputs.encode(), "producer-output-json"),
+        )
         print(json.dumps({"validation_mode": manifest["validation_mode"], "platform": manifest["platform"],
                           "derived_lock_sha256": manifest["derived_lock_sha256"]}, sort_keys=True))
         return 0

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 from scripts import joint_ci
 
@@ -117,14 +118,116 @@ class JointCIGateTests(unittest.TestCase):
                 mode="candidate", platform="darwin-arm64", hyphae_sha="a" * 40,
                 agent24_sha=joint_ci.AGENT24_BASE_SHA,
                 production_lock_sha256=sha(self.prod), derived_lock_sha256=sha(derived), hashes=hashes)
-            manifest_path = root / "manifest.json"
+            manifest_path = artifact / "manifest.json"
             manifest_path.write_text(json.dumps(manifest))
             production_path = root / "production.lock.json"
             production_path.write_bytes(self.prod)
-            self.assertEqual(joint_ci.validate_manifest(manifest_path, artifact, production_path)["validation_mode"], "candidate")
+            outputs = {
+                "validation_mode": manifest["validation_mode"], "platform": manifest["platform"],
+                "hyphae_source_sha": manifest["hyphae_source_sha"],
+                "production_lock_sha256": manifest["production_lock_sha256"],
+                "derived_lock_sha256": manifest["derived_lock_sha256"],
+                "binary_sha256": manifest["binary_sha256"],
+                "manifest_sha256": sha(manifest_path.read_bytes()),
+            }
+            verified = joint_ci.verify_consumer_bundle(
+                manifest_path, artifact, production_path,
+                expected_manifest_sha256=outputs["manifest_sha256"], expected_platform="darwin-arm64",
+                expected_hyphae_sha="a" * 40, expected_outputs=outputs)
+            self.assertEqual(verified["validation_mode"], "candidate")
+            self.assertTrue(all((artifact / name).stat().st_mode & 0o111 for name in joint_ci.ARTIFACTS))
+            self.assertEqual({name: joint_ci.file_sha(artifact / name) for name in joint_ci.ARTIFACTS}, hashes)
             (artifact / "hyphae").write_bytes(b"tampered")
             with self.assertRaisesRegex(joint_ci.GateError, "artifact-hash-mismatch"):
                 joint_ci.validate_manifest(manifest_path, artifact, production_path)
+
+    def test_restore_modes_rejects_artifact_symlink_without_chmod(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            artifact = root / "artifact"
+            artifact.mkdir()
+            for name in joint_ci.ARTIFACTS:
+                (artifact / name).write_bytes(name.encode())
+            manifest = {"binary_sha256": {name: sha(name.encode()) for name in joint_ci.ARTIFACTS}}
+            target = artifact / "hyphae"
+            target.unlink()
+            target.symlink_to(root / "outside")
+            (root / "outside").write_bytes(b"outside")
+            with mock.patch.object(joint_ci.os, "fchmod") as chmod:
+                with self.assertRaisesRegex(joint_ci.GateError, "artifact-not-regular"):
+                    joint_ci.restore_executable_modes(artifact, manifest)
+                chmod.assert_not_called()
+
+    def test_manifest_gate_rejects_artifact_or_parent_directory_symlink(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            artifact = root / "artifact"
+            artifact.mkdir()
+            artifact_link = root / "artifact-link"
+            artifact_link.symlink_to(artifact, target_is_directory=True)
+            with self.assertRaisesRegex(joint_ci.GateError, "artifact-directory-not-regular"):
+                joint_ci.validate_manifest(artifact_link / "manifest.json", artifact_link,
+                                           root / "production.lock.json")
+            parent_link = root / "parent-link"
+            parent_link.symlink_to(root, target_is_directory=True)
+            linked_child = parent_link / "artifact"
+            with self.assertRaisesRegex(joint_ci.GateError, "artifact-directory-not-regular"):
+                joint_ci.validate_manifest(linked_child / "manifest.json", linked_child,
+                                           root / "production.lock.json")
+
+    def test_failed_manifest_or_hash_gate_never_changes_modes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            artifact = root / "artifact"
+            artifact.mkdir()
+            hashes = {}
+            for name in joint_ci.ARTIFACTS:
+                content = ("binary-" + name).encode()
+                path = artifact / name
+                path.write_bytes(content)
+                path.chmod(0o644)
+                hashes[name] = sha(content)
+            derived = joint_ci.derive_lock(self.prod, platform="linux-x64", hyphae_sha="a" * 40,
+                                           hyphae_binary_sha256=hashes["hyphae"])
+            (artifact / "hyphae.lock.json").write_bytes(derived)
+            manifest = joint_ci.make_manifest(mode="candidate", platform="linux-x64", hyphae_sha="a" * 40,
+                                              agent24_sha=joint_ci.AGENT24_BASE_SHA,
+                                              production_lock_sha256=sha(self.prod),
+                                              derived_lock_sha256=sha(derived), hashes=hashes)
+            manifest_path = artifact / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+            prod_path = root / "production.lock.json"
+            prod_path.write_bytes(self.prod)
+            outputs = {
+                "validation_mode": manifest["validation_mode"], "platform": manifest["platform"],
+                "hyphae_source_sha": manifest["hyphae_source_sha"],
+                "production_lock_sha256": manifest["production_lock_sha256"],
+                "derived_lock_sha256": manifest["derived_lock_sha256"],
+                "binary_sha256": manifest["binary_sha256"],
+                "manifest_sha256": sha(manifest_path.read_bytes()),
+            }
+            with mock.patch.object(joint_ci.os, "fchmod") as chmod:
+                with self.assertRaisesRegex(joint_ci.GateError, "manifest-producer-hash"):
+                    joint_ci.verify_consumer_bundle(
+                        manifest_path, artifact, prod_path, expected_manifest_sha256="0" * 64,
+                        expected_platform="linux-x64", expected_hyphae_sha="a" * 40,
+                        expected_outputs=outputs)
+                chmod.assert_not_called()
+                wrong_outputs = dict(outputs)
+                wrong_outputs["derived_lock_sha256"] = "0" * 64
+                with self.assertRaisesRegex(joint_ci.GateError, "producer-output-mismatch"):
+                    joint_ci.verify_consumer_bundle(
+                        manifest_path, artifact, prod_path, expected_manifest_sha256=outputs["manifest_sha256"],
+                        expected_platform="linux-x64", expected_hyphae_sha="a" * 40,
+                        expected_outputs=wrong_outputs)
+                chmod.assert_not_called()
+                (artifact / "agent24d").write_bytes(b"altered")
+                with self.assertRaisesRegex(joint_ci.GateError, "artifact-hash-mismatch"):
+                    joint_ci.verify_consumer_bundle(
+                        manifest_path, artifact, prod_path, expected_manifest_sha256=outputs["manifest_sha256"],
+                        expected_platform="linux-x64", expected_hyphae_sha="a" * 40,
+                        expected_outputs=outputs)
+                chmod.assert_not_called()
 
     def test_rejects_unexpected_lock_field_change(self):
         derived = joint_ci.derive_lock(self.prod, platform="linux-x64",
