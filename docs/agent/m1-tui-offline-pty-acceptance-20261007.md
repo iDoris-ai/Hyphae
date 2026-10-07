@@ -8,7 +8,7 @@
 - `docs/agent/m1-tui-live-inbox-acceptance-20261007.md`（#135）：记录了三个隔离 HOME、真实 CLI/TUI PTY、本地持久 relay、无外部 daemon 和 relay 重启后 inbox recovery 的验收经验；当时未有可重跑 PTY 驱动，且离线发送/outbox 不在 #135 范围。
 - `test_tui_e2e.sh`：仅测试 help 命令并提示人工交互；它依赖 `./bin/hyphae` 和当前 HOME，不作为隔离验收器。
 - `test_group_e2e.sh`：依赖公网 relay 和共享 HOME，发送未加密 DM 并吞掉错误，不构成加密群聊证据。
-- 群聊协议/状态设计参考了本机 sibling worktree `codex/m1-group-design-20261007`（commit `d0e2d3b`，`docs/agent/m1-group-chat-design-20261007.md`；该文档未包含在本验收工装基线上）：规定固定 roster、显式邀请接受/激活、每收件人独立 NIP-44 event、稳定 event ID 重试、单 inbox router 与幂等存储；并明确真实 CLI/TUI 三用户链路未完成。
+- 群聊协议/状态设计参考本机 sibling worktree `codex/m1-group-design-20261007`（commit `d0e2d3b`；设计文档未包含在本验收工装基线上）：规定固定 roster、显式邀请接受/激活、每收件人独立 NIP-44 event、稳定 event ID 重试、单 inbox router 与幂等存储；并明确真实 CLI/TUI 三用户链路未完成。
 
 ## 离线 PTY runner
 
@@ -17,7 +17,7 @@ python3 scripts/tui_offline_pty_acceptance.py
 python3 scripts/tui_offline_pty_acceptance.py --group-skeleton
 ```
 
-上面两条现在均应显示 `expected_gap` 并以 77 退出。等 TUI outbox 功能分支实现并同步 UX 后，显式运行：
+上面两条现在均应显示 `expected_gap` 并以 77 退出。离线 outbox PTY 路径现已实现；传入与产品二进制匹配的 source commit 和 hashes 后，可显式运行：
 
 ```sh
 python3 scripts/tui_offline_pty_acceptance.py \
@@ -37,7 +37,7 @@ runner 不启动 daemon，仅清理它自己创建的 PTY 子进程和 relay 子
 
 ### 本机真实链路结果（2026-10-07）
 
-修复候选在本机干净 worktree `codex/m1-tui-offline-20261007` / source commit `047e3e4e5b34128592f4d90cb7ca0e79cdfe4edb` 上运行，PTY runner commit 后续会由 offline PR cherry-pick。候选二进制及验收输入为：
+修复候选在本机干净 worktree `codex/m1-tui-offline-20261007` / source commit `047e3e4e5b34128592f4d90cb7ca0e79cdfe4edb` 上运行；runner 和自测已从验收工装提交 cherry-pick 到本 offline PR 分支。候选二进制及验收输入为：
 
 - `hyphae` SHA-256：`ba68bdb81dfc4785cf2e443edf6698a0ff7fb42145d29c92d8898500e1b28b90`
 - `hyphae-relay` SHA-256：`31ec2b39bdcac4d73ec84e16d2a598787c1844823ac559ea41e6e4c52b673f07`
