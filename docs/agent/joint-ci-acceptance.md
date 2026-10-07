@@ -1,6 +1,6 @@
 # Agent24 × Hyphae joint CI acceptance
 
-Status: Linux x64 candidate and pinned-production consumers each passed 10/10 in [run 37622440387](https://github.com/iDoris-ai/Hyphae/actions/runs/37622440387), using PR #134 merge source `efdb96660aefd5094741e01c77fcd321bfe1ae6b` after #133 was merged into main `6c613b64e8ce95fc89ac81a0d6d56a0e486e5d22`. This is Linux-only evidence; the current change adds native macOS ARM64 producers and consumers, whose four mode/platform legs still require a fresh successful run. CLI/relay acceptance does not imply desktop M1 acceptance.
+Status: In [run 37627002418](https://github.com/iDoris-ai/Hyphae/actions/runs/37627002418), all four native candidate/pinned-production × darwin-arm64/linux-x64 consumers passed 10/10, and macOS cleanup stress passed. The run was not fully green: macOS ordinary Go tests hit a stdout/stderr ordering race in `TestDaemonJSONLCLIOutputModesAndGenerationRestart`, so `ci-ok` failed. A test-only two-event synchronization fix is being validated on a new head; until that head has fresh CI, do not claim the overall gate passed. CLI/relay acceptance does not imply desktop M1 acceptance.
 
 ## Independent inputs
 
@@ -31,6 +31,6 @@ The reusable workflow is called by the ordinary CI workflow and also has schedul
 ## Limits and next steps
 
 - The scheduled workflow checks the pinned baseline and the Hyphae source at the workflow’s triggering commit. It does not automatically detect a new commit in the separate Agent24 repository. An Agent24 lock/source change must update this repository’s tracked pin configuration or explicitly dispatch a reviewed run; do not claim cross-repository automation that is not present.
-- The most recent completed evidence is Linux-only (run 37622440387). Do not describe the newly added macOS ARM64 ten-stage legs as passed until their exact new head has successful consumers.
+- Run 37627002418 proves all four platform/mode consumer legs, but not the entire workflow due to the unrelated-to-production test fixture race described above. The synchronization fix must pass a new full run on its exact head.
 - Do not say that candidate PR code passed joint acceptance until its exact SHA has a successful consumer job. Unit tests and YAML parsing validate the gate mechanics only.
 - #130 owns the existing runner/test implementation. Keep future changes to the locked-source helper, workflow, and documentation separated from those files.
