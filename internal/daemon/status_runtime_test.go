@@ -649,7 +649,11 @@ func TestDaemonJSONLCLIOutputModesAndGenerationRestart(t *testing.T) {
 	modes := []string{"flag", "current-env", "legacy-env", "flag"}
 	generations := make(map[string]struct{})
 	for _, mode := range modes {
-		lines, stdout, stderr := runDaemonJSONChild(t, home, mode)
+		lines, stdout, stderr := runDaemonJSONChildWithRelaysAndStderrDiagnostic(
+			t, home, mode, []string{"ws://127.0.0.1:1/private-content-marker"},
+			func(line StatusEnvelope) bool { return line.Data.Scan.State == StatusScanIncomplete },
+			"Inbox scan incomplete",
+		)
 		require.GreaterOrEqual(t, len(lines), 8)
 		for _, line := range lines {
 			assert.True(t, line.OK)
@@ -783,6 +787,80 @@ func runDaemonJSONChildForRelay(t *testing.T, home string, relays []string, targ
 }
 
 func runDaemonJSONChildWithRelays(t *testing.T, home, mode string, relays []string, target func(StatusEnvelope) bool) ([]StatusEnvelope, string, string) {
+	return runDaemonJSONChildWithRelaysAndStderrDiagnostic(t, home, mode, relays, target, "")
+}
+
+type daemonChildSignalGate struct {
+	targetStatus     func(StatusEnvelope) bool
+	targetDiagnostic string
+	statusSeen       bool
+	diagnosticSeen   bool
+	signaled         bool
+}
+
+func (gate *daemonChildSignalGate) observeStatus(line StatusEnvelope) bool {
+	if gate.targetStatus != nil && gate.targetStatus(line) {
+		gate.statusSeen = true
+	}
+	return gate.readyToSignal()
+}
+
+func (gate *daemonChildSignalGate) observeDiagnostic(line string) bool {
+	if gate.targetDiagnostic != "" && strings.Contains(line, gate.targetDiagnostic) {
+		gate.diagnosticSeen = true
+	}
+	return gate.readyToSignal()
+}
+
+func (gate *daemonChildSignalGate) readyToSignal() bool {
+	if gate.signaled || !gate.statusSeen || (gate.targetDiagnostic != "" && !gate.diagnosticSeen) {
+		return false
+	}
+	gate.signaled = true
+	return true
+}
+
+func TestDaemonJSONChildSignalGateRequiresStatusAndStderrInEitherOrder(t *testing.T) {
+	targetStatus := func(line StatusEnvelope) bool { return line.Data.Scan.State == StatusScanIncomplete }
+	target := StatusEnvelope{Data: StatusSnapshot{Scan: StatusScan{State: StatusScanIncomplete}}}
+	other := StatusEnvelope{Data: StatusSnapshot{Scan: StatusScan{State: StatusScanIdle}}}
+	const diagnostic = "Inbox scan incomplete"
+
+	t.Run("stdout first does not signal", func(t *testing.T) {
+		gate := daemonChildSignalGate{targetStatus: targetStatus, targetDiagnostic: diagnostic}
+		assert.False(t, gate.observeStatus(other))
+		assert.False(t, gate.observeStatus(target))
+		assert.False(t, gate.signaled, "target status alone must not signal")
+		assert.True(t, gate.observeDiagnostic("[time] ⚠️  Inbox scan incomplete: connection refused"))
+		assert.False(t, gate.observeDiagnostic(diagnostic), "the gate signals at most once")
+	})
+
+	t.Run("stderr first does not signal", func(t *testing.T) {
+		gate := daemonChildSignalGate{targetStatus: targetStatus, targetDiagnostic: diagnostic}
+		assert.False(t, gate.observeDiagnostic("[time] ⚠️  Inbox scan incomplete: connection refused"))
+		assert.False(t, gate.signaled, "diagnostic alone must not signal")
+		assert.True(t, gate.observeStatus(target))
+	})
+
+	t.Run("EOF without either required event fails closed", func(t *testing.T) {
+		gate := daemonChildSignalGate{targetStatus: targetStatus, targetDiagnostic: diagnostic}
+		assert.False(t, gate.observeStatus(target))
+		// Reaching EOF without the diagnostic leaves the gate unsignaled; the
+		// child helper then fails its required-signal assertion.
+		assert.False(t, gate.signaled)
+		gate = daemonChildSignalGate{targetStatus: targetStatus, targetDiagnostic: diagnostic}
+		assert.False(t, gate.observeDiagnostic(diagnostic))
+		assert.False(t, gate.signaled)
+	})
+}
+
+func runDaemonJSONChildWithRelaysAndStderrDiagnostic(
+	t *testing.T,
+	home, mode string,
+	relays []string,
+	target func(StatusEnvelope) bool,
+	targetDiagnostic string,
+) ([]StatusEnvelope, string, string) {
 	t.Helper()
 	args := []string{"daemon", "--identity", "alice"}
 	for _, relayURL := range relays {
@@ -811,8 +889,22 @@ func runDaemonJSONChildWithRelays(t *testing.T, home, mode string, relays []stri
 	require.NoError(t, command.Start())
 	var stderr bytes.Buffer
 	stderrDone := make(chan struct{})
+	stderrDiagnostic := make(chan string, 1)
+	var stderrReadErr error
 	go func() {
-		_, _ = io.Copy(&stderr, stderrPipe)
+		scanner := bufio.NewScanner(stderrPipe)
+		for scanner.Scan() {
+			line := scanner.Text()
+			stderr.WriteString(line)
+			stderr.WriteByte('\n')
+			if targetDiagnostic != "" && strings.Contains(line, targetDiagnostic) {
+				select {
+				case stderrDiagnostic <- line:
+				default:
+				}
+			}
+		}
+		stderrReadErr = scanner.Err()
 		close(stderrDone)
 	}()
 	type scanOutput struct {
@@ -854,9 +946,11 @@ func runDaemonJSONChildWithRelays(t *testing.T, home, mode string, relays []stri
 	var stdout strings.Builder
 	signaled := false
 	eof := false
+	stderrStreamDone := (<-chan struct{})(stderrDone)
+	signalGate := daemonChildSignalGate{targetStatus: target, targetDiagnostic: targetDiagnostic}
 	deadline := time.NewTimer(8 * time.Second)
 	defer deadline.Stop()
-	for !eof {
+	for !eof || (!signaled && targetDiagnostic != "" && stderrStreamDone != nil) {
 		select {
 		case item := <-output:
 			if item.done {
@@ -876,16 +970,24 @@ func runDaemonJSONChildWithRelays(t *testing.T, home, mode string, relays []stri
 			var envelope StatusEnvelope
 			require.NoError(t, json.Unmarshal([]byte(item.line), &envelope), "every stdout line must be a complete status envelope")
 			lines = append(lines, envelope)
-			if target != nil && target(envelope) && !signaled {
+			if signalGate.observeStatus(envelope) && !signaled {
 				require.NoError(t, command.Process.Signal(syscall.SIGTERM))
 				signaled = true
 			}
+		case diagnostic := <-stderrDiagnostic:
+			if signalGate.observeDiagnostic(diagnostic) && !signaled {
+				require.NoError(t, command.Process.Signal(syscall.SIGTERM))
+				signaled = true
+			}
+		case <-stderrStreamDone:
+			stderrStreamDone = nil
 		case <-deadline.C:
 			t.Fatalf("daemon did not produce the expected state stream; stdout=%s", stdout.String())
 		}
 	}
 	require.True(t, signaled, "target status must be emitted before shutdown")
 	<-stderrDone
+	require.NoError(t, stderrReadErr, "read daemon stderr")
 	waitErr := command.Wait()
 	waited = true
 	require.NoError(t, waitErr, stderr.String())
