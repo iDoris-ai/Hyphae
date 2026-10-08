@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -354,7 +355,14 @@ func countByID(entries []types.OutboxEntry, id string) int {
 // guess which queued payload the caller intended. Checking disk under the
 // transaction lock protects both CLI retries and the daemon retry loop.
 func AttemptSend(ctx context.Context, ob *types.Outbox, entry types.OutboxEntry, defaultRelays []string, dialTimeout time.Duration) (SendResult, error) {
-	return attemptSend(ctx, ob, entry, defaultRelays, dialTimeout, publishToRelays, StoreOutgoingMessage)
+	return AttemptSendWithKeyStore(ctx, ob, entry, defaultRelays, dialTimeout, nil)
+}
+
+// AttemptSendWithKeyStore lets callers that already have an unlocked
+// keystore use it when reconstructing encrypted history. A nil keystore keeps
+// daemon and CLI retry behavior independent of an in-memory caller state.
+func AttemptSendWithKeyStore(ctx context.Context, ob *types.Outbox, entry types.OutboxEntry, defaultRelays []string, dialTimeout time.Duration, ks *types.KeyStore) (SendResult, error) {
+	return attemptSendWithKeyStore(ctx, ob, entry, defaultRelays, dialTimeout, publishToRelays, StoreOutgoingMessage, ks)
 }
 
 type outboxPublisher func(context.Context, []string, nostr.Event, time.Duration) bool
@@ -368,6 +376,19 @@ func attemptSend(
 	dialTimeout time.Duration,
 	publish outboxPublisher,
 	store outgoingMessageStore,
+) (SendResult, error) {
+	return attemptSendWithKeyStore(ctx, ob, entry, defaultRelays, dialTimeout, publish, store, nil)
+}
+
+func attemptSendWithKeyStore(
+	ctx context.Context,
+	ob *types.Outbox,
+	entry types.OutboxEntry,
+	defaultRelays []string,
+	dialTimeout time.Duration,
+	publish outboxPublisher,
+	store outgoingMessageStore,
+	ks *types.KeyStore,
 ) (SendResult, error) {
 	current, err := currentOutboxAttempt(entry)
 	if errors.Is(err, errOutboxEntrySuperseded) {
@@ -397,13 +418,19 @@ func attemptSend(
 		return recordAttemptFailure(ob, current.entry, result)
 	}
 
-	plaintext, isEncrypted, err := outgoingHistoryContent(&event)
+	plaintext, isEncrypted, err := outgoingHistoryContent(&event, ks)
 	if err != nil {
-		result.Queued, result.Superseded, result.QueueStateUnknown = inspectAttemptQueue(current.entry)
+		result, retryErr := recordAttemptFailure(ob, current.entry, result)
+		if retryErr != nil {
+			err = fmt.Errorf("%w (also failed to record retry: %v)", err, retryErr)
+		}
 		return result, fmt.Errorf("prepare outgoing message history: %w", err)
 	}
 	if err := store(&event, current.entry.RecipientNpub, plaintext, isEncrypted); err != nil {
-		result.Queued, result.Superseded, result.QueueStateUnknown = inspectAttemptQueue(current.entry)
+		result, retryErr := recordAttemptFailure(ob, current.entry, result)
+		if retryErr != nil {
+			err = fmt.Errorf("%w (also failed to record retry: %v)", err, retryErr)
+		}
 		return result, fmt.Errorf("store outgoing message: %w", err)
 	}
 	result.HistoryStored = true
@@ -420,7 +447,10 @@ func attemptSend(
 		return result, nil
 	}
 	if err != nil {
-		result.Queued, result.Superseded, result.QueueStateUnknown = inspectAttemptQueue(current.entry)
+		result, retryErr := recordAttemptFailure(ob, current.entry, result)
+		if retryErr != nil {
+			err = fmt.Errorf("%w (also failed to record retry: %v)", err, retryErr)
+		}
 		var uncertain *outboxCommitUncertainError
 		if errors.As(err, &uncertain) {
 			result.QueueStateUnknown = true
@@ -433,7 +463,7 @@ func attemptSend(
 	return result, nil
 }
 
-func outgoingHistoryContent(event *nostr.Event) (plaintext string, isEncrypted bool, err error) {
+func outgoingHistoryContent(event *nostr.Event, callerKeyStores ...*types.KeyStore) (plaintext string, isEncrypted bool, err error) {
 	encryption, hasEncryption, err := outboxTagValue(event.Tags, "enc")
 	if err != nil {
 		return "", false, err
@@ -470,17 +500,27 @@ func outgoingHistoryContent(event *nostr.Event) (plaintext string, isEncrypted b
 			return "", false, err
 		}
 		if stored == nil || stored.Plaintext == "" {
-			ks, err := identity.LoadKeyStore()
-			if err != nil {
-				return "", false, err
+			ks := (*types.KeyStore)(nil)
+			if len(callerKeyStores) > 0 {
+				ks = callerKeyStores[0]
 			}
+			if ks == nil {
+				ks, err = identity.LoadKeyStore()
+				if err != nil {
+					log.Printf("warning: cannot recover plaintext for encrypted outgoing event %s; storing encrypted history with empty plaintext: %v", event.ID.Hex(), err)
+					return "", true, nil
+				}
+			}
+			foundIdentity := false
 			for nickname, local := range ks.Identities {
 				if local == nil || local.Npub != common.EncodeNpub(event.PubKey) {
 					continue
 				}
+				foundIdentity = true
 				secret, err := identity.GetSecretKey(ks, nickname)
 				if err != nil {
-					return "", false, err
+					log.Printf("warning: cannot recover plaintext for encrypted outgoing event %s; storing encrypted history with empty plaintext: %v", event.ID.Hex(), err)
+					return "", true, nil
 				}
 				p, _, err := outboxTagValue(event.Tags, "p")
 				if err != nil {
@@ -493,6 +533,9 @@ func outgoingHistoryContent(event *nostr.Event) (plaintext string, isEncrypted b
 				decodeEvent := *event
 				decodeEvent.PubKey = recipient
 				return DecodeMessageContent(&decodeEvent, secret)
+			}
+			if !foundIdentity {
+				log.Printf("warning: cannot recover plaintext for encrypted outgoing event %s; sender identity is unavailable, storing encrypted history with empty plaintext", event.ID.Hex())
 			}
 		}
 		return "", true, nil
