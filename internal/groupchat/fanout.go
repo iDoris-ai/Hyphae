@@ -3,6 +3,7 @@ package groupchat
 import (
 	"database/sql"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -91,20 +92,74 @@ func fanoutRank(state RecipientDeliveryState) int {
 	}
 }
 
+// fanoutInt accepts int/int64 (in-process callers) or a whole-number float64
+// (JSON-decoded). A string would be silently accepted by SQLite's dynamic
+// typing and later break LoadFanoutReport's Scan, so it is rejected here.
+func fanoutInt(value any) (int64, bool) {
+	switch v := value.(type) {
+	case int:
+		return int64(v), true
+	case int64:
+		return v, true
+	case float64:
+		if v != math.Trunc(v) {
+			return 0, false
+		}
+		return int64(v), true
+	default:
+		return 0, false
+	}
+}
+
 // transitionFanoutTx applies a compare-and-swap inside the caller's write transaction.
 // A false result means a stale caller or missing row; reload the current evidence.
 // Only mutable bookkeeping fields are accepted, never the frozen event or intent key.
+//
+// D2: entering relay_accepted requires relay_acks = 1, a nonzero accepted_at,
+// and (via the SQL CAS, not just the precheck) an already-persisted nonempty
+// queue_id -- a row that skipped queued (prepared -> failed -> here is rank-
+// legal) must not become markable accepted. D14: queue_id may only be
+// supplied when the target state is queued (never same-state prepared, which
+// would otherwise forge one), is required to be nonempty when entering
+// queued, and a same-state queued call may never replace an already-
+// confirmed value. attempts/last_attempt_at/relay_count/max_retries/
+// accepted_at/updated_at are monotonic (MAX) on every transition.
 func transitionFanoutTx(tx queryExecer, key FanoutKey, recipient string, from, to RecipientDeliveryState, fields map[string]any) (bool, error) {
 	fromRank, toRank := fanoutRank(from), fanoutRank(to)
 	if fromRank < 0 || toRank < 0 || toRank < fromRank ||
 		(from == RecipientPrepared && to == RecipientRelayAccepted) {
 		return false, ErrInvalidTransition
 	}
+	localNpub, err := canonicalNpub(key.LocalNpub)
+	if err != nil {
+		return false, err
+	}
+	entering := from != to
+	if entering && to == RecipientQueued {
+		if queueID, ok := fields["queue_id"].(string); !ok || queueID == "" {
+			return false, fmt.Errorf("fanout queue_id is required when transitioning into queued")
+		}
+	}
+	if entering && to == RecipientRelayAccepted {
+		if acks, ok := fanoutInt(fields["relay_acks"]); !ok || acks != 1 {
+			return false, fmt.Errorf("fanout relay acceptance requires relay_acks = 1")
+		}
+		if acceptedAt, ok := fanoutInt(fields["accepted_at"]); !ok || acceptedAt <= 0 {
+			return false, fmt.Errorf("fanout relay acceptance requires a nonzero accepted_at")
+		}
+	}
 	sets := []string{"updated_at = MAX(updated_at, ?)"}
 	args := []any{time.Now().Unix()}
-	if from != to {
+	if entering {
 		sets = append(sets, "state = ?")
 		args = append(args, to)
+	}
+	// Entering relay_accepted, or retrying out of failed, must never leave a
+	// stale failure issue behind; the loop below ignores any caller value.
+	clearIssue := entering && (to == RecipientRelayAccepted || (from == RecipientFailed && to == RecipientQueued))
+	if clearIssue {
+		sets = append(sets, "issue = ?")
+		args = append(args, string(messaging.AgentMessageIssueNone))
 	}
 	columns := make([]string, 0, len(fields))
 	for column := range fields {
@@ -116,36 +171,61 @@ func transitionFanoutTx(tx queryExecer, key FanoutKey, recipient string, from, t
 		expression := column + " = ?"
 		switch column {
 		case "queue_id":
-			if _, ok := value.(string); !ok {
+			v, ok := value.(string)
+			if !ok {
 				return false, fmt.Errorf("invalid fanout queue_id")
 			}
-			expression = "queue_id = COALESCE(NULLIF(?, ''), queue_id)"
+			if to != RecipientQueued {
+				return false, fmt.Errorf("fanout queue_id may only be set when the target state is queued")
+			}
+			if entering {
+				expression = "queue_id = COALESCE(NULLIF(?, ''), queue_id)"
+			} else {
+				expression = "queue_id = CASE WHEN queue_id = '' THEN ? ELSE queue_id END"
+			}
+			value = v
 		case "relay_acks":
-			acks, ok := value.(int)
+			acks, ok := fanoutInt(value)
 			if !ok || acks < 0 || acks > 1 {
 				return false, fmt.Errorf("fanout relay_acks must be 0 or 1")
 			}
+			value = acks
 			expression = "relay_acks = MAX(relay_acks, ?)"
-		case "attempts", "last_attempt_at", "updated_at", "accepted_at", "relay_count", "max_retries":
-			if from == to || column == "accepted_at" {
-				expression = column + " = MAX(" + column + ", ?)"
+		case "attempts", "last_attempt_at", "accepted_at", "relay_count", "max_retries":
+			n, ok := fanoutInt(value)
+			if !ok || n < 0 {
+				return false, fmt.Errorf("fanout %s must be a non-negative integer", column)
 			}
+			value = n
+			expression = column + " = MAX(" + column + ", ?)"
 		case "issue":
+			var issue messaging.AgentMessageDeliveryIssue
+			switch v := value.(type) {
+			case messaging.AgentMessageDeliveryIssue:
+				issue = v
+			case string:
+				issue = messaging.AgentMessageDeliveryIssue(v)
+			default:
+				return false, fmt.Errorf("invalid fanout issue")
+			}
+			if to == RecipientRelayAccepted || clearIssue {
+				continue // already force-cleared above (or frozen); never let it be re-set.
+			}
+			value = string(issue)
 		default:
 			return false, fmt.Errorf("immutable or unknown fanout field %q", column)
-		}
-		if column == "updated_at" {
-			sets[0] = expression
-			args[0] = value
-			continue
 		}
 		sets = append(sets, expression)
 		args = append(args, value)
 	}
-	args = append(args, key.LocalNpub, key.GroupID, key.EnvelopeType, key.SendKey, recipient, from)
+	args = append(args, localNpub, key.GroupID, key.EnvelopeType, key.SendKey, recipient, from)
+	guard := "" // see D2 above: the authoritative, not just in-memory, queue_id check.
+	if entering && to == RecipientRelayAccepted {
+		guard = " AND queue_id != ''"
+	}
 	result, err := tx.Exec(`UPDATE groupchat_fanout SET `+strings.Join(sets, ", ")+`
         WHERE local_npub = ? AND group_id = ? AND envelope_type = ? AND send_key = ?
-        AND recipient_npub = ? AND state = ?`, args...)
+        AND recipient_npub = ? AND state = ?`+guard, args...)
 	if err != nil {
 		return false, err
 	}

@@ -7,19 +7,44 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/messaging"
 	"github.com/stretchr/testify/require"
 )
 
 func insertFanout(t *testing.T, member testMember, key FanoutKey, recipient string, state RecipientDeliveryState, eventID string) {
 	t.Helper()
+	// A prepared row has not been queued yet, so it carries no queue_id;
+	// every other starting state simulates a prior confirmed assignment.
+	queueID := "original-queue"
+	if state == RecipientPrepared {
+		queueID = ""
+	}
 	_, err := member.db.Exec(`INSERT INTO groupchat_fanout
  (local_npub, group_id, envelope_type, send_key, recipient_npub, event_id, event_json,
  queue_id, state, max_retries, created_at, updated_at)
  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 10, 123, 123)`,
 		key.LocalNpub, key.GroupID, key.EnvelopeType, key.SendKey, recipient, eventID,
-		`{"content":"frozen ciphertext"}`, "original-queue", state)
+		`{"content":"frozen ciphertext"}`, queueID, state)
 	require.NoError(t, err)
+}
+
+// requiredFanoutFields returns the evidence a legitimate caller must supply
+// to enter a given target state, mirroring the invariants transitionFanoutTx
+// enforces: a fresh queue_id to become queued, and relay_acks=1 plus a
+// nonzero accepted_at to become relay_accepted.
+func requiredFanoutFields(from, to RecipientDeliveryState, recipient string) map[string]any {
+	if from == to {
+		return nil
+	}
+	switch to {
+	case RecipientQueued:
+		return map[string]any{"queue_id": "assigned-queue-" + recipient}
+	case RecipientRelayAccepted:
+		return map[string]any{"relay_acks": 1, "accepted_at": int64(999)}
+	default:
+		return nil
+	}
 }
 
 func applyFanout(t *testing.T, member testMember, key FanoutKey, recipient string, from, to RecipientDeliveryState, fields map[string]any) (bool, error) {
@@ -52,7 +77,11 @@ func TestFanoutTransitionMatrix(t *testing.T) {
 				insertFanout(t, member, key, "recipient", from, "event")
 				before, err := member.store.LoadFanoutReport(key)
 				require.NoError(t, err)
-				changed, err := applyFanout(t, member, key, "recipient", from, to, map[string]any{"attempts": 2, "issue": messaging.AgentMessageIssueSendFailed})
+				fields := map[string]any{"attempts": 2, "issue": messaging.AgentMessageIssueSendFailed}
+				for column, value := range requiredFanoutFields(from, to, "recipient") {
+					fields[column] = value
+				}
+				changed, err := applyFanout(t, member, key, "recipient", from, to, fields)
 				after, loadErr := member.store.LoadFanoutReport(key)
 				require.NoError(t, loadErr)
 				if allowed[i][j] {
@@ -60,6 +89,10 @@ func TestFanoutTransitionMatrix(t *testing.T) {
 					require.True(t, changed)
 					require.Equal(t, to, after.Recipients[0].State)
 					require.Equal(t, 2, after.Recipients[0].Attempts)
+					if to == RecipientRelayAccepted || (from == RecipientFailed && to == RecipientQueued) {
+						require.Equal(t, messaging.AgentMessageIssueNone, after.Recipients[0].Issue,
+							"entering %s from %s must clear any stale issue", to, from)
+					}
 				} else {
 					require.ErrorIs(t, err, ErrInvalidTransition)
 					require.False(t, changed)
@@ -144,7 +177,7 @@ func TestFanoutTransitionMatrix(t *testing.T) {
 		before, err := member.store.LoadFanoutReport(key)
 		require.NoError(t, err)
 		changed, err = applyFanout(t, member, key, "recipient", RecipientRelayAccepted, RecipientRelayAccepted,
-			map[string]any{"relay_acks": 0, "accepted_at": int64(0), "queue_id": ""})
+			map[string]any{"relay_acks": 0, "accepted_at": int64(0)})
 		require.NoError(t, err)
 		require.True(t, changed)
 		after, err := member.store.LoadFanoutReport(key)
@@ -171,6 +204,232 @@ func TestFanoutTransitionMatrix(t *testing.T) {
 			require.Error(t, err)
 			require.False(t, changed)
 		}
+	})
+
+	t.Run("relay_acceptance_requires_evidence", func(t *testing.T) {
+		member := newMember(t)
+		key := FanoutKey{member.npub, "group", EnvelopeMessage, "logical"}
+		insertFanout(t, member, key, "recipient", RecipientQueued, "event")
+		for _, fields := range []map[string]any{
+			nil,
+			{"relay_acks": 1},         // missing accepted_at
+			{"accepted_at": int64(1)}, // missing relay_acks
+			{"relay_acks": 1, "accepted_at": int64(0)}, // accepted_at must be nonzero
+		} {
+			changed, err := applyFanout(t, member, key, "recipient", RecipientQueued, RecipientRelayAccepted, fields)
+			require.Error(t, err)
+			require.False(t, changed)
+		}
+		report, err := member.store.LoadFanoutReport(key)
+		require.NoError(t, err)
+		require.Equal(t, RecipientQueued, report.Recipients[0].State)
+	})
+
+	t.Run("relay_acceptance_rejects_unsupported_value_types", func(t *testing.T) {
+		member := newMember(t)
+		key := FanoutKey{member.npub, "group", EnvelopeMessage, "logical"}
+		insertFanout(t, member, key, "recipient", RecipientQueued, "event")
+		// Strings would otherwise be silently accepted by SQLite's dynamic
+		// typing and corrupt LoadFanoutReport's later int64 scan.
+		for _, fields := range []map[string]any{
+			{"relay_acks": "1", "accepted_at": int64(1)},
+			{"relay_acks": 1, "accepted_at": "1"},
+			{"relay_acks": 1.5, "accepted_at": int64(1)},
+		} {
+			changed, err := applyFanout(t, member, key, "recipient", RecipientQueued, RecipientRelayAccepted, fields)
+			require.Error(t, err)
+			require.False(t, changed)
+		}
+	})
+
+	t.Run("queued_requires_nonempty_queue_id", func(t *testing.T) {
+		member := newMember(t)
+		key := FanoutKey{member.npub, "group", EnvelopeMessage, "logical"}
+		insertFanout(t, member, key, "recipient", RecipientPrepared, "event")
+		for _, fields := range []map[string]any{nil, {"queue_id": ""}, {"queue_id": 5}} {
+			changed, err := applyFanout(t, member, key, "recipient", RecipientPrepared, RecipientQueued, fields)
+			require.Error(t, err)
+			require.False(t, changed)
+		}
+		changed, err := applyFanout(t, member, key, "recipient", RecipientPrepared, RecipientQueued, map[string]any{"queue_id": "fresh-queue"})
+		require.NoError(t, err)
+		require.True(t, changed)
+		report, err := member.store.LoadFanoutReport(key)
+		require.NoError(t, err)
+		require.Equal(t, "fresh-queue", report.Recipients[0].QueueID)
+	})
+
+	t.Run("same_state_cannot_replace_confirmed_queue_id", func(t *testing.T) {
+		member := newMember(t)
+		key := FanoutKey{member.npub, "group", EnvelopeMessage, "logical"}
+		insertFanout(t, member, key, "recipient", RecipientQueued, "event") // queue_id = "original-queue"
+		changed, err := applyFanout(t, member, key, "recipient", RecipientQueued, RecipientQueued, map[string]any{"queue_id": "different-queue"})
+		require.NoError(t, err)
+		require.True(t, changed) // the row updates (updated_at bumps), but the identity is preserved.
+		report, err := member.store.LoadFanoutReport(key)
+		require.NoError(t, err)
+		require.Equal(t, "original-queue", report.Recipients[0].QueueID)
+	})
+
+	t.Run("failed_to_queued_retry_assigns_new_queue_id", func(t *testing.T) {
+		member := newMember(t)
+		key := FanoutKey{member.npub, "group", EnvelopeMessage, "logical"}
+		insertFanout(t, member, key, "recipient", RecipientFailed, "event") // queue_id = "original-queue"
+		changed, err := applyFanout(t, member, key, "recipient", RecipientFailed, RecipientQueued, map[string]any{"queue_id": "retry-queue"})
+		require.NoError(t, err)
+		require.True(t, changed)
+		report, err := member.store.LoadFanoutReport(key)
+		require.NoError(t, err)
+		require.Equal(t, "retry-queue", report.Recipients[0].QueueID)
+		require.Equal(t, RecipientQueued, report.Recipients[0].State)
+	})
+
+	t.Run("bookkeeping_never_regresses_across_a_state_change", func(t *testing.T) {
+		member := newMember(t)
+		key := FanoutKey{member.npub, "group", EnvelopeMessage, "logical"}
+		insertFanout(t, member, key, "recipient", RecipientQueued, "event")
+		_, err := member.db.Exec(`UPDATE groupchat_fanout SET attempts = 5, last_attempt_at = 500,
+ relay_count = 7, max_retries = 20 WHERE recipient_npub = 'recipient'`)
+		require.NoError(t, err)
+		// A failure transition carrying smaller bookkeeping values (e.g. a
+		// stale in-flight attempt) must not roll any of these back.
+		changed, err := applyFanout(t, member, key, "recipient", RecipientQueued, RecipientFailed,
+			map[string]any{"attempts": 1, "last_attempt_at": int64(1), "relay_count": 2, "max_retries": 3,
+				"issue": messaging.AgentMessageIssueSendFailed})
+		require.NoError(t, err)
+		require.True(t, changed)
+		report, err := member.store.LoadFanoutReport(key)
+		require.NoError(t, err)
+		r := report.Recipients[0]
+		require.Equal(t, 5, r.Attempts)
+		require.Equal(t, int64(500), r.LastAttemptAt)
+		require.Equal(t, 7, r.RelayCount)
+		require.Equal(t, 20, r.MaxRetries)
+	})
+
+	t.Run("rejects_malformed_numeric_field_types", func(t *testing.T) {
+		member := newMember(t)
+		key := FanoutKey{member.npub, "group", EnvelopeMessage, "logical"}
+		insertFanout(t, member, key, "recipient", RecipientQueued, "event")
+		for _, column := range []string{"attempts", "last_attempt_at", "relay_count", "max_retries"} {
+			changed, err := applyFanout(t, member, key, "recipient", RecipientQueued, RecipientFailed, map[string]any{column: "x"})
+			require.Error(t, err)
+			require.False(t, changed)
+		}
+		report, err := member.store.LoadFanoutReport(key)
+		require.NoError(t, err)
+		require.Equal(t, RecipientQueued, report.Recipients[0].State)
+	})
+
+	t.Run("failed_to_queued_clears_stale_issue", func(t *testing.T) {
+		member := newMember(t)
+		key := FanoutKey{member.npub, "group", EnvelopeMessage, "logical"}
+		insertFanout(t, member, key, "recipient", RecipientFailed, "event")
+		_, err := member.db.Exec(`UPDATE groupchat_fanout SET issue = ? WHERE recipient_npub = 'recipient'`,
+			string(messaging.AgentMessageIssueRetryExhausted))
+		require.NoError(t, err)
+		changed, err := applyFanout(t, member, key, "recipient", RecipientFailed, RecipientQueued, map[string]any{"queue_id": "retry-queue"})
+		require.NoError(t, err)
+		require.True(t, changed)
+		report, err := member.store.LoadFanoutReport(key)
+		require.NoError(t, err)
+		require.Equal(t, messaging.AgentMessageIssueNone, report.Recipients[0].Issue)
+	})
+
+	t.Run("relay_accepted_ignores_further_issue_changes", func(t *testing.T) {
+		member := newMember(t)
+		key := FanoutKey{member.npub, "group", EnvelopeMessage, "logical"}
+		insertFanout(t, member, key, "recipient", RecipientQueued, "event")
+		changed, err := applyFanout(t, member, key, "recipient", RecipientQueued, RecipientRelayAccepted,
+			map[string]any{"relay_acks": 1, "accepted_at": int64(100)})
+		require.NoError(t, err)
+		require.True(t, changed)
+		// A same-state call that tries to report a failure issue on an
+		// already-accepted row must leave it untouched.
+		changed, err = applyFanout(t, member, key, "recipient", RecipientRelayAccepted, RecipientRelayAccepted,
+			map[string]any{"issue": messaging.AgentMessageIssueSendFailed})
+		require.NoError(t, err)
+		require.True(t, changed)
+		report, err := member.store.LoadFanoutReport(key)
+		require.NoError(t, err)
+		require.Equal(t, messaging.AgentMessageIssueNone, report.Recipients[0].Issue)
+		require.Equal(t, "original-queue", report.Recipients[0].QueueID)
+	})
+
+	t.Run("queue_id_rejected_outside_queued_target", func(t *testing.T) {
+		member := newMember(t)
+		key := FanoutKey{member.npub, "group", EnvelopeMessage, "logical"}
+		insertFanout(t, member, key, "recipient", RecipientQueued, "event")
+		// Supplying queue_id when the target state is not queued must be a
+		// hard error, not a silent no-op -- otherwise a same-state call on
+		// a different state could still be used to smuggle a queue_id write.
+		changed, err := applyFanout(t, member, key, "recipient", RecipientQueued, RecipientRelayAccepted,
+			map[string]any{"relay_acks": 1, "accepted_at": int64(100), "queue_id": "someone-elses-queue"})
+		require.Error(t, err)
+		require.False(t, changed)
+		report, err := member.store.LoadFanoutReport(key)
+		require.NoError(t, err)
+		require.Equal(t, RecipientQueued, report.Recipients[0].State)
+		require.Equal(t, "original-queue", report.Recipients[0].QueueID)
+	})
+
+	t.Run("relay_accepted_requires_a_persisted_queue_id", func(t *testing.T) {
+		member := newMember(t)
+		key := FanoutKey{member.npub, "group", EnvelopeMessage, "logical"}
+		// prepared -> failed is a legitimate transition (e.g. preparation
+		// itself failed) that never assigns a queue_id. The row must then
+		// never be markable relay_accepted, even though the rank check alone
+		// allows failed -> relay_accepted (a legitimate post-queued retry
+		// path).
+		insertFanout(t, member, key, "recipient", RecipientPrepared, "event")
+		changed, err := applyFanout(t, member, key, "recipient", RecipientPrepared, RecipientFailed,
+			map[string]any{"issue": messaging.AgentMessageIssueSendFailed})
+		require.NoError(t, err)
+		require.True(t, changed)
+		before, err := member.store.LoadFanoutReport(key)
+		require.NoError(t, err)
+		require.Equal(t, "", before.Recipients[0].QueueID)
+		changed, err = applyFanout(t, member, key, "recipient", RecipientFailed, RecipientRelayAccepted,
+			map[string]any{"relay_acks": 1, "accepted_at": int64(100)})
+		require.NoError(t, err)
+		require.False(t, changed, "a never-queued row must not be markable relay_accepted")
+		after, err := member.store.LoadFanoutReport(key)
+		require.NoError(t, err)
+		require.Equal(t, before, after)
+	})
+
+	t.Run("same_state_prepared_cannot_forge_a_queue_id", func(t *testing.T) {
+		member := newMember(t)
+		key := FanoutKey{member.npub, "group", EnvelopeMessage, "logical"}
+		insertFanout(t, member, key, "recipient", RecipientPrepared, "event")
+		// A same-state prepared->prepared call must not be usable to plant a
+		// queue_id while the row never actually reaches queued.
+		changed, err := applyFanout(t, member, key, "recipient", RecipientPrepared, RecipientPrepared,
+			map[string]any{"queue_id": "forged-queue"})
+		require.Error(t, err)
+		require.False(t, changed)
+		report, err := member.store.LoadFanoutReport(key)
+		require.NoError(t, err)
+		require.Equal(t, "", report.Recipients[0].QueueID)
+	})
+
+	t.Run("transition_canonicalizes_local_npub_like_load_does", func(t *testing.T) {
+		member := newMember(t)
+		key := FanoutKey{member.npub, "group", EnvelopeMessage, "logical"}
+		insertFanout(t, member, key, "recipient", RecipientQueued, "event")
+		hexKey := key
+		hexKey.LocalNpub = common.PubKeyToHex(member.sk.Public())
+		require.NotEqual(t, key.LocalNpub, hexKey.LocalNpub)
+		// The hex and npub1 forms of the same identity must resolve to the
+		// same row; otherwise a caller using one form over the other would
+		// see every transition silently rejected as stale.
+		changed, err := applyFanout(t, member, hexKey, "recipient", RecipientQueued, RecipientFailed,
+			map[string]any{"issue": messaging.AgentMessageIssueSendFailed})
+		require.NoError(t, err)
+		require.True(t, changed)
+		report, err := member.store.LoadFanoutReport(key)
+		require.NoError(t, err)
+		require.Equal(t, RecipientFailed, report.Recipients[0].State)
 	})
 }
 
@@ -231,7 +490,7 @@ func TestFanoutReport(t *testing.T) {
 	require.NotContains(t, string(encoded), "event_json")
 	require.Contains(t, string(encoded), `"issue":"queue_missing"`)
 	require.Contains(t, string(encoded), `"relay_acks":1,"relay_count":5`)
-	changed, err := applyFanout(t, member, key, "z", RecipientFailed, RecipientQueued, nil)
+	changed, err := applyFanout(t, member, key, "z", RecipientFailed, RecipientQueued, map[string]any{"queue_id": "retry-queue-z"})
 	require.NoError(t, err)
 	require.True(t, changed)
 	report, err = member.store.LoadFanoutReport(key)
@@ -239,13 +498,15 @@ func TestFanoutReport(t *testing.T) {
 	require.Equal(t, messaging.AgentMessageQueued, report.State)
 	require.Equal(t, 3, report.Queued)
 	require.Zero(t, report.Failed)
+	require.Equal(t, messaging.AgentMessageIssueNone, report.Recipients[3].Issue, "retry must clear z's stale queue_missing issue")
 	for recipient, from := range map[string]RecipientDeliveryState{"b": RecipientQueued, "c": RecipientPrepared, "z": RecipientQueued} {
 		if from == RecipientPrepared {
-			changed, err = applyFanout(t, member, key, recipient, from, RecipientQueued, nil)
+			changed, err = applyFanout(t, member, key, recipient, from, RecipientQueued, map[string]any{"queue_id": "assigned-queue-" + recipient})
 			require.NoError(t, err)
 			require.True(t, changed)
 		}
-		changed, err = applyFanout(t, member, key, recipient, RecipientQueued, RecipientRelayAccepted, map[string]any{"relay_acks": 1})
+		changed, err = applyFanout(t, member, key, recipient, RecipientQueued, RecipientRelayAccepted,
+			map[string]any{"relay_acks": 1, "accepted_at": int64(999)})
 		require.NoError(t, err)
 		require.True(t, changed)
 	}
