@@ -142,11 +142,11 @@ func watchAgentInboxRelay(
 			continue
 		}
 
-		// Recover all stored messages before entering the live stream. The
-		// overlap cursor predates this walk so events published during the
-		// history scan are returned again by the subscription and deduped by
-		// the durable event_id uniqueness constraint.
-		overlapSince := nostr.Now() - 1
+		// Recover all stored messages before entering the live stream. Keep the
+		// live subscription unbounded by CreatedAt: an offline sender may publish
+		// an already-signed event whose timestamp predates this history walk.
+		// StoreIncomingMessageOnce makes the overlap with this full walk
+		// idempotent.
 		_, walkErr := relayquery.Walk(ctx, url, filter, func(event nostr.Event) error {
 			storeIncomingWatchEvent(&event, recipient, recipientSK, recipientHex, store, url, emit)
 			return nil // Invalid events are reported but must not block later events.
@@ -160,9 +160,7 @@ func watchAgentInboxRelay(
 			walkErr = fmt.Errorf("recover inbox history: %w", walkErr)
 		}
 
-		liveFilter := filter
-		liveFilter.Since = overlapSince
-		sub, err := relay.Subscribe(connCtx, liveFilter, nostr.SubscriptionOptions{Label: "hyphae-tui-inbox"})
+		sub, err := relay.Subscribe(connCtx, filter, nostr.SubscriptionOptions{Label: "hyphae-tui-inbox"})
 		if err != nil {
 			relay.Close()
 			cancelConn()
