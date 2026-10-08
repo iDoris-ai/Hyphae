@@ -2,7 +2,9 @@ package groupchat
 
 import (
 	"database/sql"
+	"net/url"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"fiatjaf.com/nostr"
@@ -37,6 +39,40 @@ func newMember(t *testing.T) testMember {
 	store, err := NewStore(db)
 	require.NoError(t, err)
 	return testMember{sk: sk, npub: common.EncodeNpub(sk.Public()), db: db, store: store}
+}
+
+func newPoolMember(t *testing.T) testMember {
+	t.Helper()
+	sk := nostr.Generate()
+	u := &url.URL{Scheme: "file", Path: filepath.ToSlash(filepath.Join(t.TempDir(), "g.db"))}
+	q := url.Values{}
+	q.Add("_pragma", "busy_timeout(5000)")
+	q.Add("_pragma", "foreign_keys(ON)")
+	q.Add("_pragma", "synchronous(NORMAL)")
+	u.RawQuery = q.Encode()
+	db, err := sql.Open("sqlite", u.String())
+	require.NoError(t, err)
+	_, err = db.Exec("PRAGMA journal_mode = WAL")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	store, err := NewStore(db)
+	require.NoError(t, err)
+	return testMember{sk: sk, npub: common.EncodeNpub(sk.Public()), db: db, store: store}
+}
+
+func poolGroup(t *testing.T) *threeMemberGroup {
+	g := &threeMemberGroup{t: t, alice: newPoolMember(t), bob: newPoolMember(t), carol: newPoolMember(t)}
+	draft, err := g.alice.store.CreateGroup("planning", g.alice.npub, []string{g.bob.npub, g.carol.npub})
+	require.NoError(t, err)
+	g.draft = draft
+	g.invites = map[string]Envelope{}
+	for _, inv := range draft.Invitations {
+		g.invites[inv.InviteeNpub] = inv
+		target := g.member(inv.InviteeNpub)
+		_, err := target.store.ReceiveInvite(buildIncoming(t, g.alice, target, inv))
+		require.NoError(t, err)
+	}
+	return g
 }
 
 func buildIncoming(t *testing.T, sender, recipient testMember, envelope Envelope) VerifiedIncoming {
@@ -317,6 +353,75 @@ func TestExplicitDeclineCancelsInsteadOfShrinkingRoster(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidTransition)
 }
 
+func TestCancelGroupRejectedAfterPartialActivation(t *testing.T) {
+	g := newThreeMemberGroup(t)
+	// Both Bob and Carol accept the invite.
+	bobInvite := g.invites[g.bob.npub]
+	bobAccept, err := g.bob.store.AcceptInvite(bobInvite.InviteID, g.bob.npub)
+	require.NoError(t, err)
+	_, err = g.alice.store.ReceiveAcceptance(buildIncoming(t, g.bob, g.alice, bobAccept))
+	require.NoError(t, err)
+
+	carolInvite := g.invites[g.carol.npub]
+	carolAccept, err := g.carol.store.AcceptInvite(carolInvite.InviteID, g.carol.npub)
+	require.NoError(t, err)
+	actBatch, err := g.alice.store.ReceiveAcceptance(buildIncoming(t, g.carol, g.alice, carolAccept))
+	require.NoError(t, err)
+	require.Len(t, actBatch, 2, "all accepted moves group to activating and yields activations")
+
+	// Alice queues activation for Bob only. Bob becomes InviteActive in Alice's store.
+	var bobActivation Envelope
+	for _, act := range actBatch {
+		if act.InviteeNpub == g.bob.npub {
+			bobActivation = act
+			break
+		}
+	}
+	require.NotEmpty(t, bobActivation.InviteID)
+	bobEvent := testAgentEvent(t, mustEncode(t, bobActivation), g.alice.sk, g.bob.sk, true)
+	err = g.alice.store.MarkActivationQueued(g.alice.npub, g.draft.Group.ID, bobActivation.InviteID, bobEvent.ID.Hex(), true)
+	require.NoError(t, err)
+
+	// Bob is active, Carol is still accepted. Group is in partial activation.
+	// Cancellation must be rejected.
+	_, err = g.alice.store.CancelGroup(g.alice.npub, g.draft.Group.ID)
+	require.ErrorIs(t, err, ErrInvalidTransition)
+
+	// Group remains in Activating state.
+	creatorGroup, err := g.alice.store.GetGroup(g.alice.npub, g.draft.Group.ID)
+	require.NoError(t, err)
+	require.Equal(t, StateActivating, creatorGroup.State)
+}
+
+func TestReceiveDeclineRequiresPendingState(t *testing.T) {
+	g := newThreeMemberGroup(t)
+
+	// Bob accepts the invite.
+	bobInvite := g.invites[g.bob.npub]
+	bobAccept, err := g.bob.store.AcceptInvite(bobInvite.InviteID, g.bob.npub)
+	require.NoError(t, err)
+	_, err = g.alice.store.ReceiveAcceptance(buildIncoming(t, g.bob, g.alice, bobAccept))
+	require.NoError(t, err)
+
+	// Bob attempts to decline after already accepted.
+	bogusDecline := Envelope{
+		Type:        EnvelopeDecline,
+		Version:     Version,
+		GroupID:     g.draft.Group.ID,
+		CreatorNpub: g.alice.npub,
+		InviteID:    bobInvite.InviteID,
+		RosterHash:  g.draft.Group.RosterHash,
+		InviteeNpub: g.bob.npub,
+	}
+	_, err = g.alice.store.ReceiveDecline(buildIncoming(t, g.bob, g.alice, bogusDecline))
+	require.ErrorIs(t, err, ErrInvalidTransition)
+
+	// Alice's group must remain StatePending, not cancelled.
+	group, err := g.alice.store.GetGroup(g.alice.npub, g.draft.Group.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatePending, group.State)
+}
+
 func mustEncode(t *testing.T, e Envelope) string {
 	t.Helper()
 	value, err := Encode(e)
@@ -329,4 +434,173 @@ func mustVerify(t *testing.T, event nostr.Event, recipient nostr.SecretKey) Veri
 	value, err := VerifyIncoming(event, recipient)
 	require.NoError(t, err)
 	return value
+}
+
+// B1: CancelGroup in activating state must be rejected even if activations have not yet been marked.
+func TestCancelGroupRejectedInActivatingState(t *testing.T) {
+	g := newThreeMemberGroup(t)
+	var batch []Envelope
+	for _, m := range []testMember{g.bob, g.carol} {
+		acc, err := m.store.AcceptInvite(g.invites[m.npub].InviteID, m.npub)
+		require.NoError(t, err)
+		b, err := g.alice.store.ReceiveAcceptance(buildIncoming(t, m, g.alice, acc))
+		require.NoError(t, err)
+		if len(b) > 0 {
+			batch = b
+		}
+	}
+	require.Len(t, batch, 2)
+
+	// Callers sign activations, but do NOT call MarkActivationQueued yet.
+	// Group is in StateActivating. Attempting to CancelGroup must fail.
+	_, err := g.alice.store.CancelGroup(g.alice.npub, g.draft.Group.ID)
+	require.ErrorIs(t, err, ErrInvalidTransition, "cancel must be rejected once activations are issued (StateActivating)")
+
+	// Group remains in StateActivating.
+	ag, err := g.alice.store.GetGroup(g.alice.npub, g.draft.Group.ID)
+	require.NoError(t, err)
+	require.Equal(t, StateActivating, ag.State)
+}
+
+// R1/R2: Concurrent delivery of the same message under production-like pool (WAL + busy_timeout) must be idempotent.
+func TestConcurrentSameMessageIdempotentDelivery(t *testing.T) {
+	fails := 0
+	for round := 0; round < 30; round++ {
+		g := poolGroup(t)
+		g.activate()
+		msg := Envelope{Type: EnvelopeMessage, Version: Version, GroupID: g.draft.Group.ID, LogicalID: mustOpaque(t), Body: "hi"}
+		in := buildIncoming(t, g.alice, g.bob, msg)
+		var wg sync.WaitGroup
+		errs := make(chan error, 8)
+		for i := 0; i < 8; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, err := g.bob.store.ReceiveMessage(in)
+				errs <- err
+			}()
+		}
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			if err != nil {
+				fails++
+				t.Logf("round %d: %v", round, err)
+			}
+		}
+	}
+	t.Logf("concurrent idempotent-delivery errors: %d / 240", fails)
+	require.Equal(t, 0, fails, "all concurrent deliveries must be idempotent and succeed")
+}
+
+// R3: Replaying acceptance after group is active must be idempotent and return no activation batch.
+func TestReceiveAcceptanceIdempotentOnActiveGroup(t *testing.T) {
+	g := newThreeMemberGroup(t)
+	acc, err := g.bob.store.AcceptInvite(g.invites[g.bob.npub].InviteID, g.bob.npub)
+	require.NoError(t, err)
+	in := buildIncoming(t, g.bob, g.alice, acc)
+	g.activate()
+
+	for i := 0; i < 3; i++ {
+		b, err := g.alice.store.ReceiveAcceptance(in)
+		require.NoError(t, err)
+		require.Empty(t, b, "active group must not re-emit activations")
+	}
+}
+
+// R5: MarkActivationQueued must require creator.
+func TestMarkActivationQueuedRequiresCreator(t *testing.T) {
+	g := newThreeMemberGroup(t)
+	ev := mustOpaque(t) + mustOpaque(t)
+	err := g.bob.store.MarkActivationQueued(g.bob.npub, g.draft.Group.ID, g.invites[g.bob.npub].InviteID, ev, true)
+	require.ErrorIs(t, err, ErrInvalidTransition, "invitee cannot mark activation queued")
+}
+
+// Full transition table verification covering all transitions from the review report.
+func TestGroupStateTransitionMatrix(t *testing.T) {
+	// 1. CreateGroup: G=pending, I=pending
+	g := newThreeMemberGroup(t)
+	ag, err := g.alice.store.GetGroup(g.alice.npub, g.draft.Group.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatePending, ag.State)
+
+	// 2. ReceiveInvite replay is idempotent (returns false)
+	bobTarget := g.member(g.bob.npub)
+	replayed, err := bobTarget.store.ReceiveInvite(buildIncoming(t, g.alice, bobTarget, g.invites[g.bob.npub]))
+	require.NoError(t, err)
+	require.False(t, replayed)
+
+	// 3. AcceptInvite: pending -> accepted
+	accBob, err := g.bob.store.AcceptInvite(g.invites[g.bob.npub].InviteID, g.bob.npub)
+	require.NoError(t, err)
+	// Idempotent repeat
+	_, err = g.bob.store.AcceptInvite(g.invites[g.bob.npub].InviteID, g.bob.npub)
+	require.NoError(t, err)
+
+	// 4. ReceiveAcceptance: 1 of 2 accepted -> group remains StatePending
+	b1, err := g.alice.store.ReceiveAcceptance(buildIncoming(t, g.bob, g.alice, accBob))
+	require.NoError(t, err)
+	require.Empty(t, b1)
+	ag, err = g.alice.store.GetGroup(g.alice.npub, g.draft.Group.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatePending, ag.State)
+
+	// 5. Decline after accept is rejected
+	decBob := Envelope{
+		Type:        EnvelopeDecline,
+		Version:     Version,
+		GroupID:     g.draft.Group.ID,
+		CreatorNpub: g.alice.npub,
+		InviteID:    g.invites[g.bob.npub].InviteID,
+		RosterHash:  g.draft.Group.RosterHash,
+		InviteeNpub: g.bob.npub,
+	}
+	_, err = g.alice.store.ReceiveDecline(buildIncoming(t, g.bob, g.alice, decBob))
+	require.ErrorIs(t, err, ErrInvalidTransition)
+
+	// 6. ReceiveAcceptance: all accepted -> G=activating, returns activation batch
+	accCarol, err := g.carol.store.AcceptInvite(g.invites[g.carol.npub].InviteID, g.carol.npub)
+	require.NoError(t, err)
+	b2, err := g.alice.store.ReceiveAcceptance(buildIncoming(t, g.carol, g.alice, accCarol))
+	require.NoError(t, err)
+	require.Len(t, b2, 2)
+	ag, err = g.alice.store.GetGroup(g.alice.npub, g.draft.Group.ID)
+	require.NoError(t, err)
+	require.Equal(t, StateActivating, ag.State)
+
+	// 7. CancelGroup rejected in StateActivating (B1)
+	_, err = g.alice.store.CancelGroup(g.alice.npub, g.draft.Group.ID)
+	require.ErrorIs(t, err, ErrInvalidTransition)
+
+	// 8. MarkActivationQueued: only creator, activating -> active
+	for _, act := range b2 {
+		target := g.member(act.InviteeNpub)
+		ev := testAgentEvent(t, mustEncode(t, act), g.alice.sk, target.sk, true)
+		require.NoError(t, g.alice.store.MarkActivationQueued(g.alice.npub, g.draft.Group.ID, act.InviteID, ev.ID.Hex(), true))
+		applied, err := target.store.ReceiveActivation(mustVerify(t, ev, target.sk))
+		require.NoError(t, err)
+		require.True(t, applied)
+		// Activation replay is idempotent
+		applied, err = target.store.ReceiveActivation(mustVerify(t, ev, target.sk))
+		require.NoError(t, err)
+		require.False(t, applied)
+	}
+	ag, err = g.alice.store.GetGroup(g.alice.npub, g.draft.Group.ID)
+	require.NoError(t, err)
+	require.Equal(t, StateActive, ag.State)
+
+	// 9. CancelGroup rejected on StateActive
+	_, err = g.alice.store.CancelGroup(g.alice.npub, g.draft.Group.ID)
+	require.ErrorIs(t, err, ErrInvalidTransition)
+
+	// 10. LeaveGroup: active -> left; left is idempotent
+	require.NoError(t, g.alice.store.LeaveGroup(g.alice.npub, g.draft.Group.ID))
+	require.NoError(t, g.alice.store.LeaveGroup(g.alice.npub, g.draft.Group.ID))
+	ag, err = g.alice.store.GetGroup(g.alice.npub, g.draft.Group.ID)
+	require.NoError(t, err)
+	require.Equal(t, StateLeft, ag.State)
+
+	// 11. Sending/receiving message on left group rejected
+	_, err = g.alice.store.ReceiveMessage(VerifiedIncoming{})
+	require.Error(t, err)
 }

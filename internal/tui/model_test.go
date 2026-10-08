@@ -1,11 +1,17 @@
 package tui
 
 import (
+	"encoding/hex"
+	"errors"
 	"os"
+	"sync"
 	"testing"
 
+	"fiatjaf.com/nostr"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/identity"
+	"github.com/iDoris-ai/hyphae/internal/messaging"
 	"github.com/iDoris-ai/hyphae/internal/storage"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/stretchr/testify/assert"
@@ -13,6 +19,7 @@ import (
 )
 
 func setupTestEnv(t *testing.T) func() {
+	messaging.ResetStoreForTest()
 	tempDir := t.TempDir()
 	os.Setenv("HOME", tempDir)
 
@@ -31,6 +38,7 @@ func setupTestEnv(t *testing.T) func() {
 	require.NoError(t, err)
 
 	return func() {
+		messaging.ResetStoreForTest()
 		storage.CloseDB()
 		os.RemoveAll(tempDir)
 		os.Unsetenv("HOME")
@@ -160,6 +168,147 @@ func TestChatModelQuit(t *testing.T) {
 	// Press escape to quit
 	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	assert.NotNil(t, cmd) // Should return a quit command
+}
+
+func TestInboxDisconnectIsNonFatalAndInputRemainsUsable(t *testing.T) {
+	cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	ks, err := identity.LoadKeyStore()
+	require.NoError(t, err)
+	_, err = identity.CreateIdentity(ks, "contactoffline")
+	require.NoError(t, err)
+	ks, err = identity.LoadKeyStore()
+	require.NoError(t, err)
+	id, err := identity.GetIdentity(ks, "contactoffline")
+	require.NoError(t, err)
+	require.NoError(t, identity.AddContact(ks, "contactoffline", id.Npub))
+
+	model, err := NewChatModel("contactoffline", "ws://127.0.0.1:1")
+	require.NoError(t, err)
+	defer model.Close()
+
+	newModel, _ := model.Update(inboxWatchUpdateMsg{update: messaging.AgentInboxWatchUpdate{Err: errors.New("offline")}})
+	chat := newModel.(*ChatModel)
+	assert.Nil(t, chat.err, "relay outage is receiver state, not fatal TUI state")
+	assert.Contains(t, chat.inboxStatus, "offline")
+	chat.input.SetValue("still usable")
+	_, cmd := chat.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	assert.NotNil(t, cmd, "keyboard input should still schedule a send while receiver reconnects")
+}
+
+func TestChatModelConcurrentWatcherStartIsSingleAndCloseJoins(t *testing.T) {
+	cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	ks, err := identity.LoadKeyStore()
+	require.NoError(t, err)
+	_, err = identity.CreateIdentity(ks, "contactlifecycle")
+	require.NoError(t, err)
+	ks, err = identity.LoadKeyStore()
+	require.NoError(t, err)
+	id, err := identity.GetIdentity(ks, "contactlifecycle")
+	require.NoError(t, err)
+	require.NoError(t, identity.AddContact(ks, id.Nickname, id.Npub))
+	model, err := NewChatModel(id.Nickname, "ws://127.0.0.1:1")
+	require.NoError(t, err)
+
+	start := model.startInboxWatcher()
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			start()
+		}()
+	}
+	wg.Wait()
+	model.inboxMu.Lock()
+	started := model.inboxStarted
+	model.inboxMu.Unlock()
+	require.True(t, started)
+	require.NoError(t, model.Close())
+	select {
+	case <-model.inboxDone:
+	default:
+		t.Fatal("Close returned before the receiver goroutine stopped")
+	}
+}
+
+func TestInboxWatchUpdateLoadsDurableMessageIntoView(t *testing.T) {
+	cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	ks, err := identity.LoadKeyStore()
+	require.NoError(t, err)
+	contact, err := identity.CreateIdentity(ks, "livecontact")
+	require.NoError(t, err)
+	ks, err = identity.LoadKeyStore()
+	require.NoError(t, err)
+	contact, err = identity.GetIdentity(ks, contact.Nickname)
+	require.NoError(t, err)
+	require.NoError(t, identity.AddContact(ks, contact.Nickname, contact.Npub))
+	myIdentity, err := identity.GetIdentity(ks, "testuser")
+	require.NoError(t, err)
+	mySK, err := identity.GetSecretKey(ks, myIdentity.Nickname)
+	require.NoError(t, err)
+	contactSK, err := identity.GetSecretKey(ks, contact.Nickname)
+	require.NoError(t, err)
+	model, err := NewChatModel(contact.Nickname, "ws://127.0.0.1:1")
+	require.NoError(t, err)
+	defer model.Close()
+	staleInitialRefresh, ok := model.loadMessages()().(messagesMsg)
+	require.True(t, ok)
+	body := "watch-to-screen-live-message"
+	dTag, err := messaging.FormatAgentMessageDTag("0000000000000001")
+	require.NoError(t, err)
+	myPub := mySK.Public()
+	event := nostr.Event{
+		Kind:      messaging.AgentKind,
+		CreatedAt: nostr.Now(),
+		Tags: nostr.Tags{
+			{"p", hex.EncodeToString(myPub[:])},
+			{"c", messaging.AgentTag},
+			{"v", messaging.AgentVersion},
+			{"d", dTag},
+		},
+		Content: body,
+	}
+	require.NoError(t, event.Sign(contactSK))
+	first, err := messaging.StoreIncomingMessageOnce(&event, myIdentity.Npub, body, false)
+	require.NoError(t, err)
+	require.True(t, first)
+
+	model.inboxUpdates <- messaging.AgentInboxWatchUpdate{Connected: true}
+	message := &messaging.ReceivedAgentMessage{
+		EventID: event.ID.Hex(), SenderNpub: common.EncodeNpub(contactSK.Public()), Content: body,
+	}
+	newModel, cmd := model.Update(inboxWatchUpdateMsg{update: messaging.AgentInboxWatchUpdate{Message: message}})
+	model = newModel.(*ChatModel)
+	require.NotNil(t, cmd)
+	batchMsg := cmd()
+	commands, ok := batchMsg.(tea.BatchMsg)
+	require.True(t, ok, "watch update should schedule DB refresh and next receiver update")
+
+	var refreshed bool
+	for _, command := range commands {
+		if command == nil {
+			continue
+		}
+		msg := command()
+		if _, ok := msg.(messagesMsg); ok {
+			newModel, _ = model.Update(msg)
+			model = newModel.(*ChatModel)
+			refreshed = true
+			break
+		}
+	}
+	require.True(t, refreshed, "watch update must execute its actual loadMessages command")
+	assert.Contains(t, model.View(), body, "the durable live message must be rendered in the open chat")
+	assert.Nil(t, model.err)
+	newModel, _ = model.Update(staleInitialRefresh)
+	model = newModel.(*ChatModel)
+	assert.Contains(t, model.View(), body, "an older empty init query cannot overwrite the live refresh")
 }
 
 func TestNewContactsModel(t *testing.T) {

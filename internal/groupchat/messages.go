@@ -108,7 +108,7 @@ func (s *Store) storeMessage(localNpub, groupID, logicalID, senderNpub, body str
 	if createdAt <= 0 {
 		createdAt = time.Now().Unix()
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginImmediate()
 	if err != nil {
 		return false, err
 	}
@@ -134,7 +134,7 @@ func (s *Store) storeMessage(localNpub, groupID, logicalID, senderNpub, body str
 	}
 
 	var oldSender, oldBody, oldEventID string
-	err = tx.QueryRow(`SELECT sender_npub, body, event_id FROM groupchat_messages
+	err = tx.QueryRow(`SELECT sender_npub, body, COALESCE(event_id, '') FROM groupchat_messages
 		WHERE local_npub = ? AND group_id = ? AND logical_id = ?`, localNpub, groupID, logicalID).
 		Scan(&oldSender, &oldBody, &oldEventID)
 	if err == nil {
@@ -196,7 +196,7 @@ func (s *Store) activeRoster(localNpub, groupID, member string) ([]string, error
 	return group.Roster, nil
 }
 
-func activeRosterTx(tx *sql.Tx, localNpub, groupID, member string) (bool, error) {
+func activeRosterTx(tx queryExecer, localNpub, groupID, member string) (bool, error) {
 	var state string
 	err := tx.QueryRow(`SELECT state FROM groupchat_members WHERE local_npub = ? AND group_id = ? AND npub = ?`,
 		localNpub, groupID, member).Scan(&state)

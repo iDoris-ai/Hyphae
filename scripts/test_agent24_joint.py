@@ -33,6 +33,22 @@ class SafeFailure(Exception):
     """A stable stage label safe to print without leaking test payloads."""
 
 
+class OwnedGroupCleanupFailure(SafeFailure):
+    """Safe, serializable detail for one fail-closed owned-group cleanup error."""
+
+    def __init__(self, stage: str, error: OSError | None = None, category: str | None = None) -> None:
+        self.stage = stage
+        self.errno = error.errno if error is not None else None
+        self.category = category or (errno.errorcode.get(self.errno, "OSERROR") if self.errno is not None else "FAILED")
+        super().__init__(f"owned-process-group-{stage}-failed")
+
+    def evidence(self) -> dict[str, Any]:
+        row: dict[str, Any] = {"stage": self.stage, "category": self.category}
+        if self.errno is not None:
+            row["errno"] = self.errno
+        return row
+
+
 class Blocked(SafeFailure):
     """A known external contract gate; writes evidence and exits nonzero."""
 
@@ -210,56 +226,73 @@ def child_env(home: Path, temp_root: Path, extra: dict[str, str] | None = None) 
     return env
 
 
+OWNED_GROUP_TERM_GRACE_SECONDS = 0.5
+OWNED_GROUP_KILL_WAIT_SECONDS = 2.5
+
+
 def stop_owned_group(proc: subprocess.Popen[bytes], force: bool = False) -> None:
-    """Signal only the session/process group created for this exact child."""
+    """Stop only this child's group, allowing a bounded TERM/reaper grace first.
+
+    ``force=True`` requests escalation after the grace; it never signals an
+    already-empty PGID. Any group still present after the grace is escalated
+    regardless of the flag because cleanup must not report surviving members
+    as success.
+    """
     if getattr(proc, "_joint_group_stopped", False):
         return
     pgid = proc.pid
     # If the leader already exited and the exact PGID is empty, do not signal
     # a possibly reused numeric id; record success only after both checks.
-    if proc.poll() is not None and not owned_group_exists(pgid):
+    if proc.poll() is not None and not owned_group_exists(pgid, stage="pgid-probe-before-term"):
         proc._joint_group_stopped = True
         return
     try:
         os.killpg(pgid, signal.SIGTERM)
     except OSError as error:
-        if error.errno == errno.ESRCH and wait_owned_group_gone(pgid, 0.1) and proc.poll() is not None:
+        if error.errno == errno.ESRCH and wait_owned_group_gone(
+                pgid, 0.1, stage="term-disappearance", leader=proc) and proc.poll() is not None:
             proc._joint_group_stopped = True
             return
-        raise SafeFailure("owned-process-group-signal-failed") from None
+        raise OwnedGroupCleanupFailure("term-signal", error) from None
+
+    # Do not wait only for the original leader: it can exit while a descendant
+    # reaper is still waiting for/reaping a pipe-holding child. Poll the entire
+    # original PGID for a short, fixed grace before considering SIGKILL.
+    group_gone = wait_owned_group_gone(
+        pgid, OWNED_GROUP_TERM_GRACE_SECONDS, stage="term-grace-pgid-probe", leader=proc)
+    if not group_gone:
+        # Re-check immediately before escalation. An empty PGID must never be
+        # signalled, even when the caller requested force=True.
+        if not owned_group_exists(pgid, stage="pgid-probe-before-kill"):
+            group_gone = True
+        else:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except OSError as error:
+                if error.errno == errno.ESRCH and wait_owned_group_gone(
+                        pgid, 0.1, stage="kill-disappearance", leader=proc):
+                    group_gone = True
+                else:
+                    raise OwnedGroupCleanupFailure("kill-signal", error) from None
+            if not group_gone:
+                group_gone = wait_owned_group_gone(
+                    pgid, OWNED_GROUP_KILL_WAIT_SECONDS,
+                    stage="bounded-disappearance", leader=proc)
+                if not group_gone:
+                    raise OwnedGroupCleanupFailure(
+                        "bounded-disappearance", category="TIMEOUT") from None
+
     try:
-        proc.wait(timeout=2)
+        proc.wait(timeout=0.1)
     except subprocess.TimeoutExpired:
-        force = True
-    # The leader may exit while a descendant still owns an inherited pipe.
-    # A live original PGID proves there is still a group member to clean.
-    if owned_group_exists(pgid):
-        force = True
-    if force:
-        # An exited leader can be reaped before its descendants finish. Only
-        # escalate while the original owned group still exists; an empty PGID
-        # cannot be reused while any of its original members remain.
-        if not owned_group_exists(pgid):
-            require(proc.poll() is not None, "owned-process-group-cleanup-failed")
-            proc._joint_group_stopped = True
-            return
-        try:
-            os.killpg(pgid, signal.SIGKILL)
-        except OSError as error:
-            if error.errno == errno.ESRCH and wait_owned_group_gone(pgid, 0.1) and proc.poll() is not None:
-                proc._joint_group_stopped = True
-                return
-            raise SafeFailure("owned-process-group-signal-failed") from None
-        try:
-            proc.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            raise SafeFailure("owned-process-group-cleanup-failed") from None
-    if not wait_owned_group_gone(pgid, 3) or proc.poll() is None:
-        raise SafeFailure("owned-process-group-cleanup-failed") from None
+        raise OwnedGroupCleanupFailure("leader-wait", category="TIMEOUT") from None
+
+    if not group_gone or proc.poll() is None:
+        raise OwnedGroupCleanupFailure("bounded-disappearance", category="NOT_CONFIRMED") from None
     proc._joint_group_stopped = True
 
 
-def owned_group_exists(pgid: int) -> bool:
+def owned_group_exists(pgid: int, stage: str = "pgid-probe") -> bool:
     try:
         os.killpg(pgid, 0)
         return True
@@ -268,13 +301,18 @@ def owned_group_exists(pgid: int) -> bool:
             return False
         if error.errno == errno.EPERM:
             return True
-        raise SafeFailure("owned-process-group-probe-failed") from None
+        raise OwnedGroupCleanupFailure(stage, error) from None
 
 
-def wait_owned_group_gone(pgid: int, timeout: float) -> bool:
+def wait_owned_group_gone(pgid: int, timeout: float, stage: str = "bounded-disappearance",
+                          leader: subprocess.Popen[bytes] | None = None) -> bool:
     end = time.monotonic() + timeout
     while True:
-        if not owned_group_exists(pgid):
+        if leader is not None:
+            # poll() performs waitpid(WNOHANG) and reaps the direct child without
+            # blocking, so its zombie cannot keep the original PGID observable.
+            leader.poll()
+        if not owned_group_exists(pgid, stage=stage):
             return True
         if time.monotonic() >= end:
             return False
@@ -287,7 +325,9 @@ def run_child(argv: list[str], env: dict[str, str], stdin: bytes = b"", timeout:
     proc: subprocess.Popen[bytes] | None = None
     exit_code: int | None = None
     cleanup = "not-needed"
-    failure: str | None = None
+    primary_failure: str | None = None
+    cleanup_failure: dict[str, Any] | None = None
+    failure_label: str | None = None
     stdout = stderr = b""
     try:
         try:
@@ -298,11 +338,17 @@ def run_child(argv: list[str], env: dict[str, str], stdin: bytes = b"", timeout:
         try:
             stdout, stderr = proc.communicate(stdin, timeout=timeout)
         except subprocess.TimeoutExpired:
+            primary_failure = "child-timeout"
             cleanup = "attempted"
-            stop_owned_group(proc, force=True)
-            cleanup = "completed"
             try:
-                proc.communicate(timeout=2)
+                stop_owned_group(proc, force=True)
+                cleanup = "completed"
+            except OwnedGroupCleanupFailure as error:
+                cleanup = "failed"
+                cleanup_failure = error.evidence()
+                raise SafeFailure("child-cleanup-failed") from None
+            try:
+                proc.communicate(timeout=0.5)
             except subprocess.TimeoutExpired:
                 raise SafeFailure("child-pipes-did-not-close") from None
             raise SafeFailure("child-timeout") from None
@@ -310,7 +356,9 @@ def run_child(argv: list[str], env: dict[str, str], stdin: bytes = b"", timeout:
         require(exit_code == expected_exit, "child-exit-code")
         return stdout, stderr
     except SafeFailure as error:
-        failure = str(error)
+        if primary_failure is None:
+            primary_failure = str(error)
+        failure_label = str(error)
         raise
     finally:
         cleanup_failed = False
@@ -319,11 +367,13 @@ def run_child(argv: list[str], env: dict[str, str], stdin: bytes = b"", timeout:
                 cleanup = "attempted"
                 try:
                     stop_owned_group(proc)
-                    cleanup = "completed"
-                except SafeFailure:
+                    cleanup = "completed-after-error" if cleanup_failure else "completed"
+                except OwnedGroupCleanupFailure as error:
                     cleanup = "failed"
-                    failure = "child-cleanup-failed"
+                    if cleanup_failure is None:
+                        cleanup_failure = error.evidence()
                     cleanup_failed = True
+                    failure_label = "child-cleanup-failed"
             exit_code = proc.poll() if exit_code is None else exit_code
             for pipe in (proc.stdin, proc.stdout, proc.stderr):
                 if pipe is not None:
@@ -342,7 +392,9 @@ def run_child(argv: list[str], env: dict[str, str], stdin: bytes = b"", timeout:
                 "stdout_bytes": len(stdout),
                 "stderr_bytes": len(stderr),
                 "output_redacted": True,
-                "failure": failure,
+                "failure": failure_label or primary_failure,
+                "primary_failure": primary_failure,
+                "cleanup_failure": cleanup_failure,
             })
         if cleanup_failed:
             raise SafeFailure("child-cleanup-failed") from None

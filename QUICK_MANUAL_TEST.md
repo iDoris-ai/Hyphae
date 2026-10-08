@@ -294,10 +294,10 @@ MSG="Hey team, welcome to our group chat!"
 ## TUI 聊天界面
 
 ```bash
-./bin/hyphae tui --relay ws://localhost:7777
+./bin/hyphae tui chat --with annie --relay ws://localhost:7777
 # 或直接 1 对 1：./bin/hyphae chat --with annie --relay ws://localhost:7777
 ```
-在 TUI 里应该能看到和 Part 1 里发的消息同一份历史，收发新消息也应实时刷新。这部分是交互式界面，无法脚本化验证，需要人工盯着看。
+TUI 读取本地 SQLite 历史。2026-10-07 本地三用户验证：发送和 daemon 收件落库通过，但已打开的接收方 TUI 不会自动刷新，重开才能看到新消息；不能据此宣称实时聊天闭环完成。接收端仍需单独运行 daemon 或手动 inbox 收件。真实 relay + PTY 可自动验证链路，键盘交互体验另做人工验收。详见 [当前里程碑与补齐计划](docs/agent/local-tui-milestone-plan-20261007.md)。
 
 ## Profile / TUI 通过标准
 
@@ -305,6 +305,7 @@ MSG="Hey team, welcome to our group chat!"
 - [ ] `tui`/`chat` 能正常打开，不崩溃
 - [ ] TUI 里能看到 Part 1 的历史消息
 - [ ] 在 TUI 里发消息，对方（无论是 TUI 还是 CLI）能收到
+- [ ] 接收方保持 TUI 打开，新消息自动显示（当前未通过，待补齐）
 
 ---
 

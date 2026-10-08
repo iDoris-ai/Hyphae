@@ -564,6 +564,10 @@ var AgentInboxCmd = &cli.Command{
 				eventErrors = append(eventErrors, fmt.Sprintf("event %s: decode message: %v", evt.ID.Hex(), err))
 				continue
 			}
+			if err := RejectReservedGroupPayload(content); err != nil {
+				eventErrors = append(eventErrors, fmt.Sprintf("event %s: %v", evt.ID.Hex(), err))
+				continue
+			}
 
 			first := false
 			if !isEncrypted || autoDecrypt {
@@ -653,6 +657,29 @@ func validateInboxEvent(event nostr.Event, recipientHex string) error {
 	}
 	if messageRecipient != recipientHex {
 		return fmt.Errorf("event does not match recipient filter with exactly one p tag")
+	}
+	return nil
+}
+
+// reservedGroupPrefix mirrors internal/groupchat.ReservedPrefix. It is
+// duplicated here rather than imported because internal/groupchat imports
+// internal/messaging, and importing it back would create a cycle.
+const reservedGroupPrefix = "hyphae.group/"
+
+// ErrReservedGroupRequiresHandler is returned by DM receive paths when a
+// decrypted payload carries the reserved group envelope prefix. Unknown or
+// malformed envelope versions are included so a caller can never fall back
+// to displaying the payload as an ordinary direct message.
+var ErrReservedGroupRequiresHandler = errors.New("reserved group message requires group handler")
+
+// RejectReservedGroupPayload fails closed on any plaintext beginning with
+// the reserved group prefix, regardless of whether the envelope itself is
+// well-formed. DM receive paths must call this immediately after decoding
+// plaintext and before storing, displaying, notifying on, or auto-replying
+// to it.
+func RejectReservedGroupPayload(content string) error {
+	if strings.HasPrefix(content, reservedGroupPrefix) {
+		return ErrReservedGroupRequiresHandler
 	}
 	return nil
 }

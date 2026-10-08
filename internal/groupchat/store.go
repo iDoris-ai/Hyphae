@@ -1,6 +1,7 @@
 package groupchat
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,64 @@ import (
 	"github.com/iDoris-ai/hyphae/internal/wireevent"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 )
+
+type queryExecer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+type immediateTx struct {
+	conn *sql.Conn
+	done bool
+}
+
+func (t *immediateTx) Exec(query string, args ...any) (sql.Result, error) {
+	return t.conn.ExecContext(context.Background(), query, args...)
+}
+
+func (t *immediateTx) Query(query string, args ...any) (*sql.Rows, error) {
+	return t.conn.QueryContext(context.Background(), query, args...)
+}
+
+func (t *immediateTx) QueryRow(query string, args ...any) *sql.Row {
+	return t.conn.QueryRowContext(context.Background(), query, args...)
+}
+
+func (t *immediateTx) Commit() error {
+	if t.done {
+		return sql.ErrTxDone
+	}
+	t.done = true
+	defer t.conn.Close()
+	_, err := t.conn.ExecContext(context.Background(), "COMMIT")
+	if err != nil {
+		_, _ = t.conn.ExecContext(context.Background(), "ROLLBACK")
+	}
+	return err
+}
+
+func (t *immediateTx) Rollback() error {
+	if t.done {
+		return nil
+	}
+	t.done = true
+	defer t.conn.Close()
+	_, err := t.conn.ExecContext(context.Background(), "ROLLBACK")
+	return err
+}
+
+func (s *Store) beginImmediate() (*immediateTx, error) {
+	conn, err := s.db.Conn(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(context.Background(), "BEGIN IMMEDIATE"); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return &immediateTx{conn: conn}, nil
+}
 
 type GroupState string
 
@@ -183,7 +242,7 @@ func (s *Store) CreateGroup(name, creator string, invitees []string) (GroupDraft
 	if err != nil {
 		return GroupDraft{}, err
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginImmediate()
 	if err != nil {
 		return GroupDraft{}, err
 	}
@@ -237,7 +296,7 @@ func (s *Store) ReceiveInvite(v VerifiedIncoming) (bool, error) {
 	}
 	rosterJSON, _ := json.Marshal(e.Members)
 	now := time.Now().Unix()
-	tx, err := s.db.Begin()
+	tx, err := s.beginImmediate()
 	if err != nil {
 		return false, err
 	}
@@ -313,7 +372,7 @@ func (s *Store) AcceptInvite(inviteID, currentIdentity string) (Envelope, error)
 	if err != nil {
 		return Envelope{}, err
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginImmediate()
 	if err != nil {
 		return Envelope{}, err
 	}
@@ -367,7 +426,7 @@ func (s *Store) DeclineInvite(inviteID, currentIdentity string) (Envelope, error
 	if err != nil {
 		return Envelope{}, err
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginImmediate()
 	if err != nil {
 		return Envelope{}, err
 	}
@@ -419,7 +478,7 @@ func (s *Store) ReceiveAcceptance(v VerifiedIncoming) ([]Envelope, error) {
 	if v.senderNpub != e.InviteeNpub || v.recipientNpub != e.CreatorNpub {
 		return nil, ErrProtocolMismatch
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginImmediate()
 	if err != nil {
 		return nil, err
 	}
@@ -462,7 +521,7 @@ func (s *Store) ReceiveAcceptance(v VerifiedIncoming) ([]Envelope, error) {
 		}
 	}
 	activations := []Envelope(nil)
-	if group.State == StateActivating || group.State == StateActive {
+	if group.State == StateActivating {
 		activations, err = activationEnvelopes(tx, v.recipientNpub, group)
 		if err != nil {
 			return nil, err
@@ -484,19 +543,19 @@ func (s *Store) MarkActivationQueued(localNpub, groupID, inviteID, eventID strin
 	if err != nil {
 		return err
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginImmediate()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	var groupState string
-	if err := tx.QueryRow(`SELECT state FROM groupchat_groups WHERE local_npub = ? AND group_id = ?`, localNpub, groupID).Scan(&groupState); err != nil {
+	var groupState, creator string
+	if err := tx.QueryRow(`SELECT state, creator_npub FROM groupchat_groups WHERE local_npub = ? AND group_id = ?`, localNpub, groupID).Scan(&groupState, &creator); err != nil {
 		if err == sql.ErrNoRows {
 			return ErrGroupNotFound
 		}
 		return err
 	}
-	if groupState != string(StateActivating) && groupState != string(StateActive) {
+	if creator != localNpub || (groupState != string(StateActivating) && groupState != string(StateActive)) {
 		return ErrInvalidTransition
 	}
 	var inviteState, recipient, oldActivationEventID string
@@ -557,7 +616,7 @@ func (s *Store) ReceiveActivation(v VerifiedIncoming) (bool, error) {
 	if v.senderNpub != e.CreatorNpub || v.recipientNpub != e.InviteeNpub {
 		return false, ErrProtocolMismatch
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginImmediate()
 	if err != nil {
 		return false, err
 	}
@@ -620,7 +679,7 @@ func (s *Store) CancelGroup(localNpub, groupID string) ([]Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginImmediate()
 	if err != nil {
 		return nil, err
 	}
@@ -629,7 +688,23 @@ func (s *Store) CancelGroup(localNpub, groupID string) ([]Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	if group.Creator != localNpub || (group.State != StatePending && group.State != StateActivating) {
+	if group.Creator != localNpub || group.State != StatePending {
+		return nil, ErrInvalidTransition
+	}
+	var activeInvites int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM groupchat_invites WHERE local_npub = ? AND group_id = ? AND state = ?`,
+		localNpub, groupID, InviteActive).Scan(&activeInvites); err != nil {
+		return nil, err
+	}
+	if activeInvites > 0 {
+		return nil, ErrInvalidTransition
+	}
+	var activeMembers int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM groupchat_members WHERE local_npub = ? AND group_id = ? AND state = ?`,
+		localNpub, groupID, InviteActive).Scan(&activeMembers); err != nil {
+		return nil, err
+	}
+	if activeMembers > 0 {
 		return nil, ErrInvalidTransition
 	}
 	rows, err := tx.Query(`SELECT invite_id, invitee_npub FROM groupchat_invites WHERE local_npub = ? AND group_id = ? ORDER BY invitee_npub`, localNpub, groupID)
@@ -679,7 +754,7 @@ func (s *Store) ReceiveCancel(v VerifiedIncoming) error {
 }
 
 func (s *Store) cancelFromInvite(v VerifiedIncoming, e Envelope, declined bool) ([]Envelope, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.beginImmediate()
 	if err != nil {
 		return nil, err
 	}
@@ -694,12 +769,38 @@ func (s *Store) cancelFromInvite(v VerifiedIncoming, e Envelope, declined bool) 
 	if group.State == StateActive || group.State == StateLeft {
 		return nil, ErrInvalidTransition
 	}
-	if group.State == StateCancelled {
+	var activeInvites int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM groupchat_invites WHERE local_npub = ? AND group_id = ? AND state = ?`,
+		v.recipientNpub, e.GroupID, InviteActive).Scan(&activeInvites); err != nil {
+		return nil, err
+	}
+	if activeInvites > 0 {
+		return nil, ErrInvalidTransition
+	}
+	var activeMembers int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM groupchat_members WHERE local_npub = ? AND group_id = ? AND state = ?`,
+		v.recipientNpub, e.GroupID, InviteActive).Scan(&activeMembers); err != nil {
+		return nil, err
+	}
+	if activeMembers > 0 {
+		return nil, ErrInvalidTransition
+	}
+	if declined {
+		if invite.state == InviteDeclined && group.State == StateCancelled {
+			if err := tx.Commit(); err != nil {
+				return nil, err
+			}
+			if group.Creator == v.recipientNpub {
+				return cancellationEnvelopes(s.db, v.recipientNpub, group, e.InviteeNpub)
+			}
+			return nil, nil
+		}
+		if invite.state != InvitePending || group.State != StatePending {
+			return nil, ErrInvalidTransition
+		}
+	} else if group.State == StateCancelled {
 		if err := tx.Commit(); err != nil {
 			return nil, err
-		}
-		if declined && group.Creator == v.recipientNpub {
-			return cancellationEnvelopes(s.db, v.recipientNpub, group, e.InviteeNpub)
 		}
 		return nil, nil
 	}
@@ -819,7 +920,7 @@ func (s *Store) ListGroups(localNpub string) ([]Group, error) {
 	return groups, rows.Err()
 }
 
-func insertInvite(tx *sql.Tx, localNpub string, e Envelope, state InviteState, eventID string, now int64) error {
+func insertInvite(tx queryExecer, localNpub string, e Envelope, state InviteState, eventID string, now int64) error {
 	rosterJSON, err := json.Marshal(e.Members)
 	if err != nil {
 		return err
@@ -838,7 +939,7 @@ type inviteRow struct {
 	state                                                                                                  InviteState
 }
 
-func loadInviteGroup(tx *sql.Tx, localNpub, inviteID string) (inviteRow, Group, error) {
+func loadInviteGroup(tx queryExecer, localNpub, inviteID string) (inviteRow, Group, error) {
 	var invite inviteRow
 	err := tx.QueryRow(`SELECT invite_id, group_id, creator_npub, invitee_npub, name, roster_json, roster_hash,
 		state, invite_event_id, accept_event_id, activation_event_id FROM groupchat_invites
@@ -877,7 +978,7 @@ func loadGroup(queryer interface {
 	return group, nil
 }
 
-func activationEnvelopes(tx *sql.Tx, localNpub string, group Group) ([]Envelope, error) {
+func activationEnvelopes(tx queryExecer, localNpub string, group Group) ([]Envelope, error) {
 	rows, err := tx.Query(`SELECT invite_id, invitee_npub FROM groupchat_invites
 		WHERE local_npub = ? AND group_id = ? ORDER BY invitee_npub`, localNpub, group.ID)
 	if err != nil {
