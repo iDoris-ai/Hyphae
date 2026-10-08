@@ -200,11 +200,7 @@ func (s *Store) migrate() error {
 	return nil
 }
 
-// CreateGroup stores one immutable initial roster and creates one distinct
-// pending invitation per non-creator member. The creator's create action is
-// its own explicit consent; the group is not active until all invitees accept
-// and every activation event is durably queued.
-func (s *Store) CreateGroup(name, creator string, invitees []string) (GroupDraft, error) {
+func (s *Store) createGroupTx(tx queryExecer, name, creator string, invitees []string) (GroupDraft, error) {
 	creator, err := canonicalNpub(creator)
 	if err != nil {
 		return GroupDraft{}, fmt.Errorf("invalid creator: %w", err)
@@ -242,11 +238,6 @@ func (s *Store) CreateGroup(name, creator string, invitees []string) (GroupDraft
 	if err != nil {
 		return GroupDraft{}, err
 	}
-	tx, err := s.beginImmediate()
-	if err != nil {
-		return GroupDraft{}, err
-	}
-	defer tx.Rollback()
 	if _, err := tx.Exec(`INSERT INTO groupchat_groups
 		(local_npub, group_id, name, creator_npub, roster_json, roster_hash, state, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, creator, groupID, name, creator, string(rosterJSON), rosterHash, StatePending, now, now); err != nil {
@@ -277,6 +268,23 @@ func (s *Store) CreateGroup(name, creator string, invitees []string) (GroupDraft
 		if err := insertInvite(tx, creator, invitation, InvitePending, "", now); err != nil {
 			return GroupDraft{}, err
 		}
+	}
+	return draft, nil
+}
+
+// CreateGroup stores one immutable initial roster and creates one distinct
+// pending invitation per non-creator member. The creator's create action is
+// its own explicit consent; the group is not active until all invitees accept
+// and every activation event is durably queued.
+func (s *Store) CreateGroup(name, creator string, invitees []string) (GroupDraft, error) {
+	tx, err := s.beginImmediate()
+	if err != nil {
+		return GroupDraft{}, err
+	}
+	defer tx.Rollback()
+	draft, err := s.createGroupTx(tx, name, creator, invitees)
+	if err != nil {
+		return GroupDraft{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return GroupDraft{}, fmt.Errorf("commit group draft: %w", err)
@@ -365,18 +373,11 @@ func (s *Store) ReceiveInvite(v VerifiedIncoming) (bool, error) {
 	return true, nil
 }
 
-// AcceptInvite explicitly records acceptance for the selected identity and
-// returns the signed-response payload for the caller to encrypt and send.
-func (s *Store) AcceptInvite(inviteID, currentIdentity string) (Envelope, error) {
+func (s *Store) acceptInviteTx(tx queryExecer, inviteID, currentIdentity string) (Envelope, error) {
 	currentIdentity, err := canonicalNpub(currentIdentity)
 	if err != nil {
 		return Envelope{}, err
 	}
-	tx, err := s.beginImmediate()
-	if err != nil {
-		return Envelope{}, err
-	}
-	defer tx.Rollback()
 	invite, group, err := loadInviteGroup(tx, currentIdentity, inviteID)
 	if err != nil {
 		if errors.Is(err, ErrInviteNotFound) {
@@ -410,27 +411,34 @@ func (s *Store) AcceptInvite(inviteID, currentIdentity string) (Envelope, error)
 	default:
 		return Envelope{}, ErrInvalidTransition
 	}
-	if err := tx.Commit(); err != nil {
-		return Envelope{}, err
-	}
 	return Envelope{Type: EnvelopeAccept, Version: Version, GroupID: group.ID,
 		CreatorNpub: group.Creator, InviteID: inviteID, RosterHash: group.RosterHash,
 		InviteeNpub: currentIdentity}, nil
 }
 
-// DeclineInvite explicitly rejects an invitation. The local group becomes
-// cancelled and the returned signed-response payload is addressed to its
-// creator; fixed-roster activation can never silently omit this member.
-func (s *Store) DeclineInvite(inviteID, currentIdentity string) (Envelope, error) {
-	currentIdentity, err := canonicalNpub(currentIdentity)
-	if err != nil {
-		return Envelope{}, err
-	}
+// AcceptInvite explicitly records acceptance for the selected identity and
+// returns the signed-response payload for the caller to encrypt and send.
+func (s *Store) AcceptInvite(inviteID, currentIdentity string) (Envelope, error) {
 	tx, err := s.beginImmediate()
 	if err != nil {
 		return Envelope{}, err
 	}
 	defer tx.Rollback()
+	env, err := s.acceptInviteTx(tx, inviteID, currentIdentity)
+	if err != nil {
+		return Envelope{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Envelope{}, err
+	}
+	return env, nil
+}
+
+func (s *Store) declineInviteTx(tx queryExecer, inviteID, currentIdentity string) (Envelope, error) {
+	currentIdentity, err := canonicalNpub(currentIdentity)
+	if err != nil {
+		return Envelope{}, err
+	}
 	invite, group, err := loadInviteGroup(tx, currentIdentity, inviteID)
 	if err != nil {
 		return Envelope{}, err
@@ -439,9 +447,6 @@ func (s *Store) DeclineInvite(inviteID, currentIdentity string) (Envelope, error
 		return Envelope{}, ErrIdentityMismatch
 	}
 	if invite.state == InviteDeclined && group.State == StateCancelled {
-		if err := tx.Commit(); err != nil {
-			return Envelope{}, err
-		}
 		return Envelope{Type: EnvelopeDecline, Version: Version, GroupID: group.ID,
 			CreatorNpub: group.Creator, InviteID: inviteID, RosterHash: group.RosterHash,
 			InviteeNpub: currentIdentity}, nil
@@ -458,19 +463,31 @@ func (s *Store) DeclineInvite(inviteID, currentIdentity string) (Envelope, error
 		StateCancelled, now, currentIdentity, group.ID); err != nil {
 		return Envelope{}, err
 	}
-	if err := tx.Commit(); err != nil {
-		return Envelope{}, err
-	}
 	return Envelope{Type: EnvelopeDecline, Version: Version, GroupID: group.ID,
 		CreatorNpub: group.Creator, InviteID: inviteID, RosterHash: group.RosterHash,
 		InviteeNpub: currentIdentity}, nil
 }
 
-// ReceiveAcceptance records a creator-verified acceptance. The final
-// acceptance moves the creator's group to activating and returns one creator
-// activation payload per invitee; callers must durably queue each signed event
-// before calling MarkActivationQueued.
-func (s *Store) ReceiveAcceptance(v VerifiedIncoming) ([]Envelope, error) {
+// DeclineInvite explicitly rejects an invitation. The local group becomes
+// cancelled and the returned signed-response payload is addressed to its
+// creator; fixed-roster activation can never silently omit this member.
+func (s *Store) DeclineInvite(inviteID, currentIdentity string) (Envelope, error) {
+	tx, err := s.beginImmediate()
+	if err != nil {
+		return Envelope{}, err
+	}
+	defer tx.Rollback()
+	env, err := s.declineInviteTx(tx, inviteID, currentIdentity)
+	if err != nil {
+		return Envelope{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Envelope{}, err
+	}
+	return env, nil
+}
+
+func (s *Store) receiveAcceptanceTx(tx queryExecer, v VerifiedIncoming) ([]Envelope, error) {
 	e, err := envelopeFrom(v, EnvelopeAccept)
 	if err != nil {
 		return nil, err
@@ -478,11 +495,6 @@ func (s *Store) ReceiveAcceptance(v VerifiedIncoming) ([]Envelope, error) {
 	if v.senderNpub != e.InviteeNpub || v.recipientNpub != e.CreatorNpub {
 		return nil, ErrProtocolMismatch
 	}
-	tx, err := s.beginImmediate()
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
 	invite, group, err := loadInviteGroup(tx, v.recipientNpub, e.InviteID)
 	if err != nil {
 		return nil, err
@@ -526,6 +538,23 @@ func (s *Store) ReceiveAcceptance(v VerifiedIncoming) ([]Envelope, error) {
 		if err != nil {
 			return nil, err
 		}
+	}
+	return activations, nil
+}
+
+// ReceiveAcceptance records a creator-verified acceptance. The final
+// acceptance moves the creator's group to activating and returns one creator
+// activation payload per invitee; callers must durably queue each signed event
+// before calling MarkActivationQueued.
+func (s *Store) ReceiveAcceptance(v VerifiedIncoming) ([]Envelope, error) {
+	tx, err := s.beginImmediate()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	activations, err := s.receiveAcceptanceTx(tx, v)
+	if err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -672,18 +701,11 @@ func (s *Store) ReceiveDecline(v VerifiedIncoming) ([]Envelope, error) {
 	return s.cancelFromInvite(v, e, true)
 }
 
-// CancelGroup cancels only a not-yet-active group and returns one cancellation
-// envelope per invitee for the caller to send through the durable event sender.
-func (s *Store) CancelGroup(localNpub, groupID string) ([]Envelope, error) {
+func (s *Store) cancelGroupTx(tx queryExecer, localNpub, groupID string) ([]Envelope, error) {
 	localNpub, err := canonicalNpub(localNpub)
 	if err != nil {
 		return nil, err
 	}
-	tx, err := s.beginImmediate()
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
 	group, err := loadGroup(tx, localNpub, groupID)
 	if err != nil {
 		return nil, err
@@ -732,6 +754,21 @@ func (s *Store) CancelGroup(localNpub, groupID string) ([]Envelope, error) {
 	}
 	if _, err := tx.Exec(`UPDATE groupchat_invites SET state = ?, updated_at = ? WHERE local_npub = ? AND group_id = ?`,
 		InviteCancelled, time.Now().Unix(), localNpub, groupID); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// CancelGroup cancels only a not-yet-active group and returns one cancellation
+// envelope per invitee for the caller to send through the durable event sender.
+func (s *Store) CancelGroup(localNpub, groupID string) ([]Envelope, error) {
+	tx, err := s.beginImmediate()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	result, err := s.cancelGroupTx(tx, localNpub, groupID)
+	if err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
