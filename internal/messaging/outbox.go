@@ -53,6 +53,9 @@ func readOutbox(file string) (*types.Outbox, error) {
 	if err := json.Unmarshal(data, ob); err != nil {
 		return nil, fmt.Errorf("failed to parse outbox: %w", err)
 	}
+	for i := range ob.Entries {
+		normalizeOutboxEntryRoute(&ob.Entries[i])
+	}
 
 	return ob, nil
 }
@@ -636,13 +639,17 @@ func recordAttemptFailure(ob *types.Outbox, entry types.OutboxEntry, result Send
 			return errOutboxEntrySuperseded
 		}
 		current := &latest.Entries[index]
+		if !validGroupOutboxEntry(*current) {
+			return fmt.Errorf("invalid outbox route/status")
+		}
+		pending, failed := outboxRouteStatuses(*current)
 		current.RetryCount++
 		current.LastAttempt = time.Now().Unix()
 		if current.RetryCount >= current.MaxRetries {
-			current.Status = "failed"
+			current.Status = failed
 		}
-		result.MarkedFailed = current.Status == "failed"
-		result.Queued = current.Status == "pending" && current.RetryCount < current.MaxRetries
+		result.MarkedFailed = current.Status == failed
+		result.Queued = current.Status == pending && current.RetryCount < current.MaxRetries
 		return nil
 	})
 	if errors.Is(err, errOutboxEntrySuperseded) {
@@ -676,7 +683,8 @@ func inspectAttemptQueue(entry types.OutboxEntry) (queued, superseded, unknown b
 		return false, true, false
 	}
 	current := latest.Entries[index]
-	return current.Status == "pending" && current.RetryCount < current.MaxRetries, false, false
+	pending, _ := outboxRouteStatuses(current)
+	return validGroupOutboxEntry(current) && current.Status == pending && current.RetryCount < current.MaxRetries, false, false
 }
 
 func loadOutboxLocked() (*types.Outbox, error) {
@@ -720,8 +728,9 @@ func CleanupOutbox(ob *types.Outbox, maxAge time.Duration) error {
 	updated, err := UpdateOutbox(func(latest *types.Outbox) error {
 		newEntries := make([]types.OutboxEntry, 0)
 		for _, entry := range latest.Entries {
-			// Keep pending entries, remove old sent/failed entries
-			if entry.Status == "pending" || entry.LastAttempt > cutoff {
+			// Preserve pending and corrupt route/status entries for inspection.
+			pending, _ := outboxRouteStatuses(entry)
+			if !validGroupOutboxEntry(entry) || entry.Status == pending || entry.LastAttempt > cutoff {
 				newEntries = append(newEntries, entry)
 			}
 		}
