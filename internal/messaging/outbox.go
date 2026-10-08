@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
+	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 )
@@ -107,6 +108,10 @@ func UpdateOutbox(update func(*types.Outbox) error) (*types.Outbox, error) {
 
 var persistOutbox = writeOutbox
 
+// Separate the commit syscall so subprocess tests can stop at the real
+// post-fsync, pre-rename boundary without interrupting unrelated operations.
+var renameOutbox = os.Rename
+
 func cloneOutbox(ob *types.Outbox) *types.Outbox {
 	clone := &types.Outbox{Entries: make([]types.OutboxEntry, len(ob.Entries))}
 	for i, entry := range ob.Entries {
@@ -145,7 +150,7 @@ func writeOutbox(file string, ob *types.Outbox) error {
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("close temp outbox: %w", err)
 	}
-	if err := os.Rename(tmp, file); err != nil {
+	if err := renameOutbox(tmp, file); err != nil {
 		return fmt.Errorf("rename outbox: %w", err)
 	}
 	dir, err := os.Open(filepath.Dir(file))
@@ -451,6 +456,43 @@ func outgoingHistoryContent(event *nostr.Event) (plaintext string, isEncrypted b
 		if hasCompression {
 			if _, err := DecompressText(event.Content); err != nil {
 				return "", false, fmt.Errorf("decompress encrypted event content: %w", err)
+			}
+		}
+		// A daemon/CLI retry may win before the TUI recovers a queue-first
+		// crash. Restore missing plaintext while the signed event still exists,
+		// before successful history persistence permits queue removal.
+		s, err := GetStore()
+		if err != nil {
+			return "", false, err
+		}
+		stored, err := s.GetMessage(event.ID.Hex())
+		if err != nil {
+			return "", false, err
+		}
+		if stored == nil || stored.Plaintext == "" {
+			ks, err := identity.LoadKeyStore()
+			if err != nil {
+				return "", false, err
+			}
+			for nickname, local := range ks.Identities {
+				if local == nil || local.Npub != common.EncodeNpub(event.PubKey) {
+					continue
+				}
+				secret, err := identity.GetSecretKey(ks, nickname)
+				if err != nil {
+					return "", false, err
+				}
+				p, _, err := outboxTagValue(event.Tags, "p")
+				if err != nil {
+					return "", false, err
+				}
+				recipient, err := common.ParsePublicKey(p)
+				if err != nil {
+					return "", false, err
+				}
+				decodeEvent := *event
+				decodeEvent.PubKey = recipient
+				return DecodeMessageContent(&decodeEvent, secret)
 			}
 		}
 		return "", true, nil
