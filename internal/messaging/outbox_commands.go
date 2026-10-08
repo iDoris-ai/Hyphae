@@ -437,7 +437,8 @@ func matchOutboxID(entries []types.OutboxEntry, id string) []types.OutboxEntry {
 // scheduled again). Surfacing that here is what makes `list --failed-only`
 // tell the truth about entries the daemon will never revisit.
 func isFailedOrStuck(e types.OutboxEntry) bool {
-	return e.Status == "failed" || (e.Status == "pending" && e.RetryCount >= e.MaxRetries)
+	pending, failed := outboxRouteStatuses(e)
+	return validGroupOutboxEntry(e) && (e.Status == failed || (e.Status == pending && e.RetryCount >= e.MaxRetries))
 }
 
 func truncateOutboxField(s string, n int) string {
