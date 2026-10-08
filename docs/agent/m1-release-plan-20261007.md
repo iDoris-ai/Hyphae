@@ -37,6 +37,8 @@ TUI 自有一个可取消的 outbox worker；初次发送与周期重试串行�
 
 在现有单 inbox watcher 的 DM 持久化前路由 typed 群事件，不创建第二套订阅/解密，不让群协议进入 DM 历史或 auto-reply。CLI 支持明确接受/拒绝、发送、退出；独立群 TUI 展示发言人、正文及发送状态，安全处理终端控制字符。成员变化须重新邀请，不假称本地修改元数据就同步了全群。
 
+fanout、durable send-intent、inbound 路由、ACK 状态机与重放边界的实现契约见 [M1 群消息 fanout 与 inbound 路由契约](m1-group-fanout-contract-20261008.md)。
+
 本次“完整”指固定成员、明确同意、三用户加密收发、可靠重试、历史与 TUI 闭环；动态成员治理、共享密钥轮换、远端撤权和历史撤回不在本次范围。本机 leave 只停止本机收发/显示，不承诺删除他端副本。
 
 ## 分工与合并顺序
