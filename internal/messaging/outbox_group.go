@@ -21,6 +21,25 @@ func validGroupOutboxEntry(entry types.OutboxEntry) bool {
 	return (entry.Route == OutboxRouteGroup) == groupStatus
 }
 
+// normalizeOutboxEntryRoute recovers Route on load for an entry that an
+// older binary round-tripped: Route is a new field (`omitempty`), so a
+// binary built before it existed reads outbox.json, ignores it, and writes
+// the entry back without it -- while leaving the known Status value
+// (group_pending/group_failed) exactly as this binary wrote it. Without
+// this, that entry fails validGroupOutboxEntry on the next load (Route=""
+// but Status is a group status) and silently drops out of both
+// GetPendingGroupOutbox and the failed/stuck listing forever.
+//
+// Only an empty Route is treated as a legacy round trip. A non-empty Route
+// that still disagrees with Status (e.g. Route="dm" with Status=
+// "group_pending") is left untouched and must keep failing
+// validGroupOutboxEntry -- that is genuine corruption, not round-trip loss.
+func normalizeOutboxEntryRoute(entry *types.OutboxEntry) {
+	if entry.Route == "" && (entry.Status == OutboxStatusGroupPending || entry.Status == OutboxStatusGroupFailed) {
+		entry.Route = OutboxRouteGroup
+	}
+}
+
 func outboxRouteStatuses(entry types.OutboxEntry) (pending, failed string) {
 	if entry.Route == OutboxRouteGroup {
 		return OutboxStatusGroupPending, OutboxStatusGroupFailed
@@ -65,7 +84,16 @@ func enqueueGroupOutboxEntry(eventJSON, recipientNpub string, relays []string, m
 			if !validGroupOutboxEntry(current) || current.Route != OutboxRouteGroup || current.EventJSON != eventJSON || current.RecipientNpub != recipientNpub {
 				return fmt.Errorf("conflicting group outbox entry")
 			}
-			if !requeue || current.Status == OutboxStatusGroupPending {
+			// A pending entry is only "active" -- and so left alone on requeue
+			// -- while it's still below its retry limit. Once RetryCount
+			// reaches MaxRetries, GetPendingGroupOutbox stops returning it, so
+			// without this check it would keep Status=="group_pending" forever
+			// (only a send attempt flips it to group_failed, and send attempts
+			// are exactly what a pending-but-exhausted entry never gets
+			// scheduled for again) and RequeueGroupOutboxEntry would return it
+			// unchanged on every call, permanently ineligible for reconciliation.
+			activePending := current.Status == OutboxStatusGroupPending && current.RetryCount < current.MaxRetries
+			if !requeue || activePending {
 				entry, existed = current, true
 				return nil
 			}

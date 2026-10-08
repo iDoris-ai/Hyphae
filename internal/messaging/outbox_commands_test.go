@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/iDoris-ai/hyphae/internal/storage"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -214,6 +215,80 @@ func TestFindOutboxMatches_HexFirstThenLiteralFallback(t *testing.T) {
 	literalMatches := findOutboxMatches(entries[1:], "deadbeef")
 	require.Len(t, literalMatches, 1)
 	assert.Equal(t, "deadbeef", literalMatches[0].ID)
+}
+
+// TestOutboxRetryCmd_RejectsGroupEntryBeforeAnyMutation covers Blocker B
+// from the S5a review: `storage outbox retry --id` must never hand a
+// group-route entry to generic AttemptSend, which only knows the DM path
+// (publish, then store DM history keyed by RecipientNpub, then remove the
+// queue entry). This proves the rejection happens before any of that:
+// zero relay publish (no relay is even reachable at this address), zero DM
+// history row, and the queue entry retained exactly as it was.
+func TestOutboxRetryCmd_RejectsGroupEntryBeforeAnyMutation(t *testing.T) {
+	setupTempOutbox(t)
+	ResetStoreForTest()
+	t.Cleanup(ResetStoreForTest)
+	eventJSON := groupOutboxEventJSON(t)
+	entry, _, err := EnqueueGroupOutboxEntry(eventJSON, "recipient", []string{"ws://127.0.0.1:1"}, 2)
+	require.NoError(t, err)
+
+	err = outboxRetryCmd.Run(context.Background(), []string{"retry", "--id", displayOutboxID(entry.ID), "--timeout", "1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "group route")
+
+	ob, err := LoadOutbox()
+	require.NoError(t, err)
+	require.Equal(t, []types.OutboxEntry{entry}, ob.Entries, "rejected group retry must not mutate the queue")
+
+	_, err = GetStore()
+	require.NoError(t, err)
+	var count int
+	require.NoError(t, storage.DB.QueryRow("SELECT COUNT(*) FROM messages").Scan(&count))
+	assert.Zero(t, count, "rejected group retry must not write DM history")
+}
+
+// TestIsOutboxClearable_RouteAware covers the bounded CLI correctness fix:
+// a group entry is clearable only via the route-aware equivalent of DM's
+// explicit "failed" check, never merely because RetryCount crosses the
+// generic --min-failures threshold while still actively pending.
+func TestIsOutboxClearable_RouteAware(t *testing.T) {
+	assert.False(t, isOutboxClearable(types.OutboxEntry{
+		Route: OutboxRouteGroup, Status: OutboxStatusGroupPending, RetryCount: 9, MaxRetries: 10,
+	}, 5), "an active group_pending entry must not be clearable just because retries cross --min-failures")
+	assert.True(t, isOutboxClearable(types.OutboxEntry{
+		Route: OutboxRouteGroup, Status: OutboxStatusGroupPending, RetryCount: 10, MaxRetries: 10,
+	}, 5), "a genuinely exhausted group_pending entry must be clearable")
+	assert.True(t, isOutboxClearable(types.OutboxEntry{
+		Route: OutboxRouteGroup, Status: OutboxStatusGroupFailed, RetryCount: 1, MaxRetries: 10,
+	}, 5), "group_failed must be clearable like DM failed, regardless of --min-failures")
+	assert.False(t, isOutboxClearable(types.OutboxEntry{
+		Route: "dm", Status: OutboxStatusGroupPending, RetryCount: 10, MaxRetries: 10,
+	}, 5), "a corrupt route/status pair must never be clearable")
+
+	// DM behavior must stay exactly as before.
+	assert.True(t, isOutboxClearable(types.OutboxEntry{Status: "failed", RetryCount: 1, MaxRetries: 10}, 5))
+	assert.True(t, isOutboxClearable(types.OutboxEntry{Status: "pending", RetryCount: 5, MaxRetries: 10}, 5))
+	assert.False(t, isOutboxClearable(types.OutboxEntry{Status: "pending", RetryCount: 4, MaxRetries: 10}, 5))
+}
+
+func TestOutboxClearCmd_GroupPendingStaysUntilExhausted(t *testing.T) {
+	setupTempOutbox(t)
+	ob := &types.Outbox{Entries: []types.OutboxEntry{
+		{ID: "active-group", Route: OutboxRouteGroup, Status: OutboxStatusGroupPending, RetryCount: 6, MaxRetries: 10},
+		{ID: "exhausted-group", Route: OutboxRouteGroup, Status: OutboxStatusGroupPending, RetryCount: 10, MaxRetries: 10},
+		{ID: "failed-group", Route: OutboxRouteGroup, Status: OutboxStatusGroupFailed, RetryCount: 1, MaxRetries: 10},
+	}}
+	require.NoError(t, SaveOutbox(ob))
+
+	out := captureStdout(t, func() {
+		require.NoError(t, outboxClearCmd.Run(context.Background(), []string{"clear", "--failed", "--yes", "--min-failures", "5"}))
+	})
+	assert.Contains(t, out, "Removed 2")
+
+	ob2, err := LoadOutbox()
+	require.NoError(t, err)
+	require.Len(t, ob2.Entries, 1)
+	assert.Equal(t, "active-group", ob2.Entries[0].ID, "an actively-retrying group_pending entry must survive clear --failed")
 }
 
 func TestIsFailedOrStuck(t *testing.T) {

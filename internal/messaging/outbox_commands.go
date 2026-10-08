@@ -241,7 +241,22 @@ var outboxClearCmd = &cli.Command{
 	},
 }
 
+// isOutboxClearable decides whether an entry qualifies for `clear --failed`.
+// A group-route entry is cleared only by the route-aware equivalent of DM's
+// explicit "failed" check (group_failed, or group_pending genuinely
+// exhausted past MaxRetries) -- never merely because RetryCount crosses the
+// user-configurable --min-failures threshold, which could be lower than an
+// actively-retrying group entry's MaxRetries and would otherwise delete
+// work the daemon has not given up on yet. DM entries keep their existing,
+// more permissive minFailures-based policy unchanged.
 func isOutboxClearable(entry types.OutboxEntry, minFailures int) bool {
+	if !validGroupOutboxEntry(entry) {
+		return false
+	}
+	if entry.Route == OutboxRouteGroup {
+		return entry.Status == OutboxStatusGroupFailed ||
+			(entry.Status == OutboxStatusGroupPending && entry.RetryCount >= entry.MaxRetries)
+	}
 	return entry.Status == "failed" || entry.RetryCount >= minFailures
 }
 
@@ -310,6 +325,17 @@ var outboxRetryCmd = &cli.Command{
 		}
 
 		entry := matches[0]
+		// Group entries need a group-aware dispatch path (relay publish plus
+		// group-chat bookkeeping) that does not exist yet. Generic AttemptSend
+		// only knows the DM path: it would publish the event and then store
+		// DM history keyed by RecipientNpub (wrong recipient semantics for a
+		// group message) and remove the queue entry, silently losing group
+		// delivery state. Reject before any publish, history write, or outbox
+		// mutation rather than let that happen.
+		if entry.Route == OutboxRouteGroup || entry.Status == OutboxStatusGroupPending || entry.Status == OutboxStatusGroupFailed {
+			return common.NewExitError(common.ErrCodeUser, fmt.Errorf(
+				"entry %s uses the group route; manual DM retry is not supported for group entries yet", displayOutboxID(entry.ID)))
+		}
 		relays := entry.Relays
 		if len(relays) == 0 {
 			relays, err = common.ResolveRelays(c)

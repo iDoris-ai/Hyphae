@@ -117,7 +117,11 @@ func TestGroupOutboxRejectsCorruptionAndCollisions(t *testing.T) {
 	require.NoError(t, err)
 	fixtures := []types.OutboxEntry{entry, entry, entry, entry}
 	fixtures[0].Status = "pending"
-	fixtures[1].Route = ""
+	// An empty Route is a legacy round trip (see
+	// TestLegacyRoundTripRecoversGroupRoute), not corruption -- normalized
+	// back to "group" on load. A non-empty, non-group Route is the genuine
+	// contradiction this fixture needs to exercise.
+	fixtures[1].Route = "dm"
 	fixtures[2].RecipientNpub = "different recipient"
 	fixtures[3].EventJSON += " "
 	for _, fixture := range fixtures {
@@ -201,7 +205,11 @@ func TestCleanupOutboxKeepsGroupPending(t *testing.T) {
 	ob := &types.Outbox{Entries: []types.OutboxEntry{
 		{ID: "new-group", Route: OutboxRouteGroup, Status: OutboxStatusGroupPending},
 		{ID: "corrupt-group", Route: OutboxRouteGroup, Status: "failed"},
-		{ID: "corrupt-dm", Status: OutboxStatusGroupFailed},
+		// An empty Route alongside a group status is a legacy round trip
+		// (normalized back to "group" on load), not corruption -- a
+		// genuinely contradictory non-empty Route is what must still be
+		// preserved for inspection regardless of age.
+		{ID: "corrupt-route", Route: "dm", Status: OutboxStatusGroupFailed},
 		{ID: "legacy-dm", Status: "pending"},
 		{ID: "old-group", Route: OutboxRouteGroup, Status: OutboxStatusGroupFailed},
 		{ID: "old-dm", Status: "failed"},
@@ -214,7 +222,106 @@ func TestCleanupOutboxKeepsGroupPending(t *testing.T) {
 	for _, entry := range ob.Entries {
 		ids = append(ids, entry.ID)
 	}
-	require.Equal(t, []string{"new-group", "corrupt-group", "corrupt-dm", "legacy-dm", "recent-group"}, ids)
+	require.Equal(t, []string{"new-group", "corrupt-group", "corrupt-route", "legacy-dm", "recent-group"}, ids)
+}
+
+// TestLegacyRoundTripRecoversGroupRoute covers Blocker A from the S5a
+// review: an old binary that reads/writes the shared outbox.json ignores
+// the (to it) unknown "route" field and re-serializes the entry without it,
+// while preserving the known group_pending/group_failed status values
+// exactly. On load, the new binary must still recognize that entry as a
+// valid group entry -- not treat the dropped route as corruption and lose
+// the queued work.
+func TestLegacyRoundTripRecoversGroupRoute(t *testing.T) {
+	setupTempOutbox(t)
+	eventJSON := groupOutboxEventJSON(t)
+	entry, _, err := EnqueueGroupOutboxEntry(eventJSON, "recipient", []string{"wss://relay.example"}, 2)
+	require.NoError(t, err)
+
+	// Mirror an old binary's schema: everything but Route.
+	type legacyOutboxEntry struct {
+		QueueID       string   `json:"queue_id,omitempty"`
+		ID            string   `json:"id"`
+		EventJSON     string   `json:"event_json"`
+		RecipientNpub string   `json:"recipient_npub"`
+		Relays        []string `json:"relays"`
+		RetryCount    int      `json:"retry_count"`
+		MaxRetries    int      `json:"max_retries"`
+		LastAttempt   int64    `json:"last_attempt"`
+		CreatedAt     int64    `json:"created_at"`
+		Status        string   `json:"status"`
+	}
+	legacy := legacyOutboxEntry{
+		QueueID: entry.QueueID, ID: entry.ID, EventJSON: entry.EventJSON,
+		RecipientNpub: entry.RecipientNpub, Relays: entry.Relays,
+		RetryCount: entry.RetryCount, MaxRetries: entry.MaxRetries,
+		LastAttempt: entry.LastAttempt, CreatedAt: entry.CreatedAt, Status: entry.Status,
+	}
+	data, err := json.Marshal(struct {
+		Entries []legacyOutboxEntry `json:"entries"`
+	}{Entries: []legacyOutboxEntry{legacy}})
+	require.NoError(t, err)
+	path, err := GetOutboxPath()
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, data, 0600))
+
+	ob, err := LoadOutbox()
+	require.NoError(t, err)
+	require.Len(t, ob.Entries, 1)
+	recovered := ob.Entries[0]
+	require.Equal(t, OutboxRouteGroup, recovered.Route)
+	require.True(t, validGroupOutboxEntry(recovered))
+	require.Equal(t, []types.OutboxEntry{recovered}, GetPendingGroupOutbox(ob))
+	require.True(t, isFailedOrStuck(types.OutboxEntry{Route: OutboxRouteGroup, Status: OutboxStatusGroupFailed}))
+
+	// A genuinely contradictory route/status pair must NOT be "fixed" into
+	// validity -- only a dropped (empty) route is a legacy round trip.
+	contradictory := recovered
+	contradictory.Route = "dm"
+	require.NoError(t, SaveOutbox(&types.Outbox{Entries: []types.OutboxEntry{contradictory}}))
+	ob2, err := LoadOutbox()
+	require.NoError(t, err)
+	require.Len(t, ob2.Entries, 1)
+	require.Equal(t, "dm", ob2.Entries[0].Route)
+	require.False(t, validGroupOutboxEntry(ob2.Entries[0]))
+}
+
+// TestRequeueGroupOutboxEntryResetsExhaustedPending covers Blocker C: once a
+// group_pending entry's RetryCount reaches MaxRetries, GetPendingGroupOutbox
+// stops scheduling it, so nothing ever flips it to group_failed again (that
+// transition only happens inside a send attempt). RequeueGroupOutboxEntry
+// must notice this "exhausted but still pending" state and reset it with a
+// fresh QueueID rather than returning it unchanged with existed=true, which
+// would make it permanently unreachable for reconciliation.
+func TestRequeueGroupOutboxEntryResetsExhaustedPending(t *testing.T) {
+	setupTempOutbox(t)
+	eventJSON := groupOutboxEventJSON(t)
+	exhausted, _, err := EnqueueGroupOutboxEntry(eventJSON, "recipient", nil, 2)
+	require.NoError(t, err)
+	exhausted.RetryCount = exhausted.MaxRetries
+	require.NoError(t, SaveOutbox(&types.Outbox{Entries: []types.OutboxEntry{exhausted}}))
+
+	requeued, existed, err := RequeueGroupOutboxEntry(eventJSON, "recipient", nil, 3)
+	require.NoError(t, err)
+	require.False(t, existed, "an exhausted pending entry must be reset, not returned unchanged")
+	require.NotEqual(t, exhausted.QueueID, requeued.QueueID)
+	require.Equal(t, exhausted.ID, requeued.ID)
+	require.Zero(t, requeued.RetryCount)
+	require.Equal(t, OutboxStatusGroupPending, requeued.Status)
+	require.Equal(t, 3, requeued.MaxRetries)
+
+	ob, err := LoadOutbox()
+	require.NoError(t, err)
+	require.Equal(t, []types.OutboxEntry{requeued}, ob.Entries)
+	require.Equal(t, []types.OutboxEntry{requeued}, GetPendingGroupOutbox(ob))
+
+	// A still-active pending entry (below MaxRetries) must be left alone.
+	active, _, err := EnqueueGroupOutboxEntry(groupOutboxEventJSON(t), "recipient2", nil, 5)
+	require.NoError(t, err)
+	activeRequeued, activeExisted, err := RequeueGroupOutboxEntry(active.EventJSON, "recipient2", nil, 5)
+	require.NoError(t, err)
+	require.True(t, activeExisted)
+	require.Equal(t, active, activeRequeued)
 }
 
 func TestLegacyBinaryIgnoresGroupEntries(t *testing.T) {

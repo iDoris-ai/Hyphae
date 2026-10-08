@@ -53,6 +53,9 @@ func readOutbox(file string) (*types.Outbox, error) {
 	if err := json.Unmarshal(data, ob); err != nil {
 		return nil, fmt.Errorf("failed to parse outbox: %w", err)
 	}
+	for i := range ob.Entries {
+		normalizeOutboxEntryRoute(&ob.Entries[i])
+	}
 
 	return ob, nil
 }

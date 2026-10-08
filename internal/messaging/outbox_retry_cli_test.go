@@ -1,6 +1,7 @@
 package messaging
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/hex"
@@ -171,6 +172,122 @@ func signedOutboxRetryFixture(t *testing.T, content string, relays []string) (no
 	return event, types.OutboxEntry{
 		ID: event.ID.Hex(), EventJSON: string(encoded), RecipientNpub: "npub1retryrecipient",
 		Relays: relays, RetryCount: 0, MaxRetries: 10, CreatedAt: int64(event.CreatedAt), Status: "pending",
+	}
+}
+
+// signedGroupOutboxRetryFixture builds a realistic signed group-route outbox
+// entry: same event shape as signedOutboxRetryFixture (AgentKind, and the
+// required "c"/"v" tags every real agent message carries), but queued with
+// Route=group and Status=group_pending the way EnqueueGroupOutboxEntry
+// actually writes one.
+func signedGroupOutboxRetryFixture(t *testing.T, content string, relays []string) (nostr.Event, types.OutboxEntry) {
+	t.Helper()
+	secret := nostr.Generate()
+	recipient := nostr.Generate().Public()
+	event := nostr.Event{CreatedAt: nostr.Now(), Kind: AgentKind, PubKey: secret.Public(), Content: content, Tags: nostr.Tags{
+		{"p", hex.EncodeToString(recipient[:])}, {"c", AgentTag}, {"v", AgentVersion},
+	}}
+	if err := event.Sign(secret); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return event, types.OutboxEntry{
+		ID: event.ID.Hex(), Route: OutboxRouteGroup, EventJSON: string(encoded), RecipientNpub: "npub1groupretry",
+		Relays: relays, RetryCount: 0, MaxRetries: 10, CreatedAt: int64(event.CreatedAt), Status: OutboxStatusGroupPending,
+	}
+}
+
+// TestOutboxRetryCLIRejectsGroupEntryBeforeTouchingRelayOrHistory is the
+// regression test for the S5a review Blocker B escalation: `storage outbox
+// retry --id` must reject a group-route entry before it ever reaches a
+// relay or local history, proven end to end through the real compiled CLI
+// binary against a real running relay (not just the in-process Action call)
+// -- so there is no gap between what the unit test exercises and what a
+// user actually running the binary would hit.
+func TestOutboxRetryCLIRejectsGroupEntryBeforeTouchingRelayOrHistory(t *testing.T) {
+	temp := t.TempDir()
+	relayBin := filepath.Join(temp, "hyphae-relay")
+	buildCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	build := exec.CommandContext(buildCtx, "go", "build", "-o", relayBin, "./cmd/hyphae-relay")
+	build.Dir = projectRootFromTest(t)
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build relay: %v: %s", err, output)
+	}
+	port := freeOutboxTestPort(t)
+	relayURL := fmt.Sprintf("ws://127.0.0.1:%d", port)
+	relay := startOutboxTestRelay(t, relayBin, filepath.Join(temp, "relay-data"), port)
+	defer relay.stop()
+
+	home := t.TempDir()
+	event, entry := signedGroupOutboxRetryFixture(t, "group plaintext must stay private", []string{relayURL})
+	before := writeOutboxFixture(t, home, &types.Outbox{Entries: []types.OutboxEntry{entry}})
+
+	result := runOutboxCLI(t, home, nil, "storage", "outbox", "retry", "--id", event.ID.Hex(), "--timeout", "2", "--json")
+	if result.code != 1 || result.stdout != "" {
+		t.Fatalf("group retry exit=%d stdout=%q stderr=%q", result.code, result.stdout, result.stderr)
+	}
+	response := decodeOutboxResult(t, result.stderr)
+	if response["ok"] != false || response["error"] != "user_error" {
+		t.Fatalf("unexpected group retry error shape: %#v", response)
+	}
+
+	// Queue entry retained byte-for-byte: no QueueID backfill, no retry
+	// count bump, no status change, no removal.
+	after, err := os.ReadFile(filepath.Join(home, ".hyphae", "outbox.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatalf("rejected group retry mutated the queue file:\nbefore=%s\nafter=%s", before, after)
+	}
+
+	// No DM history row was written for the group event.
+	if _, err := os.Stat(filepath.Join(home, ".hyphae", "messages.db")); !os.IsNotExist(err) {
+		t.Fatalf("rejected group retry created a history database: stat err=%v", err)
+	}
+
+	assertRelayNeverReceivedEvent(t, relayURL, event.ID.Hex())
+}
+
+// assertRelayNeverReceivedEvent queries the relay for the given event ID and
+// fails the test if the relay returns it -- i.e. it fails only if a publish
+// actually reached the relay, which is the strongest available proof that
+// AttemptSend's publish step was never invoked.
+func assertRelayNeverReceivedEvent(t *testing.T, relayURL, eventID string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, relayURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_ = conn.SetWriteDeadline(time.Now().Add(1 * time.Second))
+	if err := conn.WriteJSON([]any{"REQ", "retry-rejection-check", map[string]any{"ids": []string{eventID}}}); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		var response []json.RawMessage
+		if err := conn.ReadJSON(&response); err != nil {
+			t.Fatal(err)
+		}
+		if len(response) > 0 && string(response[0]) == `"EOSE"` {
+			return
+		}
+		if len(response) == 3 && string(response[0]) == `"EVENT"` {
+			var event nostr.Event
+			if err := json.Unmarshal(response[2], &event); err != nil {
+				t.Fatal(err)
+			}
+			if event.ID.Hex() == eventID {
+				t.Fatalf("relay received the rejected group entry's event %s -- AttemptSend published it", eventID)
+			}
+		}
 	}
 }
 
