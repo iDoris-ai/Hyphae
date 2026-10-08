@@ -39,6 +39,7 @@ type StoredMessage struct {
 type OutboxEntry struct {
 	// QueueID distinguishes enqueues with the same event ID and is omitted for legacy entries.
 	QueueID       string   `json:"queue_id,omitempty"`
+	Route         string   `json:"route,omitempty"` // empty = DM; group = group outbox
 	ID            string   `json:"id"`
 	EventJSON     string   `json:"event_json"`
 	RecipientNpub string   `json:"recipient_npub"`
@@ -47,7 +48,7 @@ type OutboxEntry struct {
 	MaxRetries    int      `json:"max_retries"`
 	LastAttempt   int64    `json:"last_attempt"`
 	CreatedAt     int64    `json:"created_at"`
-	Status        string   `json:"status"` // "pending", "sent", "failed"
+	Status        string   `json:"status"` // DM: pending/sent/failed; group: group_pending/group_failed
 }
 
 // KeyStore 存储所有身份和联系人
