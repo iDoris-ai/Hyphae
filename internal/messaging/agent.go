@@ -20,7 +20,6 @@ import (
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/internal/relayquery"
 	"github.com/iDoris-ai/hyphae/internal/wireevent"
-	"github.com/iDoris-ai/hyphae/pkg/crypto"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/klauspost/compress/zstd"
 	"github.com/urfave/cli/v3"
@@ -239,58 +238,51 @@ Example: hyphae agent msg --from alice --to bob --content "Hello!"`,
 			return common.NewExitError(common.ErrCodeUser, fmt.Errorf("invalid recipient npub: %w", err))
 		}
 
-		// Encrypt if enabled
-		messageContent := content
-		isEncrypted := false
-		if c.Bool("encrypt") {
-			encrypted, err := crypto.EncryptMessage(content, senderSK, recipientPK)
-			if err != nil {
-				return fmt.Errorf("failed to encrypt: %w", err)
-			}
-			messageContent = encrypted
-			isEncrypted = true
-		}
-
-		compressed, err := CompressText(messageContent)
-		if err != nil {
-			return fmt.Errorf("failed to compress message: %w", err)
-		}
-		createdAt := nostr.Now()
-		dTag, err := NewAgentMessageDTag(compressed, createdAt)
-		if err != nil {
-			return fmt.Errorf("failed to derive d tag: %w", err)
-		}
-		tags := nostr.Tags{
-			{"p", common.PubKeyToHex(recipientPK)},
-			{"c", AgentTag},
-			{"z", CompressTag},
-			{"v", AgentVersion},
-			// Kind 30078 is a NIP-01 addressable/parameterized-replaceable
-			// kind range (30000-39999): relays that follow the spec keep
-			// only the latest event per (pubkey, kind, d) coordinate. A
-			// unique per-message d (unlike profile's fixed ProfileDTag,
-			// see internal/profile/profile.go) keeps every message its own
-			// coordinate so consecutive messages from the same sender
-			// don't silently evict each other -- see CC-82 discussion.
-			{"d", dTag},
-		}
-		// Use "enc" tag to mark encrypted messages
+		isEncrypted := c.Bool("encrypt")
+		var event *nostr.Event
 		if isEncrypted {
-			tags = append(tags, nostr.Tag{"enc", "nip44"})
-		}
+			event, err = BuildAgentMessageEvent(senderSK, recipientPK, content, nostr.Now())
+			if err != nil {
+				return err
+			}
+		} else {
+			compressed, err := CompressText(content)
+			if err != nil {
+				return fmt.Errorf("failed to compress message: %w", err)
+			}
+			createdAt := nostr.Now()
+			dTag, err := NewAgentMessageDTag(compressed, createdAt)
+			if err != nil {
+				return fmt.Errorf("failed to derive d tag: %w", err)
+			}
+			tags := nostr.Tags{
+				{"p", common.PubKeyToHex(recipientPK)},
+				{"c", AgentTag},
+				{"z", CompressTag},
+				{"v", AgentVersion},
+				// Kind 30078 is a NIP-01 addressable/parameterized-replaceable
+				// kind range (30000-39999): relays that follow the spec keep
+				// only the latest event per (pubkey, kind, d) coordinate. A
+				// unique per-message d (unlike profile's fixed ProfileDTag,
+				// see internal/profile/profile.go) keeps every message its own
+				// coordinate so consecutive messages from the same sender
+				// don't silently evict each other -- see CC-82 discussion.
+				{"d", dTag},
+			}
 
-		event := &nostr.Event{
-			CreatedAt: createdAt,
-			Kind:      AgentKind,
-			Tags:      tags,
-			Content:   compressed,
-			PubKey:    senderSK.Public(),
-		}
-		if err := ValidateAgentMessageEvent(event); err != nil {
-			return fmt.Errorf("validate outgoing message tags: %w", err)
-		}
-		if err := event.Sign(senderSK); err != nil {
-			return fmt.Errorf("failed to sign event: %w", err)
+			event = &nostr.Event{
+				CreatedAt: createdAt,
+				Kind:      AgentKind,
+				Tags:      tags,
+				Content:   compressed,
+				PubKey:    senderSK.Public(),
+			}
+			if err := ValidateAgentMessageEvent(event); err != nil {
+				return fmt.Errorf("validate outgoing message tags: %w", err)
+			}
+			if err := event.Sign(senderSK); err != nil {
+				return fmt.Errorf("failed to sign event: %w", err)
+			}
 		}
 
 		relays, err := common.ResolveRelays(c)
