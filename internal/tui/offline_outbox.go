@@ -11,7 +11,6 @@ import (
 	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/internal/messaging"
-	"github.com/iDoris-ai/hyphae/pkg/crypto"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 )
 
@@ -235,37 +234,10 @@ func (m *ChatModel) sendQueuedMessage(ctx context.Context, request outboxSendReq
 	if err != nil {
 		return
 	}
-	encrypted, err := crypto.EncryptMessage(request.content, senderSK, recipient)
+	event, err := messaging.BuildAgentMessageEvent(senderSK, recipient, request.content, nostr.Now())
 	if err != nil {
 		return
 	}
-	compressed, err := messaging.CompressText(encrypted)
-	if err != nil {
-		return
-	}
-	createdAt := nostr.Now()
-	dTag, err := messaging.NewAgentMessageDTag(compressed, createdAt)
-	if err != nil {
-		return
-	}
-	event := &nostr.Event{
-		CreatedAt: createdAt,
-		Kind:      messaging.AgentKind,
-		Tags: nostr.Tags{
-			{"p", common.PubKeyToHex(recipient)},
-			{"c", messaging.AgentTag},
-			{"z", messaging.CompressTag},
-			{"v", messaging.AgentVersion},
-			{"d", dTag},
-			{"enc", "nip44"},
-		},
-		Content: compressed,
-		PubKey:  senderSK.Public(),
-	}
-	if err := messaging.ValidateAgentMessageEvent(event); err != nil {
-		return
-	}
-	event.Sign(senderSK)
 	update.eventID = event.ID.Hex()
 
 	result, _ := messaging.SendQueuedAgentMessage(ctx, event, m.contactNpub, request.content, true, m.relays, relayDialTimeout)

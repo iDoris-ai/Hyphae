@@ -63,6 +63,42 @@ func TestFormatOutboxStatusDistinguishesQueueAcceptanceAndFailure(t *testing.T) 
 	}
 }
 
+func TestSendQueuedMessageBuildsEncryptedSignedEvent(t *testing.T) {
+	cleanup := setupTestEnv(t)
+	defer cleanup()
+	ks, err := identity.LoadKeyStore()
+	require.NoError(t, err)
+	peer, err := identity.CreateIdentity(ks, "encrypted-peer")
+	require.NoError(t, err)
+	require.NoError(t, identity.AddContact(ks, peer.Nickname, peer.Npub))
+	peerSK, err := identity.GetSecretKey(ks, peer.Nickname)
+	require.NoError(t, err)
+
+	var accept atomic.Bool
+	relayURL, eventIDs := startTUIOutboxRelay(t, &accept, nil)
+	model, err := NewChatModel(peer.Nickname, relayURL)
+	require.NoError(t, err)
+	defer model.Close()
+	model.sendQueuedMessage(context.Background(), outboxSendRequest{requestID: 42, content: "private queued message"})
+	update := waitTUIOutboxUpdate(t, model.outboxUpdates, func(update outboxDeliveryUpdate) bool {
+		return update.requestID == 42
+	})
+	require.Equal(t, messaging.AgentMessageQueued, update.state)
+	require.Equal(t, update.eventID, receiveTUIEventID(t, eventIDs))
+	outbox, err := messaging.LoadOutbox()
+	require.NoError(t, err)
+	require.Len(t, outbox.Entries, 1)
+	var event nostr.Event
+	require.NoError(t, json.Unmarshal([]byte(outbox.Entries[0].EventJSON), &event))
+	require.NoError(t, messaging.ValidateAgentMessageEvent(&event))
+	assert.True(t, event.CheckID())
+	assert.True(t, event.VerifySignature())
+	plaintext, encrypted, err := messaging.DecodeMessageContent(&event, peerSK)
+	require.NoError(t, err)
+	assert.True(t, encrypted)
+	assert.Equal(t, "private queued message", plaintext)
+}
+
 func TestTUIOutboxQueuesAndRestartsWithSameSignedEvent(t *testing.T) {
 	cleanup := setupTestEnv(t)
 	defer cleanup()
