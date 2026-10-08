@@ -39,6 +39,8 @@ TUI 自有一个可取消的 outbox worker；初次发送与周期重试串行�
 
 fanout、durable send-intent、inbound 路由、ACK 状态机与重放边界的实现契约见 [M1 群消息 fanout 与 inbound 路由契约](m1-group-fanout-contract-20261008.md)。
 
+按 PR 预算（生产代码 ≤300 行/PR）切分的实现顺序见 [M1 群 fanout 实现拆分方案](m1-group-fanout-impl-plan-20261008.md)。
+
 本次“完整”指固定成员、明确同意、三用户加密收发、可靠重试、历史与 TUI 闭环；动态成员治理、共享密钥轮换、远端撤权和历史撤回不在本次范围。本机 leave 只停止本机收发/显示，不承诺删除他端副本。
 
 ## 分工与合并顺序
