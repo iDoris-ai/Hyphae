@@ -161,3 +161,155 @@ func historyCLIEnv(current []string, home string, extra []string) []string {
 	env = append(env, "HOME="+home)
 	return append(env, extra...)
 }
+
+func TestHistoryZeroMessagesAllCommands(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	ks := &types.KeyStore{Identities: map[string]*types.Identity{}, Contacts: map[string]*types.Contact{}}
+	_, err := identity.CreateIdentity(ks, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, err := identity.CreateIdentity(ks, "bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := identity.AddContact(ks, "bob", bob.Npub); err != nil {
+		t.Fatal(err)
+	}
+	if err := identity.SaveKeyStore(ks); err != nil {
+		t.Fatal(err)
+	}
+	db, err := storage.InitDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. history stats
+	t.Run("stats human", func(t *testing.T) {
+		res := runHistoryConversationCLI(t, home, nil, "history", "stats")
+		if res.code != 0 || res.stderr != "" {
+			t.Fatalf("stats human failed: exit=%d stdout=%q stderr=%q", res.code, res.stdout, res.stderr)
+		}
+		for _, expected := range []string{
+			"Total messages: 0",
+			"Incoming:       0",
+			"Outgoing:       0",
+			"Encrypted:      0",
+		} {
+			if !strings.Contains(res.stdout, expected) {
+				t.Fatalf("expected %q in stdout: %q", expected, res.stdout)
+			}
+		}
+	})
+
+	t.Run("stats json", func(t *testing.T) {
+		res := runHistoryConversationCLI(t, home, nil, "history", "stats", "--json")
+		if res.code != 0 || res.stderr != "" {
+			t.Fatalf("stats json failed: exit=%d stdout=%q stderr=%q", res.code, res.stdout, res.stderr)
+		}
+		var response struct {
+			OK   bool           `json:"ok"`
+			Data map[string]int `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(res.stdout), &response); err != nil {
+			t.Fatalf("unmarshal stats json: %v: %q", err, res.stdout)
+		}
+		if !response.OK {
+			t.Fatalf("expected ok: true, got %#v", response)
+		}
+		expected := map[string]int{"total": 0, "incoming": 0, "outgoing": 0, "encrypted": 0}
+		for k, v := range expected {
+			if response.Data[k] != v {
+				t.Fatalf("expected %s=%d, got %d in %#v", k, v, response.Data[k], response.Data)
+			}
+		}
+	})
+
+	// 2. history inbox
+	t.Run("inbox human", func(t *testing.T) {
+		res := runHistoryConversationCLI(t, home, nil, "history", "inbox")
+		if res.code != 0 || res.stderr != "" {
+			t.Fatalf("inbox human failed: exit=%d stdout=%q stderr=%q", res.code, res.stdout, res.stderr)
+		}
+		if !strings.Contains(res.stdout, "Inbox is empty") {
+			t.Fatalf("expected 'Inbox is empty', got: %q", res.stdout)
+		}
+	})
+
+	t.Run("inbox json", func(t *testing.T) {
+		res := runHistoryConversationCLI(t, home, nil, "history", "inbox", "--json")
+		if res.code != 0 || res.stderr != "" {
+			t.Fatalf("inbox json failed: exit=%d stdout=%q stderr=%q", res.code, res.stdout, res.stderr)
+		}
+		var response struct {
+			OK   bool                  `json:"ok"`
+			Data []types.StoredMessage `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(res.stdout), &response); err != nil {
+			t.Fatalf("unmarshal inbox json: %v: %q", err, res.stdout)
+		}
+		if !response.OK || len(response.Data) != 0 {
+			t.Fatalf("expected empty data, got %#v", response)
+		}
+	})
+
+	// 3. history conversation
+	t.Run("conversation human", func(t *testing.T) {
+		res := runHistoryConversationCLI(t, home, nil, "history", "conversation", "--with", "bob")
+		if res.code != 0 || res.stderr != "" {
+			t.Fatalf("conversation human failed: exit=%d stdout=%q stderr=%q", res.code, res.stdout, res.stderr)
+		}
+		if !strings.Contains(res.stdout, "No messages found") {
+			t.Fatalf("expected 'No messages found', got: %q", res.stdout)
+		}
+	})
+
+	t.Run("conversation json", func(t *testing.T) {
+		res := runHistoryConversationCLI(t, home, nil, "history", "conversation", "--with", "bob", "--json")
+		if res.code != 0 || res.stderr != "" {
+			t.Fatalf("conversation json failed: exit=%d stdout=%q stderr=%q", res.code, res.stdout, res.stderr)
+		}
+		var response struct {
+			OK   bool                  `json:"ok"`
+			Data []types.StoredMessage `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(res.stdout), &response); err != nil {
+			t.Fatalf("unmarshal conversation json: %v: %q", err, res.stdout)
+		}
+		if !response.OK || len(response.Data) != 0 {
+			t.Fatalf("expected empty data, got %#v", response)
+		}
+	})
+
+	// 4. history search
+	t.Run("search human", func(t *testing.T) {
+		res := runHistoryConversationCLI(t, home, nil, "history", "search", "--query", "hello")
+		if res.code != 0 || res.stderr != "" {
+			t.Fatalf("search human failed: exit=%d stdout=%q stderr=%q", res.code, res.stdout, res.stderr)
+		}
+		if !strings.Contains(res.stdout, "No messages found") {
+			t.Fatalf("expected 'No messages found', got: %q", res.stdout)
+		}
+	})
+
+	t.Run("search json", func(t *testing.T) {
+		res := runHistoryConversationCLI(t, home, nil, "history", "search", "--query", "hello", "--json")
+		if res.code != 0 || res.stderr != "" {
+			t.Fatalf("search json failed: exit=%d stdout=%q stderr=%q", res.code, res.stdout, res.stderr)
+		}
+		var response struct {
+			OK   bool                  `json:"ok"`
+			Data []types.StoredMessage `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(res.stdout), &response); err != nil {
+			t.Fatalf("unmarshal search json: %v: %q", err, res.stdout)
+		}
+		if !response.OK || len(response.Data) != 0 {
+			t.Fatalf("expected empty data, got %#v", response)
+		}
+	})
+}
