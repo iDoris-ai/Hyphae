@@ -346,9 +346,11 @@ Profile 字段分三类：
 
 ## 9. Milestone 修订（取代 `03-development-plan.md`）
 
+2026-10-07 纠正 M1 完成判定，优先级与发布出口见 [M1 收尾计划](agent/m1-release-plan-20261007.md)。其余行保留历史规划；周期是旧估算，不是本轮交付承诺。
+
 | Milestone | 内容 | 周期 | 状态（2026-07-24） |
 |-----------|------|------|---|
-| **M1** | TUI 聊天 + 群聊收尾（合并 #4 #5 #9） | 1-2 周 | ✅ 已完成（PR #4/#5/#9 均已合并） |
+| **M1** | TUI 聊天 + 群聊收尾 | 历史估算，不作当前承诺 | 🔄 当前 P0：#135 实时 TUI 收件已合；加密群应用及 TUI 离线闭环待验收 |
 | **M1.5** | Relay 自部署 + 花名册 + register/discover | 2-3 周 | 🔄 进行中（`scripts/deploy-relay.sh` khatru skeleton 已落地，`AuraAIHQ/relay-khatru` 仓库尚未创建） |
 | **M2** | L3 应用行为协议 JSON schema 标准化 | 2 周 | ⏳ 未开始 |
 | **M2.5** | 跨 relay 接力 + 漂流瓶 + AAstar Point 支付 | 3-4 周 | ⏳ 未开始 |

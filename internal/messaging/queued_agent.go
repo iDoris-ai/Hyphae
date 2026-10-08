@@ -16,9 +16,36 @@ type QueuedAgentRelayResult struct {
 	Error string
 }
 
+// AgentMessageDeliveryState is a safe, content-free summary of a queued send.
+// Relay acceptance does not imply that the recipient received or read it.
+type AgentMessageDeliveryState string
+
+const (
+	AgentMessageFailed        AgentMessageDeliveryState = "failed"
+	AgentMessageQueued        AgentMessageDeliveryState = "queued"
+	AgentMessageRelayAccepted AgentMessageDeliveryState = "relay_accepted"
+)
+
+// AgentMessageDeliveryIssue is a content-free safe reason accompanying a
+// delivery state. It intentionally excludes the underlying error, relay URL,
+// event payload, and encryption material.
+type AgentMessageDeliveryIssue string
+
+const (
+	AgentMessageIssueNone                    AgentMessageDeliveryIssue = ""
+	AgentMessageIssueSendFailed              AgentMessageDeliveryIssue = "send_failed"
+	AgentMessageIssueHistoryNotStored        AgentMessageDeliveryIssue = "history_not_stored"
+	AgentMessageIssueQueueStateUnknown       AgentMessageDeliveryIssue = "queue_state_unknown"
+	AgentMessageIssueQueueSuperseded         AgentMessageDeliveryIssue = "queue_superseded"
+	AgentMessageIssueOutboxBookkeepingFailed AgentMessageDeliveryIssue = "outbox_bookkeeping_failed"
+	AgentMessageIssueRetryExhausted          AgentMessageDeliveryIssue = "retry_exhausted"
+)
+
 // QueuedAgentMessageResult describes the durable queue/send outcome. A relay
 // acknowledgment confirms relay acceptance only, not delivery to a recipient.
 type QueuedAgentMessageResult struct {
+	State             AgentMessageDeliveryState
+	Issue             AgentMessageDeliveryIssue
 	EventID           string
 	Relays            []QueuedAgentRelayResult
 	PublishedTo       int
@@ -52,6 +79,8 @@ func SendQueuedAgentMessage(
 		StoreOutgoingMessage, enqueueOutboxEntry, publishAgentMessageRelays,
 	)
 	wrapped := QueuedAgentMessageResult{
+		State:   deliveryState(result),
+		Issue:   deliveryIssue(result, err),
 		EventID: result.EventID, PublishedTo: result.PublishedTo, RelayCount: result.RelayCount,
 		QueuedForRetry: result.QueuedForRetry, HistoryStored: result.HistoryStored,
 		Superseded: result.Superseded, QueueStateUnknown: result.QueueStateUnknown,
@@ -61,4 +90,32 @@ func SendQueuedAgentMessage(
 		wrapped.Relays = append(wrapped.Relays, QueuedAgentRelayResult{URL: relay.URL, OK: relay.OK, Error: relay.Error})
 	}
 	return wrapped, err
+}
+
+func deliveryState(result agentMsgResult) AgentMessageDeliveryState {
+	switch {
+	case result.PublishedTo > 0:
+		return AgentMessageRelayAccepted
+	case result.QueuedForRetry && !result.QueueStateUnknown && !result.Superseded:
+		return AgentMessageQueued
+	default:
+		return AgentMessageFailed
+	}
+}
+
+func deliveryIssue(result agentMsgResult, err error) AgentMessageDeliveryIssue {
+	switch {
+	case result.QueueStateUnknown:
+		return AgentMessageIssueQueueStateUnknown
+	case !result.HistoryStored:
+		return AgentMessageIssueHistoryNotStored
+	case result.Superseded:
+		return AgentMessageIssueQueueSuperseded
+	case err != nil && result.PublishedTo > 0:
+		return AgentMessageIssueOutboxBookkeepingFailed
+	case err != nil:
+		return AgentMessageIssueSendFailed
+	default:
+		return AgentMessageIssueNone
+	}
 }

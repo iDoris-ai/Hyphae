@@ -1,0 +1,195 @@
+name: Agent24 × Hyphae platform bundle producer
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        description: Native target platform (linux-x64 or darwin-arm64).
+        required: true
+        type: string
+    outputs:
+      candidate_outputs:
+        description: Independent candidate manifest and binary hashes.
+        value: ${{ jobs.produce.outputs.candidate_outputs }}
+      production_outputs:
+        description: Independent pinned-production manifest and binary hashes.
+        value: ${{ jobs.produce.outputs.production_outputs }}
+
+permissions:
+  contents: read
+
+jobs:
+  produce:
+    name: Produce ${{ inputs.platform }} bundles
+    runs-on: ${{ inputs.platform == 'darwin-arm64' && 'macos-15' || 'ubuntu-24.04' }}
+    timeout-minutes: 60
+    outputs:
+      candidate_outputs: ${{ steps.provenance.outputs.candidate_outputs }}
+      production_outputs: ${{ steps.provenance.outputs.production_outputs }}
+    steps:
+      - name: Checkout Hyphae tools and candidate source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: tools
+          persist-credentials: false
+          submodules: false
+
+      - name: Validate native producer platform
+        env:
+          TARGET_PLATFORM: ${{ inputs.platform }}
+        run: |
+          set -euo pipefail
+          case "$TARGET_PLATFORM:$(uname -s):$(uname -m)" in
+            linux-x64:Linux:x86_64) goos=linux; goarch=amd64 ;;
+            darwin-arm64:Darwin:arm64) goos=darwin; goarch=arm64 ;;
+            *) echo "producer-platform-mismatch" >&2; exit 1 ;;
+          esac
+          printf 'goos=%s\ngoarch=%s\n' "$goos" "$goarch" >> "$GITHUB_OUTPUT"
+        id: target
+
+      - name: Load tracked cross-repository production pins
+        id: pins
+        run: |
+          set -euo pipefail
+          python3 - tools/.github/joint-ci-baseline.json >> "$GITHUB_OUTPUT" <<'PY'
+          import json, pathlib, sys
+          config = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+          assert config['schema'] == 1
+          for key in ('agent24_base_sha', 'production_hyphae_sha', 'production_lock_sha256', 'production_lock_path', 'go_version'):
+            print(f'{key}={config[key]}')
+          PY
+
+      - name: Checkout pinned production Hyphae source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: iDoris-ai/Hyphae
+          ref: ${{ steps.pins.outputs.production_hyphae_sha }}
+          path: hyphae-production
+          persist-credentials: false
+          submodules: false
+
+      - name: Checkout public pinned Agent24 base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: iDoris-ai/Agent24
+          ref: ${{ steps.pins.outputs.agent24_base_sha }}
+          path: agent24-base
+          persist-credentials: false
+          submodules: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: ${{ steps.pins.outputs.go_version }}
+          check-latest: false
+          cache: false
+
+      - name: Build candidate and pinned production bundles natively
+        id: build
+        env:
+          TARGET_PLATFORM: ${{ inputs.platform }}
+          GOOS: ${{ steps.target.outputs.goos }}
+          GOARCH: ${{ steps.target.outputs.goarch }}
+          CANDIDATE_SHA: ${{ github.sha }}
+          AGENT24_SHA: ${{ steps.pins.outputs.agent24_base_sha }}
+          PRODUCTION_HYPHAE_SHA: ${{ steps.pins.outputs.production_hyphae_sha }}
+          PRODUCTION_LOCK_SHA256: ${{ steps.pins.outputs.production_lock_sha256 }}
+          PRODUCTION_LOCK_PATH: ${{ steps.pins.outputs.production_lock_path }}
+          GO_VERSION: ${{ steps.pins.outputs.go_version }}
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/joint-bundles"
+          mkdir -p "$out/candidate" "$out/pinned-production"
+          prod_lock="$RUNNER_TEMP/production-lock.json"
+          cp "agent24-base/$PRODUCTION_LOCK_PATH" "$prod_lock"
+          python3 - "$prod_lock" <<'PY'
+          import hashlib, os, pathlib, sys
+          p = pathlib.Path(sys.argv[1])
+          assert hashlib.sha256(p.read_bytes()).hexdigest() == os.environ['PRODUCTION_LOCK_SHA256']
+          PY
+
+          for mode in pinned-production candidate; do
+            work="$RUNNER_TEMP/$mode"
+            mkdir -p "$work"
+            if [ "$mode" = pinned-production ]; then
+              cp -a hyphae-production/. "$work/hyphae/"
+              source_sha="$PRODUCTION_HYPHAE_SHA"
+            else
+              cp -a tools/. "$work/hyphae/"
+              source_sha="$CANDIDATE_SHA"
+            fi
+            git -C "$work/hyphae" cat-file -e "$source_sha^{commit}"
+            test "$(git -C "$work/hyphae" rev-parse HEAD)" = "$source_sha"
+            build="$work/build"
+            mkdir -p "$build"
+            actual_target="$(GOOS="$GOOS" GOARCH="$GOARCH" go env GOOS GOARCH)"
+            expected_target="$(printf '%s\n%s' "$GOOS" "$GOARCH")"
+            test "$actual_target" = "$expected_target"
+            (
+              cd "$work/hyphae"
+              GOTOOLCHAIN="go$GO_VERSION" CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -buildvcs=false -ldflags='-buildid=' -o "$build/hyphae" ./cmd/hyphae
+              GOTOOLCHAIN="go$GO_VERSION" CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -buildvcs=false -ldflags='-buildid=' -o "$build/relay" ./cmd/hyphae-relay
+            )
+            if [ "$mode" = candidate ]; then
+              hyphae_hash="$(python3 - "$build/hyphae" <<'PY'
+          import hashlib, pathlib, sys
+          print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())
+          PY
+          )"
+              python3 tools/scripts/joint_ci.py derive-lock --production-lock "$prod_lock" \
+                --platform "$TARGET_PLATFORM" --hyphae-sha "$source_sha" \
+                --hyphae-sha256 "$hyphae_hash" --output "$build/hyphae.lock.json"
+            else
+              cp "$prod_lock" "$build/hyphae.lock.json"
+            fi
+            agent="$RUNNER_TEMP/agent24-$mode"
+            cp -a agent24-base/. "$agent/"
+            cp "$build/hyphae.lock.json" "$agent/$PRODUCTION_LOCK_PATH"
+            CARGO_TARGET_DIR="$RUNNER_TEMP/agent24-target" cargo build --manifest-path "$agent/rust/Cargo.toml" --locked --release -p agent24-cli -p agent24d
+            cp "$RUNNER_TEMP/agent24-target/release/agent24" "$build/agent24"
+            cp "$RUNNER_TEMP/agent24-target/release/agent24d" "$build/agent24d"
+            for binary in hyphae relay agent24 agent24d; do
+              python3 tools/scripts/joint_ci.py verify-platform \
+                --platform "$TARGET_PLATFORM" --binary "$build/$binary"
+            done
+            chmod 755 "$build"/*
+            cp "$build"/* "$out/$mode/"
+            python3 tools/scripts/joint_ci.py write-manifest --mode "$mode" --platform "$TARGET_PLATFORM" \
+              --hyphae-sha "$source_sha" --artifact-dir "$out/$mode" --production-lock "$prod_lock" \
+              --output "$out/$mode/manifest.json"
+          done
+          echo "bundle_dir=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Publish independent producer hashes
+        id: provenance
+        env:
+          BUNDLE_DIR: ${{ steps.build.outputs.bundle_dir }}
+          TARGET_PLATFORM: ${{ inputs.platform }}
+        run: |
+          set -euo pipefail
+          python3 - "$BUNDLE_DIR" >> "$GITHUB_OUTPUT" <<'PY'
+          import hashlib, json, pathlib, sys
+          root = pathlib.Path(sys.argv[1])
+          for key, directory in [('candidate_outputs', 'candidate'), ('production_outputs', 'pinned-production')]:
+            folder = root / directory
+            manifest_path = folder / 'manifest.json'
+            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+            outputs = {
+              'validation_mode': manifest['validation_mode'], 'platform': manifest['platform'],
+              'hyphae_source_sha': manifest['hyphae_source_sha'],
+              'production_lock_sha256': manifest['production_lock_sha256'],
+              'derived_lock_sha256': manifest['derived_lock_sha256'],
+              'binary_sha256': manifest['binary_sha256'],
+              'manifest_sha256': hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+            }
+            assert outputs['platform'] == __import__('os').environ['TARGET_PLATFORM']
+            print(f'{key}={json.dumps(outputs, sort_keys=True, separators=(",", ":"))}')
+          PY
+
+      - name: Upload producer bundles for this platform
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: joint-bundles-${{ inputs.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.build.outputs.bundle_dir }}/
+          if-no-files-found: error
+          retention-days: 2

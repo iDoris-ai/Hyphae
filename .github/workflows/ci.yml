@@ -34,6 +34,10 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  joint:
+    name: Agent24 × Hyphae joint acceptance
+    uses: ./.github/workflows/joint-ci.yml
+
   test:
     strategy:
       # Do not cancel the other OS when one fails: when a failure IS the
@@ -114,6 +118,23 @@ jobs:
       - name: Test Python tools
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
+  cleanup-stress:
+    name: macOS 50-round timeout cleanup stress
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          submodules: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: 3.14.7
+          check-latest: false
+      - name: Repeat the pipe-holding descendant cleanup regression 50 times
+        run: >-
+          python3 -c 'import unittest; from scripts.test_agent24_joint_test import JointRunnerTests; suite=unittest.TestSuite(JointRunnerTests("test_timeout_does_not_leak_descendants_holding_output_pipe") for _ in range(50)); result=unittest.TextTestRunner(verbosity=2).run(suite); raise SystemExit(not result.wasSuccessful())'
+
   # A stable name for branch protection to require.
   #
   # The matrix legs surface as "test (ubuntu-latest)" and "test (macos-latest)",
@@ -129,15 +150,17 @@ jobs:
   # when it has a successful, skipped or neutral status. That would turn the
   # gate into the exact thing it exists to prevent.
   #
-  # `needs: [test]` automatically covers future legs OF `test` (adding windows
-  # needs no change here) but NOT future jobs -- a new top-level job must be
-  # added to this list or it is not gated.
+  # Every top-level required gate is listed. A new job must be added here.
   ci-ok:
     if: always()
-    needs: [test]
+    needs: [test, joint, cleanup-stress]
     runs-on: ubuntu-latest
     steps:
-      - name: Require every matrix leg to have succeeded
+      - name: Require every CI gate to have succeeded
         run: |
           echo "test result: ${{ needs.test.result }}"
+          echo "joint result: ${{ needs.joint.result }}"
+          echo "cleanup-stress result: ${{ needs.cleanup-stress.result }}"
           [ "${{ needs.test.result }}" = "success" ]
+          [ "${{ needs.joint.result }}" = "success" ]
+          [ "${{ needs.cleanup-stress.result }}" = "success" ]
