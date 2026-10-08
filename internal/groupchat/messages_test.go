@@ -133,3 +133,18 @@ func TestStoreMessageTxReplayRollback(t *testing.T) {
 	require.Len(t, messages, 1)
 	require.Empty(t, messages[0].EventID, "rollback must undo the replay's event ID backfill")
 }
+
+func TestStoreMessageTxRejectsInvalidLogicalID(t *testing.T) {
+	g := newThreeMemberGroup(t)
+	g.activate()
+	tx, err := g.alice.store.beginImmediate()
+	require.NoError(t, err)
+	defer tx.Rollback()
+	inserted, err := g.alice.store.storeMessageTx(tx, g.alice.npub, g.draft.Group.ID,
+		"invalid", g.alice.npub, "valid body", 1000, "", true)
+	require.ErrorContains(t, err, "invalid logical message ID")
+	require.False(t, inserted)
+	var count int
+	require.NoError(t, tx.QueryRow(`SELECT COUNT(*) FROM groupchat_messages`).Scan(&count))
+	require.Zero(t, count)
+}
