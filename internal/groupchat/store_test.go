@@ -386,7 +386,6 @@ func TestReceiveDeclineRequiresPendingState(t *testing.T) {
 	require.Equal(t, StatePending, group.State)
 }
 
-
 func mustEncode(t *testing.T, e Envelope) string {
 	t.Helper()
 	value, err := Encode(e)

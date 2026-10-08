@@ -55,4 +55,3 @@ func TestStoreLocalMessageIdempotencyAndConflict(t *testing.T) {
 	_, err = g.alice.store.StoreLocalMessage(g.alice.npub, g.draft.Group.ID, logicalID, "altered body", 1000)
 	require.ErrorIs(t, err, ErrLogicalIDConflict)
 }
-
