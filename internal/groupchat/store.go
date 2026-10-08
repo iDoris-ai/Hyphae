@@ -632,6 +632,22 @@ func (s *Store) CancelGroup(localNpub, groupID string) ([]Envelope, error) {
 	if group.Creator != localNpub || (group.State != StatePending && group.State != StateActivating) {
 		return nil, ErrInvalidTransition
 	}
+	var activeInvites int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM groupchat_invites WHERE local_npub = ? AND group_id = ? AND state = ?`,
+		localNpub, groupID, InviteActive).Scan(&activeInvites); err != nil {
+		return nil, err
+	}
+	if activeInvites > 0 {
+		return nil, ErrInvalidTransition
+	}
+	var activeMembers int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM groupchat_members WHERE local_npub = ? AND group_id = ? AND state = ?`,
+		localNpub, groupID, InviteActive).Scan(&activeMembers); err != nil {
+		return nil, err
+	}
+	if activeMembers > 0 {
+		return nil, ErrInvalidTransition
+	}
 	rows, err := tx.Query(`SELECT invite_id, invitee_npub FROM groupchat_invites WHERE local_npub = ? AND group_id = ? ORDER BY invitee_npub`, localNpub, groupID)
 	if err != nil {
 		return nil, err
@@ -694,12 +710,38 @@ func (s *Store) cancelFromInvite(v VerifiedIncoming, e Envelope, declined bool) 
 	if group.State == StateActive || group.State == StateLeft {
 		return nil, ErrInvalidTransition
 	}
-	if group.State == StateCancelled {
+	var activeInvites int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM groupchat_invites WHERE local_npub = ? AND group_id = ? AND state = ?`,
+		v.recipientNpub, e.GroupID, InviteActive).Scan(&activeInvites); err != nil {
+		return nil, err
+	}
+	if activeInvites > 0 {
+		return nil, ErrInvalidTransition
+	}
+	var activeMembers int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM groupchat_members WHERE local_npub = ? AND group_id = ? AND state = ?`,
+		v.recipientNpub, e.GroupID, InviteActive).Scan(&activeMembers); err != nil {
+		return nil, err
+	}
+	if activeMembers > 0 {
+		return nil, ErrInvalidTransition
+	}
+	if declined {
+		if invite.state == InviteDeclined && group.State == StateCancelled {
+			if err := tx.Commit(); err != nil {
+				return nil, err
+			}
+			if group.Creator == v.recipientNpub {
+				return cancellationEnvelopes(s.db, v.recipientNpub, group, e.InviteeNpub)
+			}
+			return nil, nil
+		}
+		if invite.state != InvitePending || group.State != StatePending {
+			return nil, ErrInvalidTransition
+		}
+	} else if group.State == StateCancelled {
 		if err := tx.Commit(); err != nil {
 			return nil, err
-		}
-		if declined && group.Creator == v.recipientNpub {
-			return cancellationEnvelopes(s.db, v.recipientNpub, group, e.InviteeNpub)
 		}
 		return nil, nil
 	}

@@ -134,7 +134,7 @@ func (s *Store) storeMessage(localNpub, groupID, logicalID, senderNpub, body str
 	}
 
 	var oldSender, oldBody, oldEventID string
-	err = tx.QueryRow(`SELECT sender_npub, body, event_id FROM groupchat_messages
+	err = tx.QueryRow(`SELECT sender_npub, body, COALESCE(event_id, '') FROM groupchat_messages
 		WHERE local_npub = ? AND group_id = ? AND logical_id = ?`, localNpub, groupID, logicalID).
 		Scan(&oldSender, &oldBody, &oldEventID)
 	if err == nil {

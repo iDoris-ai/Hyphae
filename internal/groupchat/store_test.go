@@ -317,6 +317,76 @@ func TestExplicitDeclineCancelsInsteadOfShrinkingRoster(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidTransition)
 }
 
+func TestCancelGroupRejectedAfterPartialActivation(t *testing.T) {
+	g := newThreeMemberGroup(t)
+	// Both Bob and Carol accept the invite.
+	bobInvite := g.invites[g.bob.npub]
+	bobAccept, err := g.bob.store.AcceptInvite(bobInvite.InviteID, g.bob.npub)
+	require.NoError(t, err)
+	_, err = g.alice.store.ReceiveAcceptance(buildIncoming(t, g.bob, g.alice, bobAccept))
+	require.NoError(t, err)
+
+	carolInvite := g.invites[g.carol.npub]
+	carolAccept, err := g.carol.store.AcceptInvite(carolInvite.InviteID, g.carol.npub)
+	require.NoError(t, err)
+	actBatch, err := g.alice.store.ReceiveAcceptance(buildIncoming(t, g.carol, g.alice, carolAccept))
+	require.NoError(t, err)
+	require.Len(t, actBatch, 2, "all accepted moves group to activating and yields activations")
+
+	// Alice queues activation for Bob only. Bob becomes InviteActive in Alice's store.
+	var bobActivation Envelope
+	for _, act := range actBatch {
+		if act.InviteeNpub == g.bob.npub {
+			bobActivation = act
+			break
+		}
+	}
+	require.NotEmpty(t, bobActivation.InviteID)
+	bobEvent := testAgentEvent(t, mustEncode(t, bobActivation), g.alice.sk, g.bob.sk, true)
+	err = g.alice.store.MarkActivationQueued(g.alice.npub, g.draft.Group.ID, bobActivation.InviteID, bobEvent.ID.Hex(), true)
+	require.NoError(t, err)
+
+	// Bob is active, Carol is still accepted. Group is in partial activation.
+	// Cancellation must be rejected.
+	_, err = g.alice.store.CancelGroup(g.alice.npub, g.draft.Group.ID)
+	require.ErrorIs(t, err, ErrInvalidTransition)
+
+	// Group remains in Activating state.
+	creatorGroup, err := g.alice.store.GetGroup(g.alice.npub, g.draft.Group.ID)
+	require.NoError(t, err)
+	require.Equal(t, StateActivating, creatorGroup.State)
+}
+
+func TestReceiveDeclineRequiresPendingState(t *testing.T) {
+	g := newThreeMemberGroup(t)
+
+	// Bob accepts the invite.
+	bobInvite := g.invites[g.bob.npub]
+	bobAccept, err := g.bob.store.AcceptInvite(bobInvite.InviteID, g.bob.npub)
+	require.NoError(t, err)
+	_, err = g.alice.store.ReceiveAcceptance(buildIncoming(t, g.bob, g.alice, bobAccept))
+	require.NoError(t, err)
+
+	// Bob attempts to decline after already accepted.
+	bogusDecline := Envelope{
+		Type:        EnvelopeDecline,
+		Version:     Version,
+		GroupID:     g.draft.Group.ID,
+		CreatorNpub: g.alice.npub,
+		InviteID:    bobInvite.InviteID,
+		RosterHash:  g.draft.Group.RosterHash,
+		InviteeNpub: g.bob.npub,
+	}
+	_, err = g.alice.store.ReceiveDecline(buildIncoming(t, g.bob, g.alice, bogusDecline))
+	require.ErrorIs(t, err, ErrInvalidTransition)
+
+	// Alice's group must remain StatePending, not cancelled.
+	group, err := g.alice.store.GetGroup(g.alice.npub, g.draft.Group.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatePending, group.State)
+}
+
+
 func mustEncode(t *testing.T, e Envelope) string {
 	t.Helper()
 	value, err := Encode(e)
