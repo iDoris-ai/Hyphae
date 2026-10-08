@@ -56,8 +56,8 @@ type QueuedAgentMessageResult struct {
 	QueueStateUnknown bool
 }
 
-// SendQueuedAgentMessage writes plaintext history, persists the signed event
-// to the outbox, then uses the shared QueueID-guarded send path. The caller is
+// SendQueuedAgentMessage persists the signed event to the outbox, writes
+// plaintext history, then uses the shared QueueID-guarded send path. The caller is
 // responsible for constructing and signing the event. plaintext is stored
 // locally; it is never used as the published content here.
 func SendQueuedAgentMessage(

@@ -362,17 +362,19 @@ func sendQueuedAgentMessage(
 		From: sender, To: recipient, Encrypted: isEncrypted, EventID: event.ID.Hex(),
 		Relays: make([]agentMsgRelayResult, 0, len(relays)), RelayCount: len(relays),
 	}
-	if err := store(event, recipientNpub, plaintext, isEncrypted); err != nil {
-		return result, fmt.Errorf("store local message history: %w", err)
-	}
-	result.HistoryStored = true
-
+	// Queue first so interruption during the history write leaves the original
+	// signed event available for recovery. Publishing follows both commits.
 	entry, err := enqueue(nil, event, recipientNpub, relays)
 	if err != nil {
 		var uncertain *outboxCommitUncertainError
 		result.QueueStateUnknown = errors.As(err, &uncertain)
 		return result, fmt.Errorf("enqueue message before publishing: %w", err)
 	}
+	if err := store(event, recipientNpub, plaintext, isEncrypted); err != nil {
+		result.QueuedForRetry, result.Superseded, result.QueueStateUnknown = inspectAttemptQueue(entry)
+		return result, fmt.Errorf("store local message history (signed event retained for recovery): %w", err)
+	}
+	result.HistoryStored = true
 
 	relayResults := make([]agentMsgRelayResult, 0, len(relays))
 	var publishedTo int
@@ -388,7 +390,7 @@ func sendQueuedAgentMessage(
 	result.QueuedForRetry = sendResult.Queued
 	result.Superseded = sendResult.Superseded
 	result.QueueStateUnknown = sendResult.QueueStateUnknown
-	// History was stored before enqueue and therefore remains present even if
+	// History was stored before publish and therefore remains present even if
 	// the post-ACK upsert reports an error.
 	result.HistoryStored = true
 

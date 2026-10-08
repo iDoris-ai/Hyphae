@@ -228,6 +228,7 @@ func TestAgentMsgCmd_HistoryOrOutboxFailureNeverPublishes(t *testing.T) {
 		breakState func(*testing.T, string)
 		history    bool
 		unknown    bool
+		queued     bool
 	}{
 		{
 			name: "history write failure",
@@ -236,6 +237,7 @@ func TestAgentMsgCmd_HistoryOrOutboxFailureNeverPublishes(t *testing.T) {
 				require.NoError(t, os.Mkdir(path, 0700))
 			},
 			history: false,
+			queued:  true,
 		},
 		{
 			name: "invalid outbox JSON",
@@ -243,7 +245,7 @@ func TestAgentMsgCmd_HistoryOrOutboxFailureNeverPublishes(t *testing.T) {
 				path := filepath.Join(home, ".hyphae", "outbox.json")
 				require.NoError(t, os.WriteFile(path, []byte("{"), 0600))
 			},
-			history: true,
+			history: false,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -272,6 +274,17 @@ func TestAgentMsgCmd_HistoryOrOutboxFailureNeverPublishes(t *testing.T) {
 			assert.Equal(t, tc.history, response.Data.HistoryStored)
 			assert.Zero(t, response.Data.PublishedTo)
 			assert.Equal(t, tc.unknown, response.Data.QueueStateUnknown)
+			if tc.queued {
+				ob, err := LoadOutbox()
+				require.NoError(t, err)
+				require.Len(t, ob.Entries, 1, "history failure must retain recoverable signed evidence")
+				require.Equal(t, response.Data.EventID, ob.Entries[0].ID)
+				require.DirExists(t, filepath.Join(home, ".hyphae", "messages.db"), "the blocked database remains untouched")
+			} else {
+				stored, err := mustGetStoredMessage(t, response.Data.EventID)
+				require.NoError(t, err)
+				assert.Nil(t, stored, "failed enqueue must not leave phantom outgoing history")
+			}
 			select {
 			case event := <-received:
 				t.Fatalf("relay received event %s despite local write failure", event.ID.Hex())
@@ -413,7 +426,7 @@ func TestSendQueuedAgentMessage_UncertainEnqueueNeverPublishes(t *testing.T) {
 			return nil, 0
 		})
 	require.Error(t, err)
-	assert.True(t, result.HistoryStored)
+	assert.False(t, result.HistoryStored, "uncertain enqueue must not create outgoing history")
 	assert.True(t, result.QueueStateUnknown)
 	assert.False(t, result.QueuedForRetry)
 	assert.False(t, publisherCalled, "an uncertain enqueue must never begin network publishing")

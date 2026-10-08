@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"fiatjaf.com/nostr"
@@ -127,6 +128,15 @@ func (m *ChatModel) retryPendingOutbox(ctx context.Context) {
 		if !m.belongsToCurrentIdentity(entry, sender) || !outboxRetryDue(entry, time.Now()) {
 			continue
 		}
+		// Queue and history live in different stores. If the process died after
+		// enqueue, reconstruct history from the original signed event before
+		// publishing; no new signature or encryption nonce is generated.
+		if err := m.restoreOutboxHistory(entry); err != nil {
+			if entry.RecipientNpub == m.contactNpub {
+				m.publishOutboxUpdate(ctx, outboxDeliveryUpdate{eventID: entry.ID, state: messaging.AgentMessageQueued, issue: messaging.AgentMessageIssueHistoryNotStored})
+			}
+			continue
+		}
 		result, sendErr := messaging.AttemptSend(ctx, outbox, entry, m.relays, relayDialTimeout)
 		if !result.Attempted && result.Superseded {
 			continue
@@ -139,6 +149,52 @@ func (m *ChatModel) retryPendingOutbox(ctx context.Context) {
 			})
 		}
 	}
+}
+
+func (m *ChatModel) restoreOutboxHistory(entry types.OutboxEntry) error {
+	var event nostr.Event
+	if err := json.Unmarshal([]byte(entry.EventJSON), &event); err != nil {
+		return err
+	}
+	if !event.CheckID() || !event.VerifySignature() {
+		return fmt.Errorf("invalid queued event signature")
+	}
+	if err := messaging.ValidateAgentMessageEvent(&event); err != nil {
+		return err
+	}
+	stored, err := m.store.GetMessage(entry.ID)
+	if err != nil {
+		return err
+	}
+	if stored != nil && (!stored.IsEncrypted || stored.Plaintext != "") {
+		return nil
+	}
+	ks, err := identity.LoadKeyStore()
+	if err != nil {
+		return err
+	}
+	secret, err := identity.GetSecretKey(ks, m.myIdentity.Nickname)
+	if err != nil {
+		return err
+	}
+	recipient, err := common.ParsePublicKey(entry.RecipientNpub)
+	if err != nil {
+		return err
+	}
+	for _, tag := range event.Tags {
+		if len(tag) >= 2 && tag[0] == "p" && tag[1] != recipient.Hex() {
+			return fmt.Errorf("queued event recipient does not match queue metadata")
+		}
+	}
+	// NIP-44's conversation key is symmetric. Decode with the sender key and
+	// recipient public key; keep the actual event untouched for retry/storage.
+	decodeEvent := event
+	decodeEvent.PubKey = recipient
+	plaintext, encrypted, err := messaging.DecodeMessageContent(&decodeEvent, secret)
+	if err != nil {
+		return err
+	}
+	return m.store.StoreOutgoingMessage(&event, entry.RecipientNpub, plaintext, encrypted)
 }
 
 func (m *ChatModel) belongsToCurrentIdentity(entry types.OutboxEntry, sender nostr.PubKey) bool {
@@ -262,6 +318,9 @@ func formatOutboxStatus(update outboxDeliveryUpdate) string {
 	}
 	switch update.state {
 	case messaging.AgentMessageQueued:
+		if update.issue == messaging.AgentMessageIssueHistoryNotStored {
+			return "Outbox: queued for retry" + id + " (not delivered; awaiting relay ACK) • local history recovery pending"
+		}
 		if update.issue != messaging.AgentMessageIssueNone {
 			return "Outbox: queued for retry" + id + " (not delivered; awaiting relay ACK) • relay unavailable"
 		}

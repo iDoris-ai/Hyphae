@@ -18,7 +18,7 @@ import (
 var outboxCLI string
 
 func TestMain(m *testing.M) {
-	if os.Getenv("HYPHAE_OUTBOX_HELPER_ID") != "" {
+	if os.Getenv("HYPHAE_OUTBOX_HELPER_ID") != "" || os.Getenv("HYPHAE_CRASH_STAGE") != "" {
 		os.Exit(m.Run())
 	}
 	_, source, _, _ := runtime.Caller(0)
