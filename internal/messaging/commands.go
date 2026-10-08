@@ -182,30 +182,36 @@ var HistoryCmd = &cli.Command{
 					return err
 				}
 
-				if len(messages) == 0 {
-					fmt.Println("No messages found")
-					return nil
+				if messages == nil {
+					messages = []types.StoredMessage{}
 				}
 
-				for _, msg := range messages {
-					content := msg.Plaintext
-					if content == "" {
-						content = msg.Content
+				common.Emit(common.JSONMode(c), messages, func() {
+					if len(messages) == 0 {
+						fmt.Println("No messages found")
+						return
 					}
 
-					direction := "→"
-					if msg.IsIncoming {
-						direction = "←"
+					for _, msg := range messages {
+						content := msg.Plaintext
+						if content == "" {
+							content = msg.Content
+						}
+
+						direction := "→"
+						if msg.IsIncoming {
+							direction = "←"
+						}
+
+						fmt.Printf("[%s] %s %d: %s\n",
+							msg.SenderNpub[:20],
+							direction,
+							msg.CreatedAt,
+							common.TruncateString(content, 50))
 					}
 
-					fmt.Printf("[%s] %s %d: %s\n",
-						msg.SenderNpub[:20],
-						direction,
-						msg.CreatedAt,
-						common.TruncateString(content, 50))
-				}
-
-				fmt.Printf("\nFound %d results\n", len(messages))
+					fmt.Printf("\nFound %d results\n", len(messages))
+				})
 				return nil
 			},
 		},
