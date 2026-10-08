@@ -352,9 +352,11 @@ func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.input.Value() == m.sendingContent {
 					m.input.SetValue("")
 				}
-				cmds = append(cmds, m.loadMessages())
 			}
 			m.sendingContent = ""
+		}
+		if msg.update.eventID != "" && msg.update.state != messaging.AgentMessageFailed {
+			cmds = append(cmds, m.loadMessages())
 		}
 		cmds = append(cmds, m.waitOutboxUpdate())
 

@@ -1,11 +1,13 @@
 package messaging
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +17,8 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
+	"github.com/iDoris-ai/hyphae/internal/identity"
+	"github.com/iDoris-ai/hyphae/pkg/crypto"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -650,6 +654,108 @@ func TestAttemptSend_NewEncryptedHistoryLeavesPlaintextEmpty(t *testing.T) {
 	assert.True(t, stored.IsEncrypted)
 	assert.Empty(t, stored.Plaintext)
 	assert.Equal(t, event.Content, stored.Content)
+}
+
+func TestAttemptSend_EncryptedHistoryRecoversWithUnlockedKeyStore(t *testing.T) {
+	resetStore(t)
+	t.Cleanup(ResetStoreForTest)
+	ks, event, plaintext := realEncryptedHistoryFixture(t)
+	entry, ob := queueHistoryEvent(t, event)
+
+	result, err := attemptSendWithKeyStore(context.Background(), ob, entry, nil, time.Second,
+		func(context.Context, []string, nostr.Event, time.Duration) bool { return true }, StoreOutgoingMessage, ks)
+	require.NoError(t, err)
+	assert.True(t, result.HistoryStored)
+	assert.False(t, result.Queued)
+	latest, err := LoadOutbox()
+	require.NoError(t, err)
+	assert.Empty(t, latest.Entries)
+	stored, err := mustGetStoredMessage(t, entry.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.True(t, stored.IsEncrypted)
+	assert.Equal(t, plaintext, stored.Plaintext)
+	t.Logf("unlocked keystore: sent=%t historyStored=%t queued=%t plaintext=%q", result.Sent, result.HistoryStored, result.Queued, stored.Plaintext)
+}
+
+func TestAttemptSend_EncryptedHistoryLockedKeyStoreFallsBackAndClearsQueue(t *testing.T) {
+	resetStore(t)
+	t.Cleanup(ResetStoreForTest)
+	_, event, _ := realEncryptedHistoryFixture(t)
+	locked, err := identity.LoadKeyStore()
+	require.NoError(t, err)
+	require.Nil(t, locked.MasterKey)
+	entry, ob := queueHistoryEvent(t, event)
+
+	var logs bytes.Buffer
+	oldOutput := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(oldOutput) })
+	result, err := attemptSendWithKeyStore(context.Background(), ob, entry, nil, time.Second,
+		func(context.Context, []string, nostr.Event, time.Duration) bool { return true }, StoreOutgoingMessage, locked)
+	require.NoError(t, err)
+	assert.True(t, result.Sent)
+	assert.True(t, result.HistoryStored)
+	assert.False(t, result.Queued)
+	assert.Contains(t, logs.String(), "storing encrypted history with empty plaintext")
+
+	latest, err := LoadOutbox()
+	require.NoError(t, err)
+	assert.Empty(t, latest.Entries, "locked key recovery falls back to established encrypted-history behavior")
+	stored, err := mustGetStoredMessage(t, entry.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.True(t, stored.IsEncrypted)
+	assert.Empty(t, stored.Plaintext)
+	t.Logf("locked keystore: sent=%t historyStored=%t queued=%t outboxEntries=%d plaintext=%q warning=%q", result.Sent, result.HistoryStored, result.Queued, len(latest.Entries), stored.Plaintext, logs.String())
+}
+
+func TestAttemptSend_EncryptedHistoryFailureUsesRetryLimit(t *testing.T) {
+	resetStore(t)
+	t.Cleanup(ResetStoreForTest)
+	ks, event, _ := realEncryptedHistoryFixture(t)
+	entry, _ := queueHistoryEvent(t, event)
+	entry.MaxRetries = 3
+	require.NoError(t, SaveOutbox(&types.Outbox{Entries: []types.OutboxEntry{entry}}))
+
+	for attempt := 0; attempt < 3; attempt++ {
+		latest, err := LoadOutbox()
+		require.NoError(t, err)
+		require.Len(t, latest.Entries, 1)
+		result, err := attemptSendWithKeyStore(context.Background(), latest, latest.Entries[0], nil, time.Second,
+			func(context.Context, []string, nostr.Event, time.Duration) bool { return true },
+			func(*nostr.Event, string, string, bool) error { return errors.New("history unavailable") }, ks)
+		require.Error(t, err)
+		assert.True(t, result.Sent)
+		assert.Equal(t, attempt < 2, result.Queued)
+	}
+	latest, err := LoadOutbox()
+	require.NoError(t, err)
+	require.Len(t, latest.Entries, 1)
+	assert.Equal(t, 3, latest.Entries[0].RetryCount)
+	assert.NotZero(t, latest.Entries[0].LastAttempt)
+	assert.Equal(t, "failed", latest.Entries[0].Status)
+	assert.Empty(t, GetPendingOutbox(latest))
+}
+
+func realEncryptedHistoryFixture(t *testing.T) (*types.KeyStore, nostr.Event, string) {
+	t.Helper()
+	ks := &types.KeyStore{Identities: make(map[string]*types.Identity), Contacts: make(map[string]*types.Contact)}
+	_, err := identity.CreateIdentityWithPassword(ks, "alice", "fixture-password")
+	require.NoError(t, err)
+	sender, err := identity.GetSecretKey(ks, "alice")
+	require.NoError(t, err)
+	recipient := nostr.Generate()
+	plaintext := "real NIP-44 recovered plaintext"
+	ciphertext, err := crypto.EncryptMessage(plaintext, sender, recipient.Public())
+	require.NoError(t, err)
+	compressed := mustCompressText(t, ciphertext)
+	event := nostr.Event{
+		CreatedAt: nostr.Now(), Kind: AgentKind, PubKey: sender.Public(), Content: compressed,
+		Tags: nostr.Tags{{"p", recipient.Public().Hex()}, {"c", AgentTag}, {"v", AgentVersion}, {"z", CompressTag}, {"enc", "nip44"}},
+	}
+	require.NoError(t, event.Sign(sender))
+	return ks, event, plaintext
 }
 
 func TestAttemptSend_UnencryptedHistoryUsesDecodedOrRawContent(t *testing.T) {
