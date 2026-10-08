@@ -113,6 +113,45 @@ func (s *Store) storeMessage(localNpub, groupID, logicalID, senderNpub, body str
 		return false, err
 	}
 	defer tx.Rollback()
+	inserted, err := s.storeMessageTx(tx, localNpub, groupID, logicalID, senderNpub, body, createdAt, eventID, outgoing)
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return inserted, nil
+}
+
+// storeLocalMessageTx stores sender-side history in the caller's transaction.
+// The caller is responsible for committing or rolling back the transaction.
+func (s *Store) storeLocalMessageTx(tx queryExecer, localNpub, groupID, logicalID, body string, createdAt int64) (types.GroupMessage, error) {
+	localNpub, err := canonicalNpub(localNpub)
+	if err != nil {
+		return types.GroupMessage{}, err
+	}
+	if createdAt <= 0 {
+		createdAt = time.Now().Unix()
+	}
+	if _, err := s.storeMessageTx(tx, localNpub, groupID, logicalID, localNpub, body, createdAt, "", true); err != nil {
+		return types.GroupMessage{}, err
+	}
+	return types.GroupMessage{ID: logicalID, GroupID: groupID, Sender: localNpub,
+		Plaintext: body, CreatedAt: createdAt, IsEncrypted: true}, nil
+}
+
+// storeMessageTx validates and stores a logical message without committing the
+// caller's transaction. It also leaves rollback to the caller on errors.
+func (s *Store) storeMessageTx(tx queryExecer, localNpub, groupID, logicalID, senderNpub, body string, createdAt int64, eventID string, outgoing bool) (bool, error) {
+	if !validOpaqueID(logicalID) {
+		return false, errors.New("invalid logical message ID")
+	}
+	if err := validateBody(body); err != nil {
+		return false, err
+	}
+	if createdAt <= 0 {
+		createdAt = time.Now().Unix()
+	}
 	group, err := loadGroup(tx, localNpub, groupID)
 	if err != nil {
 		return false, err
@@ -147,9 +186,6 @@ func (s *Store) storeMessage(localNpub, groupID, logicalID, senderNpub, body str
 				return false, err
 			}
 		}
-		if err := tx.Commit(); err != nil {
-			return false, err
-		}
 		return false, nil
 	}
 	if err != sql.ErrNoRows {
@@ -163,9 +199,6 @@ func (s *Store) storeMessage(localNpub, groupID, logicalID, senderNpub, body str
 	}
 	if _, err := tx.Exec(`UPDATE groupchat_groups SET updated_at = ? WHERE local_npub = ? AND group_id = ?`,
 		time.Now().Unix(), localNpub, groupID); err != nil {
-		return false, err
-	}
-	if err := tx.Commit(); err != nil {
 		return false, err
 	}
 	return true, nil
