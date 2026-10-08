@@ -19,6 +19,7 @@ import (
 )
 
 func setupTestEnv(t *testing.T) func() {
+	messaging.ResetStoreForTest()
 	tempDir := t.TempDir()
 	os.Setenv("HOME", tempDir)
 
@@ -37,6 +38,7 @@ func setupTestEnv(t *testing.T) func() {
 	require.NoError(t, err)
 
 	return func() {
+		messaging.ResetStoreForTest()
 		storage.CloseDB()
 		os.RemoveAll(tempDir)
 		os.Unsetenv("HOME")

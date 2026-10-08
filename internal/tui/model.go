@@ -5,23 +5,19 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
-	"fiatjaf.com/nostr"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/internal/messaging"
 	"github.com/iDoris-ai/hyphae/internal/relayconfig"
 	"github.com/iDoris-ai/hyphae/internal/storage"
-	"github.com/iDoris-ai/hyphae/pkg/crypto"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 )
 
@@ -77,7 +73,7 @@ func safeTruncate(s string, n int) string {
 // ChatModel represents the TUI chat interface.
 //
 // SECURITY NOTE: ChatModel intentionally does NOT hold the user's secret key
-// as a field. The secret key is loaded on-demand inside sendMessage and only
+// as a field. The secret key is loaded on-demand inside the outbox worker and only
 // lives in a local variable / goroutine stack. This limits exposure via core
 // dumps, debuggers, or accidental fmt.Printf("%+v", m) logging.
 type ChatModel struct {
@@ -103,6 +99,17 @@ type ChatModel struct {
 	inboxClosed           bool
 	inboxStatus           string
 	inboxReceived         int
+	outboxCtx             context.Context
+	outboxCancel          context.CancelFunc
+	outboxRequests        chan outboxSendRequest
+	outboxUpdates         chan outboxDeliveryUpdate
+	outboxDone            chan struct{}
+	outboxStarted         bool
+	outboxSending         bool
+	outboxStatus          string
+	activeSendID          uint64
+	nextSendID            uint64
+	sendingContent        string
 	messageLoadGeneration uint64
 }
 
@@ -152,21 +159,28 @@ func NewChatModel(contactName string, relays ...string) (*ChatModel, error) {
 	}
 
 	inboxCtx, inboxCancel := context.WithCancel(context.Background())
+	outboxCtx, outboxCancel := context.WithCancel(context.Background())
 	return &ChatModel{
-		viewport:     vp,
-		input:        ti,
-		contactName:  contactName,
-		contactNpub:  contact.Npub,
-		myIdentity:   myIdentity,
-		store:        store,
-		db:           db,
-		relays:       relays,
-		loading:      true,
-		inboxCtx:     inboxCtx,
-		inboxCancel:  inboxCancel,
-		inboxUpdates: make(chan messaging.AgentInboxWatchUpdate, 256),
-		inboxDone:    make(chan struct{}),
-		inboxStatus:  "Connecting to relay…",
+		viewport:       vp,
+		input:          ti,
+		contactName:    contactName,
+		contactNpub:    contact.Npub,
+		myIdentity:     myIdentity,
+		store:          store,
+		db:             db,
+		relays:         relays,
+		loading:        true,
+		inboxCtx:       inboxCtx,
+		inboxCancel:    inboxCancel,
+		inboxUpdates:   make(chan messaging.AgentInboxWatchUpdate, 256),
+		inboxDone:      make(chan struct{}),
+		inboxStatus:    "Connecting to relay…",
+		outboxCtx:      outboxCtx,
+		outboxCancel:   outboxCancel,
+		outboxRequests: make(chan outboxSendRequest, 16),
+		outboxUpdates:  make(chan outboxDeliveryUpdate, 64),
+		outboxDone:     make(chan struct{}),
+		outboxStatus:   "Outbox: no pending messages in this conversation",
 	}, nil
 }
 
@@ -183,6 +197,16 @@ func (m *ChatModel) Close() error {
 			return errors.New("timed out stopping inbox watcher; database left open")
 		}
 	}
+	m.inboxMu.Lock()
+	outboxStarted := m.outboxStarted
+	m.inboxMu.Unlock()
+	if outboxStarted {
+		select {
+		case <-m.outboxDone:
+		case <-time.After(5 * time.Second):
+			return errors.New("timed out stopping TUI outbox worker; database left open")
+		}
+	}
 	if m.db != nil {
 		return m.db.Close()
 	}
@@ -195,6 +219,7 @@ func (m *ChatModel) Init() tea.Cmd {
 		textinput.Blink,
 		m.loadMessages(),
 		m.startInboxWatcher(),
+		m.startOutboxWorker(),
 	)
 }
 
@@ -254,6 +279,9 @@ func (m *ChatModel) stopInboxWatcher() {
 	if m.inboxCancel != nil {
 		m.inboxCancel()
 	}
+	if m.outboxCancel != nil {
+		m.outboxCancel()
+	}
 	m.inboxMu.Unlock()
 }
 
@@ -276,10 +304,20 @@ func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case tea.KeyEnter:
 			content := m.input.Value()
-			if content != "" {
-				m.input.SetValue("")
-				m.loading = true
-				cmds = append(cmds, m.sendMessage(content))
+			if content != "" && !m.outboxSending {
+				m.inboxMu.Lock()
+				closed := m.inboxClosed
+				m.inboxMu.Unlock()
+				if closed {
+					m.outboxStatus = "Outbox: closed; message was not submitted"
+					break
+				}
+				m.nextSendID++
+				m.activeSendID = m.nextSendID
+				m.sendingContent = content
+				m.outboxSending = true
+				m.outboxStatus = "Outbox: sending; durable queue not yet confirmed"
+				cmds = append(cmds, m.sendMessage(m.activeSendID, content))
 			}
 
 		case tea.KeyPgUp:
@@ -304,13 +342,21 @@ func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.updateViewportContent()
 
-	case messageSentMsg:
-		m.loading = false
-		if msg.err != nil {
-			m.err = msg.err
-		} else {
-			cmds = append(cmds, m.loadMessages())
+	case outboxWorkerStartedMsg:
+		cmds = append(cmds, m.waitOutboxUpdate())
+	case outboxDeliveryUpdateMsg:
+		m.outboxStatus = formatOutboxStatus(msg.update)
+		if msg.update.requestID != 0 && msg.update.requestID == m.activeSendID {
+			m.outboxSending = false
+			if msg.update.state != messaging.AgentMessageFailed {
+				if m.input.Value() == m.sendingContent {
+					m.input.SetValue("")
+				}
+				cmds = append(cmds, m.loadMessages())
+			}
+			m.sendingContent = ""
 		}
+		cmds = append(cmds, m.waitOutboxUpdate())
 
 	case errorMsg:
 		m.err = msg.err
@@ -363,6 +409,8 @@ func (m *ChatModel) View() string {
 	b.WriteString(m.viewport.View())
 	b.WriteString("\n")
 	b.WriteString(helpStyle.Render("Inbox: " + m.inboxStatus))
+	b.WriteString("\n")
+	b.WriteString(helpStyle.Render(m.outboxStatus))
 	b.WriteString("\n")
 
 	b.WriteString(inputStyle.Render(m.input.View()))
@@ -433,10 +481,6 @@ type messagesMsg struct {
 	generation uint64
 }
 
-type messageSentMsg struct {
-	err error
-}
-
 type errorMsg struct {
 	err error
 }
@@ -454,104 +498,17 @@ func (m *ChatModel) loadMessages() tea.Cmd {
 	}
 }
 
-// sendMessage encrypts, publishes, and locally stores an outgoing message.
-//
-// Returns a non-nil error only if *both* all relay publishes fail *and* local
-// storage fails. A single successful relay (or successful local store, even
-// with all relays failing) is considered a partial success so the user does
-// not lose the message — but the error is surfaced so the UI can warn.
-func (m *ChatModel) sendMessage(content string) tea.Cmd {
+func (m *ChatModel) sendMessage(requestID uint64, content string) tea.Cmd {
 	return func() tea.Msg {
-		recipientPK, err := common.ParsePublicKey(m.contactNpub)
-		if err != nil {
-			return messageSentMsg{err: fmt.Errorf("invalid recipient key: %w", err)}
-		}
-
-		// Load the secret key on demand. It lives only in this goroutine's
-		// stack and is not retained on ChatModel.
-		ks, err := identity.LoadKeyStore()
-		if err != nil {
-			return messageSentMsg{err: fmt.Errorf("load keystore: %w", err)}
-		}
-		senderSK, err := identity.GetSecretKey(ks, m.myIdentity.Nickname)
-		if err != nil {
-			return messageSentMsg{err: fmt.Errorf("get sender key: %w", err)}
-		}
-
-		encrypted, err := crypto.EncryptMessage(content, senderSK, recipientPK)
-		if err != nil {
-			return messageSentMsg{err: fmt.Errorf("encrypt: %w", err)}
-		}
-
-		compressed, err := messaging.CompressText(encrypted)
-		if err != nil {
-			return messageSentMsg{err: fmt.Errorf("compress: %w", err)}
-		}
-		createdAt := nostr.Now()
-		dTag, err := messaging.NewAgentMessageDTag(compressed, createdAt)
-		if err != nil {
-			return messageSentMsg{err: fmt.Errorf("generate message d tag: %w", err)}
-		}
-
-		tags := nostr.Tags{
-			{"p", common.PubKeyToHex(recipientPK)},
-			{"c", messaging.AgentTag},
-			{"z", messaging.CompressTag},
-			{"v", messaging.AgentVersion},
-			{"d", dTag},
-			{"enc", "nip44"},
-		}
-
-		event := &nostr.Event{
-			CreatedAt: createdAt,
-			Kind:      messaging.AgentKind,
-			Tags:      tags,
-			Content:   compressed,
-			PubKey:    senderSK.Public(),
-		}
-		if err := messaging.ValidateAgentMessageEvent(event); err != nil {
-			return messageSentMsg{err: fmt.Errorf("validate message tags: %w", err)}
-		}
-		event.Sign(senderSK)
-
-		// Publish to each relay with its own timeout so a slow relay does
-		// not starve the rest. Collect errors so we can report accurately.
-		var relayErrs []error
-		published := 0
-		for _, relayURL := range m.relays {
-			relayCtx, cancel := context.WithTimeout(context.Background(), relayDialTimeout)
-			relay, err := nostr.RelayConnect(relayCtx, relayURL, nostr.RelayOptions{})
-			if err != nil {
-				cancel()
-				relayErrs = append(relayErrs, fmt.Errorf("connect %s: %w", relayURL, err))
-				continue
-			}
-			if err := relay.Publish(relayCtx, *event); err != nil {
-				relayErrs = append(relayErrs, fmt.Errorf("publish %s: %w", relayURL, err))
-			} else {
-				published++
-			}
-			relay.Close()
-			cancel()
-		}
-
-		storeErr := messaging.StoreOutgoingMessage(event, m.contactNpub, content, true)
-
-		switch {
-		case published == 0 && storeErr != nil:
-			// Total failure — nothing the user can recover from inside the TUI.
-			relayErrs = append(relayErrs, fmt.Errorf("local store: %w", storeErr))
-			return messageSentMsg{err: fmt.Errorf("send failed: %w", errors.Join(relayErrs...))}
-		case published == 0:
-			// Stored locally but not on any relay; warn the user so they
-			// know the contact has not received it yet.
-			return messageSentMsg{err: fmt.Errorf("no relay accepted the message (saved locally): %w", errors.Join(relayErrs...))}
-		case storeErr != nil:
-			// Published but local store failed — uncommon. Log and continue.
-			log.Printf("tui: published to %d relay(s) but local store failed: %v", published, storeErr)
-			return messageSentMsg{err: nil}
-		default:
-			return messageSentMsg{err: nil}
+		request := outboxSendRequest{requestID: requestID, content: content}
+		select {
+		case m.outboxRequests <- request:
+			return nil
+		case <-m.outboxCtx.Done():
+			return outboxDeliveryUpdateMsg{update: outboxDeliveryUpdate{
+				requestID: requestID, state: messaging.AgentMessageFailed,
+				issue: messaging.AgentMessageIssueSendFailed,
+			}}
 		}
 	}
 }
