@@ -227,6 +227,10 @@ func storeIncomingWatchEvent(
 		emit(AgentInboxWatchUpdate{RelayURL: relayURL, Err: fmt.Errorf("decode incoming event %s: %w", event.ID.Hex(), err)})
 		return
 	}
+	if err := RejectReservedGroupPayload(content); err != nil {
+		emit(AgentInboxWatchUpdate{RelayURL: relayURL, Err: fmt.Errorf("reject incoming event %s: %w", event.ID.Hex(), err)})
+		return
+	}
 	first, err := store.StoreIncomingMessageOnce(event, recipient.Npub, content, encrypted)
 	if err != nil {
 		emit(AgentInboxWatchUpdate{RelayURL: relayURL, Err: fmt.Errorf("store incoming event %s: %w", event.ID.Hex(), err)})

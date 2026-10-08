@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -161,6 +162,84 @@ func TestAgentInboxEventFailurePreservesUsableEntries(t *testing.T) {
 	require.Len(t, response.Data, 1)
 	assert.Equal(t, good.ID.Hex(), response.Data[0].EventID)
 	assert.Equal(t, "usable", response.Data[0].Content)
+}
+
+func TestAgentInboxDecryptFailsClosedForReservedGroupPayloads(t *testing.T) {
+	for i, body := range []string{"hyphae.group/v1\n{}", "hyphae.group/v99\n{}", "hyphae.group/not-a-version"} {
+		t.Run(fmt.Sprintf("reserved-%d", i), func(t *testing.T) {
+			_, recipientPK := setupAgentInbox(t)
+			event := makeInboxEvent(t, recipientPK, nostr.Generate(), nostr.Now(), body, nil)
+			relay := startInboxRelay(t, inboxRelayPlan{events: []nostr.Event{event}})
+			var runErr error
+			stdout := captureStdout(t, func() {
+				runErr = runAgentInboxCLI(context.Background(), []string{"--json", "--relay", relay})
+			})
+			require.Error(t, runErr)
+			assert.Empty(t, stdout, "reserved envelope must never be printed as a DM")
+			stderr := captureInboxError(t, runErr)
+			assert.Contains(t, stderr, ErrReservedGroupRequiresHandler.Error())
+			assert.NotContains(t, stderr, body)
+			stored, err := mustGetStoredMessage(t, event.ID.Hex())
+			require.NoError(t, err)
+			assert.Nil(t, stored, "reserved payload must not enter DM history")
+		})
+	}
+
+	_, recipientPK := setupAgentInbox(t)
+	group := makeInboxEvent(t, recipientPK, nostr.Generate(), nostr.Now(), "hyphae.group/v1\n{secret envelope}", nil)
+	direct := makeInboxEvent(t, recipientPK, nostr.Generate(), nostr.Now()+1, "ordinary DM", nil)
+	relay := startInboxRelay(t, inboxRelayPlan{events: []nostr.Event{group, direct}})
+	var runErr error
+	stdout := captureStdout(t, func() {
+		runErr = runAgentInboxCLI(context.Background(), []string{"--json", "--relay", relay})
+	})
+	require.Error(t, runErr, "the unsupported group envelope is reported, but usable direct messages remain in partial data")
+	assert.Empty(t, stdout)
+	stderr := captureInboxError(t, runErr)
+	assert.Contains(t, stderr, ErrReservedGroupRequiresHandler.Error())
+	assert.NotContains(t, stderr, "{secret envelope}")
+	assert.Contains(t, stderr, "ordinary DM")
+	groupStored, err := mustGetStoredMessage(t, group.ID.Hex())
+	require.NoError(t, err)
+	assert.Nil(t, groupStored)
+	stored, err := mustGetStoredMessage(t, direct.ID.Hex())
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, "ordinary DM", stored.Plaintext)
+}
+
+func TestStoreIncomingWatchEventFailsClosedForReservedGroupPayloads(t *testing.T) {
+	recipient, recipientPK := setupAgentInbox(t)
+	ResetStoreForTest()
+	t.Cleanup(ResetStoreForTest)
+	store, err := GetStore()
+	require.NoError(t, err)
+	keyStore, err := identity.LoadKeyStore()
+	require.NoError(t, err)
+	recipientSK, err := identity.GetSecretKey(keyStore, recipient.Nickname)
+	require.NoError(t, err)
+	for i, body := range []string{"hyphae.group/v1\n{}", "hyphae.group/v99\n{}", "hyphae.group/not-a-version"} {
+		t.Run(fmt.Sprintf("reserved-%d", i), func(t *testing.T) {
+			event := makeInboxEvent(t, recipientPK, nostr.Generate(), nostr.Now(), body, nil)
+			var updates []AgentInboxWatchUpdate
+			storeIncomingWatchEvent(&event, recipient, recipientSK, recipientPK.Hex(), store, "ws://127.0.0.1:1", func(update AgentInboxWatchUpdate) { updates = append(updates, update) })
+			require.Len(t, updates, 1)
+			assert.ErrorIs(t, updates[0].Err, ErrReservedGroupRequiresHandler)
+			assert.NotContains(t, updates[0].Err.Error(), body)
+			assert.Nil(t, updates[0].Message)
+			stored, err := mustGetStoredMessage(t, event.ID.Hex())
+			require.NoError(t, err)
+			assert.Nil(t, stored, "reserved payload must not enter DM history")
+		})
+	}
+
+	direct := makeInboxEvent(t, recipientPK, nostr.Generate(), nostr.Now(), "ordinary DM", nil)
+	var updates []AgentInboxWatchUpdate
+	storeIncomingWatchEvent(&direct, recipient, recipientSK, recipientPK.Hex(), store, "ws://127.0.0.1:1", func(update AgentInboxWatchUpdate) { updates = append(updates, update) })
+	require.Len(t, updates, 1)
+	assert.NoError(t, updates[0].Err)
+	require.NotNil(t, updates[0].Message)
+	assert.Equal(t, "ordinary DM", updates[0].Message.Content)
 }
 
 func TestAgentInboxDecodeAndStoreFailuresKeepUsableDataAndNoPlaceholderRows(t *testing.T) {

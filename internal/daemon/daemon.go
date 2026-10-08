@@ -650,6 +650,9 @@ func processIncomingEvent(
 	if err != nil {
 		return false, fmt.Errorf("decode message: %w", err)
 	}
+	if err := messaging.RejectReservedGroupPayload(content); err != nil {
+		return false, err
+	}
 	first, err := hooks.store(event, myIdentity.Npub, content, isEncrypted)
 	if err != nil {
 		return false, fmt.Errorf("store incoming message: %w", err)
