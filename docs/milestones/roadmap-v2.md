@@ -3,7 +3,7 @@
 > 版本目标：从基础消息工具升级为去中心化 Agent 协作网络
 > 权威架构决策见 [`../protocol-v2.md`](../protocol-v2.md)（L1/L2/L3 协议栈、fork khatru、AAstar Point、漂流瓶、字段级隐私 —— 2026-05-13 锁定）
 > 本文件是**详细任务清单**，按 `protocol-v2.md` §9 的 M1/M1.5/M2/M2.5/M3/M4/M5 七段式展开，每个里程碑给出：目标、架构改动、子任务、交付物
-> 最后更新：2026-07-24（对照 [`../buzz-comparison-analysis.md`](../buzz-comparison-analysis.md) 调研结论做了一轮修订，见文末「本次修订说明」）
+> 最后更新：2026-10-07（纠正 M1 完成状态；本次开发与验收出口见 [`../agent/m1-release-plan-20261007.md`](../agent/m1-release-plan-20261007.md)。保留 2026-07-24 的历史调研与测试记录。）
 
 ---
 
@@ -23,7 +23,7 @@ Hyphae 不是一个人对人的加密聊天工具，而是**去中心化的 Agen
 
 | # | 名称 | 目标 | 状态 |
 |---|---|---|---|
-| M1 | TUI 聊天 + 群聊 | 打造去中心化版即时通讯基础体验 | ✅ 已完成 |
+| M1 | TUI 聊天 + 群聊 | 打造去中心化版即时通讯基础体验 | 🔄 当前 P0：群应用与 TUI 离线闭环待验收 |
 | M1.5 | Relay 自部署 + 花名册 | 脱离对单一公共 relay 的依赖，建立发现机制 | 🔄 代码任务已完成（10/10），relay-khatru 仓库待建 |
 | M2 | L3 行为协议标准化 | 把"消息"升级为可扩展的 Agent 行为语言 | ⏳ 未开始 |
 | M2.5 | 跨 relay 接力 + 漂流瓶 + 支付 | 去中心化广度（多 relay 互联）+ 低成本触达 + 激励层 | ⏳ 未开始 |
@@ -33,9 +33,9 @@ Hyphae 不是一个人对人的加密聊天工具，而是**去中心化的 Agen
 
 ---
 
-## M1 · TUI 聊天 + 群聊 ✅ 已完成
+## M1 · TUI 聊天 + 群聊 🔄 当前 P0：闭环收尾
 
-**交付**：PR [#3](https://github.com/iDoris-ai/hyphae/pull/3)（SQLite 存储）、[#4](https://github.com/iDoris-ai/hyphae/pull/4)（TUI 聊天界面，`internal/tui/`）、[#5](https://github.com/iDoris-ai/hyphae/pull/5)（Agent Profile v0.25.0 + daemon 自动回复 + 群聊，`internal/profile/`/`internal/daemon/`/`internal/group/`）、[#9](https://github.com/iDoris-ai/hyphae/pull/9)（Apache 2.0 合规）均已合并。当前 `main` 已具备：身份/联系人管理、点对点加密消息（NIP-44）、SQLite 历史存储、群聊、Agent Profile 发布/发现、daemon 后台重试与自动回复、Bubble Tea TUI。
+**基础交付**：PR [#3](https://github.com/iDoris-ai/hyphae/pull/3)（SQLite 存储）、[#4](https://github.com/iDoris-ai/hyphae/pull/4)（TUI）、[#5](https://github.com/iDoris-ai/hyphae/pull/5)（Profile、daemon 与群元数据）、[#9](https://github.com/iDoris-ai/hyphae/pull/9)（Apache 2.0 合规）均已合并，#135 实时 TUI 接收也已合入。群元数据并非完整加密群聊；群协议 #136、状态/收发/界面接线与三人验收，以及 TUI 离线发送/恢复重试仍需完成。旧版“已完成”结论撤回，当前发布出口见 [M1 收尾计划](../agent/m1-release-plan-20261007.md)。
 
 ### M1 测试状态（2026-07-24 复核）
 
@@ -61,7 +61,7 @@ Hyphae 不是一个人对人的加密聊天工具，而是**去中心化的 Agen
 2. `history conversation --with <name>` 要求 `<name>` 必须在 contact 列表里，而 `agent msg --to <name>` 的解析更宽松——两个命令对"名字"的处理规则不一致，容易让人以为是 bug。
 3. `daemon` 的 outbox 重试机制里发现历史遗留的失效队列条目（重试全部失败），怀疑是跨环境/跨 relay 测试遗留的脏数据，值得在 M1.5 顺手加一个 `hyphae storage` 的 outbox 清理/诊断命令。
 
-**结论**：自动化测试真实可信但覆盖有盲区（daemon/nostr 两个核心包基本零覆盖），真实网络链路验证通过。**已经不需要"再充分自测"才能进入 M1.5**——但 daemon/nostr 补测试值得作为 M1.5 的前置小任务（低成本，见下）。人工测试指南见仓库根目录 [`QUICK_MANUAL_TEST.md`](../../QUICK_MANUAL_TEST.md)（双人/三人协作测试 + Profile/TUI 部分），建议你实际拉一个朋友测一遍 Part 1-3，尤其是 TUI 的交互体验，这部分自动化测不出来。
+**历史结论边界**：上述 2026-07-24 检查证明基础 CLI/存储链路，不证明完整群 TUI 或 TUI 离线发送闭环，也不是当前 M1 完成证据。daemon/nostr 补测试曾作为 M1.5 前置推进；当前验收按 [M1 收尾计划](../agent/m1-release-plan-20261007.md) 执行。历史人工指南保留在 [`QUICK_MANUAL_TEST.md`](../../QUICK_MANUAL_TEST.md)。
 
 ---
 
