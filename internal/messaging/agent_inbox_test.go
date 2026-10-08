@@ -164,48 +164,196 @@ func TestAgentInboxEventFailurePreservesUsableEntries(t *testing.T) {
 	assert.Equal(t, "usable", response.Data[0].Content)
 }
 
-func TestAgentInboxDecryptFailsClosedForReservedGroupPayloads(t *testing.T) {
-	for i, body := range []string{"hyphae.group/v1\n{}", "hyphae.group/v99\n{}", "hyphae.group/not-a-version"} {
-		t.Run(fmt.Sprintf("reserved-%d", i), func(t *testing.T) {
-			_, recipientPK := setupAgentInbox(t)
-			event := makeInboxEvent(t, recipientPK, nostr.Generate(), nostr.Now(), body, nil)
-			relay := startInboxRelay(t, inboxRelayPlan{events: []nostr.Event{event}})
-			var runErr error
-			stdout := captureStdout(t, func() {
-				runErr = runAgentInboxCLI(context.Background(), []string{"--json", "--relay", relay})
-			})
-			require.Error(t, runErr)
-			assert.Empty(t, stdout, "reserved envelope must never be printed as a DM")
-			stderr := captureInboxError(t, runErr)
-			assert.Contains(t, stderr, ErrReservedGroupRequiresHandler.Error())
-			assert.NotContains(t, stderr, body)
-			stored, err := mustGetStoredMessage(t, event.ID.Hex())
-			require.NoError(t, err)
-			assert.Nil(t, stored, "reserved payload must not enter DM history")
-		})
+func TestAgentInboxR3ReservedGroupEnvelopesFilteredAndCounted(t *testing.T) {
+	cases := []struct {
+		name      string
+		body      string
+		encrypted bool
+	}{
+		{name: "valid encrypted group envelope", body: "hyphae.group/v1\n{\"type\":\"message\",\"id\":\"m1\"}", encrypted: true},
+		{name: "unknown version encrypted envelope", body: "hyphae.group/v99\n{\"type\":\"message\"}", encrypted: true},
+		{name: "damaged prefix encrypted envelope", body: "hyphae.group/broken-prefix", encrypted: true},
+		{name: "valid plaintext group envelope", body: "hyphae.group/v1\n{\"type\":\"invite\"}", encrypted: false},
+		{name: "damaged plaintext group envelope", body: "hyphae.group/not-a-version", encrypted: false},
 	}
 
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, recipientPK := setupAgentInbox(t)
+			sender := nostr.Generate()
+			var event nostr.Event
+			if tc.encrypted {
+				ciphertext, err := crypto.EncryptMessage(tc.body, sender, recipientPK)
+				require.NoError(t, err)
+				event = makeInboxEvent(t, recipientPK, sender, nostr.Now(), ciphertext, nostr.Tags{{"enc", "nip44"}})
+			} else {
+				event = makeInboxEvent(t, recipientPK, sender, nostr.Now(), tc.body, nil)
+			}
+
+			relay := startInboxRelay(t, inboxRelayPlan{events: []nostr.Event{event}})
+
+			// JSON mode: entries list must be empty, must succeed
+			stdout := captureStdout(t, func() {
+				err := runAgentInboxCLI(context.Background(), []string{"--json", "--relay", relay})
+				require.NoError(t, err)
+			})
+			var response struct {
+				OK   bool              `json:"ok"`
+				Data []agentInboxEntry `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(stdout), &response))
+			assert.True(t, response.OK)
+			assert.Empty(t, response.Data, "reserved group envelope must never enter DM entries list")
+
+			// Human mode: summary must count 1 group message and never print the body
+			t.Setenv("HYPHAE_OUTPUT", "")
+			humanOut := captureStdout(t, func() {
+				err := runAgentInboxCLI(context.Background(), []string{"--relay", relay})
+				require.NoError(t, err)
+			})
+			t.Setenv("HYPHAE_OUTPUT", "json")
+			assert.Contains(t, humanOut, "1 group messages (use `hyphae groupchat`)")
+			assert.NotContains(t, humanOut, tc.body, "reserved group payload body must never be displayed")
+
+			// Persistence check: never stored in DM history
+			stored, err := mustGetStoredMessage(t, event.ID.Hex())
+			require.NoError(t, err)
+			assert.Nil(t, stored, "reserved group envelope must never enter DM database")
+		})
+	}
+}
+
+func TestAgentInboxR3MixedDirectAndReservedEnvelopes(t *testing.T) {
 	_, recipientPK := setupAgentInbox(t)
-	group := makeInboxEvent(t, recipientPK, nostr.Generate(), nostr.Now(), "hyphae.group/v1\n{secret envelope}", nil)
-	direct := makeInboxEvent(t, recipientPK, nostr.Generate(), nostr.Now()+1, "ordinary DM", nil)
-	relay := startInboxRelay(t, inboxRelayPlan{events: []nostr.Event{group, direct}})
+	sender := nostr.Generate()
+	now := nostr.Now()
+
+	// 1 direct DM + 2 reserved group envelopes (one valid v1, one unknown v99)
+	directText := "normal direct message"
+	directCipher, err := crypto.EncryptMessage(directText, sender, recipientPK)
+	require.NoError(t, err)
+	directEvt := makeInboxEvent(t, recipientPK, sender, now+2, directCipher, nostr.Tags{{"enc", "nip44"}})
+
+	group1Body := "hyphae.group/v1\n{\"type\":\"message\",\"content\":\"secret1\"}"
+	group1Cipher, err := crypto.EncryptMessage(group1Body, sender, recipientPK)
+	require.NoError(t, err)
+	group1Evt := makeInboxEvent(t, recipientPK, sender, now+1, group1Cipher, nostr.Tags{{"enc", "nip44"}})
+
+	group2Body := "hyphae.group/v99\n{\"secret\":\"unknown\"}"
+	group2Cipher, err := crypto.EncryptMessage(group2Body, sender, recipientPK)
+	require.NoError(t, err)
+	group2Evt := makeInboxEvent(t, recipientPK, sender, now, group2Cipher, nostr.Tags{{"enc", "nip44"}})
+
+	relay := startInboxRelay(t, inboxRelayPlan{events: []nostr.Event{group2Evt, group1Evt, directEvt}})
+
+	// JSON mode: only direct message is returned
+	stdout := captureStdout(t, func() {
+		require.NoError(t, runAgentInboxCLI(context.Background(), []string{"--json", "--relay", relay}))
+	})
+	var response struct {
+		OK   bool              `json:"ok"`
+		Data []agentInboxEntry `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &response))
+	assert.True(t, response.OK)
+	require.Len(t, response.Data, 1, "only ordinary DM should appear in entries")
+	assert.Equal(t, directText, response.Data[0].Content)
+
+	// Human mode: displays direct message and summary count 2 group messages
+	t.Setenv("HYPHAE_OUTPUT", "")
+	humanOut := captureStdout(t, func() {
+		require.NoError(t, runAgentInboxCLI(context.Background(), []string{"--relay", relay}))
+	})
+	t.Setenv("HYPHAE_OUTPUT", "json")
+	assert.Contains(t, humanOut, directText)
+	assert.Contains(t, humanOut, "2 group messages (use `hyphae groupchat`)")
+	assert.NotContains(t, humanOut, "secret1")
+	assert.NotContains(t, humanOut, "unknown")
+
+	// DM DB check: only direct message stored, neither group message stored
+	directStored, err := mustGetStoredMessage(t, directEvt.ID.Hex())
+	require.NoError(t, err)
+	require.NotNil(t, directStored)
+	assert.Equal(t, directText, directStored.Plaintext)
+
+	group1Stored, err := mustGetStoredMessage(t, group1Evt.ID.Hex())
+	require.NoError(t, err)
+	assert.Nil(t, group1Stored, "group1 envelope must not enter DM store")
+
+	group2Stored, err := mustGetStoredMessage(t, group2Evt.ID.Hex())
+	require.NoError(t, err)
+	assert.Nil(t, group2Stored, "group2 envelope must not enter DM store")
+}
+
+func TestAgentInboxR3DecryptFalseDoesNotClassifyOrPersistGroupEnvelopes(t *testing.T) {
+	home, _, recipientPK := setupAgentInboxLocked(t)
+	sender := nostr.Generate()
+	groupBody := "hyphae.group/v1\n{\"type\":\"message\"}"
+	groupCipher, err := crypto.EncryptMessage(groupBody, sender, recipientPK)
+	require.NoError(t, err)
+	groupEvt := makeInboxEvent(t, recipientPK, sender, nostr.Now(), groupCipher, nostr.Tags{{"enc", "nip44"}})
+
+	directText := "hello direct"
+	directCipher, err := crypto.EncryptMessage(directText, sender, recipientPK)
+	require.NoError(t, err)
+	directEvt := makeInboxEvent(t, recipientPK, sender, nostr.Now()+1, directCipher, nostr.Tags{{"enc", "nip44"}})
+
+	relay := startInboxRelay(t, inboxRelayPlan{events: []nostr.Event{groupEvt, directEvt}})
+
+	// Under --decrypt=false, both encrypted messages appear as [encrypted message]
+	stdout := captureStdout(t, func() {
+		require.NoError(t, runAgentInboxCLI(context.Background(), []string{"--json", "--decrypt=false", "--relay", relay}))
+	})
+	var response struct {
+		OK   bool              `json:"ok"`
+		Data []agentInboxEntry `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &response))
+	assert.True(t, response.OK)
+	require.Len(t, response.Data, 2)
+	assert.Equal(t, "[encrypted message]", response.Data[0].Content)
+	assert.Equal(t, "[encrypted message]", response.Data[1].Content)
+
+	// Under --decrypt=false, human mode does not attempt classification
+	t.Setenv("HYPHAE_OUTPUT", "")
+	humanOut := captureStdout(t, func() {
+		require.NoError(t, runAgentInboxCLI(context.Background(), []string{"--decrypt=false", "--relay", relay}))
+	})
+	t.Setenv("HYPHAE_OUTPUT", "json")
+	assert.NotContains(t, humanOut, "group messages (use `hyphae groupchat`)")
+	assert.Contains(t, humanOut, "[encrypted message]")
+
+	// Neither message should be persisted to DM history
+	storedGroup, err := mustGetStoredMessage(t, groupEvt.ID.Hex())
+	require.NoError(t, err)
+	assert.Nil(t, storedGroup)
+
+	storedDirect, err := mustGetStoredMessage(t, directEvt.ID.Hex())
+	require.NoError(t, err)
+	assert.Nil(t, storedDirect)
+	assert.DirExists(t, filepath.Join(home, ".hyphae"))
+}
+
+func TestAgentInboxR3DamagedEncryptedEnvelopeFailsClosedWithoutPayloadLeak(t *testing.T) {
+	_, recipientPK := setupAgentInbox(t)
+	sender := nostr.Generate()
+	secretLeak := "super-secret-payload"
+	// bad ciphertext tagged nip44 but containing raw secret
+	event := makeInboxEvent(t, recipientPK, sender, nostr.Now(), secretLeak, nostr.Tags{{"enc", "nip44"}})
+	relay := startInboxRelay(t, inboxRelayPlan{events: []nostr.Event{event}})
+
 	var runErr error
 	stdout := captureStdout(t, func() {
 		runErr = runAgentInboxCLI(context.Background(), []string{"--json", "--relay", relay})
 	})
-	require.Error(t, runErr, "the unsupported group envelope is reported, but usable direct messages remain in partial data")
+	require.Error(t, runErr)
 	assert.Empty(t, stdout)
 	stderr := captureInboxError(t, runErr)
-	assert.Contains(t, stderr, ErrReservedGroupRequiresHandler.Error())
-	assert.NotContains(t, stderr, "{secret envelope}")
-	assert.Contains(t, stderr, "ordinary DM")
-	groupStored, err := mustGetStoredMessage(t, group.ID.Hex())
+	assert.Contains(t, stderr, event.ID.Hex())
+	assert.NotContains(t, stderr, secretLeak, "error output must never include payload/body")
+	stored, err := mustGetStoredMessage(t, event.ID.Hex())
 	require.NoError(t, err)
-	assert.Nil(t, groupStored)
-	stored, err := mustGetStoredMessage(t, direct.ID.Hex())
-	require.NoError(t, err)
-	require.NotNil(t, stored)
-	assert.Equal(t, "ordinary DM", stored.Plaintext)
+	assert.Nil(t, stored, "damaged message must never enter DM database")
 }
 
 func TestStoreIncomingWatchEventFailsClosedForReservedGroupPayloads(t *testing.T) {
@@ -485,7 +633,7 @@ func runAgentInboxCLI(ctx context.Context, args []string) error {
 			&cli.BoolFlag{Name: "json"},
 		},
 	}
-	return cmd.Run(ctx, args)
+	return cmd.Run(ctx, append([]string{"inbox"}, args...))
 }
 
 func makeInboxEvent(t *testing.T, recipient nostr.PubKey, sender nostr.SecretKey, created nostr.Timestamp, content string, extra nostr.Tags) nostr.Event {
