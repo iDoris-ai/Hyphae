@@ -191,6 +191,7 @@ func (s *Store) migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_groupchat_invites_state ON groupchat_invites(local_npub, state)`,
 		`CREATE INDEX IF NOT EXISTS idx_groupchat_messages_order ON groupchat_messages(local_npub, group_id, created_at, logical_id)`,
+		fanoutSchema,
 	}
 	for _, statement := range statements {
 		if _, err := s.db.Exec(statement); err != nil {

@@ -60,6 +60,7 @@ echo "GROUP CHAT UNIT TESTS"
 echo "========================================="
 
 run_test "internal/group" "go test ./internal/group"
+run_test "internal/groupchat" "go test ./internal/groupchat"
 
 echo ""
 echo "========================================="
