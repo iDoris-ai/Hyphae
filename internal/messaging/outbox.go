@@ -386,7 +386,7 @@ func AttemptSend(ctx context.Context, ob *types.Outbox, entry types.OutboxEntry,
 // keystore use it when reconstructing encrypted history. A nil keystore keeps
 // daemon and CLI retry behavior independent of an in-memory caller state.
 func AttemptSendWithKeyStore(ctx context.Context, ob *types.Outbox, entry types.OutboxEntry, defaultRelays []string, dialTimeout time.Duration, ks *types.KeyStore) (SendResult, error) {
-	return attemptSendWithKeyStore(ctx, ob, entry, defaultRelays, dialTimeout, publishToRelays, StoreOutgoingMessage, ks)
+	return AttemptSendRouted(ctx, ob, entry, defaultRelays, dialTimeout, AttemptOptions{KeyStore: ks})
 }
 
 // AttemptSendRouted sends DM entries through the existing DM implementation
@@ -447,10 +447,6 @@ func attemptSendGroup(ctx context.Context, ob *types.Outbox, entry types.OutboxE
 	}
 	if err := handler.MarkRelayAccepted(current.entry, 1, len(targets)); err != nil {
 		result.Issue = AgentMessageIssueOutboxBookkeepingFailed
-		result, retryErr := recordGroupAttemptFailure(ob, current.entry, result, handler)
-		if retryErr != nil {
-			err = fmt.Errorf("%w (also failed to record retry: %v)", err, retryErr)
-		}
 		return result, fmt.Errorf("mark group relay accepted: %w", err)
 	}
 	result.Issue = AgentMessageIssueNone

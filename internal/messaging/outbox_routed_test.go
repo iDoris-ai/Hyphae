@@ -94,6 +94,22 @@ func TestAttemptSendRouted_MissingHandlerFailsClosed(t *testing.T) {
 	assert.Len(t, ob.Entries, 1)
 }
 
+func TestAttemptSendWithKeyStore_GroupRouteFailsClosed(t *testing.T) {
+	entry, ob := routedFixture(t, OutboxRouteGroup, OutboxStatusGroupPending, 0, 1)
+	entry.Relays = []string{"://invalid-relay"}
+	ob.Entries[0] = entry
+	require.NoError(t, SaveOutbox(ob))
+
+	result, err := AttemptSendWithKeyStore(context.Background(), ob, entry, nil, time.Millisecond, nil)
+	require.ErrorIs(t, err, ErrGroupRouteHandlerMissing)
+	assert.False(t, result.Attempted)
+	assert.False(t, result.Sent)
+	assert.Equal(t, AgentMessageIssueRouteHandlerMissing, result.Issue)
+	latest, loadErr := LoadOutbox()
+	require.NoError(t, loadErr)
+	require.Equal(t, []types.OutboxEntry{entry}, latest.Entries)
+}
+
 func TestAttemptSendRouted_UnsupportedRouteFailsClosed(t *testing.T) {
 	entry, ob := routedFixture(t, "unknown", OutboxStatusGroupPending, 0, 3)
 	published, stored := 0, 0
@@ -194,4 +210,32 @@ func TestAttemptSendRouted_HandlerErrorPreservesQueue(t *testing.T) {
 	assert.False(t, published)
 	assert.False(t, result.Attempted)
 	assert.Len(t, ob.Entries, 1)
+}
+
+func TestAttemptSendRouted_MarkRelayAcceptedErrorPreservesPendingEntry(t *testing.T) {
+	entry, ob := routedFixture(t, OutboxRouteGroup, OutboxStatusGroupPending, 0, 1)
+	want := errors.New("sqlite unavailable")
+	var failureCalls int
+	handler := &routedHandler{
+		before:   func(types.OutboxEntry) (bool, error) { return false, nil },
+		accepted: func(types.OutboxEntry, int, int) error { return want },
+		failure: func(types.OutboxEntry, bool, AgentMessageDeliveryIssue) error {
+			failureCalls++
+			return nil
+		},
+	}
+	result, err := attemptSendRouted(context.Background(), ob, entry, nil, time.Second,
+		AttemptOptions{Handlers: OutboxHandlers{Group: handler}},
+		func(context.Context, []string, nostr.Event, time.Duration) bool { return true },
+		func(*nostr.Event, string, string, bool) error { t.Fatal("group must not write DM history"); return nil })
+	require.ErrorIs(t, err, want)
+	assert.ErrorContains(t, err, "mark group relay accepted")
+	assert.True(t, result.Attempted)
+	assert.True(t, result.Sent)
+	assert.Equal(t, AgentMessageIssueOutboxBookkeepingFailed, result.Issue)
+	assert.Zero(t, failureCalls, "accepted relay event must not spend retry budget")
+	assert.Equal(t, []types.OutboxEntry{entry}, ob.Entries)
+	latest, loadErr := LoadOutbox()
+	require.NoError(t, loadErr)
+	assert.Equal(t, []types.OutboxEntry{entry}, latest.Entries)
 }
