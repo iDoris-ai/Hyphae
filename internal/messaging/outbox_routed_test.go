@@ -94,6 +94,19 @@ func TestAttemptSendRouted_MissingHandlerFailsClosed(t *testing.T) {
 	assert.Len(t, ob.Entries, 1)
 }
 
+func TestAttemptSendRouted_UnsupportedRouteFailsClosed(t *testing.T) {
+	entry, ob := routedFixture(t, "unknown", OutboxStatusGroupPending, 0, 3)
+	published, stored := 0, 0
+	result, err := attemptSendRouted(context.Background(), ob, entry, nil, time.Second, AttemptOptions{},
+		func(context.Context, []string, nostr.Event, time.Duration) bool { published++; return true },
+		func(*nostr.Event, string, string, bool) error { stored++; return nil })
+	require.ErrorContains(t, err, `unsupported outbox route "unknown"`)
+	assert.False(t, result.Attempted)
+	assert.Zero(t, published)
+	assert.Zero(t, stored)
+	assert.Len(t, ob.Entries, 1)
+}
+
 func TestAttemptSendRouted_FailureBookkeepingAndCancellation(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -125,7 +138,10 @@ func TestAttemptSendRouted_FailureBookkeepingAndCancellation(t *testing.T) {
 			}
 			result, err := attemptSendRouted(ctx, ob, entry, nil, time.Second,
 				AttemptOptions{Handlers: OutboxHandlers{Group: handler}},
-				func(ctx context.Context, _ []string, _ nostr.Event, _ time.Duration) bool {
+				func(publishCtx context.Context, _ []string, _ nostr.Event, _ time.Duration) bool {
+					if tc.cancel {
+						assert.ErrorIs(t, publishCtx.Err(), context.Canceled)
+					}
 					return false
 				},
 				func(*nostr.Event, string, string, bool) error { t.Fatal("group must not write DM history"); return nil })
