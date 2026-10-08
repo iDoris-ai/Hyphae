@@ -1,23 +1,26 @@
 # M1 群消息 fanout 与 inbound 路由契约（P0-E/F 前置）
 
-状态：2026-10-08 设计契约，**不含实现**。P0-E（发送 fanout / durable send-intent / 重试）与 P0-F（inbound 路由 / 界面通知）的实现者按本文照做；偏离本文任何一条决定，须先改本文并经评审。
+状态：2026-10-08 设计契约，**不含实现**。P0-E（发送 fanout / durable send-intent / 重试）与 P0-F（inbound 路由 / 界面通知）的实现者按本文照做；偏离本文任何一条决定，须先改本文并经评审。本文写作时的设计基线与当前实现基线分别注明，不能混用。
 
-修订 rev2（2026-10-08）：按 [P0-E 实现拆分方案](m1-group-fanout-impl-plan-20261008.md) 第 6 节登记的 D1–D13 修订本文。各条以 `**D#**` 标记写在原章节内（决定、理由、为什么不是另一个方案、约束的切片）；切片编号（S1–S10b、E2E-A/B）以实现拆分方案第 2 节为准。实现 PR 一律以本修订版为唯一依据。
+修订 rev3（2026-10-08）：在 rev2 基础上按 [P0-E 实现拆分方案](m1-group-fanout-impl-plan-20261008.md) 第 6 节登记 D14，并按已合入 main 的 #151 闭合 D13。各条以 `**D#**` 标记写在原章节内；切片编号（S1–S10b、E2E-A/B）以实现拆分方案第 2 节为准。实现 PR 一律以本修订版为唯一依据。
 
-依据与基线（本文写作时的代码事实）：
+依据与基线：
+
+- 当前实现基线（检查后、2026-10-08）：`origin/main = 254b5412ef1d78aafa679cdbd1b1ac7724e0b2b0`（#157），包含 #145、#151、#153、#154、#155、#156、#157。新实现工作以此为起点。
+- 设计时基线（rev1/rev2 作出决定时）：`origin/main = 6c5e751`，当时 #145 尚未合入；该历史基线只解释 D1 等早期决定，不描述当前代码。
 
 - 发布计划：[M1 收尾计划](m1-release-plan-20261007.md)「加密群聊」一节。
 - 群协议：#136（已入 main）`internal/groupchat/protocol.go`、`verified.go`；设计基线 [M1 群聊最小设计](m1-group-chat-design-20261007.md)。
 - 状态层：#138 **已合入 main**（`6c5e751`）`internal/groupchat/store.go`、`messages.go`；写事务统一经 `beginImmediate()`。
-- 已验证入站边界：#145（**仍 open**，REVIEW_REQUIRED，基于 #138 合并前的旧栈）`internal/messaging/verified_agent.go` 的 `VerifyAgentMessage` / `AgentMessageRoute`，以及 `groupchat.FromVerifiedAgentMessage`。本文的 inbound 路由**以 #145 为前提**；#145 不合并则 P0-F 不开工。发送侧（P0-E）不依赖 #145。
+- 已验证入站边界：#145 **已合入 main**，`internal/messaging/verified_agent.go` 的 `VerifyAgentMessage` / `AgentMessageRoute`，以及 `groupchat.FromVerifiedAgentMessage`。设计时 #145 基于 #138 合并前旧栈，因此 D1 曾将 `Route()` 断言延后；当前实现基线已包含 #145。发送侧（P0-E）不依赖该 PR。
 - 收件守卫：**已合入 main**，形态为 `messaging.RejectReservedGroupPayload`（`internal/messaging/agent.go`），被 `inbox_watch.go`、`daemon.go` `processIncomingEvent`、`AgentInboxCmd` 三处调用，对 `hyphae.group/` 前缀做 fail-closed。它对应第 4 节 R1–R3 的「不回落 DM」半边，是本文的子集，不提供群路由；P0-F 集成时以本文第 4 节为准，guard 并入 R1–R3 的 reserved 分支。（handoff 中记录的未推送 commit `1cf7bb3` 已被该合入版本取代，不再作为基线。）
 - 现有发送/重试：`internal/messaging/outbox.go`（JSON 文件 outbox，`UpdateOutbox` 加锁 + fsync/rename）、`agent.go` 的 `sendQueuedAgentMessage`、`queued_agent.go` 的 `AgentMessageDeliveryState`、`internal/tui/offline_outbox.go`（#143）、`internal/daemon/daemon.go` 的重试循环。
-- 并行中的 #151（open，CHANGES_REQUESTED）：在同一函数族新增 `AttemptSendWithKeyStore`，并改 `tui/offline_outbox.go`、`agent.go sendQueuedAgentMessage`；与 3.4 的 `AttemptSendRouted` 签名相关，见 **D13**。
+- #151 **已合入 main**：新增 `AttemptSendWithKeyStore(..., ks *types.KeyStore)`，原 `AttemptSend(...)` 以 `nil` 调用它；传入已解锁 keystore 时，重建加密历史使用该 keystore。D13 据此冻结 3.4 选项结构的字段和语义。
 
 **D1**（约束 S4；延后断言归 P0-F）：
-- 决定：基线以 `origin/main = 6c5e751` 为准（上列）。第 1 节单元验收中「通过 `VerifyAgentMessage`、`Route()==AgentRouteReservedGroup`」改为「产出的 event 能通过 main 上已有的 `groupchat.VerifyIncoming` 解出逐字节相同的 envelope」；`Route()==AgentRouteReservedGroup` 断言延后，由 P0-F 在 #145 合入后补上（P0-F 开工前提本就是 #145 合入，见 G5）。
-- 理由：契约写作时 #138 未合、守卫未推送；现在二者已在 main，而 #145 不在 main。S4 若照旧验收，会被迫等待一个与发送侧无关的 PR。
-- 为什么不是另一个方案：「S4 等 #145 合入」会把发送侧关键路径绑到收件侧 PR 上，而 #145 还需按 #138 合并后的主干重做；「S4 自带一份 `VerifyAgentMessage`」会与 #145 产生两份解密边界，违反 I2。`groupchat.VerifyIncoming` 已在 main、覆盖 kind、event ID 与签名、`ValidateAgentMessageEvent`、恰一个且匹配的 `p`、NIP-44 解密并拒绝明文，再经 `groupchat.Decode` 即可比对 envelope，足以证明 event 可被收件侧接受；只缺「按前缀分类为 reserved」这一项，正是延后给 P0-F 的断言。
+- 决定（设计时）：基线以 `origin/main = 6c5e751` 为准（上列）。第 1 节单元验收中「通过 `VerifyAgentMessage`、`Route()==AgentRouteReservedGroup`」改为「产出的 event 能通过 main 上已有的 `groupchat.VerifyIncoming` 解出逐字节相同的 envelope」；`Route()==AgentRouteReservedGroup` 断言留给 P0-F 集成验收（当时 P0-F 开工前提是 #145 合入，见 G5）。
+- 理由（设计时）：契约写作时 #138 未合、守卫未推送；D1 据当时基线将 `Route()` 断言留给 P0-F。当前基线已包含 #145；保留该历史切分的原因是 S4 验收不应依赖入站路由集成。
+- 为什么不是另一个方案（设计时）：「S4 等 #145 合入」会把发送侧关键路径绑到收件侧 PR 上；当时 #145 还需按 #138 合并后的主干重做。「S4 自带一份 `VerifyAgentMessage`」会与 #145 产生两份解密边界，违反 I2。`groupchat.VerifyIncoming` 当时已在 main、覆盖 kind、event ID 与签名、`ValidateAgentMessageEvent`、恰一个且匹配的 `p`、NIP-44 解密并拒绝明文，再经 `groupchat.Decode` 即可比对 envelope，足以证明 event 可被收件侧接受；只缺「按前缀分类为 reserved」这一项，正是延后给 P0-F 的断言。
 
 不变量（全文共用）：
 
@@ -27,7 +30,7 @@
 - **I4** 已签名 event 一旦持久化即冻结：重试只重发同一 event（同 event ID / 同 `d` / 同密文 / 同签名），绝不重新加密或重新签名。
 - **I5** 状态单调：任何重放、重启、并发重试都不能让收件人投递状态或群状态倒退，也不能让同一逻辑消息显示两次。
 
-### rev2 修订索引（D1–D13）
+### rev3 修订索引（D1–D14）
 
 | ID | 位置 | 一句话决定 | 约束的切片 |
 | --- | --- | --- | --- |
@@ -43,7 +46,8 @@
 | D10 | §1 构造函数 | 只收拢**加密路径**；明文分支与 daemon auto-reply 维持现状 | S1 |
 | D11 | §3.4 | `SendResult` 追加 `Issue`；哨兵错误 `ErrGroupRouteHandlerMissing` | S5b |
 | D12 | §3.3 | 签名在 T1 事务内；同 `(group, logical_id)` 已有 fanout 行时返回既有行、不再签名 | S4 |
-| D13 | §3.4 签名 | 末参改为 `AttemptOptions{Handlers; KeyStore}`；**定稿阻塞在 #151**，闭合条件 = #151 合并或关闭 | S5b |
+| D13 | §3.4 签名 | `AttemptOptions{Handlers; KeyStore}` 冻结；KeyStore 语义对齐已合入 #151 的 `AttemptSendWithKeyStore` | S5b |
+| D14 | §2、§3.1、§3.4、§5 | 状态迁移保留历史证据；队列与 ACK 证据不可伪造或倒退；校验、时间、计数与 Issue 语义固定 | S3、S5b |
 
 ---
 
@@ -88,7 +92,7 @@
 
 - 单元：Alice→{Bob, Carol} fanout 后断言 2 个 event：`p` 各 1 个且分别为 Bob/Carol；event ID、`d`、`Content` 两两不同；`created_at` 相同；Bob、Carol 各自用私钥解出的明文逐字节相等且 `Decode` 后 `LogicalID` 相同；用 Bob 私钥解 Carol 的 event 失败。
 - 单元（**D1**，S4）：`BuildAgentMessageEvent` / `PrepareMessageFanout` 产出的每个 event 用对应收件人私钥经 `groupchat.VerifyIncoming` 解出的 envelope 与发送前 `groupchat.Encode` 的结果逐字节相同。
-- 单元（**D1**，P0-F，#145 合入后）：同一 event 通过 `messaging.VerifyAgentMessage`，`Route()` 为 `AgentRouteReservedGroup`。该断言不属于 S4 的合并条件。
+- 单元（**D1**，P0-F，#145 已合入）：同一 event 通过 `messaging.VerifyAgentMessage`，`Route()` 为 `AgentRouteReservedGroup`。该断言不属于 S4 的合并条件。
 - 单元（**D12**，S4）：同 `(group, logical_id)` 第二次进入 T1 时签名函数调用次数为 0，返回的 event ID 与第一次相同。
 - 单元：同一 `(group, logical_id)` 两次进入 T1 只得一行本机历史；同 logical ID 不同 body 返回 `ErrLogicalIDConflict`，并且不新增任何 fanout 行。
 - E2E（真实 relay 抓包）：relay 上两份 event 的 `Content` 都不含正文、群名或 roster 的明文。
@@ -120,7 +124,7 @@ type RecipientDelivery struct {
     State         RecipientDeliveryState               `json:"state"`
     Issue         messaging.AgentMessageDeliveryIssue  `json:"issue,omitempty"`
     RelayAcks     int                                  `json:"relay_acks"`  // D2：∈ {0,1}；1 = 最近一次尝试至少一个 relay 接受
-    RelayCount    int                                  `json:"relay_count"` // D2：最近一次尝试的目标 relay 数 = len(targets)
+    RelayCount    int                                  `json:"relay_count"` // D2：最近一次 publish attempt 的目标 relay 数 = len(targets)，不是 ACK 数
     Attempts      int                                  `json:"attempts"`
     MaxRetries    int                                  `json:"max_retries"`
     LastAttemptAt int64                                `json:"last_attempt_at"`
@@ -130,7 +134,7 @@ type RecipientDelivery struct {
 type FanoutReport struct {
     GroupID    string                              `json:"group_id"`
     LogicalID  string                              `json:"logical_id"`
-    CreatedAt  int64                               `json:"created_at"`
+    CreatedAt  int64                               `json:"created_at"` // D14：该逻辑消息全部收件人行的共同 created_at
     State      messaging.AgentMessageDeliveryState `json:"state"` // 派生，规则见下
     Accepted   int                                 `json:"accepted"`
     Queued     int                                 `json:"queued"`   // prepared 计入 queued
@@ -141,8 +145,8 @@ type FanoutReport struct {
 
 **D2**（约束 S3 的字段定义、S6 的 T3 写入、S9 的 CLI 文案）：
 - 决定：M1 中 `relay_acks ∈ {0,1}`，含义是「最近一次尝试至少一个 relay 接受」，**不是** OK relay 的个数；`relay_count = len(targets)`，即该次尝试配置的目标 relay 数；**删除 `Relays` 字段**（上面结构已删）。CLI / TUI 文案统一为 `relay accepted (≥1 of N)`，不显示 `k/N relays` 形式的比例。逐 relay 结果留给后续里程碑（届时需要改 `publishToRelays` 的返回值，并作为新字段追加）。
-- 理由：main 上 `publishToRelays` 返回 `bool`，且**第一个 relay 成功即返回**，后续 relay 根本没有被尝试；按原契约填「OK relay 数」只能伪造数据。改 `publishToRelays` 会改动所有 DM 发送路径并与 #151 正面冲突。
-- 为什么不是另一个方案：「在 P0-E 改 `publishToRelays` 为逐 relay 发布并返回结果」会改变 DM 发布的时延与行为（原本首个成功即停），超出 S5b「DM 分支零可观察变化」的边界；「保留 `Relays` 字段但留空」会让 `--json` 消费方误以为数据存在。`relay_accepted` 的判定（≥1 个 OK）不受影响，与第 5 节一致。
+- 理由（设计时）：main 上 `publishToRelays` 返回 `bool`，且**第一个 relay 成功即返回**，后续 relay 根本没有被尝试；按原契约填「OK relay 数」只能伪造数据。改 `publishToRelays` 会改动所有 DM 发送路径并与当时并行的 #151 正面冲突。
+- 为什么不是另一个方案（设计时）：「在 P0-E 改 `publishToRelays` 为逐 relay 发布并返回结果」会改变 DM 发布的时延与行为（原本首个成功即停），超出 S5b「DM 分支零可观察变化」的边界；当时也会与 #151 的发送函数改动交叠。「保留 `Relays` 字段但留空」会让 `--json` 消费方误以为数据存在。`relay_accepted` 的判定（≥1 个 OK）不受影响，与第 5 节一致。
 
 新增 issue 常量（加到 `queued_agent.go` 现有 `AgentMessageDeliveryIssue` 枚举旁）：`queue_missing`（SQLite 为 queued 但 outbox 条目不见且无 ACK 证据）、`queue_duplicate`（outbox 中同 event ID 多于一条）、`route_handler_missing`（重试方未装配群处理器，见第 3 节）。
 
@@ -224,11 +228,11 @@ CREATE TABLE IF NOT EXISTS groupchat_fanout (
     relay_acks      INTEGER NOT NULL DEFAULT 0,
     relay_count     INTEGER NOT NULL DEFAULT 0,
     attempts        INTEGER NOT NULL DEFAULT 0,
-    max_retries     INTEGER NOT NULL,
-    created_at      INTEGER NOT NULL,
-    updated_at      INTEGER NOT NULL,
-    last_attempt_at INTEGER NOT NULL DEFAULT 0,
-    accepted_at     INTEGER NOT NULL DEFAULT 0,
+    max_retries     INTEGER NOT NULL,             -- D14：intent 创建后冻结
+    created_at      INTEGER NOT NULL,             -- D14：同一 intent 的所有收件人相同
+    updated_at      INTEGER NOT NULL,             -- D14：迁移时不得倒退
+    last_attempt_at INTEGER NOT NULL DEFAULT 0,   -- D14：迁移时不得倒退
+    accepted_at     INTEGER NOT NULL DEFAULT 0,   -- D14：接受时 > 0，之后不得清除或倒退
     PRIMARY KEY (local_npub, group_id, envelope_type, send_key, recipient_npub),
     UNIQUE (local_npub, event_id)
 );
@@ -314,10 +318,10 @@ type GroupOutboxHandler interface {
 
 type OutboxHandlers struct{ Group GroupOutboxHandler }
 
-// D13：末参为选项结构；字段集合在 #151 落定后定稿（见下方 D13）。
+// D13：字段与语义按已合入 #151 的 keystore API 冻结（见下方 D13）。
 type AttemptOptions struct {
     Handlers OutboxHandlers
-    KeyStore *types.KeyStore // 对齐 #151 的 AttemptSendWithKeyStore；#151 关闭则删除此字段
+    KeyStore *types.KeyStore // 对齐 #151 的 AttemptSendWithKeyStore
 }
 
 func AttemptSendRouted(ctx context.Context, ob *types.Outbox, entry types.OutboxEntry,
@@ -355,11 +359,15 @@ func SetGroupOutboxProvider(p GroupOutboxProvider)
 - 理由：上一条要求返回 issue `route_handler_missing`，但 main 上 `SendResult` 没有 issue 字段；调用方需要用 `errors.Is` 区分「未装配」与发布失败，以决定写 `route_handler_missing` 而不是 `send_failed`。
 - 为什么不是另一个方案：「只返回错误、让调用方解析错误文本」脆弱且不可测试；「新建 `GroupSendResult` 类型」要让三个重试方按 route 处理两种返回类型，分叉 DM / 群的结果处理代码；追加字段对现有 DM 调用方是源码兼容的。
 
-**D13**（约束 S5b；**定稿阻塞在 #151**）：
-- 决定：`AttemptSendRouted` 的最后一个参数是选项结构 `AttemptOptions{Handlers OutboxHandlers; KeyStore *types.KeyStore}`，而不是裸的 `OutboxHandlers`。「末参为选项结构」这一形状本修订即定；结构内的字段集合（是否含 `KeyStore`、`AttemptSendWithKeyStore` 是否改为 `AttemptSendRouted(..., AttemptOptions{KeyStore: ks})` 的薄包装）随 #151 结论定稿。
-- 阻塞与闭合：**阻塞在 #151**；**闭合条件 = #151 合并或关闭**。负责人：S5b 实现者，在 S5b 开工前提交一个仅改本文的文档 PR 写死字段集合（#151 合并 → 保留 `KeyStore` 并对齐其语义；#151 关闭 → 删除 `KeyStore` 字段）。S5b 不得在该文档 PR 合入前开 PR。
-- 理由：#151 正在给同一函数族新增 `AttemptSendWithKeyStore(..., ks)`；若两者各加一个位置参数，会出现 `AttemptSendRouted` / `AttemptSendWithKeyStore` / 二者组合三个入口，签名互相打架。
-- 为什么不是另一个方案：「现在就按 #151 当前 head 定死 `KeyStore` 字段」—— #151 处于 CHANGES_REQUESTED，KeyStore 语义仍可能变；「保持 `handlers OutboxHandlers` 末参，等 #151 合入后再加参数」会在 S5b 合入后立刻需要一次破坏性签名改动，违反实现规划「后片不重写前片」的约束。
+**D13**（约束 S5b；已依据 #151 闭合）：
+- 决定：`AttemptSendRouted` 末参为 `AttemptOptions{Handlers OutboxHandlers; KeyStore *types.KeyStore}`。与 main 上 #151 一致，`AttemptSend` 是 `AttemptSendWithKeyStore(..., nil)` 的兼容包装；有已解锁 keystore 的调用方可传 `KeyStore`，用于加密历史恢复，否则 `nil` 保持 daemon / CLI 不依赖进程内 keystore 状态。`Handlers` 仅供 routed 群路径分派，不能改变 DM 路径行为。
+- 状态：**D13 已闭合**。#151 已合入，公开签名和 nil / 非 nil KeyStore 语义以上述 main API 为准；无需再等 #151。
+- 理由：将处理器与 keystore 放入一组选项，使群路由注入与 #151 已有的 keystore 能力共存，避免再增加一个位置参数。
+
+**D14**（约束 S3、S5b；权威规则见第 5 节）：
+- 决定：迁移按持久化历史证据校验，不只比较状态等级。QueueID、relay ACK、attempt 计数、时间戳、Issue 与固定字段须满足第 5 节 allowlist、类型、范围和不回退规则；SQL CAS 必须保护终态及 ACK 证据。
+- 决定：所有收件人的 `created_at` 必须相同；`LoadFanoutReport` 与 `transitionFanoutTx` 对 npub 使用相同 `canonicalNpub` 规范化。`relay_count` 表示最近一次 publish attempt 的目标数，`Issue` 只描述当前状态/尝试。
+- 理由：状态名本身不足以证明 outbox 入队或 relay 接受；迁移必须携带并保留产生这些事实的证据。
 
 #### 3.5 幂等恢复：`ReconcileFanout(localNpub string) (FanoutReconcileReport, error)`
 
@@ -487,8 +495,22 @@ relay ACK（NIP-01 `OK true`）只表示「某个 relay 接受存储了该 event
                                           └── groupchat retry（同 event，新 QueueID）──▶ queued
 ```
 
-- 状态等级：`prepared(0) < queued(1) = failed(1) < relay_accepted(2)`。SQLite 更新一律带 `WHERE` 条件，只允许升级；同级之间只允许 `queued→failed`（失败记账）和 `failed→queued`（显式 `groupchat retry`，或 **D4** 对账采纳已重排的条目）；`relay_accepted` 不可离开。
-- `relay_accepted` 判定：一次尝试中至少 1 个目标 relay 返回 OK（与现有 `deliveryState` 的 `PublishedTo > 0` 一致）。按 **D2**，`relay_acks ∈ {0,1}` 只记录「是否至少一个接受」，`relay_count` 记录目标数，二者**不构成**比例。
+- **D14 权威迁移规则。** 状态转换必须以持久化历史证据为依据，不能只比较 `from`/`to` 排名。以下表格定义完整 4×4 转换矩阵；“同态”是允许的幂等元数据更新，但仍受表后全局约束。
+
+| 当前状态 ↓ / 目标状态 → | `prepared` | `queued` | `relay_accepted` | `failed` |
+| --- | --- | --- | --- | --- |
+| `prepared` | 允许同态元数据更新；`queue_id` 必须仍为空 | 允许；必须有非空新/current `queue_id` | 拒绝；没有已持久化 QueueID 与排队历史 | 允许；`queue_id` 保持空，可记录当前失败尝试 |
+| `queued` | 拒绝；不得倒退 | 允许同态元数据更新；`queue_id` 必须不变 | 允许；仅 SQL CAS 同时验证非空已持久化 `queue_id`、`relay_acks=1`、`accepted_at>0` | 允许；保留 `queue_id`，记录当前失败尝试 |
+| `relay_accepted` | 拒绝 | 拒绝 | 只允许不改变状态及其接受/队列证据的幂等元数据更新 | 拒绝；终态 |
+| `failed` | 拒绝 | 允许；显式重排时须非空新 QueueID；对账采纳时须非空当前 QueueID | 允许延迟 ACK；仅当既有非空 QueueID 证据存在且本次提供 `relay_acks=1`、`accepted_at>0`，由 SQL CAS 验证 | 允许同态元数据更新；只可描述当前失败尝试，queue/接受证据不得倒退 |
+
+- `queue_id` 只可在目标为 `queued` 的迁移中引入。`prepared→queued` 与 `failed→queued` 必须有非空 QueueID；显式 `failed→queued` 使用新 QueueID。所有其他迁移都保持其原值。任何同态更新都不得伪造、替换或清空非空 QueueID；提交一个不匹配的 QueueID 也必须拒绝。
+- `relay_accepted` 必须有非空已持久化 QueueID、`relay_acks=1` 和 `accepted_at>0`。`relay_acks` 沿用 **D2** 的布尔语义：1 表示至少一个 relay 接受，不是 ACK 数。进入该状态的 SQL CAS 必须同时检查这些条件；因此 `prepared→relay_accepted` 必须拒绝。`failed→relay_accepted` 只允许满足表中既有队列证据和本次接受证据的延迟 ACK。
+- `relay_accepted` 为终态：过期失败/重试不能更改状态、QueueID、`relay_acks`、`relay_count`、`accepted_at` 或接受证据。
+- 在 SQLite 写入前按字段 allowlist 校验字段、严格类型和范围；拒绝无法解析的文本、溢出值、负计数/时间及未知字段，禁止把格式错误文本写入 INTEGER 列。`event_id`、`event_json`、recipient、intent 键、`created_at`、`max_retries` 不可变；同一 intent 的所有 recipient 行必须共享 `created_at`。`attempts`、`last_attempt_at`、`updated_at` 在任何迁移中不得回退，`max_retries` 创建后冻结。
+- `relay_count` 表示最近一次 publish attempt 的目标数（D2），只可随有效 attempt 更新，不代表实际 ACK 数；计数须在非负范围内且 `relay_acks ∈ {0,1}`。`Issue` 表示当前状态：进入 `queued`（包括重试）或 `relay_accepted` 时清空；只可为当前失败尝试设置/保留，不能让过期失败覆盖新状态。
+- `LoadFanoutReport` 与 `transitionFanoutTx` 对输入身份使用完全相同的 `canonicalNpub` 规范化。`FanoutReport.CreatedAt` 取该逻辑消息共同的 `created_at`；若存储行违反共同值不变量，报告加载必须返回错误，不得依赖排序后首行。
+- `relay_accepted` 判定：一次有效尝试中至少 1 个目标 relay 返回 OK（与现有 `deliveryState` 的 `PublishedTo > 0` 一致）。按 **D2**，`relay_acks ∈ {0,1}` 只记录「是否至少一个接受」，`relay_count` 记录目标数，二者**不构成**比例。
 - 不存在 `delivered` / `read` 状态：M1 协议没有回执 envelope，任何「已送达」的显示都没有证据。
 
 ### 为什么不是另一个方案
@@ -499,8 +521,9 @@ relay ACK（NIP-01 `OK true`）只表示「某个 relay 接受存储了该 event
 
 ### 验收
 
-- 单元：状态迁移表穷举测试：对 4×4 的（当前状态, 目标状态）组合，仅允许上面列出的迁移，其余返回错误且行不变。
-- 单元：relay_accepted 之后再收到失败记账（另一进程的过期尝试）→ 行不变。
+- 单元（D14）：逐一断言上表 16 个状态对的允许/拒绝结果；每个允许格验证 QueueID、ACK、Issue、attempt 与时间证据约束，每个拒绝格验证事务回滚且行逐字段不变。
+- 单元（D14）：覆盖 `prepared→failed` 后无 QueueID 不能接受；`prepared→relay_accepted` 被 CAS 拒绝；queued 的 QueueID 替换/清空/无关值被拒；failed 重排须新 QueueID；带既有 QueueID 的 failed 延迟 ACK 成功、不带则失败；relay_accepted 收到旧失败/重试后所有证据不变。
+- 单元（D14）：覆盖 malformed text、未知字段、越界/负整数不进入 SQLite；attempts 和各时间戳不回退；`max_retries` 不变；relay_count 仅随有效 attempt 更新；queued/accepted 清理 Issue，failed Issue 仅对应当前 attempt；canonical npub 读取/迁移一致；不同 created_at 行拒绝生成 FanoutReport。
 - 文案检查：`grep -rn -i 'delivered\|已送达\|已读' internal/groupchat internal/tui` 在群相关输出中无匹配（测试中以断言输出字符串实现）。
 
 ---
@@ -565,7 +588,7 @@ Carol 的群消息可能先于 Alice 发给 Bob 的激活到达 Bob。此时 `st
 | G2 | `MarkActivationQueued(localNpub, groupID, inviteID, eventID string, queued bool)` 以布尔表达「已入队」 | 与第 3 节「不得用布尔代替证据」冲突；调用方可在无 outbox 证据时激活成员 | #138 作者 | 去掉 `queued bool`；改为要求 `groupchat_fanout` 中 `(group_id, 'activate', invite_id, invitee)` 行存在、`event_id` 相同且 `state ∈ {queued, relay_accepted}`，在同一事务中校验。#138 合并前完成，或 P0-E 第一个提交完成且合并前通过评审 |
 | G3 | `storeMessage` 对 `pending`/`activating`/`cancelled` 一律返回 `ErrGroupNotActive` | sink 无法区分暂态与终态（第 6 节） | P0-F 实现者 | 在 `groupchat` 新增 `ErrGroupActivationPending`（本机邀请 accepted 且群未激活时返回），`cancelled` 改返回 `ErrGroupCancelled`；P0-F 合并前附第 6 节暂态单元测试 |
 | G4 | `ReceiveAcceptance` / `CancelGroup` 等返回 `[]Envelope`，但没有说明由谁加密/签名/入队 | 控制 envelope 可能绕过 durable intent 直接发布；状态已提交而 envelope 未持久化时无法找回 | P0-E 实现者（S10a、S10b） | （**D9**）**状态迁移与 fanout 行插入在同一事务**：S10a 为 `CreateGroup` / `AcceptInvite` / `DeclineInvite` / `ReceiveAcceptance` / `CancelGroup` 提供 Tx 变体（原公开方法变薄包装，行为不变），S10b 的 `*WithFanout` 在一个事务内调用 Tx 变体并经 `prepareFanoutTx(envelopeType, sendKey=invite_id, ...)` 插入 fanout 行；S10b 合并前附「控制 envelope 也有 fanout 行」与「fanout 插入失败时状态迁移一并回滚」的测试 |
-| G5 | #145 尚未合并，`VerifyAgentMessage` 不在 main | 第 4 节 R1–R3 依赖它 | #145 作者 | #136→#138→#145 依次合并后 P0-F 才开工；若 #145 被拒，P0-F 必须在同等约束下（单次解密、opaque 值、前缀即 reserved）重新提交该边界，并先更新本文 |
+| G5 | （已关闭）#145 曾未合并，`VerifyAgentMessage` 不在当时的 main | 第 4 节 R1–R3 依赖它 | #145 作者 | #136→#138→#145 已依序合入当前 main；P0-F 可按第 4 节接线，无需重新提交该边界 |
 | G6 | `groupchat_messages` 的 `UNIQUE(event_id)` 是全库唯一而不是按 `local_npub` 唯一 | 同一 HOME 多身份时没有实际冲突（单 `p` 保证 event 不同），无需修改；在此记录以免实现者误改 | P0-F 实现者 | 无需修改；P0-F 增加「同 HOME 两身份各收一份」测试，作为不需修改的证据 |
 
 **D9**（约束 S10a、S10b）：
@@ -576,5 +599,5 @@ Carol 的群消息可能先于 Alice 发给 Bob 的激活到达 Bob。此时 `st
 ## 8. 交付拆分（供 coordinator 派发）
 
 - **P0-E**：`messaging.BuildAgentMessageEvent`（加密路径，D10）；`groupchat/fanout.go`（表、`PrepareFanout`（T1，D12）、T2–T4、`ReconcileFanout`（D4）、`FanoutReport`（D2））；`OutboxEntry.Route` + `group_pending/group_failed`（D5）+ `RequeueGroupOutboxEntry`（D6）；`AttemptSendRouted`（D11、D13）与三个重试方经 `SetGroupOutboxProvider` 接线（D7）；`hyphae groupchat {send,retry,status}`（D8）；第 1、2、3、5 节验收（E2E 按 D3）；关闭 G1、G2、G4（D9）。切片拆分与顺序见 [实现拆分方案](m1-group-fanout-impl-plan-20261008.md)。
-- **P0-F**：R1/R2/R3 分流；`GroupInboundSink` 与 `groupchat/inbound.go`；暂态 re-walk；TUI 群模型的投递摘要展示；第 4、6 节验收；#145 合入后补第 1 节 `Route()==AgentRouteReservedGroup` 断言（D1）；关闭 G3、G6。
+- **P0-F**：R1/R2/R3 分流；`GroupInboundSink` 与 `groupchat/inbound.go`；暂态 re-walk；TUI 群模型的投递摘要展示；第 4、6 节验收；当前 main 已有 #145，可补第 1 节 `Route()==AgentRouteReservedGroup` 断言（D1）；关闭 G3、G6。
 - 两者共同完成：真实 relay（`wss://relay.aastar.io`）+ 三个隔离 HOME（alice/bob/carol）的 E2E 脚本 `test_groupchat_fanout_e2e.sh`。现有 `test_group_e2e.sh` 不计入证据（见群聊设计基线）。
