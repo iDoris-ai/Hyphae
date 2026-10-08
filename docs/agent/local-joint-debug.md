@@ -4,7 +4,13 @@
 
 本文件仅记录列明源码/二进制 hash 与 production lock 下的 T20 本机 CLI/daemon/relay 联调，不代表 COMM6a 桌面 UI 或 E-M1 整体验收，也不外推至后续 API/UI/依赖升级。Hyphae 的 `671c584..3fc1f02` 生产树相同性仅限这两个 SHA。COMM6a API #678、UI #679 均已合并，但 targeted component tests 16/16 与 typecheck 不等同桌面 UI+真实 relay 验收；后续 UI 与当前项目状态见[2026-10-06 交接快照](handoff-20261006.md)。Hyphae PR #122（文档 head `31c0cd2`）fresh CI run `37463001377` 全绿后已并入 main `8bbaeb8`。旧 head `fb576411` 的 macOS Python timeout-fixture failure 保留为历史记录，详见交接文档；该 failure 根因仍未证实。
 
-后续文档 PR #128 的 CI 是独立阻塞，不否定上述精确输入范围的真实 CLI 十阶段 PASS：head `217115c21e00f6a9286573f4850c2e6ef00121e4`、run `37469204603` macOS job `112287952894` 在 `Test Python tools` 的 73 项中再次触发同一 timeout fixture（期望 `child-timeout`、实收 `child-cleanup-failed`）；Ubuntu、CLA 与 macOS 其他 Go 步骤通过。CI Python 3.14.7；本机 Python 3.14.6 对该 fixture 重复 5/5 PASS，根因未知且不能用本机通过替代 CI。旧 head clestons approval 不适用于更新后的 PR head；新 head 需要重新审批。当前阻塞、精确 trace 与交接建议见[交接记录](handoff-20261006.md)。
+PR #128 的历史 head `217115c21e00f6a9286573f4850c2e6ef00121e4`、run `37469204603` 曾在 macOS Python tools 触发 timeout fixture failure（期望 `child-timeout`、实收 `child-cleanup-failed`）。该历史 failure 保留；之后 head `b86a26f4c64552ed41336d81423db100ed29512e` 的 fresh run `37470596622` macOS/Ubuntu/ci-ok 全绿，PR 已合并，merge push run `37615070377` 成功。不能以旧失败继续描述为当前 main blocker，也不能删除这段历史。修复和后续 50-round stress 由 #130 独立实现；该 stress 在本机 Python 3.14.6 通过 50/50（23.711 秒），不代替 PR CI 上 Python 3.14.7 验证。
+
+## Joint CI automation status
+
+Hyphae #129 adds separate `pinned-production` and `candidate` paths. The production baseline pins Agent24 source `fc862cf3f765f3e59686e816aea6fa4792f10da2`, production lock SHA-256 `a83b7a586b1e19693d4abbbe4d1c737cf9fb5d6e2f63b7d8ebc6a252e1032ffd`, and Go `1.26.4`. Candidate validation must use a temporary derived lock and an independently verified manifest; it must not edit or re-label the production lock. See [joint CI acceptance](joint-ci-acceptance.md) for the source chain and evidence allowlist.
+
+The workflow has real Actions evidence: run [37627002418](https://github.com/iDoris-ai/Hyphae/actions/runs/37627002418) passed all four native candidate/pinned-production ten-stage consumers (10/10 each) across Linux x64 and macOS ARM64, and macOS cleanup stress passed. The overall workflow was not green: macOS ordinary Go tests exposed a test-fixture timing race in `TestDaemonJSONLCLIOutputModesAndGenerationRestart`; therefore `ci-ok` failed. The test-only fix synchronizes on both the target JSON status and stderr diagnostic before sending TERM. It preserves assertions and production behavior; a fresh full run on the fix head is still required. Candidate PRs, Dependabot updates, nightly and manual invocations run both modes on both platforms; `ci-ok` accepts only literal success from `test`, `joint`, and the macOS cleanup stress job. No raw runner evidence, temporary HOME, database, credentials, or raw logs may be uploaded.
 
 ## 范围与输入
 
@@ -89,11 +95,11 @@ Runner 输出 `PASS <stage>`。所有断言都成功后生成 `result: PASS` 的
 
 证据不包含密码、bearer token、消息正文、keystore、数据库、relay 内容或原始 stderr。失败命令保留脱敏参数形状、退出码、起止时间和子进程清理状态；失败本身写 `result: FAIL`，仅 unlock 路由缺失（404）写 `result: BLOCKED`。任何 cleanup 失败都使总体结果 FAIL，不能吞掉；PID 出生标记不匹配时拒绝 kill 并留下清理失败记录。不要把临时 HOME 或其数据库复制到共享仓库。通过证据应另行安全归档，文档链接只需指向本文件及已审阅的证据摘要。
 
-## 当前困难与 Agent24 需要调整的事项
+## 历史联调问题与 Agent24 稳定性要求
 
 本轮真实联调已通过，不再存在阻止本机 Agent24×Hyphae 基础通信闭环的已知 blocker。过程中发现并关闭了三类问题：旧 Agent24 lock 与 Hyphae main 不一致；memory password store 缺少安全解锁入口；两个验收夹具分别存在本地 counter readiness 竞态和重复预置联系人。首轮 runner 失败证据保留为 `/tmp/agent24-joint-evidence-20261005/agent24-joint-20261005T155435Z-777881f9/evidence.json`，其 cleanup 全部完成；修复后以全新隔离 HOME 重跑通过。
 
-当前额外的交接 blocker 是 #128 文档 PR 的 macOS Python CI，不是本机十阶段真实 CLI/relay 验收失败。#128 复现旧的 cleanup fixture failure，具体原因未从脱敏 trace 查明；更新 head 后须重新请求 PR-Daemon。后续建议在不放宽 timeout/owned-PGID 硬断言的前提下，记录脱敏 cleanup 细节，并用 readiness handshake 与同组 supervisor/reaper 设计确定的父子生命周期；回归仍需保留 leader 先退出而 descendant 持有输出 pipe 的场景，不能仅让 leader 一直存活来绕开竞态。此文档只记录建议，不扩大本次联调代码范围。
+PR #128 的旧 head 曾复现 macOS cleanup fixture failure；具体根因在当时的脱敏 trace 中未知。后续 head 的 CI 已通过并合并，见上方 CI 历史，不再是当前阻塞。runner/fixture 的有界清理和 diagnostic 改进由独立 #130 task 处理；不得放宽 timeout/owned-PGID 硬断言，回归仍需覆盖 leader 退出而 descendant 持有输出 pipe 的场景。此处保留历史背景，不表示当前 #128 未解决。
 
 请 Agent24 仓库在合并与后续优化中保持这些稳定性要求：
 

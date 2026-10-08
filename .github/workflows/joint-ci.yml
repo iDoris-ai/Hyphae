@@ -1,0 +1,192 @@
+name: Agent24 × Hyphae joint acceptance
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 4 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: joint-ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  produce_linux:
+    name: Build Linux x64 locked and candidate inputs
+    uses: ./.github/workflows/joint-ci-producer.yml
+    with:
+      platform: linux-x64
+
+  produce_darwin:
+    name: Build macOS ARM64 locked and candidate inputs
+    uses: ./.github/workflows/joint-ci-producer.yml
+    with:
+      platform: darwin-arm64
+
+  consume:
+    name: Strict ten-stage ${{ matrix.mode }} / ${{ matrix.platform }} runner
+    needs: [produce_linux, produce_darwin]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: pinned-production
+            platform: linux-x64
+            runner: ubuntu-24.04
+          - mode: candidate
+            platform: linux-x64
+            runner: ubuntu-24.04
+          - mode: pinned-production
+            platform: darwin-arm64
+            runner: macos-15
+          - mode: candidate
+            platform: darwin-arm64
+            runner: macos-15
+    steps:
+      - name: Checkout Hyphae runner tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: tools
+          persist-credentials: false
+          submodules: false
+
+      - name: Confirm consumer is executing on the requested native platform
+        env:
+          TARGET_PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          python3 - "$TARGET_PLATFORM" <<'PY'
+          import platform, sys
+          expected = {
+            'linux-x64': ('linux', 'x86_64'),
+            'darwin-arm64': ('darwin', 'arm64'),
+          }
+          actual = ('darwin' if sys.platform == 'darwin' else 'linux' if sys.platform.startswith('linux') else sys.platform,
+                    platform.machine().lower())
+          if expected.get(sys.argv[1]) != actual:
+            raise SystemExit('consumer-platform-mismatch')
+          PY
+
+      - name: Load tracked cross-repository production pins
+        id: pins
+        run: |
+          set -euo pipefail
+          python3 - tools/.github/joint-ci-baseline.json >> "$GITHUB_OUTPUT" <<'PY'
+          import json, pathlib, sys
+          config = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+          assert config['schema'] == 1
+          for key in ('agent24_base_sha', 'production_hyphae_sha', 'production_lock_sha256', 'production_lock_path', 'go_version'):
+            print(f'{key}={config[key]}')
+          PY
+
+      - name: Checkout independently pinned Agent24 lock
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: iDoris-ai/Agent24
+          ref: ${{ steps.pins.outputs.agent24_base_sha }}
+          path: agent24-base
+          persist-credentials: false
+          submodules: false
+
+      - name: Download same-run producer bundle for this platform
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: joint-bundles-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/joint-download
+          digest-mismatch: error
+
+      - name: Re-hash producer outputs and validate mode/platform lock chain
+        env:
+          MODE: ${{ matrix.mode }}
+          TARGET_PLATFORM: ${{ matrix.platform }}
+          CANDIDATE_SHA: ${{ github.sha }}
+          PRODUCTION_HYPHAE_SHA: ${{ steps.pins.outputs.production_hyphae_sha }}
+          PRODUCTION_LOCK_PATH: ${{ steps.pins.outputs.production_lock_path }}
+          LINUX_CANDIDATE_OUTPUTS: ${{ needs.produce_linux.outputs.candidate_outputs }}
+          LINUX_PRODUCTION_OUTPUTS: ${{ needs.produce_linux.outputs.production_outputs }}
+          DARWIN_CANDIDATE_OUTPUTS: ${{ needs.produce_darwin.outputs.candidate_outputs }}
+          DARWIN_PRODUCTION_OUTPUTS: ${{ needs.produce_darwin.outputs.production_outputs }}
+        run: |
+          set -euo pipefail
+          if [ "$TARGET_PLATFORM" = linux-x64 ]; then
+            producer_outputs="$LINUX_PRODUCTION_OUTPUTS"
+          elif [ "$TARGET_PLATFORM" = darwin-arm64 ]; then
+            producer_outputs="$DARWIN_PRODUCTION_OUTPUTS"
+          else
+            echo "consumer-platform-invalid" >&2
+            exit 1
+          fi
+          source_sha="$PRODUCTION_HYPHAE_SHA"
+          if [ "$MODE" = candidate ]; then
+            if [ "$TARGET_PLATFORM" = linux-x64 ]; then
+              producer_outputs="$LINUX_CANDIDATE_OUTPUTS"
+            else
+              producer_outputs="$DARWIN_CANDIDATE_OUTPUTS"
+            fi
+            source_sha="$CANDIDATE_SHA"
+          elif [ "$MODE" != pinned-production ]; then
+            echo "consumer-mode-invalid" >&2
+            exit 1
+          fi
+          manifest_sha="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["manifest_sha256"])' "$producer_outputs")"
+          python3 tools/scripts/joint_ci.py verify-candidate \
+            --manifest "$RUNNER_TEMP/joint-download/$MODE/manifest.json" \
+            --artifact-dir "$RUNNER_TEMP/joint-download/$MODE" \
+            --production-lock "agent24-base/$PRODUCTION_LOCK_PATH" \
+            --expected-manifest-sha256 "$manifest_sha" --expected-platform "$TARGET_PLATFORM" \
+            --expected-hyphae-sha "$source_sha" --expected-producer-outputs "$producer_outputs"
+
+      - name: Run unchanged strict ten-stage joint runner on native platform
+        env:
+          MODE: ${{ matrix.mode }}
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          set -euo pipefail
+          artifact="$RUNNER_TEMP/joint-download/$MODE"
+          manifest="$artifact/manifest.json"
+          output="$RUNNER_TEMP/joint-evidence"
+          safe_dir="$RUNNER_TEMP/joint-safe"
+          mkdir -p "$output" "$safe_dir"
+          cp "$manifest" "$safe_dir/manifest.json"
+          python3 - "$manifest" > "$RUNNER_TEMP/runner-inputs.json" <<'PY'
+          import json, sys
+          m = json.load(open(sys.argv[1], encoding='utf-8'))
+          print(json.dumps({'hyphae_sha': m['hyphae_source_sha'], 'agent24_sha': m['agent24_built_sha'],
+            'lock_sha': m['derived_lock_sha256'], 'hashes': m['binary_sha256']}))
+          PY
+          set +e
+          python3 - "$RUNNER_TEMP/runner-inputs.json" <<'PY'
+          import json, os, pathlib, subprocess, sys
+          i = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          root = pathlib.Path(os.environ['GITHUB_WORKSPACE']) / 'tools'
+          a = pathlib.Path(os.environ['RUNNER_TEMP']) / 'joint-download' / os.environ['MODE']
+          cmd = [sys.executable, str(root / 'scripts/test_agent24_joint.py')]
+          for name in ('hyphae', 'agent24', 'agent24d', 'relay'):
+            cmd += [f'--{name}-bin', str(a / name), f'--expected-{name}-sha256', i['hashes'][name]]
+          cmd += ['--hyphae-sha', i['hyphae_sha'], '--agent24-sha', i['agent24_sha'],
+            '--lock', str(a / 'hyphae.lock.json'), '--expected-lock-sha256', i['lock_sha'],
+            '--output-dir', os.environ['RUNNER_TEMP'] + '/joint-evidence']
+          raise SystemExit(subprocess.run(cmd, cwd=root).returncode)
+          PY
+          runner_status=$?
+          set -e
+          evidence="$(find "$output" -type f -name evidence.json -print -quit)"
+          if [ -n "$evidence" ]; then
+            python3 tools/scripts/joint_ci.py normalize-evidence --evidence "$evidence" \
+              --manifest "$manifest" --output "$safe_dir/evidence.json" || runner_status=$?
+          fi
+          exit "$runner_status"
+
+      - name: Upload only normalized redacted evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: joint-evidence-${{ matrix.mode }}-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/joint-safe/
+          if-no-files-found: ignore
+          retention-days: 7
