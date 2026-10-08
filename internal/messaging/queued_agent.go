@@ -33,6 +33,9 @@ type AgentMessageDeliveryIssue string
 
 const (
 	AgentMessageIssueNone                    AgentMessageDeliveryIssue = ""
+	AgentMessageIssueQueueMissing            AgentMessageDeliveryIssue = "queue_missing"
+	AgentMessageIssueQueueDuplicate          AgentMessageDeliveryIssue = "queue_duplicate"
+	AgentMessageIssueRouteHandlerMissing     AgentMessageDeliveryIssue = "route_handler_missing"
 	AgentMessageIssueSendFailed              AgentMessageDeliveryIssue = "send_failed"
 	AgentMessageIssueHistoryNotStored        AgentMessageDeliveryIssue = "history_not_stored"
 	AgentMessageIssueQueueStateUnknown       AgentMessageDeliveryIssue = "queue_state_unknown"
