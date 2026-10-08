@@ -795,7 +795,18 @@ func (s *Store) cancelFromInvite(v VerifiedIncoming, e Envelope, declined bool) 
 			}
 			return nil, nil
 		}
-		if invite.state != InvitePending || group.State != StatePending {
+		// A creator cancellation can cross an in-flight decline. The group and
+		// invite are already durably cancelled, so the late decline is settled.
+		if invite.state == InviteCancelled && group.State == StateCancelled {
+			if err := tx.Commit(); err != nil {
+				return nil, err
+			}
+			return nil, nil
+		}
+		// A shared invitee key can accept on one device and decline on another.
+		// While the fixed-roster group is still pending, the decline wins and
+		// cancels the group; once activation starts, rejection is too late.
+		if group.State != StatePending || (invite.state != InvitePending && invite.state != InviteAccepted) {
 			return nil, ErrInvalidTransition
 		}
 	} else if group.State == StateCancelled {

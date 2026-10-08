@@ -393,7 +393,7 @@ func TestCancelGroupRejectedAfterPartialActivation(t *testing.T) {
 	require.Equal(t, StateActivating, creatorGroup.State)
 }
 
-func TestReceiveDeclineRequiresPendingState(t *testing.T) {
+func TestReceiveDeclineAfterAcceptanceCancelsPendingGroup(t *testing.T) {
 	g := newThreeMemberGroup(t)
 
 	// Bob accepts the invite.
@@ -403,7 +403,8 @@ func TestReceiveDeclineRequiresPendingState(t *testing.T) {
 	_, err = g.alice.store.ReceiveAcceptance(buildIncoming(t, g.bob, g.alice, bobAccept))
 	require.NoError(t, err)
 
-	// Bob attempts to decline after already accepted.
+	// A decline can arrive from another device using Bob's key after the
+	// acceptance, while the creator is still pending on the full roster.
 	bogusDecline := Envelope{
 		Type:        EnvelopeDecline,
 		Version:     Version,
@@ -413,13 +414,14 @@ func TestReceiveDeclineRequiresPendingState(t *testing.T) {
 		RosterHash:  g.draft.Group.RosterHash,
 		InviteeNpub: g.bob.npub,
 	}
-	_, err = g.alice.store.ReceiveDecline(buildIncoming(t, g.bob, g.alice, bogusDecline))
-	require.ErrorIs(t, err, ErrInvalidTransition)
+	cancellations, err := g.alice.store.ReceiveDecline(buildIncoming(t, g.bob, g.alice, bogusDecline))
+	require.NoError(t, err)
+	require.Len(t, cancellations, 1)
 
-	// Alice's group must remain StatePending, not cancelled.
+	// The decline wins before activation and cancels the whole fixed roster.
 	group, err := g.alice.store.GetGroup(g.alice.npub, g.draft.Group.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatePending, group.State)
+	require.Equal(t, StateCancelled, group.State)
 }
 
 func mustEncode(t *testing.T, e Envelope) string {
@@ -545,20 +547,7 @@ func TestGroupStateTransitionMatrix(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, StatePending, ag.State)
 
-	// 5. Decline after accept is rejected
-	decBob := Envelope{
-		Type:        EnvelopeDecline,
-		Version:     Version,
-		GroupID:     g.draft.Group.ID,
-		CreatorNpub: g.alice.npub,
-		InviteID:    g.invites[g.bob.npub].InviteID,
-		RosterHash:  g.draft.Group.RosterHash,
-		InviteeNpub: g.bob.npub,
-	}
-	_, err = g.alice.store.ReceiveDecline(buildIncoming(t, g.bob, g.alice, decBob))
-	require.ErrorIs(t, err, ErrInvalidTransition)
-
-	// 6. ReceiveAcceptance: all accepted -> G=activating, returns activation batch
+	// 5. ReceiveAcceptance: all accepted -> G=activating, returns activation batch
 	accCarol, err := g.carol.store.AcceptInvite(g.invites[g.carol.npub].InviteID, g.carol.npub)
 	require.NoError(t, err)
 	b2, err := g.alice.store.ReceiveAcceptance(buildIncoming(t, g.carol, g.alice, accCarol))
@@ -568,11 +557,11 @@ func TestGroupStateTransitionMatrix(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, StateActivating, ag.State)
 
-	// 7. CancelGroup rejected in StateActivating (B1)
+	// 6. CancelGroup rejected in StateActivating (B1)
 	_, err = g.alice.store.CancelGroup(g.alice.npub, g.draft.Group.ID)
 	require.ErrorIs(t, err, ErrInvalidTransition)
 
-	// 8. MarkActivationQueued: only creator, activating -> active
+	// 7. MarkActivationQueued: only creator, activating -> active
 	for _, act := range b2 {
 		target := g.member(act.InviteeNpub)
 		ev := testAgentEvent(t, mustEncode(t, act), g.alice.sk, target.sk, true)
@@ -589,18 +578,71 @@ func TestGroupStateTransitionMatrix(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, StateActive, ag.State)
 
-	// 9. CancelGroup rejected on StateActive
+	// 8. CancelGroup rejected on StateActive
 	_, err = g.alice.store.CancelGroup(g.alice.npub, g.draft.Group.ID)
 	require.ErrorIs(t, err, ErrInvalidTransition)
 
-	// 10. LeaveGroup: active -> left; left is idempotent
+	// 9. LeaveGroup: active -> left; left is idempotent
 	require.NoError(t, g.alice.store.LeaveGroup(g.alice.npub, g.draft.Group.ID))
 	require.NoError(t, g.alice.store.LeaveGroup(g.alice.npub, g.draft.Group.ID))
 	ag, err = g.alice.store.GetGroup(g.alice.npub, g.draft.Group.ID)
 	require.NoError(t, err)
 	require.Equal(t, StateLeft, ag.State)
 
-	// 11. Sending/receiving message on left group rejected
+	// 10. Sending/receiving message on left group rejected
 	_, err = g.alice.store.ReceiveMessage(VerifiedIncoming{})
 	require.Error(t, err)
+}
+
+func TestMultiDeviceAcceptThenDeclineCancelsPendingGroup(t *testing.T) {
+	g := newThreeMemberGroup(t)
+	bobDeviceB := newMember(t)
+	bobDeviceB.sk, bobDeviceB.npub = g.bob.sk, g.bob.npub
+	_, err := bobDeviceB.store.ReceiveInvite(buildIncoming(t, g.alice, bobDeviceB, g.invites[g.bob.npub]))
+	require.NoError(t, err)
+
+	accept, err := g.bob.store.AcceptInvite(g.invites[g.bob.npub].InviteID, g.bob.npub)
+	require.NoError(t, err)
+	activation, err := g.alice.store.ReceiveAcceptance(buildIncoming(t, g.bob, g.alice, accept))
+	require.NoError(t, err)
+	require.Empty(t, activation, "the other fixed-roster invitee has not accepted")
+
+	decline, err := bobDeviceB.store.DeclineInvite(g.invites[g.bob.npub].InviteID, bobDeviceB.npub)
+	require.NoError(t, err)
+	cancellations, err := g.alice.store.ReceiveDecline(buildIncoming(t, bobDeviceB, g.alice, decline))
+	require.NoError(t, err)
+	require.Len(t, cancellations, 1, "the decline sender is excluded from cancellation notices")
+	group, err := g.alice.store.GetGroup(g.alice.npub, g.draft.Group.ID)
+	require.NoError(t, err)
+	require.Equal(t, StateCancelled, group.State)
+}
+
+func TestDeclineAfterCreatorCancelIsIdempotent(t *testing.T) {
+	g := newThreeMemberGroup(t)
+	decline, err := g.bob.store.DeclineInvite(g.invites[g.bob.npub].InviteID, g.bob.npub)
+	require.NoError(t, err)
+	_, err = g.alice.store.CancelGroup(g.alice.npub, g.draft.Group.ID)
+	require.NoError(t, err)
+
+	_, err = g.alice.store.ReceiveDecline(buildIncoming(t, g.bob, g.alice, decline))
+	require.NoError(t, err)
+}
+
+func TestReceiveDeclineRejectedAfterActivationStarts(t *testing.T) {
+	g := newThreeMemberGroup(t)
+	for _, member := range []testMember{g.bob, g.carol} {
+		accept, err := member.store.AcceptInvite(g.invites[member.npub].InviteID, member.npub)
+		require.NoError(t, err)
+		_, err = g.alice.store.ReceiveAcceptance(buildIncoming(t, member, g.alice, accept))
+		require.NoError(t, err)
+	}
+
+	decline := Envelope{Type: EnvelopeDecline, Version: Version, GroupID: g.draft.Group.ID,
+		CreatorNpub: g.alice.npub, InviteID: g.invites[g.bob.npub].InviteID,
+		RosterHash: g.draft.Group.RosterHash, InviteeNpub: g.bob.npub}
+	_, err := g.alice.store.ReceiveDecline(buildIncoming(t, g.bob, g.alice, decline))
+	require.ErrorIs(t, err, ErrInvalidTransition)
+	group, err := g.alice.store.GetGroup(g.alice.npub, g.draft.Group.ID)
+	require.NoError(t, err)
+	require.Equal(t, StateActivating, group.State)
 }
