@@ -289,12 +289,12 @@ func TestFanoutTransitionMatrix(t *testing.T) {
 		key := FanoutKey{member.npub, "group", EnvelopeMessage, "logical"}
 		insertFanout(t, member, key, "recipient", RecipientQueued, "event")
 		_, err := member.db.Exec(`UPDATE groupchat_fanout SET attempts = 5, last_attempt_at = 500,
- relay_count = 7, max_retries = 20 WHERE recipient_npub = 'recipient'`)
+ relay_count = 7 WHERE recipient_npub = 'recipient'`)
 		require.NoError(t, err)
 		// A failure transition carrying smaller bookkeeping values (e.g. a
 		// stale in-flight attempt) must not roll any of these back.
 		changed, err := applyFanout(t, member, key, "recipient", RecipientQueued, RecipientFailed,
-			map[string]any{"attempts": 1, "last_attempt_at": int64(1), "relay_count": 2, "max_retries": 3,
+			map[string]any{"attempts": 1, "last_attempt_at": int64(1), "relay_count": 2,
 				"issue": messaging.AgentMessageIssueSendFailed})
 		require.NoError(t, err)
 		require.True(t, changed)
@@ -304,7 +304,7 @@ func TestFanoutTransitionMatrix(t *testing.T) {
 		require.Equal(t, 5, r.Attempts)
 		require.Equal(t, int64(500), r.LastAttemptAt)
 		require.Equal(t, 7, r.RelayCount)
-		require.Equal(t, 20, r.MaxRetries)
+		require.Equal(t, 10, r.MaxRetries)
 	})
 
 	t.Run("rejects_malformed_numeric_field_types", func(t *testing.T) {
@@ -431,6 +431,74 @@ func TestFanoutTransitionMatrix(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, RecipientFailed, report.Recipients[0].State)
 	})
+}
+
+func TestFanoutMaxRetriesFrozen(t *testing.T) {
+	for _, pair := range [][2]RecipientDeliveryState{
+		{RecipientPrepared, RecipientPrepared},
+		{RecipientQueued, RecipientQueued},
+		{RecipientFailed, RecipientFailed},
+		{RecipientRelayAccepted, RecipientRelayAccepted},
+		{RecipientPrepared, RecipientFailed},
+		{RecipientQueued, RecipientFailed},
+		{RecipientFailed, RecipientQueued},
+		{RecipientQueued, RecipientRelayAccepted},
+	} {
+		for _, maxRetries := range []int{9, 10, 11} {
+			t.Run(fmt.Sprintf("%s_to_%s/%d", pair[0], pair[1], maxRetries), func(t *testing.T) {
+				member := newMember(t)
+				key := FanoutKey{member.npub, "group", EnvelopeMessage, "logical"}
+				insertFanout(t, member, key, "recipient", pair[0], "event")
+				before, err := member.store.LoadFanoutReport(key)
+				require.NoError(t, err)
+				fields := map[string]any{"attempts": 2, "max_retries": maxRetries}
+				for column, value := range requiredFanoutFields(pair[0], pair[1], "recipient") {
+					fields[column] = value
+				}
+				changed, err := applyFanout(t, member, key, "recipient", pair[0], pair[1], fields)
+				require.ErrorContains(t, err, `immutable or unknown fanout field "max_retries"`)
+				require.False(t, changed)
+				after, err := member.store.LoadFanoutReport(key)
+				require.NoError(t, err)
+				require.Equal(t, before, after)
+				var updatedAt int64
+				require.NoError(t, member.db.QueryRow(`SELECT updated_at FROM groupchat_fanout`).Scan(&updatedAt))
+				require.Equal(t, int64(123), updatedAt)
+				// Omitting the frozen field must still permit this transition.
+				delete(fields, "max_retries")
+				changed, err = applyFanout(t, member, key, "recipient", pair[0], pair[1], fields)
+				require.NoError(t, err)
+				require.True(t, changed)
+				after, err = member.store.LoadFanoutReport(key)
+				require.NoError(t, err)
+				require.Equal(t, pair[1], after.Recipients[0].State)
+				require.Equal(t, 10, after.Recipients[0].MaxRetries)
+			})
+		}
+	}
+}
+
+func TestFanoutReportCreatedAtConsistency(t *testing.T) {
+	for _, timestamps := range [][2]int64{{123, 123}, {0, 0}, {123, 456}, {456, 123}, {0, 123}, {123, 0}} {
+		t.Run(fmt.Sprintf("%d_%d", timestamps[0], timestamps[1]), func(t *testing.T) {
+			member := newMember(t)
+			key := FanoutKey{member.npub, "group", EnvelopeMessage, "logical"}
+			for i, recipient := range []string{"a", "z"} {
+				insertFanout(t, member, key, recipient, RecipientPrepared, recipient)
+				_, err := member.db.Exec(`UPDATE groupchat_fanout SET created_at = ? WHERE recipient_npub = ?`, timestamps[i], recipient)
+				require.NoError(t, err)
+			}
+			report, err := member.store.LoadFanoutReport(key)
+			if timestamps[0] != timestamps[1] {
+				require.ErrorContains(t, err, "inconsistent created_at")
+				require.Equal(t, FanoutReport{}, report, "must not return a partial report")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, timestamps[0], report.CreatedAt)
+			require.Len(t, report.Recipients, 2)
+		})
+	}
 }
 
 func TestFanoutReport(t *testing.T) {

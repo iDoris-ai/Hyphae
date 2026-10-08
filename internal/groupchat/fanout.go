@@ -122,8 +122,9 @@ func fanoutInt(value any) (int64, bool) {
 // supplied when the target state is queued (never same-state prepared, which
 // would otherwise forge one), is required to be nonempty when entering
 // queued, and a same-state queued call may never replace an already-
-// confirmed value. attempts/last_attempt_at/relay_count/max_retries/
-// accepted_at/updated_at are monotonic (MAX) on every transition.
+// confirmed value. max_retries is frozen at intent creation.
+// attempts/last_attempt_at/relay_count/accepted_at/updated_at are
+// monotonic (MAX) on every transition.
 func transitionFanoutTx(tx queryExecer, key FanoutKey, recipient string, from, to RecipientDeliveryState, fields map[string]any) (bool, error) {
 	fromRank, toRank := fanoutRank(from), fanoutRank(to)
 	if fromRank < 0 || toRank < 0 || toRank < fromRank ||
@@ -191,7 +192,7 @@ func transitionFanoutTx(tx queryExecer, key FanoutKey, recipient string, from, t
 			}
 			value = acks
 			expression = "relay_acks = MAX(relay_acks, ?)"
-		case "attempts", "last_attempt_at", "accepted_at", "relay_count", "max_retries":
+		case "attempts", "last_attempt_at", "accepted_at", "relay_count":
 			n, ok := fanoutInt(value)
 			if !ok || n < 0 {
 				return false, fmt.Errorf("fanout %s must be a non-negative integer", column)
@@ -269,6 +270,8 @@ func (s *Store) LoadFanoutReport(key FanoutKey) (FanoutReport, error) {
 		}
 		if len(report.Recipients) == 0 {
 			report.CreatedAt = createdAt
+		} else if createdAt != report.CreatedAt {
+			return FanoutReport{}, fmt.Errorf("fanout intent has inconsistent created_at: recipient %q has %d, expected %d", recipient.RecipientNpub, createdAt, report.CreatedAt)
 		}
 		report.Recipients = append(report.Recipients, recipient)
 	}
