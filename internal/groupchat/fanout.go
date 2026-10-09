@@ -250,6 +250,10 @@ func transitionFanoutTx(tx queryExecer, key FanoutKey, recipient string, from, t
 		args = append(args, to)
 		if to == RecipientRelayAccepted {
 			sets = append(sets, "attempt_phase = 'accepted'")
+		} else if to == RecipientFailed {
+			sets = append(sets, "attempt_phase = 'failed'")
+		} else if from == RecipientFailed && to == RecipientQueued {
+			sets = append(sets, "attempt_phase = 'idle'")
 		}
 	}
 	// Entering relay_accepted, or retrying out of failed, must never leave a
