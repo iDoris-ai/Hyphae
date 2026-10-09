@@ -25,7 +25,18 @@ const fanoutSchema = `CREATE TABLE IF NOT EXISTS groupchat_fanout (
     relay_acks      INTEGER NOT NULL DEFAULT 0,
     relay_count     INTEGER NOT NULL DEFAULT 0,
     attempts        INTEGER NOT NULL DEFAULT 0,
-    max_retries     INTEGER NOT NULL,
+    max_retries     INTEGER NOT NULL CHECK (max_retries > 0),
+    row_revision    INTEGER NOT NULL DEFAULT 0 CHECK (row_revision >= 0),
+    attempt_generation INTEGER NOT NULL DEFAULT 0 CHECK (attempt_generation >= 0),
+    attempt_phase   TEXT NOT NULL DEFAULT 'idle' CHECK (attempt_phase IN ('idle','reserved','started','failed','accepted')),
+    last_result_generation INTEGER NOT NULL DEFAULT 0 CHECK (last_result_generation >= 0),
+    last_failure_receipt TEXT NOT NULL DEFAULT '',
+    retry_count     INTEGER CHECK (retry_count IS NULL OR retry_count >= 0),
+    retry_queue_id  TEXT NOT NULL DEFAULT '',
+    last_recovery_id TEXT NOT NULL DEFAULT '',
+    last_recovery_digest TEXT NOT NULL DEFAULT '',
+    accounting_origin TEXT NOT NULL DEFAULT 'native' CHECK (accounting_origin IN ('native','legacy')),
+    legacy_attempts_base INTEGER NOT NULL DEFAULT 0 CHECK (legacy_attempts_base >= 0),
     created_at      INTEGER NOT NULL,
     updated_at      INTEGER NOT NULL,
     last_attempt_at INTEGER NOT NULL DEFAULT 0,
@@ -47,17 +58,22 @@ const (
 )
 
 type RecipientDelivery struct {
-	RecipientNpub string                              `json:"recipient_npub"`
-	EventID       string                              `json:"event_id"`
-	QueueID       string                              `json:"queue_id"`
-	State         RecipientDeliveryState              `json:"state"`
-	Issue         messaging.AgentMessageDeliveryIssue `json:"issue,omitempty"`
-	RelayAcks     int                                 `json:"relay_acks"`  // 0 or 1: at least one relay accepted.
-	RelayCount    int                                 `json:"relay_count"` // Number of configured targets.
-	Attempts      int                                 `json:"attempts"`
-	MaxRetries    int                                 `json:"max_retries"`
-	LastAttemptAt int64                               `json:"last_attempt_at"`
-	AcceptedAt    int64                               `json:"accepted_at"`
+	RecipientNpub      string                              `json:"recipient_npub"`
+	EventID            string                              `json:"event_id"`
+	QueueID            string                              `json:"queue_id"`
+	State              RecipientDeliveryState              `json:"state"`
+	Issue              messaging.AgentMessageDeliveryIssue `json:"issue,omitempty"`
+	RelayAcks          int                                 `json:"relay_acks"`  // 0 or 1: at least one relay accepted.
+	RelayCount         int                                 `json:"relay_count"` // Number of configured targets.
+	Attempts           int                                 `json:"attempts"`
+	RetryCount         *int                                `json:"retry_count"`
+	RetryQueueID       string                              `json:"retry_queue_id"`
+	AttemptPhase       string                              `json:"attempt_phase"`
+	AccountingOrigin   string                              `json:"accounting_origin"`
+	LegacyAttemptsBase int                                 `json:"legacy_attempts_base"`
+	MaxRetries         int                                 `json:"max_retries"`
+	LastAttemptAt      int64                               `json:"last_attempt_at"`
+	AcceptedAt         int64                               `json:"accepted_at"`
 }
 
 type FanoutReport struct {
@@ -77,6 +93,85 @@ type FanoutKey struct {
 	GroupID      string
 	EnvelopeType EnvelopeType
 	SendKey      string
+}
+
+type fanoutAttemptToken struct {
+	key                         FanoutKey
+	recipient, eventID, queueID string
+	generation                  int64
+}
+
+// reserveFanoutAttemptTx consumes a generation without counting a publish start.
+func reserveFanoutAttemptTx(tx queryExecer, key FanoutKey, recipient string) (fanoutAttemptToken, error) {
+	local, err := canonicalNpub(key.LocalNpub)
+	if err != nil {
+		return fanoutAttemptToken{}, err
+	}
+	var token fanoutAttemptToken
+	token.key, token.recipient = key, recipient
+	var revision int64
+	var phase string
+	err = tx.QueryRow(`SELECT event_id,queue_id,attempt_generation,row_revision,attempt_phase FROM groupchat_fanout
+        WHERE local_npub=? AND group_id=? AND envelope_type=? AND send_key=? AND recipient_npub=? AND state=?`,
+		local, key.GroupID, key.EnvelopeType, key.SendKey, recipient, RecipientQueued).Scan(&token.eventID, &token.queueID, &token.generation, &revision, &phase)
+	if err != nil {
+		return fanoutAttemptToken{}, err
+	}
+	if token.queueID == "" || token.generation < 0 || revision < 0 || token.generation == math.MaxInt64 || revision == math.MaxInt64 {
+		return fanoutAttemptToken{}, fmt.Errorf("fanout attempt reservation is invalid or exhausted")
+	}
+	if phase != "idle" && phase != "failed" && phase != "accepted" {
+		return fanoutAttemptToken{}, fmt.Errorf("fanout attempt phase %q cannot be reserved", phase)
+	}
+	if phase == "accepted" {
+		return fanoutAttemptToken{}, fmt.Errorf("accepted fanout row is frozen")
+	}
+	token.generation++
+	result, err := tx.Exec(`UPDATE groupchat_fanout SET attempt_generation=?,attempt_phase='reserved',row_revision=row_revision+1
+        WHERE local_npub=? AND group_id=? AND envelope_type=? AND send_key=? AND recipient_npub=? AND state=? AND row_revision=? AND attempt_generation=?`,
+		token.generation, local, key.GroupID, key.EnvelopeType, key.SendKey, recipient, RecipientQueued, revision, token.generation-1)
+	if err != nil {
+		return fanoutAttemptToken{}, err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fanoutAttemptToken{}, err
+	}
+	if n != 1 {
+		return fanoutAttemptToken{}, fmt.Errorf("stale fanout reservation")
+	}
+	token.key.LocalNpub = local
+	return token, nil
+}
+
+// startFanoutAttemptTx records S before the caller performs network publish P.
+func startFanoutAttemptTx(tx queryExecer, token fanoutAttemptToken, targets int, now int64) error {
+	if targets < 0 || now < 0 {
+		return fmt.Errorf("fanout start values must be non-negative")
+	}
+	var attempts, revision int64
+	err := tx.QueryRow(`SELECT attempts,row_revision FROM groupchat_fanout WHERE local_npub=? AND group_id=? AND envelope_type=? AND send_key=? AND recipient_npub=? AND event_id=? AND queue_id=? AND attempt_generation=? AND attempt_phase='reserved' AND state=?`,
+		token.key.LocalNpub, token.key.GroupID, token.key.EnvelopeType, token.key.SendKey, token.recipient, token.eventID, token.queueID, token.generation, RecipientQueued).Scan(&attempts, &revision)
+	if err != nil {
+		return err
+	}
+	if attempts < 0 || attempts == math.MaxInt64 || revision < 0 || revision == math.MaxInt64 {
+		return fmt.Errorf("fanout start counter overflow or invalid")
+	}
+	result, err := tx.Exec(`UPDATE groupchat_fanout SET attempts=attempts+1,attempt_phase='started',last_attempt_at=MAX(last_attempt_at,?),relay_count=?,issue='',row_revision=row_revision+1
+        WHERE local_npub=? AND group_id=? AND envelope_type=? AND send_key=? AND recipient_npub=? AND event_id=? AND queue_id=? AND attempt_generation=? AND attempt_phase='reserved' AND state=? AND row_revision=?`,
+		now, targets, token.key.LocalNpub, token.key.GroupID, token.key.EnvelopeType, token.key.SendKey, token.recipient, token.eventID, token.queueID, token.generation, RecipientQueued, revision)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return fmt.Errorf("stale fanout start")
+	}
+	return nil
 }
 
 func fanoutRank(state RecipientDeliveryState) int {
@@ -102,7 +197,7 @@ func fanoutInt(value any) (int64, bool) {
 	case int64:
 		return v, true
 	case float64:
-		if v != math.Trunc(v) {
+		if v != math.Trunc(v) || v < math.MinInt64 || v >= math.MaxInt64 {
 			return 0, false
 		}
 		return int64(v), true
@@ -153,6 +248,9 @@ func transitionFanoutTx(tx queryExecer, key FanoutKey, recipient string, from, t
 	if entering {
 		sets = append(sets, "state = ?")
 		args = append(args, to)
+		if to == RecipientRelayAccepted {
+			sets = append(sets, "attempt_phase = 'accepted'")
+		}
 	}
 	// Entering relay_accepted, or retrying out of failed, must never leave a
 	// stale failure issue behind; the loop below ignores any caller value.
@@ -168,6 +266,14 @@ func transitionFanoutTx(tx queryExecer, key FanoutKey, recipient string, from, t
 	sort.Strings(columns)
 	for _, column := range columns {
 		value := fields[column]
+		if from == RecipientRelayAccepted {
+			switch column {
+			case "relay_acks", "accepted_at", "issue":
+				continue
+			default:
+				return false, fmt.Errorf("accepted fanout row is frozen")
+			}
+		}
 		expression := column + " = ?"
 		switch column {
 		case "queue_id":
@@ -191,7 +297,13 @@ func transitionFanoutTx(tx queryExecer, key FanoutKey, recipient string, from, t
 			}
 			value = acks
 			expression = "relay_acks = MAX(relay_acks, ?)"
-		case "attempts", "last_attempt_at", "accepted_at", "relay_count", "max_retries":
+		case "relay_count":
+			n, ok := fanoutInt(value)
+			if !ok || n < 0 {
+				return false, fmt.Errorf("fanout relay_count must be non-negative")
+			}
+			value = n
+		case "attempts", "last_attempt_at", "accepted_at":
 			n, ok := fanoutInt(value)
 			if !ok || n < 0 {
 				return false, fmt.Errorf("fanout %s must be a non-negative integer", column)
@@ -218,14 +330,25 @@ func transitionFanoutTx(tx queryExecer, key FanoutKey, recipient string, from, t
 		sets = append(sets, expression)
 		args = append(args, value)
 	}
-	args = append(args, localNpub, key.GroupID, key.EnvelopeType, key.SendKey, recipient, from)
+	var revision int64
+	if err := tx.QueryRow(`SELECT row_revision FROM groupchat_fanout WHERE local_npub=? AND group_id=? AND envelope_type=? AND send_key=? AND recipient_npub=? AND state=?`, localNpub, key.GroupID, key.EnvelopeType, key.SendKey, recipient, from).Scan(&revision); err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	if revision < 0 || revision == math.MaxInt64 {
+		return false, fmt.Errorf("fanout row revision overflow")
+	}
+	sets = append(sets, "row_revision = row_revision + 1")
+	args = append(args, localNpub, key.GroupID, key.EnvelopeType, key.SendKey, recipient, from, revision)
 	guard := "" // see D2 above: the authoritative, not just in-memory, queue_id check.
 	if entering && to == RecipientRelayAccepted {
 		guard = " AND queue_id != ''"
 	}
 	result, err := tx.Exec(`UPDATE groupchat_fanout SET `+strings.Join(sets, ", ")+`
         WHERE local_npub = ? AND group_id = ? AND envelope_type = ? AND send_key = ?
-        AND recipient_npub = ? AND state = ?`+guard, args...)
+        AND recipient_npub = ? AND state = ? AND row_revision = ?`+guard, args...)
 	if err != nil {
 		return false, err
 	}
@@ -242,7 +365,8 @@ func (s *Store) LoadFanoutReport(key FanoutKey) (FanoutReport, error) {
 	}
 	report := FanoutReport{GroupID: key.GroupID, LogicalID: key.SendKey, Recipients: []RecipientDelivery{}}
 	rows, err := s.db.Query(`SELECT recipient_npub, event_id, queue_id, state, issue,
-        relay_acks, relay_count, attempts, max_retries, last_attempt_at, accepted_at, created_at
+		relay_acks, relay_count, attempts, max_retries, last_attempt_at, accepted_at, created_at,
+		retry_count, retry_queue_id, attempt_phase, accounting_origin, legacy_attempts_base
         FROM groupchat_fanout WHERE local_npub = ? AND group_id = ? AND envelope_type = ? AND send_key = ?
         ORDER BY recipient_npub`, local, key.GroupID, key.EnvelopeType, key.SendKey)
 	if err != nil {
@@ -252,11 +376,24 @@ func (s *Store) LoadFanoutReport(key FanoutKey) (FanoutReport, error) {
 	for rows.Next() {
 		var recipient RecipientDelivery
 		var createdAt int64
+		var retryCount sql.NullInt64
+		var retryQueueID, phase, origin string
+		var legacyBase int64
 		if err := rows.Scan(&recipient.RecipientNpub, &recipient.EventID, &recipient.QueueID,
 			&recipient.State, &recipient.Issue, &recipient.RelayAcks, &recipient.RelayCount,
-			&recipient.Attempts, &recipient.MaxRetries, &recipient.LastAttemptAt, &recipient.AcceptedAt, &createdAt); err != nil {
+			&recipient.Attempts, &recipient.MaxRetries, &recipient.LastAttemptAt, &recipient.AcceptedAt, &createdAt,
+			&retryCount, &retryQueueID, &phase, &origin, &legacyBase); err != nil {
 			return FanoutReport{}, err
 		}
+		if retryCount.Valid {
+			count := int(retryCount.Int64)
+			recipient.RetryCount = &count
+		}
+		if recipient.State == RecipientRelayAccepted {
+			phase = "accepted"
+		}
+		recipient.RetryQueueID, recipient.AttemptPhase = retryQueueID, phase
+		recipient.AccountingOrigin, recipient.LegacyAttemptsBase = origin, int(legacyBase)
 		switch recipient.State {
 		case RecipientPrepared, RecipientQueued:
 			report.Queued++
@@ -269,6 +406,8 @@ func (s *Store) LoadFanoutReport(key FanoutKey) (FanoutReport, error) {
 		}
 		if len(report.Recipients) == 0 {
 			report.CreatedAt = createdAt
+		} else if report.CreatedAt != createdAt {
+			return FanoutReport{}, fmt.Errorf("fanout recipients have inconsistent created_at")
 		}
 		report.Recipients = append(report.Recipients, recipient)
 	}
