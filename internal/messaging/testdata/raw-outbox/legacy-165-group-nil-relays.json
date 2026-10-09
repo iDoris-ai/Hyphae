@@ -1,0 +1,17 @@
+{
+  "entries": [
+    {
+      "queue_id": "2fc72e7f8539e9eff9120c979198790b",
+      "route": "group",
+      "id": "3ab652f4ab22a053e7c17b8b35ab99f903f5086a2b44c459ace8d81844662906",
+      "event_json": "{\"kind\":30078,\"id\":\"3ab652f4ab22a053e7c17b8b35ab99f903f5086a2b44c459ace8d81844662906\",\"pubkey\":\"040f5835fd1b2e604e31d9bc3fe0b09e072762081350411a02c73c4a82fe745a\",\"created_at\":1791539064,\"tags\":[[\"p\",\"50780c4ce82ef325d6f45f53a30ef58deb07dfa9a95be290fdb460cbe4756f6e\"],[\"c\",\"agent\"],[\"z\",\"zstd\"],[\"v\",\"v1\"],[\"d\",\"agent-message:0123456789abcdef\"],[\"enc\",\"nip44\"]],\"content\":\"KLUv/UQAXADhCgBBdVBkUUphTmNaZGhtUElweGNhcWdhNDZPWDc3Qlc4VTlxMUxZckNhaXFCb1psdkFSN25rbjdXL0d1TVFJUXhVSGxZZ2VMQ2w1eE92NWpNSjdna0dtWXpqVUtCVVU0d285R2pnUmlteTZHMXVFYXdaeEIvczh2bEgxSHFDdU50ZEQwdTd4aVJGOG1aRzlQdnIrSWdSc1lva1JKYTVEU01QQUNWLzY0WUptYWltSVJOOUtBR1laaDRzYVBIOHZKUHorbXh6UmpUMGhzNjBvSEVHcHhMQ2NEQ0d0eVhscjVQMlFtLzN4Q2E5TUZNNDNsenhweUNSbUNXWW9QNTBoRGprUnBlT1BMYVVNazhQc1Q5U1lKMFZQODZ4Qkx6KzU2am1yaW9sci9MM1NOWkhqSWozbFV2bGhJR01GVGVSQ0F5bWpWQ04yMTZaQ0V1WVlESGNCTnJxSVdEMVBBPT2t+kXS\",\"sig\":\"e6323c249ac7bd6787d1a4c8165cff1047905f317eed027d1b7b1f5e249ced23e99bf377ef3a824bbf7d81542236fec38bda9faa0591b28486990aa1167682cc\"}",
+      "recipient_npub": "npub12puqcn8g9mejt4h5taf6xrh43h4s0haf49d79y8ak3svher4dahq9z8wdj",
+      "relays": null,
+      "retry_count": 0,
+      "max_retries": 10,
+      "last_attempt": 0,
+      "created_at": 1791539064,
+      "status": "group_pending"
+    }
+  ]
+}
