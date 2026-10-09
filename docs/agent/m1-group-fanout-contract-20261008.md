@@ -1,21 +1,36 @@
 # M1 群消息 fanout 与 inbound 路由契约（P0-E/F 前置）
 
-状态：2026-10-08 设计契约，**不含实现**。P0-E（发送 fanout / durable send-intent / 重试）与 P0-F（inbound 路由 / 界面通知）的实现者按本文照做；偏离本文任何一条决定，须先改本文并经评审。本文写作时的设计基线与当前实现基线分别注明，不能混用。
+状态：**rev7 设计评审 PASS（2026-10-09；仅文档/设计层）**。本文描述目标契约，不代表实现已存在或运行时验收已通过；S7 与受影响的 S8/S9 接线仍 **BLOCKED，直到 F1–F4 前置 follow-up 分别评审/合入并通过其验收门槛**。不得修改已批准的 #165/#166 来追补本设计。
 
-修订 rev3（2026-10-08）：在 rev2 基础上按 [P0-E 实现拆分方案](m1-group-fanout-impl-plan-20261008.md) 第 6 节登记 D14，并按已合入 main 的 #151 闭合 D13。各条以 `**D#**` 标记写在原章节内；切片编号（S1–S10b、E2E-A/B）以实现拆分方案第 2 节为准。实现 PR 一律以本修订版为唯一依据。
+设计历史：rev7 在源码审计与 rev6 复核基础上，选择有条件的受控部署边界并明确 legacy null 语义；本文与[实现计划](m1-group-fanout-impl-plan-20261008.md)自包含记录七项设计决策，不依赖临时档案。
 
-依据与基线：
+### 实现状态与精确基线
 
-- 当前实现基线（检查后、2026-10-08）：`origin/main = 254b5412ef1d78aafa679cdbd1b1ac7724e0b2b0`（#157），包含 #145、#151、#153、#154、#155、#156、#157。新实现工作以此为起点。
-- 设计时基线（rev1/rev2 作出决定时）：`origin/main = 6c5e751`，当时 #145 尚未合入；该历史基线只解释 D1 等早期决定，不描述当前代码。
+本工作树/PR base 固定为 `699b36f74c6b3802b93768d670229d7b2d3b6cff`。下表来自本地 `git show <exact-object>:<path>`；未把远端 PR 的批准状态当成 base 已包含它们。旧 rev1–3 的 `6c5e751` / `254b5412` 只属历史。
 
-- 发布计划：[M1 收尾计划](m1-release-plan-20261007.md)「加密群聊」一节。
-- 群协议：#136（已入 main）`internal/groupchat/protocol.go`、`verified.go`；设计基线 [M1 群聊最小设计](m1-group-chat-design-20261007.md)。
-- 状态层：#138 **已合入 main**（`6c5e751`）`internal/groupchat/store.go`、`messages.go`；写事务统一经 `beginImmediate()`。
-- 已验证入站边界：#145 **已合入 main**，`internal/messaging/verified_agent.go` 的 `VerifyAgentMessage` / `AgentMessageRoute`，以及 `groupchat.FromVerifiedAgentMessage`。设计时 #145 基于 #138 合并前旧栈，因此 D1 曾将 `Route()` 断言延后；当前实现基线已包含 #145。发送侧（P0-E）不依赖该 PR。
-- 收件守卫：**已合入 main**，形态为 `messaging.RejectReservedGroupPayload`（`internal/messaging/agent.go`），被 `inbox_watch.go`、`daemon.go` `processIncomingEvent`、`AgentInboxCmd` 三处调用，对 `hyphae.group/` 前缀做 fail-closed。它对应第 4 节 R1–R3 的「不回落 DM」半边，是本文的子集，不提供群路由；P0-F 集成时以本文第 4 节为准，guard 并入 R1–R3 的 reserved 分支。（handoff 中记录的未推送 commit `1cf7bb3` 已被该合入版本取代，不再作为基线。）
-- 现有发送/重试：`internal/messaging/outbox.go`（JSON 文件 outbox，`UpdateOutbox` 加锁 + fsync/rename）、`agent.go` 的 `sendQueuedAgentMessage`、`queued_agent.go` 的 `AgentMessageDeliveryState`、`internal/tui/offline_outbox.go`（#143）、`internal/daemon/daemon.go` 的重试循环。
-- #151 **已合入 main**：新增 `AttemptSendWithKeyStore(..., ks *types.KeyStore)`，原 `AttemptSend(...)` 以 `nil` 调用它；传入已解锁 keystore 时，重建加密历史使用该 keystore。D13 据此冻结 3.4 选项结构的字段和语义。
+| 精确对象 | 已检查的源/API | 事实与缺口 |
+| --- | --- | --- |
+| base `699b36f74c6b3802b93768d670229d7b2d3b6cff` | `internal/groupchat/store.go:beginImmediate`、[fanout.go](../../internal/groupchat/fanout.go)、`messages.go:storeMessageTx` | fanout 是 SQLite；S2/S3/S10a 已在 base。无 attempt_generation、row_revision、recovery witness；transitionFanoutTx 以 state CAS，部分字段 MAX 更新，不等于 rev7 fence |
+| 同一 base | [outbox.go](../../internal/messaging/outbox.go) 的 readOutbox/UpdateOutbox/writeOutbox/currentOutboxAttempt；`outbox_lock_unix.go:withOutboxLock`；`pkg/types/types.go:OutboxEntry` | outbox 是独立 JSON 文件，排他 flock + temp fsync/rename/目录 fsync，**不与 fanout 共用 SQLite DB/事务**；typed unmarshal 后 normalize，缺 QueueID 可被自动分配 |
+| 同一 base | [outbox_group.go](../../internal/messaging/outbox_group.go) 的 normalizeOutboxEntryRoute / RequeueGroupOutboxEntry / GetPendingGroupOutbox / GroupOutboxEntriesByEventID | S5a 已有；空 Route 可被修成 group；requeue 能替换 exhausted pending，GetPending 排除 exhausted；同事件 helper 只收 group-like，不能用作全 route 证据枚举；没有 D6 来源见证 |
+| approved #165 `c0a54111f78f357c6ae2772f06f9a3cc4fe7c63b` | `internal/groupchat/fanout_queue.go:queueTargets / BeforePublish / MarkRelayAccepted / RecordAttemptFailure` | 先 JSON 入队再 SQLite state CAS；BeforePublish 只看 accepted；失败回调增加 attempts。**没有 generation reservation/token，也没有恢复见证** |
+| approved #166 `7861d029b5ccc2959b80a184a390ec132ddd025f` | `internal/messaging/outbox.go:GroupOutboxHandler / attemptSendGroup / recordGroupAttemptFailure / recordAttemptFailure` | 三个 handler 签名均无 generation；O3 先改 JSON RetryCount/status，再调用 T4；给 T4 加 fence 仍阻止不了 stale O3。精确 QueueID 删除已有基础，但 raw 全量/ACK 证据门槛仍需 follow-up |
+
+两个 approved head 上的 tracked 契约仍为 rev3，不能把 rev5 的设计接口归到它们。#145 的 verified 路由、#151 的 `AttemptSendWithKeyStore` 已在 base；D1 的历史分工、D13 的 keystore 语义保留，无需再等这些已合入 PR。
+
+参考：[M1 收尾计划](m1-release-plan-20261007.md)、[群聊最小设计](m1-group-chat-design-20261007.md)。不引入新的 relay 订阅/解密实现；现有 reserved guard 只提供不回落 DM 的保护，完整 inbound 仍见 §4。
+
+### 七项评审发现的闭合索引（设计层）
+
+| 发现 | 本次明确决策 | 契约位置 | 实施门槛 |
+| --- | --- | --- | --- |
+| 1 generation 不在 approved heads | 单独 F1–F4，不 retrofit #165/#166 | §3.1、§3.3、§3.6 | 全部合入后才 S7/接线 |
+| 2 stale O3 | 持锁检查当前 token 后才写 O3；结果日志与 retry/status 原子提交，恢复屏障先 T4 后新 R | §3.3、V2/V3 | F2/F3 |
+| 3 recovery provenance | D6 原子写 witness；missing 证明当前缺失，不要求不存在的旧记录 | §3.4、V4 | F4 |
+| 4 generation/预算 | generation、publish starts、当前 QueueID failure budget 三个计数分开 | §3.1、V1 | F1/F3、S9 |
+| 5 exhausted pending | `<` 与 `>=` 分开；D14 QueueID 冲突先于 exhaustion/recovery | §3.2、§3.4–3.5 | F2/F4、S7 |
+| 6 诊断重叠 | first-match primary + details；orphan 仅无 row；诊断不覆写 Issue | §3.5、V5 | F4、S7 |
+| 7 raw evidence | normalization/自动 QueueID 前验证；全 route 枚举；字段级 legacy 例外（DM 身份路由、DM/group relays:null） | §3.2、V6 | F2 |
 
 **D1**（约束 S4；延后断言归 P0-F）：
 - 决定（设计时）：基线以 `origin/main = 6c5e751` 为准（上列）。第 1 节单元验收中「通过 `VerifyAgentMessage`、`Route()==AgentRouteReservedGroup`」改为「产出的 event 能通过 main 上已有的 `groupchat.VerifyIncoming` 解出逐字节相同的 envelope」；`Route()==AgentRouteReservedGroup` 断言留给 P0-F 集成验收（当时 P0-F 开工前提是 #145 合入，见 G5）。
@@ -30,24 +45,24 @@
 - **I4** 已签名 event 一旦持久化即冻结：重试只重发同一 event（同 event ID / 同 `d` / 同密文 / 同签名），绝不重新加密或重新签名。
 - **I5** 状态单调：任何重放、重启、并发重试都不能让收件人投递状态或群状态倒退，也不能让同一逻辑消息显示两次。
 
-### rev3 修订索引（D1–D14）
+### 决策索引（D1–D14；rev7 更新恢复与证据规则）
 
 | ID | 位置 | 一句话决定 | 约束的切片 |
 | --- | --- | --- | --- |
 | D1 | 依据与基线、§1 验收 | 基线更新；§1 验收改用 `groupchat.VerifyIncoming`，`Route()` 断言延后到 P0-F | S4（P0-F 补断言） |
 | D2 | §2 `RecipientDelivery`、CLI、§5 | `relay_acks ∈ {0,1}`、`relay_count = len(targets)`、删 `Relays`、文案 `relay accepted (≥1 of N)` | S3、S6、S9 |
 | D3 | §2 验收 E2E | 投递状态只取决于发送方→relay；E2E 改为全 relay 不可达 0/2→2/2 + Go e2e 注入 1/2 | E2E-A |
-| D4 | §3.5 对账表 | 增 `failed`+`group_pending`→T2'、`failed`+`group_failed`→无动作；扫描含有条目的 `failed` 行 | S7 |
+| D4 | §3.4–3.5 | failed 恢复须 durable witness；全状态/全 route 扫描、顺序诊断 | F4、S7 |
 | D5 | §3.2 | `CleanupOutbox`/`recordAttemptFailure`/`inspectAttemptQueue`/`isFailedOrStuck` 按 route 取状态值 | S5a |
-| D6 | §3.2、§2 手动重试、§3.5 | 新原语 `RequeueGroupOutboxEntry`（单次 `UpdateOutbox` 内删旧 `group_failed` + 加新 `group_pending`） | S5a（S6 使用） |
-| D7 | §3.4 | `messaging.SetGroupOutboxProvider(p)`，`main.go` 注册一次；未注册→`route_handler_missing` | S8a（S8b 使用） |
+| D6 | §2、§3.4–3.5 | 协调恢复 API：新 QueueID + 原子 witness；覆盖 missing 与两种 exhausted | F4、S7、S9 |
+| D7 | §3.6 | `messaging.SetGroupOutboxProvider(p)`，`main.go` 注册一次；未注册→`route_handler_missing` | S8a（S8b 使用） |
 | D8 | §2 CLI、全文命令名 | 新协议命令为 `hyphae groupchat {send,retry,status}`；不碰旧 `hyphae group` | S9 |
 | D9 | §7 G4 | G4 关闭条件 = 状态迁移与 fanout 行插入同一事务（S10a Tx 变体 + S10b `*WithFanout`） | S10a、S10b |
 | D10 | §1 构造函数 | 只收拢**加密路径**；明文分支与 daemon auto-reply 维持现状 | S1 |
-| D11 | §3.4 | `SendResult` 追加 `Issue`；哨兵错误 `ErrGroupRouteHandlerMissing` | S5b |
+| D11 | §3.6 | `SendResult` 追加 `Issue`；哨兵错误 `ErrGroupRouteHandlerMissing` | S5b |
 | D12 | §3.3 | 签名在 T1 事务内；同 `(group, logical_id)` 已有 fanout 行时返回既有行、不再签名 | S4 |
-| D13 | §3.4 签名 | `AttemptOptions{Handlers; KeyStore}` 冻结；KeyStore 语义对齐已合入 #151 的 `AttemptSendWithKeyStore` | S5b |
-| D14 | §2、§3.1、§3.4、§5 | 状态迁移保留历史证据；队列与 ACK 证据不可伪造或倒退；校验、时间、计数与 Issue 语义固定 | S3、S5b |
+| D13 | §3.6 | `AttemptOptions{Handlers; KeyStore}` 冻结；KeyStore 语义对齐已合入 #151 的 `AttemptSendWithKeyStore` | S5b |
+| D14 | §2、§3.1、§3.4、§3.5、§5 | 状态迁移保留历史证据；queued QueueID 碰撞只 hold；独立 generation、O3 fence、证据恢复与精确清理 | F1–F4、S7–S9 |
 
 ---
 
@@ -105,7 +120,7 @@
 
 投递状态**逐收件人**记录、逐收件人报告；整体状态只是派生摘要，不单独落盘。
 
-报告结构（P0-E 新增 `internal/groupchat/fanout.go`）：
+目标报告结构（在 base 的 `internal/groupchat/fanout.go` 基础上由 F1 扩展；诊断 overlay 见 §3.5）：
 
 ```go
 type RecipientDeliveryState string
@@ -123,9 +138,14 @@ type RecipientDelivery struct {
     QueueID       string                               `json:"queue_id"`  // 当前 outbox 条目；prepared 时为空
     State         RecipientDeliveryState               `json:"state"`
     Issue         messaging.AgentMessageDeliveryIssue  `json:"issue,omitempty"`
-    RelayAcks     int                                  `json:"relay_acks"`  // D2：∈ {0,1}；1 = 最近一次尝试至少一个 relay 接受
+    RelayAcks     int                                  `json:"relay_acks"`  // D2：∈ {0,1}；1 = T3 durable ACK
     RelayCount    int                                  `json:"relay_count"` // D2：最近一次 publish attempt 的目标 relay 数 = len(targets)，不是 ACK 数
-    Attempts      int                                  `json:"attempts"`
+    Attempts      int                                  `json:"attempts"` // §3.1 durable publish starts（legacy 有标签）
+    RetryCount    *int                                 `json:"retry_count"` // nil = unknown，不伪造 0
+    RetryQueueID  string                               `json:"retry_queue_id"`
+    AttemptPhase  string                               `json:"attempt_phase"`
+    AccountingOrigin string                            `json:"accounting_origin"`
+    LegacyAttemptsBase int                             `json:"legacy_attempts_base"`
     MaxRetries    int                                  `json:"max_retries"`
     LastAttemptAt int64                                `json:"last_attempt_at"`
     AcceptedAt    int64                                `json:"accepted_at"` // relay_accepted 时刻；否则 0
@@ -148,7 +168,7 @@ type FanoutReport struct {
 - 理由（设计时）：main 上 `publishToRelays` 返回 `bool`，且**第一个 relay 成功即返回**，后续 relay 根本没有被尝试；按原契约填「OK relay 数」只能伪造数据。改 `publishToRelays` 会改动所有 DM 发送路径并与当时并行的 #151 正面冲突。
 - 为什么不是另一个方案（设计时）：「在 P0-E 改 `publishToRelays` 为逐 relay 发布并返回结果」会改变 DM 发布的时延与行为（原本首个成功即停），超出 S5b「DM 分支零可观察变化」的边界；当时也会与 #151 的发送函数改动交叠。「保留 `Relays` 字段但留空」会让 `--json` 消费方误以为数据存在。`relay_accepted` 的判定（≥1 个 OK）不受影响，与第 5 节一致。
 
-新增 issue 常量（加到 `queued_agent.go` 现有 `AgentMessageDeliveryIssue` 枚举旁）：`queue_missing`（SQLite 为 queued 但 outbox 条目不见且无 ACK 证据）、`queue_duplicate`（outbox 中同 event ID 多于一条）、`route_handler_missing`（重试方未装配群处理器，见第 3 节）。
+Issue 与 operation diagnostic 分离：持久 `queue_missing` / `retry_exhausted` / `send_failed` 只由 §3 的受保护迁移写入；`queue_duplicate` 等对账诊断不写 RecipientDelivery.Issue，缺 handler 仅返回 route_handler_missing。枚举已存在不代表允许在任意 row 上持久化。
 
 派生整体状态，复用现有三值 `AgentMessageDeliveryState`：任一收件人 `failed` → `failed`；否则任一 `prepared`/`queued` → `queued`；否则 → `relay_accepted`。「部分」由计数表达（例如 `queued`，`accepted=1/2`），不新造第四个整体状态。
 
@@ -159,20 +179,20 @@ CLI `hyphae groupchat send`（命令命名空间见 **D8**）：
   ```text
   📤 group <name> · logical 3f2a…  accepted 1/2
      bob    ✓ relay accepted (≥1 of 2)  event 9ab1…
-     carol  ⏳ queued                    attempt 1/10  event 77cd…
+     carol  ⏳ queued                    publish starts 1; failures 1/10  event 77cd…
   ```
 
 - `--json` 输出完整 `FanoutReport`。
 - 退出码：全部 `relay_accepted` → 0；否则返回 `common.NewExitErrorWithData(common.ErrCodeOther, err, report)`。这与现有 `agent msg` 「已入队待重试仍返回非零」一致，脚本才能区分「全员 relay 已收」和「部分在路上」。
 - 文案只说 “relay accepted / 已提交 relay”，不得出现 “delivered / 已送达 / 已读”。
 
-TUI（P0-F 的群模型）：本机发出的每条消息尾部显示派生摘要，例如 `✓ 2/2`、`⏳ 1/2`、`✗ 1/2`；选中该消息展开逐收件人行（同 CLI 字段）。状态更新来自 SQLite 重读，而不是 worker 内存，因此重开 TUI 后显示一致。
+TUI（P0-F 的群模型）：本机发出的每条消息尾部显示派生摘要，例如 `✓ 2/2`、`⏳ 1/2`、`✗ 1/2`；选中该消息展开逐收件人行（同 CLI 字段）。状态更新来自 SQLite 重读及 §3.5 只读 evidence overlay，而不是 worker 内存，因此重开 TUI 后显示一致。
 
 重试：
 
-- 自动重试：同一收件人沿用原 outbox 条目（同 QueueID、同 event），由现有重试循环（daemon、TUI outbox worker、`storage outbox retry`）经 `AttemptSend` 发送，见第 3 节分派。
-- 手动重试：`hyphae groupchat retry <group-id> <logical-id> [--recipient <npub>]` 只作用于 `failed` 行；它经 **D6** 的 `RequeueGroupOutboxEntry` 把 SQLite 中**原 `event_json`** 重新入 outbox（新 QueueID、**同 event ID**），行转回 `queued`。`relay_accepted` 的收件人永远不重发。
-- 只读查询：`hyphae groupchat status <group-id> <logical-id> [--json]` 输出 `LoadFanoutReport` 的结果（同 `send` 的文本 / JSON 格式），不发布、不入队。
+- 自动重试：同一收件人沿用原 outbox 条目（同 QueueID、同 event），由现有重试循环（daemon、TUI outbox worker、`storage outbox retry`）经升级后的 routed 协调 API 发送，见第 3 节分派。
+- 手动重试：`hyphae groupchat retry <group-id> <logical-id> [--recipient <npub>]` 只作用于 `failed` 行；它经 **D6** 的协调恢复 API 与耐久 witness 把 SQLite 中**原 `event_json`** 重新入 outbox（新 QueueID、**同 event ID**），行转回 `queued`；queued 缺队列/同 QueueID exhausted 可先对账成 failed，不同 QueueID 一律 hold（§3.4）。`relay_accepted` 的收件人永远不重发。
+- 只读查询：`hyphae groupchat status <group-id> <logical-id> [--json]` 输出 `LoadFanoutReport` 加 §3.5 的只读 evidence diagnostics overlay（同 `send` 格式），不发布、不入队、不重放持久写入。
 
 **D8**（约束 S9；协调者已拍板）：
 - 决定：新群协议的 CLI 使用独立命名空间 **`hyphae groupchat {send,retry,status}`**。**不改动现有 `hyphae group`**：旧 `internal/group` 的 create/list/add-member/remove-member/leave/delete/chat 保持原样，其去留由 CLI/TUI 线单独决定。本文其余位置凡指新协议命令，均为 `hyphae groupchat …`。
@@ -205,211 +225,206 @@ TUI（P0-F 的群模型）：本机发出的每条消息尾部显示派生摘要
 
 ## 3. outbox 与 SQLite 不共事务：durable send-intent
 
-### 决定
+以下均为 **rev7 提案**；F1–F4 独立 follow-up 尚未实现/评审/合入。SQLite 保存权威 intent/投递状态，JSON 保存工作队列及跨存储提交凭据。不声称两者具有单事务原子性；选择「统一跨进程锁 + SQLite CAS + JSON 原子结果日志 + 强制恢复屏障」协议。仅把 generation 加进 T3/T4 回调不能满足本契约。
 
-**SQLite 是发送意图与投递状态的唯一权威；outbox JSON 只是工作队列。** 两者靠「冻结的 event ID」对账，不靠布尔。
+#### 3.1 数据模型与计数（D14；发现 1、4）
 
-#### 3.1 send-intent 表（字段级）
+保留基线 `groupchat_fanout` 的主键 `(local_npub, group_id, envelope_type, send_key, recipient_npub)`、`UNIQUE(local_npub,event_id)`、冻结的 `event_json`/`event_id`、`max_retries` 与同 intent 共同 `created_at`。控制 envelope 的 `send_key=invite_id`，message 的 `send_key=logical_id`。F1 增加以下**目标 schema**（不是现有列）：
 
-P0-E 在 `internal/groupchat/fanout.go` 的 migrate 中新增（不修改 #138 已有表）：
+| 存储 | 字段/约束 | 语义 |
+| --- | --- | --- |
+| fanout SQLite | `row_revision` 非负 64 位整数 | 每次实际 row 更新递增；所有跨存储操作 CAS 的版本，阻止同态/ABA 覆盖 |
+| fanout SQLite | `attempt_generation` 非负 64 位整数 | 每次 R 预留严格 +1；从不因重排、进程重启或失败重置，溢出 fail closed |
+| fanout SQLite | `attempt_phase` = idle/reserved/started/failed/accepted | 当前 generation 的阶段；started 后无结果表示结果未知 |
+| fanout SQLite | `last_result_generation`、`last_failure_receipt`（token+凭据摘要）、`last_recovery_id`/`last_recovery_digest` | 幂等投影水位与已消费精确凭据；只能消费匹配的 O3 结果或 D6 witness |
+| fanout SQLite | nullable `retry_count`、`retry_queue_id` | 当前 queue epoch 的预算快照；由 O3→T4 或 D6→T2' 投影，读报告可识别尚待投影，不能用 attempts 代替 |
+| fanout SQLite | `accounting_origin` = native/legacy、`legacy_attempts_base` | 升级时旧 attempts 只能保留为 legacy 基数，不能伪称是历史发布次数 |
+| outbox JSON group entry | `fanout_protocol=1`、可选 `failure_result`、可选 `recovery_witness` | F2 严格版本化 schema；O3 与 failure_result 同次 JSON 提交；D6 替换与 witness 同次 JSON 提交 |
 
-```sql
-CREATE TABLE IF NOT EXISTS groupchat_fanout (
-    local_npub      TEXT    NOT NULL,             -- 发送身份
-    group_id        TEXT    NOT NULL,
-    envelope_type   TEXT    NOT NULL,             -- 'message' | 'invite' | 'accept' | 'decline' | 'activate' | 'cancel'
-    send_key        TEXT    NOT NULL,             -- message: logical_id；控制 envelope: invite_id
-    recipient_npub  TEXT    NOT NULL,
-    event_id        TEXT    NOT NULL,             -- 64 位小写 hex，签名后的 event ID，插入后不可变
-    event_json      TEXT    NOT NULL,             -- 完整已签名 event（仅密文），插入后不可变
-    queue_id        TEXT    NOT NULL DEFAULT '',  -- 已确认的 outbox QueueID；prepared 时为 ''
-    state           TEXT    NOT NULL,             -- prepared | queued | relay_accepted | failed
-    issue           TEXT    NOT NULL DEFAULT '',
-    relay_acks      INTEGER NOT NULL DEFAULT 0,
-    relay_count     INTEGER NOT NULL DEFAULT 0,
-    attempts        INTEGER NOT NULL DEFAULT 0,
-    max_retries     INTEGER NOT NULL,             -- D14：intent 创建后冻结
-    created_at      INTEGER NOT NULL,             -- D14：同一 intent 的所有收件人相同
-    updated_at      INTEGER NOT NULL,             -- D14：迁移时不得倒退
-    last_attempt_at INTEGER NOT NULL DEFAULT 0,   -- D14：迁移时不得倒退
-    accepted_at     INTEGER NOT NULL DEFAULT 0,   -- D14：接受时 > 0，之后不得清除或倒退
-    PRIMARY KEY (local_npub, group_id, envelope_type, send_key, recipient_npub),
-    UNIQUE (local_npub, event_id)
-);
-CREATE INDEX IF NOT EXISTS idx_groupchat_fanout_pending
-    ON groupchat_fanout(local_npub, state) WHERE state IN ('prepared', 'queued');
-```
+`AttemptToken = (完整 fanout 主键, event_id, queue_id, attempt_generation)`；QueueID 非空且全队列唯一，generation 独立于 attempts。主键与 sender 身份必须同时匹配，不能仅凭 event ID 跨身份回调。`row_revision` 在每个短事务内现读并 CAS；token 在 R/S/结果之间不因正常 revision 变化失效。
 
-- 稳定键 = `(local_npub, group_id, envelope_type, send_key, recipient_npub)`，即「稳定 logical ID × recipient」。
-- 恢复证据 = `event_id` + `event_json`（原签名 event）+ `queue_id`（outbox 条目身份）。
-- 控制 envelope（邀请/接受/激活/取消）走同一张表，`send_key = invite_id`。这样 #138 的激活「已入队」也能有证据（见缺口 G2）。
+- **R reservation**：只增加 `attempt_generation`，phase=reserved；`attempts`、`RetryCount`、`last_attempt_at`、`relay_count`、`Issue` 均不动。崩溃只消耗 generation，未消耗发布计数或 retry budget。
+- **S dispatch start**：R 后独立的 SQLite 提交，精确 token、phase=reserved CAS；`attempts += 1`，phase=started，记录 `last_attempt_at=max(旧值,now)` 与 `relay_count=len(targets)`，清除旧发送失败 Issue。S 成功返回后才调用 P，重试 S 不可再次加一；已有 started 的重复 S 不授予第二次 P，进程恢复以新 R 开始。`attempts` 的严格定义为「已持久化授权的发布启动次数」，**不声称能证明网络调用发生**：S 后 P 前崩溃也计 1，UI 标记结果未知。不能在无事务的网络 P 与计数之间声称恰一次。
+- **O3 failure**：只有当前 token、phase=started、尚无该 generation 结果的有效 P 失败才使 `RetryCount += 1`；达到 `MaxRetries` 写 `group_failed`，否则 `group_pending`。成功、过期结果、校验失败、R/S 崩溃不增加 RetryCount。RetryCount 是本 QueueID 已提交的发布失败数，不是所有 P 调用数；自动调度只允许 `< MaxRetries`。
+- **T3/T4** 不再增加 attempts。T4 从 O3 凭据投影 retry_count/status/issue、phase=failed、last_result_generation、last_failure_receipt；T3 固化 ACK，phase=accepted 并推进 last_result_generation。`Outbox.LastAttempt` 是最近已提交失败的 S 时间，不是成功时间；SQLite `last_attempt_at` 是最近 S 时间。两个时间不必相等。
+- **D6** 创建新 QueueID，并重置该 epoch 的 RetryCount=0 / LastAttempt=0；`MaxRetries` 必须等于冻结的 row.max_retries。SQLite attempts、attempt_generation、last_attempt_at、relay_count 与历史水位保留；T2' 清 Issue、phase=idle、投影新 retry_queue_id/count=0。下一 R 才再增加 generation。旧 epoch 结果永远不能回写。
+- `relay_count` 是最近 S 的目标数，可以从 3 减到 1，**不能用 MAX 聚合**；`relay_acks ∈ {0,1}`，1 仅在当前 token 的 T3 写入。`accepted_at=max(now,last_attempt_at)` 且 >0，终态冻结；updated_at 单调，只在实际写入时更新。只读 hold 不刷新时间。
+- 报告扩展 nullable `RetryCount`、`RetryQueueID`、`AttemptPhase`、`AccountingOrigin`、`LegacyAttemptsBase`；generation 可在诊断中显示，不能充当 `attempt x/MaxRetries`。CLI/TUI 顶层格式为 `publish starts N; failures r/M (current queue)`；native 的 N=attempts，legacy 的 N=attempts-legacy_attempts_base，并另显示历史基数，started 无结果显示 `outcome unknown`。预算投影待恢复时显示 `pending bookkeeping`，不拼接旧 QueueID 的预算。只读 status 不做恢复写入。
 
-#### 3.2 outbox 条目扩展
+F1 迁移保留旧 attempts 原值，另存相同的 immutable legacy_attempts_base，标记 legacy；以该非负值初始化 generation 水位但**不构造历史 token**，phase=idle（accepted 行保留终态并置 phase=accepted）。迁移只在 §3.6.1 受控安装边界成立、旧 writer 已退出且所有入口关闭后进行；旧在途回调没有新 token，一律不能提交。不能从现有 attempts 推导历史 RetryCount，须用经严格验证的当前队列初始化预算快照，否则报告未知。新行两计数与 legacy_attempts_base 均为 0。F1 需同时更新迁移原语/allowlist/报告，不能沿用基线 state-only CAS 或 relay_count 的 MAX 行为。
 
-`types.OutboxEntry` 新增 `Route string \`json:"route,omitempty"\``（`""` = DM，`"group"` = 群）。群条目的 `Status` 使用 `group_pending` / `group_failed`，**不用** `pending` / `failed`。
+#### 3.2 原始证据边界（D5；发现 5、7）
 
-不变量：`Route == "group"` ⇔ `Status ∈ {group_pending, group_failed}`。不满足时视为损坏条目：不发送、不删除、不写任何历史，该收件人 issue 记为 `send_failed`，条目原样保留供人工检查。
+**先读原始字节，再校验，再分类，最后才能正规化 DM 或调用任何可写 API。** 现有 `LoadOutbox/readOutbox` 和 `currentOutboxAttempt` 不能当作群证据入口（前者会归一 Route，后者会补 QueueID）。F2 提供 `ReadRawOutboxEvidenceLocked` 与保持未改条目原始字节的 writer；普通 struct unmarshal 后再 marshal 不够。
 
-理由：现有 `GetPendingOutbox` 只挑 `Status == "pending"`。旧版本二进制（例如升级后仍在跑的旧 daemon）读到新 outbox 时会忽略未知 `route` 字段；如果群条目仍叫 `pending`，旧 `attemptSend` 会把它发出并调用 `StoreOutgoingMessage`，在 DM 表写一条空正文的出站行，违反 I3。改用新状态值后，旧二进制会跳过这些条目。旧 `CleanupOutbox` 可能删掉 `LastAttempt == 0` 的群条目，但 SQLite 的 `event_json` 仍在，由 3.5 对账恢复，降级而不出错。
+1. 在稳定 outbox sibling 锁内读取一个完整 JSON snapshot。严格 tokenizer 在 outer document、entry、嵌套 witness/result、`event_json` 内的 signed event 每一层检测重复 key（包括转义后同名）、未知字段、字段级 null/缺失/类型错误（见下表）、尾随 token、整数溢出/负值。schema 字段名大小写精确；signed event 使用受支持的 Nostr 字段 allowlist，验证 ID/签名、kind、单一 p、加密标签、sender/recipient 与条目自身声明一致；与冻结 SQLite event 的逐字节比较在 §3.5 优先级 5 完成。`event_json` 字符串不得经重编码替换。未知 metadata 版本 hold，不能丢弃后继续。
+2. 群条目的原始 `route` 必须显式等于 `group`，status 仅 `group_pending/group_failed`；空/缺失/null route + group status 均为 `queue_corrupt`，**无 legacy group Route 修复例外**。反向不匹配、未知 route、`sent` 群条目也不可当 ACK。group queue_id 空/缺失/null 先报损坏，绝不让 `currentOutboxAttempt` 自动分配。`RetryCount >= 0`、`MaxRetries > 0`、时间非负、身份/固定字段匹配；RetryCount 超过上限是 exhausted，不单因 `>` 判损坏；group_failed 却 RetryCount<MaxRetries 是矛盾证据，归 queue_corrupt。
+3. 先枚举 **所有 route/status** 共享外层 ID 或可严格读出 signed EventID 的条目，包括 DM、未知 route、坏 group、group_failed；随后才选择/adopt。两个 ID 不符是损坏，不能把碰撞藏在另一 ID 下。条目不能可靠提取身份/EventID、outer JSON 损坏、或未识别字段可能影响枚举时，整份 outbox `queue_corrupt(scope=file)`，冻结该文件群操作。多个条目同 EventID 一律 duplicate，不能选最新。重复 QueueID 跨 EventID 也不可用。
+4. Route/QueueID 的唯一兼容例外：无 group status、也不与任何 fanout EventID 碰撞的普通 DM，可沿用旧的空/缺失 route 与空/缺失 QueueID；只有隔离的 DM 路径可补 QueueID。DM 的 route/queue_id 显式 null 仍拒绝；DM 不因此成为群候选。另有下表规定的 DM/group `relays:null` 兼容，不授权身份修复。缺少新增 protocol metadata 的**严格合法旧群条目**可在升级审计中补 `fanout_protocol=1`，不能补 Route/QueueID、生成 recovery witness 或假造结果。升级审计仅对匹配 queued 行的旧条目自动初始化预算；prepared+active pending 在 §3.5 的 T2 正式采纳后才投影该条目的预算，不能由 migration 提前假定 queued；failed+pending 仍无恢复授权。
+5. `GetPendingGroupOutbox` 必须只返回严格有效的 `group_pending && RetryCount < MaxRetries`；`GetPendingOutbox` 只返回合格 DM。`group_pending && RetryCount >= MaxRetries` 与 `group_failed` 均不可发布，交 §3.5/显式 D6；全量证据扫描不能使用 GetPending 作为输入。
 
-**D5**（约束 S5a）：
-- 决定：**新二进制**中以下四个函数必须按 `entry.Route` 取对应状态值（DM：`pending`/`failed`；群：`group_pending`/`group_failed`），不得硬编码 DM 值：
-  - `CleanupOutbox`：保留条件中的「pending」对群条目指 `group_pending`；从未尝试（`LastAttempt == 0`）的 `group_pending` 必须保留。
-  - `recordAttemptFailure`：重试耗尽时群条目写 `group_failed`，DM 条目仍写 `failed`。
-  - `inspectAttemptQueue`：判断「仍排队」时群条目以 `group_pending` 为准。
-  - `outbox_commands.go` `isFailedOrStuck`：群条目以 `group_failed`、或 `group_pending` 且 `RetryCount >= MaxRetries` 判定。
-- 理由：上一段只讨论了旧二进制。main 上新二进制的 `CleanupOutbox` 只保留 `Status == "pending"` 或近期条目，会在 daemon 第一次清理时删掉从未尝试的 `group_pending`；`recordAttemptFailure` 写死 `"failed"`，会把群条目改成 DM 状态，破坏 Route⇔Status 不变量，此后旧二进制与 `GetPendingOutbox` 都会把它当 DM 处理。
-- 为什么不是另一个方案：「靠 3.5 对账兜底被误删的条目」把新代码自己的 bug 当作常态降级，且 `queued` + 0 条目会被标 `queue_missing` 而不自动恢复，用户必须手动 retry；「群条目在入队时就把 `LastAttempt` 设为当前时间以躲过清理」是利用清理规则的副作用，一旦 `maxAge` 过期仍会被删，且 `recordAttemptFailure` 的问题仍在。
-- 验收（S5a）：`CleanupOutbox` 后 `LastAttempt == 0` 的 `group_pending` 仍在；群条目耗尽后 `Status == group_failed`、`Route == group`；`storage outbox list --failed-only` 列出 `group_failed`；DM 条目在这四个函数中的行为与 main 逐用例一致。
+**字段级 raw JSON schema（B2）**：缺失、null、空值分别判定，不能用 Go 零值或指针反推原文是否存在。表中例外只适用于指定字段；每层 duplicate-key（包括转义同名）、unknown-key、类型与范围检查始终有效。
 
-**D6**（约束 S5a 提供原语，S6 `RequeueFailed` 与 `groupchat retry` 使用）：
-- 决定：在 `internal/messaging` 新增原语 `RequeueGroupOutboxEntry`。它在**一次 `UpdateOutbox` 回调内**完成：(1) 若同 event ID 已有 `group_pending` 条目 → 不改动，直接返回该既有条目；(2) 否则删除同 event ID 的全部 `group_failed` 条目，并追加一条新的 `group_pending` 条目（新 QueueID、同 `EventJSON`、`RetryCount = 0`）。同 event ID 存在 Route⇔Status 不变量被破坏的条目时返回错误、不改动。普通入队 `EnqueueGroupOutboxEntry` 仍是「同 event ID 已存在即返回既有条目」。
-- 理由：`groupchat retry` 要用同一 event ID 换新 QueueID，而原 `group_failed` 条目仍在 outbox：按 3.5「入队前先查同 event ID」会直接返回旧的失败条目，什么都没重排；先追加再删会在两次写之间出现 2 条，被判为 `queue_duplicate`，`AttemptSend` 也会拒绝同 ID 多条。
-- 为什么不是另一个方案：「先调用一次删除、再调用一次入队」是两次 `UpdateOutbox`，两次之间崩溃会留下「行为 failed、条目 0 条」，与用户执行 `storage outbox clear` 的状态不可区分；「原地把 `group_failed` 改回 `group_pending` 并清零重试」保留了旧 QueueID，违反第 2 节「新 QueueID」的约定，T2' 的「QueueID 不同即被另一进程重排」判据也会失效。
+| 字段/位置 | 缺失、null 与空值规则 |
+| --- | --- |
+| outer document / entry / signed event | 必须为对象；`entries` 必须为数组，每项为对象，均不得缺失/null。signed event 必需 id/pubkey/sig/content/tags/kind/created_at 按其 schema 校验，`tags` 及元素不得 null；不因 relays 例外放宽 event |
+| entry `id`、`event_json`、`recipient_npub`、`status`；群 `route`、`queue_id` | required，拒绝缺失/null/错误类型；身份与群 Route/QueueID 必须有效非空。`event_json` 为原始签名 event 的 JSON 字符串，先验证后比较，绝不先重编码或发明标识 |
+| `retry_count`、`max_retries`、`last_attempt`、`created_at` | required 非 null 整数，范围按本节；缺失不能默认为 0。counter/时间为 0 是否合法依字段语义判断 |
+| DM/group entry `relays` | required；允许字符串数组（空数组表示 default-relay selection）或 **legacy null**（同一默认 relay 哨兵）；缺失、标量、对象、数组中的 null/非字符串拒绝。新建条目必须写 `relays:[]` 表示默认选择；对已有 legacy 条目的采纳、迁移、O3、恢复投影及其他非替换更新须逐字节保留其 `relays` 原始片段，包括 null 与周围原有空白，不将 null 改写为 [] |
+| `fanout_protocol`、`failure_result`、`recovery_witness` | protocol 仅旧群条目可缺；出现时须为受支持正整数，null 拒绝。result/witness 是可省略对象，省略表示不存在；显式 null 拒绝。出现则内部必需 version/token/key/ID/revision/generation/计数/时间等字段完整且非 null，不能用空对象或缺失成员代表未发生 |
+| witness 的条件字段 | `old_queue_id` 必须存在且为字符串，仅 §3.4 的 legacy failed 无旧 QueueID 可为空，不可 null。reason=missing 必须 `observed_absent=true`，旧条目摘要/status/RetryCount 省略；exhausted 两种 reason 必须旧摘要/status/RetryCount 且 `observed_absent` 省略；互斥字段或 null 均拒绝 |
+| optional / pointer 输出 | 无其他通用 null 豁免。可选持久字段缺失与显式 null 不等价；新字段须列入已评审 schema。§2 报告 `RetryCount *int` 与 SQLite nullable retry_count 可用 null 表示 unknown，**不代表** outbox retry_count、token 或 witness 允许 null；可选 Issue 省略表示无 issue，出现须为合法字符串 |
 
-#### 3.3 发送顺序（每一步都是独立的持久化边界）
+上述片段保留是未来 F2 writer 的要求，不是 approved typed writer 的现有能力；授权更新计数/metadata 时不承诺整份 outer JSON envelope 字节不变。legacy `relays:null` 在补 `fanout_protocol=1` 后仍合法，不能因升级 metadata 就失去兼容性。仅解释为运行时选用 `defaultRelays`，不把默认 relay 地址写回条目；defaultRelays 为空时沿用既有发送结果，不额外发明成功语义。D6 创建新 QueueID 属于新条目，默认选择写 []，从旧 null 得到同一选择语义；此处是显式授权替换，不是旧条目的归一化。D6 witness 必须对替换前**包含原 null 的旧原始条目**取摘要；所有 event 字节始终保留。已消费的 result/witness 即使在同条目后续 O3/R/S/T3 等更新时也须保留原始嵌套片段，直到 §3.3/§3.4 授权替换/删除，不能重排或重新格式化破坏 receipt digest。
+
+**源路径复制 fixture 规格（B2，F2/V6 必交）**：以下是应复制落盘 bytes 的两个具名输入，不是手写有效签名或本次已运行的测试。F2 要在隔离 HOME 从指定精确对象运行源路径后直接读取 `outbox.json`，连同对应 SQLite row、event bytes 和 SHA-256 固定为原始 fixture；不得以新版 struct round-trip 生成或“修复”。完整签名 event 由该路径生成后冻结，文档不以占位 event 冒充可执行 fixture。
+
+| fixture | 必须复制的精确来源/原始特征 | 预期结果与派生用例 |
+| --- | --- | --- |
+| `legacy-165-group-nil-relays` | #165 `c0a54111f78f357c6ae2772f06f9a3cc4fe7c63b` 的 `fanout_queue.go:queueTargets` 调用 `enqueue(target.eventJSON, target.recipient, nil, target.maxRetries)`；其 `outbox_group.go` 用 `Relays: append([]string(nil), relays...)`，`OutboxEntry` relays 无 omitempty，writeOutbox MarshalIndent 产生 `"relays": null`、`"retry_count": 0`、`"last_attempt": 0`、`"status": "group_pending"`，并保留源分配的非空 queue_id、route=group、真实 event_json | matching queued row 可补 protocol 并初始化当前 QueueID 预算 0/M，不能改 relays/event bytes；捕获 O1 后 T2 前另一个 snapshot，prepared 经 T2 采纳原 QueueID、预算 0/M；有效 R/S/P 失败后 O3 计 1、T4 前 kill 重放只投影一次，null/event 不变；同原 QueueID 耗尽派生 fixture 经显式 D6 新条目 [] + witness，再 T2' kill/replay 幂等；failed+active pending 无 witness 仍 hold |
+| `legacy-dm-nil-relays` | 同一 #165 精确树的 `outbox.go:enqueueOutboxEntry`（与 base 路径相同）调用 nil relays，`Relays: relays`；落盘 `"relays": null`、`"retry_count": 0`、`"max_retries": 10`、`"last_attempt": 0`、`"status": "pending"`；route 由 omitempty 省略，queue_id 保留源分配值 | 严格 raw 校验后进入独立 DM 兼容路径，不增加 group protocol/witness、不写 fanout、不初始化虚假群预算；DM 发送仍选 defaultRelays，失败重试预算沿用 DM 规则且保留 null/event bytes。另以源 raw bytes 定向删除 queue_id 测 legacy DM 例外，不能把该例外移植到 group |
+
+#166 `7861d029b5ccc2959b80a184a390ec132ddd025f` 的 `attemptSendGroup` 明确以 `len(targets)==0` 选 defaultRelays；上述 null 不是损坏或新的投递语义。两个 exact approved head 均无本节未来 strict raw 验证能力。V6 还须在这两个真实 fixture 上定向改出缺失 relays、`relays:[null]`、计数 null、group Route/QueueID null、result/witness null、嵌套缺字段及重复/未知 key，并验证拒绝前后原 bytes 不变。
+
+异常快照禁止整文件类型化重写（否则会抹掉别的坏条目）。F2 将所有 writer 路径纳入原始证据保护，确保 hold 条目的原始 bytes 保留；无法无损保存时整个写请求失败。`CleanupOutbox`/clear 不得删未投影的结果/witness，不得自动删除群 failed 证据；精确终态清理由 §3.5 授权。D5 的 route 状态分离继续有效。
+
+#### 3.3 并发、顺序和实际 O3 fence（D12、D14；发现 1、2）
+
+**F3 新 API 边界提案**：`WithGroupOutboxEvidence` 管理 outbox 锁、严格 snapshot、SQLite `BEGIN IMMEDIATE` 与恢复屏障；`ReserveGroupAttempt` 返回 token；`StartGroupPublish(token,targets)` 提交 S；`CommitGroupFailure(token,result)` 包住 **O3 本身和 T4**；`CommitGroupAccepted(token,ack)` 包住 T3；`CleanupAcceptedGroup` 仅做授权 O2。方法名为设计名，接口需在 F3 独立评审冻结。不能继续使用 #166 的 `recordAttemptFailure` 先写、handler 后验流程；也不能只改三个 handler 的参数。
+
+全局锁顺序：**outbox 稳定 sibling 排他锁 → SQLite BEGIN IMMEDIATE → 完成短操作 → 结束 SQLite → 释放 outbox 锁**。T1 是纯 SQLite，不获取 outbox 锁；不得持 SQLite 再等 outbox。所有群 row 状态/queue/generation/revision writer（含 requeue、reconcile、clear、迁移、generic transition 的调用方）必须遵循该边界；DM outbox writer 使用同一文件锁并保留群凭据。不支持跨进程锁的平台禁止启用群发送。P 在两把锁均释放后执行。此锁只约束合作的新 writer；旧二进制即使取得同一 flock 仍可删字段/清队列。§3.6.1 的部署前提独立成立，不能由 outbox.lock、daemon.lock 或协议 marker 代替。
 
 ```text
-T1  SQLite tx（D12）：读 active roster 与群状态（同一快照）
-              + StoreLocalMessage 语义写 groupchat_messages 本机行
-              + 逐收件人 BuildAgentMessageEvent 加密并签名
-              + 为每个收件人 INSERT groupchat_fanout(state=prepared, event_id, event_json)
-              —— 全部成功或全部回滚；提交后本机历史才可见
-              —— 同 (group, logical_id) 已有 fanout 行：不签名，直接返回既有行
-for each recipient（可并行，互不影响）:
-  O1  outbox：enqueueOutboxEntry(Route=group, Status=group_pending, EventJSON=event_json)
-              —— UpdateOutbox 的 fsync+rename 成功返回才算有证据
-  T2  SQLite tx：state prepared→queued, queue_id=<O1 返回的 QueueID>
-              —— WHERE state='prepared' AND event_id=?；0 行受影响视为已被并发推进，读回现状即可
-  P   relay publish（不持锁）
-  成功：
-    T3  SQLite tx：state→relay_accepted, relay_acks, relay_count, accepted_at, issue=''
-    O2  outbox：按 QueueID 删除条目（attemptSend 现有「先 store、后删除」顺序）
-  失败：
-    O3  outbox：recordAttemptFailure（RetryCount++；耗尽则 Status=group_failed）
-    T4  SQLite tx：attempts++, last_attempt_at, issue；O3 判定耗尽时 state→failed
+T1: SQLite 原子写本机历史 + 冻结 fanout prepared（D12）
+O1: 锁内只从冻结 event 入 JSON；持久成功后 T2: prepared→queued
+R:  锁 + 恢复屏障 + 当前唯一队列/row/token 校验；SQLite 预留 generation
+S:  再取锁 + 恢复屏障；CAS 当前 reserved token，记录 publish start
+P:  解锁后调用 publisher（只用原 event；可与另一 generation 的 P 重叠）
+成功: 锁内校验当前 started token；T3 SQLite ACK 提交；随后精确 O2
+失败: 锁内校验当前 started token；O3 JSON failure_result + retry/status 同次提交；T4 SQLite 投影
 ```
 
-硬性规则：
+R/S 每次都重新验证 §3.2/§3.5，包括 D14 queued QueueID；R 可以 supersede 尚未完成的旧 generation，旧 P 的网络调用无法撤回，但其结果不能改变持久化状态。S 后 P 前进程挂起也可能产生迟到网络调用；本方案承诺持久化 fence 与 event 去重，不声称阻止所有过期网络发送。发现 hold 后不授权新的 P。
 
-- **成功状态落盘（T3）之后才清理队列（O2）。** 若 T3 失败，outbox 条目保留，下一轮重发同一 event（relay 按 event ID 去重，接收端按 logical ID 去重），然后再尝试 T3。
-- **签名只发生在 T1 事务内（D12）。** T1 提交之后任何路径都只读取 `event_json`，不得持有「重新构造 event」的代码路径。
-- T1 提交之前崩溃：什么都没写（事务回滚，已签名但未提交的 event 从未离开进程），用户看到发送失败，可重新发送（新 logical ID，因为本机没有任何记录）。
+回调先在锁内只读核对 SQLite token/phase；过期或已完成则直接 stale_attempt，**不触发恢复屏障写入**，即使另一个 generation 有待投影结果也由下一次正常操作恢复。这保证 A 晚失败的调用本身不能改任一 durable record。当前 token 的回调、新 R/S、D6/对账才进入屏障。
 
-**D12**（约束 S4）：
-- 决定：签名在 T1 事务**内**完成：在同一个 `beginImmediate` 事务里读取 active roster 与群状态、写本机历史行、逐收件人加密签名、插入 fanout 行。同一 `(local_npub, group_id, 'message', logical_id)` 已有 fanout 行时，T1 **直接返回既有行**（报告由既有行构造），**不再签名**、不新增行；body 不同仍按第 1 节返回 `ErrLogicalIDConflict`。
-- 理由：roster 与群状态必须和插入的 fanout 行属于同一快照，否则在「读 roster → 签名 → 开事务」之间成员被移除或群被取消，会给已不在 roster 的人签发 event；N 次 NIP-44 加密 + Schnorr 签名在毫秒级，持写锁的时间可接受。重入时不签名，是 I4「event 一旦持久化即冻结」的直接推论：重签会产生同一收件人的第二个 event ID。
-- 为什么不是另一个方案：「事务外先签名、事务内插入」需要在事务内重新校验 roster 并在不一致时丢弃签名结果重来，逻辑更复杂且仍有 TOCTOU；「重入时重新签名、靠 `UNIQUE` 冲突回退」会白做 N 次加密，并让「哪一份 event 被持久化」依赖插入顺序，测试无法断言 event ID 稳定。
-- 每一步失败都反映为对应收件人的 `Issue`，不吞错。
+**O3 内的不可分割校验与写入**：同一 outbox 锁内开始 SQLite 写事务，检查完整 token、state=queued、phase=started、精确 event/QueueID、row_revision、RetryCount 旧值、无结果水位；然后单次 JSON fsync/rename/dir-fsync 写 RetryCount/status/LastAttempt **及** `failure_result`，最后 T4 CAS/commit。SQLite 写锁和 outbox 锁直到 T4 成功/失败处理结束一直持有；B 不可在 A 校验后、O3 前预留。`failure_result` 至少包含 version、token、S 的 attempts/时间/targets 数、expected row_revision、prior/result RetryCount、result status、issue、result_id（token 唯一）。它不是可丢弃的日志；是重放 T4 的唯一授权。重入同 result_id 不再递增 RetryCount。
 
-#### 3.4 `AttemptSend` 按 route 分派
+**崩溃 O3 后 T4 前**：SQLite 事务回滚，JSON 已含新 RetryCount 和当前 token 的结果。任何后续 R/S/D6/O2/row 修改前，恢复屏障验证凭据与 row 的 token/revision/started 记录及 JSON 结果完全匹配，再执行一次 T4；若 `last_failure_receipt` 的 token/摘要精确对应该 JSON 凭据则已经消费，是幂等 no-op；凭据摘要取严格校验后存储的原始结果 bytes，不拿后续 S 已变化的 attempts/targets/revision 再作旧结果比较。结果水位未知、冲突或损坏时 hold，不能再预留 generation，也不能重加 RetryCount。T4 已提交、JSON 凭据尚未压缩时重复屏障同样 no-op。已消费凭据按 last_failure_receipt 或 last_recovery_id+last_recovery_digest 判定，不再要求旧 expected revision 等于当前 revision；后续 R/S 更新 revision/generation 或 T3 接受不能把已消费凭据误判为冲突；R/S/T3 不改 last_failure_receipt，新 T4 才替换它。T3 推进结果水位也不能使旧 O3 凭据变成“未消费”。只在水位已证实消费后，下次 O3/D6 可替换凭据；历史计数留在 SQLite。未恢复前只读 status 可以报告 bookkeeping pending。
 
-`messaging` 不能 import `groupchat`（`groupchat` 已 import `messaging`）。P0-E 在 `internal/messaging/outbox.go` 新增注入点：
+O3 写返回 commit-uncertain 时，在仍持锁时严格重读并确认目录持久性；不能确认就返回 pending-bookkeeping，不执行第二次 O3、不调用 P、不放行新 generation。重启先取得锁、确认完整 snapshot 与目录持久性并恢复；若实际只留下旧 snapshot 而无结果，则此次 P 结果没有 durable 证据，按 outcome unknown 处理，不推测 RetryCount，应在确认存储正常后才允许新 R。跨文件原子性仍不存在，这个可恢复提交边界是 **F2/F3 前置工作**；现有 UpdateOutbox 回调与 state-only transition 不能直接提供该保证。
 
-```go
-type GroupOutboxHandler interface {
-    // 发布前调用：若 SQLite 已是 relay_accepted，返回 skip=true，调用方直接删条目，不再发布。
-    BeforePublish(entry types.OutboxEntry) (skip bool, err error)
-    // 取代 StoreOutgoingMessage：T3。必须幂等；event ID 不匹配返回错误。
-    MarkRelayAccepted(entry types.OutboxEntry, relayAcks, relayCount int) error
-    // T4。exhausted 来自 O3 的结果。
-    RecordAttemptFailure(entry types.OutboxEntry, exhausted bool, issue AgentMessageDeliveryIssue) error
-}
+**必测 A/B 交错**：同 EventID、同 QueueID，A 预留 g=7 并开始 P；B 预留 g=8/开始 P；A 晚失败。A 在任何 JSON 写前发现 g 不匹配，返回 `stale_attempt`：两 durable records 均逐字段不变，RetryCount/status/Issue 不动。B 已 T3/O2、B 未返回、B 失败已 O3/T4 三种结局均须通过。反向顺序：A 已 O3 尚未 T4 时崩溃，B 的 R 必须先重放 A 的 T4；若已耗尽则 B 不可预留。既不丢 A 的有效失败，也不让 stale A 破坏 B。
 
-type OutboxHandlers struct{ Group GroupOutboxHandler }
+T3 仅接受当前 started token 的 relay OK；T3 成功后终态冻结，O2 失败只诊断待清理。P 成功但 T3 前崩溃没有 durable ACK，允许同 event 后续重发，不能猜成功。迟到失败或 ACK 在新 generation、D6 新 QueueID、failed 或 accepted 状态后一律不写。失败结果已完成也不能被同 token 的另一回调改成 ACK。
 
-// D13：字段与语义按已合入 #151 的 keystore API 冻结（见下方 D13）。
-type AttemptOptions struct {
-    Handlers OutboxHandlers
-    KeyStore *types.KeyStore // 对齐 #151 的 AttemptSendWithKeyStore
-}
+T1 的 D12 保持：事务内读 roster/群状态、签名、写本机行与 fanout；全部回滚或全部提交。同 intent 重入返回既有 event，不签名；同 logical ID 不同正文冲突。T1 提交前不得 P。
 
-func AttemptSendRouted(ctx context.Context, ob *types.Outbox, entry types.OutboxEntry,
-    defaultRelays []string, dialTimeout time.Duration, opts AttemptOptions) (SendResult, error)
+#### 3.4 显式恢复授权（D6、D4；发现 3、5）
 
-// D11：SendResult 追加字段（DM 调用方不读取它，行为不受影响）
-type SendResult struct {
-    // ……现有字段不变……
-    Issue AgentMessageDeliveryIssue // 未尝试或失败时的原因；DM 路径保持零值
-}
+**F4 新协调 API `RecoverFailedGroup`** 取代生产调用裸 `RequeueGroupOutboxEntry`。旧 API 存在不等于有恢复授权。先严格全量扫描并应用 §3.5 前置优先级，执行恢复屏障，再判断资格。用户显式 retry 只授权目标 failed 收件人；若起始 queued+缺队列/同 QueueID exhausted，先按 §3.5 提交 failed，再继续。queued+不同 QueueID **第一时间 hold**，即使该条目 exhausted 也不准转 failed 以绕过 D14。
 
-var ErrGroupRouteHandlerMissing = errors.New("group outbox entry has no route handler")
+| 起始证据（通过全部优先级） | 显式 D6 动作 |
+| --- | --- |
+| failed + 0 条；包括 queue_missing，或 legacy failed 行从未有 QueueID | 允许从冻结 event 建新 queue；reason=missing，见证持锁扫描为 0，不要求不存在的旧 failed 条目历史 |
+| failed + 唯一同旧 QueueID `group_pending` 且 RetryCount>=MaxRetries | 允许替换，新 QueueID；reason=exhausted_pending，记录真实 status/counters |
+| failed + 唯一同旧 QueueID `group_failed`（RetryCount>=MaxRetries） | 允许替换，新 QueueID；reason=exhausted_failed |
+| failed + 同/不同 QueueID active pending，且无有效 witness | hold `recovery_unauthorized`；pending 本身不能证明 D6，不能直接 T2' |
+| failed + 不同 QueueID exhausted pending/group_failed，且无有效 witness | hold `queue_conflict`；不能替换并掩盖冲突 |
+| failed + 有效 witness 的唯一新 QueueID active pending | 仅重放原 D6 的 T2'，不再次清预算/创建 queue |
+| queued + 同新 QueueID 且 row.last_recovery_id 已等于 witness ID | 已完成的 D6，幂等 no-op；不再次 reset RetryCount |
 
-// D7：进程级注册点
-type GroupOutboxProvider interface {
-    // 为给定本机身份返回 handler 与对账入口；身份打不开时返回错误
-    HandlerFor(localNpub string) (GroupOutboxHandler, error)
-    Reconcile(localNpub string) error
-}
+`group_failed` 且 below-limit 是矛盾证据，hold；未耗尽的失败原因不能冒充 exhaustion。每次真正 D6 必须新 QueueID，**不存在 failed+同旧 QueueID pending 的授权恢复例外**。若目标 QueueID 与旧 ID 相同或与全队列任一 ID 碰撞，拒绝，不执行替换。已有新 QueueID 只可凭 witness 完成，不能用“看起来刚重排”推断。
 
-func SetGroupOutboxProvider(p GroupOutboxProvider)
-```
+在锁内、SQLite 已提交的 failed row 上创建 `recovery_witness`：version、随机 recovery_id、完整 fanout key、event_id、冻结 event_json 的摘要、recipient、max_retries、expected failed row_revision/generation、old_queue_id（可空）、new_queue_id、reason、旧条目精确摘要/status/RetryCount 或 `observed_absent=true`、授权时间。调用者显式意图由该协调 API 落盘，**不是**从现有 pending 逆推。先验证所有字段和资格；保持锁，单次 JSON 提交「移除唯一旧条目（如有）+ 新条目 RetryCount=0 + witness」，绝不删除全部同 ID failed 条目来掩盖 duplicate。
 
-- `Route == ""`：行为与现有 `AttemptSend` 完全一致。现有 `AttemptSend` 改为 `AttemptSendRouted(..., AttemptOptions{})`。
-- `Route == "group"` 且 `opts.Handlers.Group == nil`：**不发布**、不写任何历史，返回 `SendResult{Attempted: false, Issue: route_handler_missing}` 与错误 `ErrGroupRouteHandlerMissing`（**D11**）。这样未装配群处理器的调用方不可能把群 event 写进 DM。
-- 三个重试方（`daemon.go` 重试循环、`tui/offline_outbox.go` `retryPendingOutbox`、`outbox_commands.go` `storage outbox retry`）都改调 `AttemptSendRouted`，handler 一律经 **D7** 的进程级 provider 取得。群条目的挑选用新函数 `GetPendingGroupOutbox`（`Status == group_pending`）；`GetPendingOutbox` 维持只返回 DM。
+这是 **D6/O1 的原子边界**：新 pending 与 witness 同生同灭，不可能只写 queue 再补 witness。随后 T2' 在同锁内以 failed + expected revision/generation + old QueueID CAS，采纳新 QueueID、记录 last_recovery_id 与 witness 原始 bytes 摘要 last_recovery_digest、清 Issue、投影新预算；控制 activation 的 `onFanoutQueuedTx` 仍与 T2/T2' 同 SQLite 事务。
 
-**D7**（约束 S8a 定义并接线 daemon / `storage outbox retry`；S8b 的 TUI 复用同一注册点）：
-- 决定：新增 `messaging.SetGroupOutboxProvider(p GroupOutboxProvider)`，由 `cmd/hyphae/main.go` 在启动时注册一次（实现为 `groupchat.NewOutboxProvider`）。三个重试方都从该 provider 取 `GroupOutboxHandler`、在每轮之前调用其 `Reconcile`。**未注册（provider 为 nil）或 `HandlerFor` 返回错误时，群条目一律得到 `route_handler_missing`**：不发布、不删除、不写任何历史（安全默认）。
-- 理由：`storage outbox retry` 的实现位于 `internal/messaging` 包内，`messaging` 不能 import `groupchat`（`groupchat` 已 import `messaging`），原文「由 app 层传入 handler」在该调用方没有可传参的 app 层。
-- 为什么不是另一个方案：「把 `storage outbox retry` 搬到 `cmd/hyphae`」会让 outbox 命令分散在两个包，并改动现有 DM 命令的结构；「`messaging` 定义接口、由各调用方各自构造 handler」需要 daemon 与 CLI 各自知道如何打开 `groupchat.Store`，同样跨包；「未注册时回落 DM 发送」直接违反 I3。全局注册只发生在 `main` 一处，测试可显式注册 / 置空。
+D6 后 T2' 前崩溃时，旧 failed row 未变，新条目携带完整授权，屏障验证并重放 T2'；不要求旧条目仍存在或查询未持久化的历史。witness 的 old evidence 是持锁验证结果的耐久记录，信任边界与本地 SQLite/JSON 相同，不能证明恶意本地篡改。row 已 queued（或后来 accepted/failed）且同新 QueueID/last_recovery_id/摘要说明已消费；任何其他 row/version/QueueID/签名不匹配 hold，不覆盖。未经消费的 witness 禁止被 publish、clear、cleanup 或其他 D6 覆盖。消费后保留到下一次经验证 D6 或终态 O2；已消费 witness 不再要求当前 RetryCount=0，否则正常后续 O3 会被误判。
 
-**D11**（约束 S5b）：
-- 决定：`SendResult` **追加** `Issue AgentMessageDeliveryIssue` 字段，并新增哨兵错误 `ErrGroupRouteHandlerMissing`；DM 路径不设置 `Issue`（保持零值），现有字段语义不变。
-- 理由：上一条要求返回 issue `route_handler_missing`，但 main 上 `SendResult` 没有 issue 字段；调用方需要用 `errors.Is` 区分「未装配」与发布失败，以决定写 `route_handler_missing` 而不是 `send_failed`。
-- 为什么不是另一个方案：「只返回错误、让调用方解析错误文本」脆弱且不可测试；「新建 `GroupSendResult` 类型」要让三个重试方按 route 处理两种返回类型，分叉 DM / 群的结果处理代码；追加字段对现有 DM 调用方是源码兼容的。
+#### 3.5 确定性对账与精确清理（D4、D14；发现 5、6）
 
-**D13**（约束 S5b；已依据 #151 闭合）：
-- 决定：`AttemptSendRouted` 末参为 `AttemptOptions{Handlers OutboxHandlers; KeyStore *types.KeyStore}`。与 main 上 #151 一致，`AttemptSend` 是 `AttemptSendWithKeyStore(..., nil)` 的兼容包装；有已解锁 keystore 的调用方可传 `KeyStore`，用于加密历史恢复，否则 `nil` 保持 daemon / CLI 不依赖进程内 keystore 状态。`Handlers` 仅供 routed 群路径分派，不能改变 DM 路径行为。
-- 状态：**D13 已闭合**。#151 已合入，公开签名和 nil / 非 nil KeyStore 语义以上述 main API 为准；无需再等 #151。
-- 理由：将处理器与 keystore 放入一组选项，使群路由注入与 #151 已有的 keystore 能力共存，避免再增加一个位置参数。
+`FanoutReconcileReport` 每项提供 fanout key/EventID、primary、稳定排序 details、held、action（none/T2/T2prime/T4/O1/O2）、是否修改与 cleanup outcome；没有匹配 row 的项不伪造 key。`LoadFanoutReport` 仍只读 SQLite；S9/P0-F 的只读展示使用 F3 的 `InspectFanoutEvidence` 在相同锁顺序下取一致 snapshot，合并 diagnostics/预算已知性 overlay，**不重放屏障、不修改 Issue**。无法读 outbox 时预算展示 unknown，而非把旧快照当当前值。F1 提供可空预算/report 数据形状，F3 提供只读证据 API，S9 负责展示。
 
-**D14**（约束 S3、S5b；权威规则见第 5 节）：
-- 决定：迁移按持久化历史证据校验，不只比较状态等级。QueueID、relay ACK、attempt 计数、时间戳、Issue 与固定字段须满足第 5 节 allowlist、类型、范围和不回退规则；SQL CAS 必须保护终态及 ACK 证据。
-- 决定：所有收件人的 `created_at` 必须相同；`LoadFanoutReport` 与 `transitionFanoutTx` 对 npub 使用相同 `canonicalNpub` 规范化。`relay_count` 表示最近一次 publish attempt 的目标数，`Issue` 只描述当前状态/尝试。
-- 理由：状态名本身不足以证明 outbox 入队或 relay 接受；迁移必须携带并保留产生这些事实的证据。
+`ReconcileFanout` 不发布、不签名。扫描本身份所有 fanout 行（包括 failed/accepted）及整份 outbox 的所有 route；通过已验证 signed event 的 sender 归属身份，其他身份有匹配 row 的正常条目不算本身份 orphan，但仍参与 EventID/QueueID 碰撞枚举。宣告 orphan 前须查询完整 sender 身份/EventID 对应 row 确认确实不存在，不能把当前分页或本身份过滤漏出的 row 当作不存在；纯决策输入是严格 raw evidence，不是仅 `[]types.OutboxEntry`。报告每个 EventID **一个 primary diagnostic**，其余证据放排序稳定的 details。以下 first-match 顺序互斥；正常状态表仅在前置检查全部通过后运行：
 
-#### 3.5 幂等恢复：`ReconcileFanout(localNpub string) (FanoutReconcileReport, error)`
-
-调用时机：TUI 启动、`groupchat send` / `groupchat retry` 开始前、daemon 每轮重试前。逐行处理 `state IN ('prepared','queued')`、仍有 outbox 条目的 `relay_accepted` 行，以及仍有 outbox 条目的 `failed` 行（**D4**）：
-
-| SQLite 行 | outbox 中 `ID == event_id` 的群条目 | 动作 |
+| 优先级 | 精确谓词 | primary / 动作 |
 | --- | --- | --- |
-| prepared | 恰 1 条 | T2 采纳该条目 QueueID（O1 已提交、T2 前崩溃） |
-| prepared | 0 条 | O1 用 `event_json` 入队（同 event ID）→ T2 |
-| queued | 恰 1 条且 QueueID 相同，`group_pending` | 无动作，交给重试循环 |
-| queued | 恰 1 条，`group_failed` | T4：state→failed，issue `retry_exhausted`（O3 后、T4 前崩溃） |
-| queued | 恰 1 条但 QueueID 不同 | T2' 采纳新 QueueID（另一进程的 `groupchat retry` 已重新入队） |
-| queued | 0 条 | state→failed，issue `queue_missing`。不自动重新入队：条目缺失可能是用户执行了 `storage outbox clear`，要尊重用户意图；由 `groupchat retry` 显式恢复 |
-| failed | 恰 1 条，`group_pending`（**D4**） | T2' 采纳该条目 QueueID：`failed→queued`（`groupchat retry` 已完成 `RequeueGroupOutboxEntry`、T2' 前崩溃，或另一进程的 retry 刚重排） |
-| failed | 恰 1 条，`group_failed`（**D4**） | 无动作（耗尽后的遗留条目，等待用户 `groupchat retry`） |
-| 任意 | ≥2 条 | 不发送，issue `queue_duplicate`，原样上报（`AttemptSend` 本就拒绝同 ID 多条） |
-| relay_accepted | ≥1 条 | O2 删除条目，不发布（T3 后、O2 前崩溃） |
-| 无对应行 | 有群条目（孤儿） | 不发布、不删除，上报 orphan。可能属于另一个 HOME 的数据库，删除不可逆 |
+| 0 | 无法可靠解析/枚举 raw snapshot | `queue_corrupt(scope=file)`；该文件群操作全部 hold |
+| 1 | SQLite 同键/同身份 EventID 重复，类型/固定字段/ACK 不变量坏 | `fanout_corrupt`；hold |
+| 2 | 同 EventID 全 route 条目数 >1 | `queue_duplicate`；即使其中有坏条目/不同 QueueID也以 duplicate 为 primary |
+| 3 | 唯一候选 raw/schema/签名/身份/Route/QueueID/计数不合法，或其 QueueID 在别的 EventID 重复 | `queue_corrupt`；hold |
+| 4 | **没有匹配 SQLite row**，且剩余恰一有效 group 条目 | `orphan`；hold。普通无 fanout 的 DM 不产生群报告；有 row 时绝不叫 orphan |
+| 5 | 有 row，唯一条目合法但与冻结 intent 字段不符；或 queued/accepted 的 QueueID 不同 | `queue_conflict`；D14：保留双方，零 mutation、零 publish、零 delete；绝不 queued→failed→queued |
+| 6 | 未消费 result/witness 与其 token、revision、stage 或已消费水位矛盾 | `bookkeeping_conflict`；hold；不能跳过凭据进行下一阶段 |
+| 7 | 有匹配的未消费 O3 result 或 D6 witness | 按 §3.3/§3.4 投影一次，再重新判定正常状态；存储失败 `bookkeeping_pending`，停止本项 |
+| 8 | 已通过以上检查 | 下表；不再从 held 状态兜底推成 orphan |
 
-对账只读 outbox、只按上表写入；重复运行结果不变（幂等）。所有「入队」都先检查同 event ID 条目是否已存在，避免制造重复；手动重排一律经 **D6** 的 `RequeueGroupOutboxEntry`，不得「先删后加」两步完成。
+优先级 3 的身份/字段校验指结构与自身 signed event 的一致性；与存在的冻结 row 比较归优先级 5。有合法 D6 witness 的 **failed** 行允许在优先级 5 暂不拒绝新 QueueID，留给 6/7 验证；此例外绝不适用于 queued 或 accepted。raw 字段错误可归属 EventID 时走 2/3；不可归属时走 0，规则不依赖遍历顺序。
 
-**D4**（约束 S7）：
-- 决定：对账表增加上面两行 `failed` 情形，并把扫描范围扩大到「仍有 outbox 条目的 `failed` 行」。`failed` + 0 条维持无动作（不在扫描范围内）。
-- 理由：`groupchat retry` 先经 `RequeueGroupOutboxEntry` 写出新的 `group_pending` 条目（O1），再做 `failed→queued`（T2'）；两步之间崩溃或与 reconcile 并发时，原表没有 `failed` 行的对应动作：outbox 里已有 `group_pending` 条目、会被重试循环发布，而 SQLite 仍显示 `failed`，报告与事实相反。`failed` + 遗留 `group_failed` 未定义同理。
-- 为什么不是另一个方案：「`failed` 行一律不扫描，靠下次 `groupchat retry` 再处理」会让已入队的 event 被发布而 SQLite 显示失败，状态与事实相反；「`failed` + `group_pending` 时删除该条目」会撤销用户刚发起的重试；「`failed` + `group_failed` 时自动重排」违反第 3.5 节「不自动重新入队、尊重用户意图」的原则。
+| row / 唯一有效证据（已过上述优先级） | 动作 | 正常诊断/结果 |
+| --- | --- | --- |
+| prepared / 0 条 | O1→T2，只用冻结 event；未发布 | `queued_repaired`（后续稳定为 ready） |
+| prepared / active group_pending，尚无 result/witness | T2 采纳其 QueueID，计数不增加 | `queued_repaired` |
+| prepared / exhausted pending 或 group_failed | 保留双方，零写入/发布/删除 | `prepared_held` |
+| queued / 同 QueueID active pending | 无写入；只有 R/S 成功后重试循环才可 P | `ready` |
+| queued / 0 条 | CAS failed/queue_missing，保留原 QueueID/计数；不得自动 O1 | `queue_missing` |
+| queued / 同 QueueID exhausted pending 或 group_failed | CAS failed/retry_exhausted，投影真实预算但不增加 attempts/generation；保持队列原貌 | `retry_exhausted` |
+| failed / 0 条或同 QueueID exhausted pending/group_failed | 只读，等待显式 D6 | `failed_held` |
+| failed / active pending（同/不同 QueueID），无可消费 witness | 零写入/发布/删除 | `recovery_unauthorized` |
+| failed / 不同 QueueID exhausted pending/group_failed，无 witness | 零写入/发布/删除 | `queue_conflict` |
+| relay_accepted / 0 条 | 不写；ACK 终态稳定 | `accepted_clean` |
+| relay_accepted / 同 QueueID 唯一有效条目 | 仅精确 O2；绝不 P | 已确认删除=`accepted_clean`；删除失败或持久性未知=`cleanup_pending` |
 
-### 为什么不是另一个方案
+其余组合（例如 prepared 带不可解释的 witness/result）以优先级 6 `bookkeeping_conflict` hold，不是默认采纳。报告里 `held=true` 与实际动作独立于 row.State；ready/accepted_clean 为无故障结果。首次修复可报告 action=queued_repaired，重复运行不必有相同 action，但 durable state 与稳定诊断必须幂等。
 
-- **布尔「已入队」**（#138 现有 `MarkActivationQueued(..., queued bool)` 的形状）：调用方传 `true` 不需要任何证据；崩溃后无法回答「入的是哪个 event、队列里还在不在」。本方案要求 event ID + event_json + QueueID，并能与 outbox 逐条对账。
-- **把群发送队列整体搬进 SQLite，不用 outbox**：会出现第二套重试循环、退避和 relay 发布逻辑，与 #143 刚接通的 TUI/daemon outbox 分叉；发布计划也明确复用现有 outbox。
-- **把 outbox 搬进 SQLite 以获得单事务**：改动面覆盖所有 DM 发送、CLI outbox 命令和已有用户数据迁移，超出 M1；并且 relay 发布本来就不能放进事务，跨步对账仍然必要。
-- **先入 outbox、后写 SQLite**：崩溃后 outbox 会有已签名 event 但没有本机历史和 logical ID 映射，重试方无法把 ACK 记到任何群消息上（只能写 DM，违反 I3）。先 T1 保证每个队列条目都有归属。
-- **ACK 后先删队列、再写 SQLite**：在两步之间崩溃会丢失 ACK 证据，行停在 queued 且条目缺失，只能误判为 `queue_missing`。
-- **群条目沿用 `pending` 状态 + `route` 字段**：旧二进制会把它当 DM 发送并写 DM 历史（见 3.2）。
+`stale_attempt` 是回调结果诊断：通过结构校验后 token 非当前或已完成，零写入；不覆盖 snapshot 的 primary。每轮输出按 fanout key/EventID 排序。`queue_duplicate/queue_corrupt/fanout_corrupt/queue_conflict/orphan/prepared_held/failed_held/recovery_unauthorized/bookkeeping_conflict/bookkeeping_pending/cleanup_pending/stale_attempt` **仅为 reconciliation/operation diagnostics，不写 RecipientDelivery.Issue**。持久 Issue 仅在获授权的状态变更写入：queue_missing、retry_exhausted、当前 O3 的 send_failed；S/T2/T2'/T3 清除相应旧 Issue，R 不清。缺 handler 返回 `SendResult.Issue=route_handler_missing`，不修改行；I/O 错误作为 operation diagnostic，不能假写投递失败。
 
-### 验收
+**O2 证据条件**：重新取锁和 SQLite 写锁/快照；通过全部 raw/duplicate/冲突检查；row 已 relay_accepted、持久 queue_id 非空、relay_acks=1、accepted_at>0；候选唯一、Route/status 合法、EventJSON/recipient/max_retries 全匹配且 QueueID 精确相同；无未消费凭据。只删除这一 entry。0 条是幂等成功；任何 mismatch/duplicate/corrupt 优先级高于 cleanup_pending，保留全部条目。删除后 fsync/rename 不确定只报告 cleanup_pending，不清 ACK、不猜删除成功；下轮重读，缺条目才 accepted_clean。不能凭 `BeforePublish skip=true` 或任意成功回调删除整个 EventID 集合。
 
-- 单元（故障注入，每个崩溃点一个用例）：在 T1 后、O1 后、T2 后、P 后、T3 后、O3 后分别中断进程，再运行 `ReconcileFanout` 和一次重试。断言：最终每个收件人恰好一个 outbox 条目或零条目；所有 event ID 等于 T1 写入的值；没有 `messages`（DM）表行；SQLite 状态符合 3.5 表格；重复运行 `ReconcileFanout` 不改变结果。
-- 单元：`AttemptSendRouted` 处理群条目且 `handlers.Group == nil` 时，publisher 调用次数为 0、`StoreOutgoingMessage` 调用次数为 0、issue 为 `route_handler_missing`。
-- 单元：T3 返回错误时 outbox 条目仍在；下一轮 `BeforePublish` 返回 skip=false，重发后 T3 成功再 O2。
-- 单元：旧格式兼容：`GetPendingOutbox` 不返回 `group_pending` 条目；以当前 main 上不认 `route` 字段的 `GetPendingOutbox` + `attemptSend` 组合模拟旧二进制处理一份含群条目的 outbox，DM 表行数为 0、publisher 调用次数为 0。
-- E2E：Alice 发送时在 publish 前 kill 进程（`SIGKILL`），重启 TUI 后 Bob、Carol 各收到一次，event ID 与 kill 前 SQLite 中记录的值一致。
+#### 3.6 接线与启用门槛（D7、D11、D13）
+
+保留 `AttemptOptions{Handlers; KeyStore}` 的 keystore 兼容语义和 `SendResult.Issue`；DM 发布行为不变。群接口升级为 F3 协调 API/token 与只读证据 InspectFanoutEvidence，不沿用 approved #166 的无 token handler 作为安全边界。`messaging` 定义接口、`groupchat` 实现，app 层 `SetGroupOutboxProvider` 注册一次，避免循环 import。nil provider/handler 一律 route_handler_missing，不发布、不删队列、不写 DM。
+
+S8a 的 daemon/CLI outbox retry、S8b 的 TUI、S9 的 send/retry 都必须先恢复屏障/对账，再用严格待发集合；不能绕过 R/S/O3 协调 API。F2–F4 涉及的 clear/cleanup/通用 writer 必须一并审计。旧 DM 数据兼容不等于旧进程可与新群 writer 共存；DM 也能整文件覆盖群凭据，因此启用 gate 覆盖整份共享 stores 的全部 writer。
+
+##### 3.6.1 B1：有条件的受控部署边界（F3/V7，S7 前置）
+
+**明确选择方案 2：外部受控安装的部署前提，不声称 OS 隔离任意同 UID 程序。** 指定一个 installation owner（部署管理员，开发单用户部署则是 HOME 所有者本人）独占管理该 HOME、安装目录、所有启动定义和升级权。受支持操作只经其登记的入口；参与者承诺不直接执行未登记二进制/解释器脚本来访问此 HOME。HOME 与数据目录不得多人/网络共享，不得有无法盘点的同 UID 自动化。管理员/同 UID 任意复制旧 binary 后直接指向 live HOME、手动 SQL/文件编辑、恶意绕过 launcher **明确在支持/威胁模型之外**；Unix 同 UID 文件权限不能阻止它们，本文也没有新存储隔离来阻止它们。普通无法维持此约束的个人 HOME 不可激活新协议；S7 在前提未满足的部署持续 BLOCKED。
+
+**持续边界的具体载体**：installation owner 管理固定绝对路径的 launcher、关闭/启用状态和安装清单；清单绑定 canonical HOME、outbox/SQLite 的 canonical 路径（含 SQLite WAL/SHM、outbox sibling/temp 路径）、唯一允许的新 binary 绝对版本路径与内容 hash，以及每一个入口。所有 managed 入口只能调用该 launcher，launcher 在执行前校验该 tuple/owner/路径，closed、缺项、hash 不符、legacy 版本请求或 HOME override 不符均在打开 stores 前拒绝。通过检查则 exec 固定版本路径，不经 PATH 查找或用户提供的 executable 参数。安装树/启动定义/清单的改动只能经 owner 的停机流程，激活时冻结写权限与版本链接；这属于受信任 owner 的操作约束，不是防同 UID 攻击。不能只给旧 binary 增加不会被它读取的 marker。
+
+| 必须登记的 surface | 指向新版本与持续控制 |
+| --- | --- |
+| CLI（含一次性 agent msg、storage outbox retry/clear、groupchat/control） | shell PATH、alias/function、命令缓存及登记绝对路径全部核查；清缓存/重开 shell；旧安装路径移除或换成仅调用固定 launcher 的 stub，旧版本参数拒绝 |
+| TUI（含桌面/IDE 启动、内部 outbox worker） | 登记启动命令及其子进程；旧会话完全退出；桌面入口/IDE task 也只能调 launcher，不能继续持有旧进程 |
+| daemon 与服务管理器 | launchd/systemd/其他 manager 的 executable、环境 HOME、自动重启策略逐项登记；升级前卸载/停止自动拉起，重启只调用 launcher |
+| cleanup、脚本/automation | 内置 cleanup 随新 binary；cron/timer、shell 脚本、CI/IDE task、备份恢复/维护脚本和自建 helper 逐项登记，包括 DM enqueue/send 后清理；禁止直接写 stores。持久化库的自建调用程序也是 executable，须迁到已评审新版本或退役 |
+
+**writer/路径盘点交付物**：F3 从目标合并树列出 `SaveOutbox`/writeOutbox 整体替换、`UpdateOutbox` **所有调用方**、`currentOutboxAttempt` 自动 ID 路径、clear、CleanupOutbox、UpdateOutboxStatus/IncrementOutboxRetry、删除/成功清理、DM enqueue/发送失败、group enqueue/requeue/handler，以及所有 SQLite/group schema migration、transitionFanoutTx、T1/T2/T3/T4、R/S、D6/T2'、reconcile/control activation 路径。每项映射源码符号→可达 executable→launcher→实际 HOME/JSON/DB 路径；包括直接 SQL/文件工具和恢复脚本，不能只列 grep 命中的公有函数或 GetPending。记录目录 owner/权限、软硬链接/其他路径别名与挂载，拒绝未受控别名。盘点必须在 F3 评审关闭且每次安装变更更新；本文列表不是已完成的全量审计。
+
+**升级/重启/回滚顺序（均为未来 F3 交付要求）**：
+
+1. owner 先关闭全部登记入口，禁用 service/timer/automation 自动重启和新 CLI/TUI 会话；保存入口/路径 inventory。等待每个已启动 writer 退出，停止在途 worker 并 wait 子进程；必要时终止旧进程后确认退出。结合 manager 状态、已登记进程树及打开文件检查确认 quiescence；单次 process scan 不足，入口在整个维护期保持关闭。任一 owner、遗漏进程、别名或调用链无法验证则不迁移、不发布、不写新 schema。
+2. stores 全部静止后保留一致的 JSON/SQLite/WAL 恢复备份。移除所有登记旧可执行文件、包管理器旧链接、构建输出/脚本内固定旧路径；如保留离线归档，不得位于登记可执行入口，恢复它必须重新走关闭 gate。将所有入口绑定到经 F1–F4 独立评审的新 version/hash，package auto-update/rollback 也必须进入同一维护流程。不得修改 approved #165/#166。
+3. 仅 owner 的新版本维护入口在入口仍关闭时执行迁移/raw 审计/合法旧条目 adoption；无 token 的旧回调不能复用。迁移失败保持关闭，不开旧程序“修复”。跑 V7 的逐入口解析/legacy 拒绝验收并保存证据后才激活；新 daemon/TUI/automation 经 launcher 冷启动，先 recovery barrier 后 writer/P。
+4. 激活后每次 managed launch 重新核对版本/hash/owner/路径，禁止入口接受 legacy executable。安装变更必须先关入口并停所有 writer，不能在活进程旁切回旧版本；长驻进程在受控维护中一律退出/重启。owner 持续维护 inventory 与配置控制，而不是只在首次启动扫描；发现配置漂移/控制丢失立即关闭入口、停止长驻 writer/调度，保持 stores 与未消费凭据，诊断后人工重新盘点。关闭新 writer 无法撤销已经发生的越界旧写；这种情况视为边界失效，不能继续声称存储正确。
+5. 升级/重启崩溃默认保持 closed，只有同一允许的新版本可在维护模式检查两 stores、完成屏障，再重新开放。**禁止旧版原地回滚 live stores**。激活前可在全部退出后恢复完整迁移前备份；激活后旧版回滚必须另立离线恢复方案，将 live HOME 与所有入口退役，恢复完整一致的迁移前快照到隔离旧 HOME，明确丢失后续本地状态且无法撤回网络 P/ACK；不提供自动降级、不混用新旧 JSON/DB。没有可验证恢复方案就保持关闭，前向修复。
+
+本节控制能力在当前代码尚不存在；F3 必须实现受控 launcher/安装维护与 fail-closed gate 并交付 V7，单独评审/合入后才满足依赖。若实际安装无法完整控制，rev7 在该环境仍 **BLOCKED**，须先另行评审存储/UID 隔离方案；不能以“测试绿了”声称任意 same-HOME writer 已被排除。
+
+rev7 已获独立设计评审 PASS（不含实现或运行时验收）。先完成并合入 F1–F4，才可 S7；受影响 S8/S9 接线与 S10b 队列副作用也依赖这些前置。依赖、owner 与验收编号见[实现计划](m1-group-fanout-impl-plan-20261008.md)。
+
+#### 3.7 必须可观察的验收
+
+- **V1**：F1 迁移/类型/allowlist；R 后 S/P 前 kill：generation +1，attempts/RetryCount/时间/relay_count/Issue 原值，P=0；重启后新 R 再 +1。S 后 P 前 kill 单列：attempts +1、结果未知、预算不变。legacy 基数有明确标签。
+- **V2**：两 Store、两个真实进程、同 HOME 同 QueueID 的 A/B 交错；B 预留后 A 晚失败/ACK，SQLite 与 outbox 均不变；覆盖 O3 校验前后抢锁与 T3/O2 后迟到回调，证明 fence 覆盖实际 RetryCount/status 写。
+- **V3**：O3 JSON commit 后 T4 前 SIGKILL；重启强制屏障准确重放一次，RetryCount 不再增加；T4 后再 kill 同样幂等；含 exhausted、write/dir-fsync uncertain、不能恢复时阻止 B reservation。
+- **V4**：D6 missing / exhausted pending / exhausted failed，原子写 witness 后 T2' 前 kill；新 QueueID 可凭耐久 witness 恢复；同旧 QueueID pending、无 witness、伪造/错 revision、重复请求均不得重置预算。queued+不同 QueueID exhausted 仍零修改。
+- **V5**：枚举全部 row state × 0/1/2 条 × 两种 pending 预算区间/failed × same/different/missing QueueID × raw/witness/result 状态，验证 §3.5 first-match、primary/details 与 mutates/publishes/deletes；orphan 只在无 row；accepted 清理 uncertain 后报告稳定。
+- **V6**：交付 §3.2 两个源路径复制 fixture 与其原始 hash，覆盖 null-relays 的 adoption、budget initialization、O3/T4 与 D6/T2' recovery、DM default-relay 行为，及新建默认选择 []；每步比较 relays/event 原始片段，后续更新保留已消费 result/witness 原片段。再测字段级缺失/null、optional/条件字段、重复/未知 key、大小写/转义、group Route/QueueID、跨 route EventID、坏 event、数值溢出；在 normalize/auto-ID 前拒绝并保留双方。不得把 valid relays:null 判为损坏。
+- **V7**：F3 在 S7 前交付 §3.6.1 完整 writer/caller/SQLite/group 路径清单、owner/权限/版本 hash/每个 launcher 解析证据及关闭→quiesce→升级→冷重启记录。对表中**每个登记入口**在激活时、O3 JSON 已落盘且 T4 未提交、D6 已落盘且 T2' 未提交（含 kill 后）尝试请求/启动 exact base、#165、#166 的旧 writer：旧路径不存在、launcher 拒绝或 stub 仅转发新版本；记录实际 exec 路径/hash 与拒绝码，并用 OS 文件访问追踪/测试审计证明**没有旧进程打开 live stores**。转发只以只读 probe 验证；拒绝/不存在测试前后 JSON bytes 与 SQLite 逻辑 snapshot 不变，显式恢复后 receipt/witness 只投影一次。覆盖一次性 DM enqueue、clear、cleanup、TUI/daemon 重启、自动化和 group 回调；单测 flock/marker 或只观测“未丢数据”不算入口排除证据。另注入未知入口、owner/hash/HOME 失配、自动重启未关、升级中断、回滚请求，验证 fail closed；未满足条件不得启动 S7。此结果仅证明受控入口排除旧版本，**不证明任意 copied same-UID/same-HOME executable 被阻止**，该绕过明确不在支持模型内。
+- V7 还覆盖合作 writer 锁顺序/屏障、clear/cleanup 保护，T1/O1/T2/R/S/P/T3/O3/T4/D6/T2'/O2 全持久边界故障注入、DM 历史 0 群行与冻结 event 不变；单元/race 之外需真实子进程锁与 SIGKILL 测试。
 
 ---
 
@@ -476,55 +491,24 @@ func WatchAgentInboxWithOptions(ctx context.Context, nickname string, relays []s
 
 ---
 
-## 5. ACK 语义
+## 5. ACK 语义与迁移约束（D14）
 
-### 决定
+NIP-01 `OK true` 仅表示至少一个 relay 接受 event，不证明对方取到/已读。`relay_acks=1` 是布尔证据，`relay_count` 是最近 S 的目标数，显示 `relay accepted (≥1 of N)`；M1 不增加 delivered/read 或回执 envelope。
 
-relay ACK（NIP-01 `OK true`）只表示「某个 relay 接受存储了该 event」，不表示收件人取到，更不表示已读。M1 每收件人状态机：
+本表约束的每格还必须通过 §3.2 raw 检查、§3.3 锁/CAS/屏障与 §3.5 优先级；状态等级本身不能授权写入。
 
-```text
-             T1                O1+T2               P ok + T3
-   (none) ───────▶ prepared ───────────▶ queued ───────────────▶ relay_accepted (终态)
-                      │                   │  ▲                       ▲
-                      │ 对账：已有条目    │  │ P fail + O3/T4        │ 迟到 ACK（另一进程）
-                      └───────▶ queued    │  └──(未耗尽)             │
-                                          │                          │
-                                          ▼ 耗尽 / queue_missing     │
-                                        failed ──────────────────────┘
-                                          │
-                                          └── groupchat retry（同 event，新 QueueID）──▶ queued
-```
-
-- **D14 权威迁移规则。** 状态转换必须以持久化历史证据为依据，不能只比较 `from`/`to` 排名。以下表格定义完整 4×4 转换矩阵；“同态”是允许的幂等元数据更新，但仍受表后全局约束。
-
-| 当前状态 ↓ / 目标状态 → | `prepared` | `queued` | `relay_accepted` | `failed` |
+| from → to | prepared | queued | failed | relay_accepted |
 | --- | --- | --- | --- | --- |
-| `prepared` | 允许同态元数据更新；`queue_id` 必须仍为空 | 允许；必须有非空新/current `queue_id` | 拒绝；没有已持久化 QueueID 与排队历史 | 允许；`queue_id` 保持空，可记录当前失败尝试 |
-| `queued` | 拒绝；不得倒退 | 允许同态元数据更新；`queue_id` 必须不变 | 允许；仅 SQL CAS 同时验证非空已持久化 `queue_id`、`relay_acks=1`、`accepted_at>0` | 允许；保留 `queue_id`，记录当前失败尝试 |
-| `relay_accepted` | 拒绝 | 拒绝 | 只允许不改变状态及其接受/队列证据的幂等元数据更新 | 拒绝；终态 |
-| `failed` | 拒绝 | 允许；显式重排时须非空新 QueueID；对账采纳时须非空当前 QueueID | 允许延迟 ACK；仅当既有非空 QueueID 证据存在且本次提供 `relay_acks=1`、`accepted_at>0`，由 SQL CAS 验证 | 允许同态元数据更新；只可描述当前失败尝试，queue/接受证据不得倒退 |
+| prepared | T1 重入只读 | 仅 O1 唯一有效 active pending + T2 | 拒绝；O1 失败保持 prepared，返回 operation diagnostic | 拒绝，无 durable queue/ACK |
+| queued | 拒绝 | 同 QueueID 的 R/S/当前非耗尽 O3→T4；D14 不换队列 | 当前 O3 耗尽，或 §3.5 同队列耗尽/queue_missing | 仅当前 started token 的 P OK→T3 |
+| failed | 拒绝 | 仅 D6 witness + T2'，新 QueueID | 只读，或未消费同一授权结果的幂等投影 | 拒绝；先前无 token 的“延迟 ACK”不能绕过 fence |
+| relay_accepted | 拒绝 | 拒绝 | 拒绝 | 不改 row；只允许 §3.5 精确 O2 |
 
-- `queue_id` 只可在目标为 `queued` 的迁移中引入。`prepared→queued` 与 `failed→queued` 必须有非空 QueueID；显式 `failed→queued` 使用新 QueueID。所有其他迁移都保持其原值。任何同态更新都不得伪造、替换或清空非空 QueueID；提交一个不匹配的 QueueID 也必须拒绝。
-- `relay_accepted` 必须有非空已持久化 QueueID、`relay_acks=1` 和 `accepted_at>0`。`relay_acks` 沿用 **D2** 的布尔语义：1 表示至少一个 relay 接受，不是 ACK 数。进入该状态的 SQL CAS 必须同时检查这些条件；因此 `prepared→relay_accepted` 必须拒绝。`failed→relay_accepted` 只允许满足表中既有队列证据和本次接受证据的延迟 ACK。
-- `relay_accepted` 为终态：过期失败/重试不能更改状态、QueueID、`relay_acks`、`relay_count`、`accepted_at` 或接受证据。
-- 在 SQLite 写入前按字段 allowlist 校验字段、严格类型和范围；拒绝无法解析的文本、溢出值、负计数/时间及未知字段，禁止把格式错误文本写入 INTEGER 列。`event_id`、`event_json`、recipient、intent 键、`created_at`、`max_retries` 不可变；同一 intent 的所有 recipient 行必须共享 `created_at`。`attempts`、`last_attempt_at`、`updated_at` 在任何迁移中不得回退，`max_retries` 创建后冻结。
-- `relay_count` 表示最近一次 publish attempt 的目标数（D2），只可随有效 attempt 更新，不代表实际 ACK 数；计数须在非负范围内且 `relay_acks ∈ {0,1}`。`Issue` 表示当前状态：进入 `queued`（包括重试）或 `relay_accepted` 时清空；只可为当前失败尝试设置/保留，不能让过期失败覆盖新状态。
-- `LoadFanoutReport` 与 `transitionFanoutTx` 对输入身份使用完全相同的 `canonicalNpub` 规范化。`FanoutReport.CreatedAt` 取该逻辑消息共同的 `created_at`；若存储行违反共同值不变量，报告加载必须返回错误，不得依赖排序后首行。
-- `relay_accepted` 判定：一次有效尝试中至少 1 个目标 relay 返回 OK（与现有 `deliveryState` 的 `PublishedTo > 0` 一致）。按 **D2**，`relay_acks ∈ {0,1}` 只记录「是否至少一个接受」，`relay_count` 记录目标数，二者**不构成**比例。
-- 不存在 `delivered` / `read` 状态：M1 协议没有回执 envelope，任何「已送达」的显示都没有证据。
-
-### 为什么不是另一个方案
-
-- **把 relay ACK 显示成已送达**：收件人可能多日不在线，relay 也可能过期删除；这正是发布计划明文禁止的表述。
-- **M1 增加送达/已读回执 envelope**：每条消息会产生 N 份反向流量，并需要新的 envelope 类型与隐私选项；M1 范围（固定成员、明确同意、可靠重试）不需要它。本契约的决定是 M1 不做，状态机为它保留了在 `relay_accepted` 之后扩展的位置，不需要改已有状态。
-- **要求所有目标 relay 都 ACK 才算 accepted**：单 relay 抖动就会让整体永远停在 queued，并且与 DM 现有判定不一致。
-
-### 验收
-
-- 单元（D14）：逐一断言上表 16 个状态对的允许/拒绝结果；每个允许格验证 QueueID、ACK、Issue、attempt 与时间证据约束，每个拒绝格验证事务回滚且行逐字段不变。
-- 单元（D14）：覆盖 `prepared→failed` 后无 QueueID 不能接受；`prepared→relay_accepted` 被 CAS 拒绝；queued 的 QueueID 替换/清空/无关值被拒；failed 重排须新 QueueID；带既有 QueueID 的 failed 延迟 ACK 成功、不带则失败；relay_accepted 收到旧失败/重试后所有证据不变。
-- 单元（D14）：覆盖 malformed text、未知字段、越界/负整数不进入 SQLite；attempts 和各时间戳不回退；`max_retries` 不变；relay_count 仅随有效 attempt 更新；queued/accepted 清理 Issue，failed Issue 仅对应当前 attempt；canonical npub 读取/迁移一致；不同 created_at 行拒绝生成 FanoutReport。
-- 文案检查：`grep -rn -i 'delivered\|已送达\|已读' internal/groupchat internal/tui` 在群相关输出中无匹配（测试中以断言输出字符串实现）。
+- 冻结 intent 主键、event_id/event_json、recipient、created_at、max_retries。所有 INTEGER 字段先严格类型/范围检查，拒绝未知字段、负数、溢出、格式错误文本；canonicalNpub 在读/写一致。多 recipient created_at 不同必须报错，不能取排序首行。
+- QueueID 仅 T2 从空引入、T2' 持有效 witness 从 failed 换新；其余迁移不替换、不清空。queued + 不同 QueueID 保留双方、零 mutation/publish/delete，不能借 exhaustion 洗成 failed 再 queued。
+- T3 必须有当前 started token、唯一匹配的非空持久 QueueID、relay_acks=1 与 accepted_at>0；终态所有字段冻结。新 generation 后旧 ACK/失败都不能修改任何 durable record 或触发 O2。
+- 计数、时间、Issue 唯一定义在 §3.1/§3.5：generation 不等于 attempts，不用 MAX 固定 relay_count，不用 attempts/MaxRetries 表示预算。报告只取耐久证据；诊断不冒充 ACK 或 delivery Issue。
+- 逐格测试允许/拒绝与完整不变字段；结合 V1–V7 检查 stale O3、恢复 witness 与精确清理。所有 CLI/TUI 文案禁止 delivered/已送达/已读。
 
 ---
 
@@ -561,7 +545,7 @@ Carol 的群消息可能先于 Alice 发给 Bob 的激活到达 Bob。此时 `st
 
 #### 发送端事务边界
 
-见第 3.3 节 T1–T4 / O1–O3。发送端本机历史只在 T1 写一次；重试、对账、迟到 ACK 都只修改 `groupchat_fanout`，不会触碰 `groupchat_messages`，所以本机不会重复显示。
+见第 3.3 节 T1–T4 / O1–O3 / R/S。发送端本机历史只在 T1 写一次；重试/对账仅按契约更新 fanout 和队列证据，不触碰 groupchat_messages；过期 ACK 不写入，所以本机不会重复显示。
 
 ### 为什么不是另一个方案
 
@@ -584,8 +568,8 @@ Carol 的群消息可能先于 Alice 发给 Bob 的激活到达 Bob。此时 `st
 
 | ID | 缺口 | 影响 | 负责人 | 关闭条件 |
 | --- | --- | --- | --- | --- |
-| G1 | `storeMessage` / `StoreLocalMessage` 各自开启事务，无法与 `groupchat_fanout` 的 N 行插入组成 T1 原子事务 | T1 无法原子，可能出现「有本机历史无 fanout 行」 | #138 作者 | #138 合并前把 `storeMessage` 拆出 `storeMessageTx(tx *sql.Tx, ...)` 并保持外部 API 不变；否则 P0-E 在 #138 合并后的独立 PR 中完成该重构，且必须在 P0-E fanout 合并之前 |
-| G2 | `MarkActivationQueued(localNpub, groupID, inviteID, eventID string, queued bool)` 以布尔表达「已入队」 | 与第 3 节「不得用布尔代替证据」冲突；调用方可在无 outbox 证据时激活成员 | #138 作者 | 去掉 `queued bool`；改为要求 `groupchat_fanout` 中 `(group_id, 'activate', invite_id, invitee)` 行存在、`event_id` 相同且 `state ∈ {queued, relay_accepted}`，在同一事务中校验。#138 合并前完成，或 P0-E 第一个提交完成且合并前通过评审 |
+| G1 | 已关闭：base 的 S2 已有 storeMessageTx | S4 可在同事务写历史/fanout | S4 owner | 使用已有 Tx 原语；T1 失败回滚测试 |
+| G2 | `MarkActivationQueued(localNpub, groupID, inviteID, eventID string, queued bool)` 以布尔表达「已入队」 | 与第 3 节「不得用布尔代替证据」冲突；调用方可在无 outbox 证据时激活成员 | #138 作者 | 去掉 `queued bool`；改为要求 `groupchat_fanout` 中 `(group_id, 'activate', invite_id, invitee)` 行存在、`event_id` 相同且 `state ∈ {queued, relay_accepted}`，在同一事务中校验。由 S10b 在 F1–F4 后完成，控制激活与 T2 同事务并通过评审 |
 | G3 | `storeMessage` 对 `pending`/`activating`/`cancelled` 一律返回 `ErrGroupNotActive` | sink 无法区分暂态与终态（第 6 节） | P0-F 实现者 | 在 `groupchat` 新增 `ErrGroupActivationPending`（本机邀请 accepted 且群未激活时返回），`cancelled` 改返回 `ErrGroupCancelled`；P0-F 合并前附第 6 节暂态单元测试 |
 | G4 | `ReceiveAcceptance` / `CancelGroup` 等返回 `[]Envelope`，但没有说明由谁加密/签名/入队 | 控制 envelope 可能绕过 durable intent 直接发布；状态已提交而 envelope 未持久化时无法找回 | P0-E 实现者（S10a、S10b） | （**D9**）**状态迁移与 fanout 行插入在同一事务**：S10a 为 `CreateGroup` / `AcceptInvite` / `DeclineInvite` / `ReceiveAcceptance` / `CancelGroup` 提供 Tx 变体（原公开方法变薄包装，行为不变），S10b 的 `*WithFanout` 在一个事务内调用 Tx 变体并经 `prepareFanoutTx(envelopeType, sendKey=invite_id, ...)` 插入 fanout 行；S10b 合并前附「控制 envelope 也有 fanout 行」与「fanout 插入失败时状态迁移一并回滚」的测试 |
 | G5 | （已关闭）#145 曾未合并，`VerifyAgentMessage` 不在当时的 main | 第 4 节 R1–R3 依赖它 | #145 作者 | #136→#138→#145 已依序合入当前 main；P0-F 可按第 4 节接线，无需重新提交该边界 |
@@ -598,6 +582,6 @@ Carol 的群消息可能先于 Alice 发给 Bob 的激活到达 Bob。此时 `st
 
 ## 8. 交付拆分（供 coordinator 派发）
 
-- **P0-E**：`messaging.BuildAgentMessageEvent`（加密路径，D10）；`groupchat/fanout.go`（表、`PrepareFanout`（T1，D12）、T2–T4、`ReconcileFanout`（D4）、`FanoutReport`（D2））；`OutboxEntry.Route` + `group_pending/group_failed`（D5）+ `RequeueGroupOutboxEntry`（D6）；`AttemptSendRouted`（D11、D13）与三个重试方经 `SetGroupOutboxProvider` 接线（D7）；`hyphae groupchat {send,retry,status}`（D8）；第 1、2、3、5 节验收（E2E 按 D3）；关闭 G1、G2、G4（D9）。切片拆分与顺序见 [实现拆分方案](m1-group-fanout-impl-plan-20261008.md)。
+- **P0-E**：`messaging.BuildAgentMessageEvent`（加密路径，D10）；`groupchat/fanout.go`（表、`PrepareFanout`（T1，D12）、T2–T4、`ReconcileFanout`（D4）、`FanoutReport`（D2））；`OutboxEntry.Route` + `group_pending/group_failed`（D5）+ 协调恢复 API + witness（D6、F4）；`AttemptSendRouted`（D11、D13）与三个重试方经 `SetGroupOutboxProvider` 接线（D7）；`hyphae groupchat {send,retry,status}`（D8）；第 1、2、3、5 节验收（E2E 按 D3）；关闭 G1、G2、G4（D9）。必须先完成 F1–F4 的独立 follow-up，不能跳到 S7。切片拆分与顺序见 [实现拆分方案](m1-group-fanout-impl-plan-20261008.md)。
 - **P0-F**：R1/R2/R3 分流；`GroupInboundSink` 与 `groupchat/inbound.go`；暂态 re-walk；TUI 群模型的投递摘要展示；第 4、6 节验收；当前 main 已有 #145，可补第 1 节 `Route()==AgentRouteReservedGroup` 断言（D1）；关闭 G3、G6。
 - 两者共同完成：真实 relay（`wss://relay.aastar.io`）+ 三个隔离 HOME（alice/bob/carol）的 E2E 脚本 `test_groupchat_fanout_e2e.sh`。现有 `test_group_e2e.sh` 不计入证据（见群聊设计基线）。
