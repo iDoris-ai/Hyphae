@@ -238,8 +238,37 @@ func (h *FanoutOutboxHandler) MarkRelayAccepted(entry types.OutboxEntry, relayAc
 		return err
 	}
 	if !changed {
-		// A stale ACK is a harmless no-op. transitionFanoutTx only returns
-		// unchanged without an error for a stale CAS (or an absent row).
+		// The row moved between the pre-transaction read and this CAS. Re-read
+		// the authoritative state inside the transaction instead of committing
+		// silently: a concurrent RecordAttemptFailure can push a queued row to
+		// failed, and swallowing that would permanently record a delivery the
+		// relay actually accepted as failed while the caller deletes the outbox
+		// entry. Main returned an error here; keep that, and additionally
+		// re-apply the rank-legal failed -> relay_accepted step.
+		var curState string
+		if err := tx.QueryRow(`SELECT state FROM groupchat_fanout
+			WHERE local_npub = ? AND group_id = ? AND envelope_type = ? AND send_key = ? AND recipient_npub = ?`,
+			row.key.LocalNpub, row.key.GroupID, row.key.EnvelopeType, row.key.SendKey, row.recipient).Scan(&curState); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		switch current := RecipientDeliveryState(curState); current {
+		case RecipientRelayAccepted:
+			// Already accepted: replaying the ACK is a genuine no-op.
+		case RecipientFailed:
+			changed, err = transitionFanoutTx(tx, row.key, row.recipient, current, RecipientRelayAccepted, fields)
+			if err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+			if !changed {
+				_ = tx.Rollback()
+				return fmt.Errorf("fanout relay acceptance was not applied for event %s (state %s)", entry.ID, current)
+			}
+		default:
+			_ = tx.Rollback()
+			return fmt.Errorf("fanout relay acceptance was not applied for event %s (state %s)", entry.ID, current)
+		}
 	}
 	return tx.Commit()
 }
@@ -269,10 +298,21 @@ func (h *FanoutOutboxHandler) RecordAttemptFailure(entry types.OutboxEntry, exha
 	if err != nil {
 		return err
 	}
-	fields := map[string]any{"attempts": row.attempts + 1, "last_attempt_at": time.Now().Unix(), "issue": issue}
-	if _, err := transitionFanoutTx(tx, row.key, row.recipient, row.state, targetState, fields); err != nil {
+	fields := map[string]any{"last_attempt_at": time.Now().Unix(), "issue": issue}
+	changed, err := transitionFanoutTx(tx, row.key, row.recipient, row.state, targetState, fields)
+	if err != nil {
 		_ = tx.Rollback()
 		return err
+	}
+	if changed {
+		// row.attempts was read before this transaction; a stale read would lose
+		// one increment when two failures race, so bump the column in place.
+		if _, err := tx.Exec(`UPDATE groupchat_fanout SET attempts = attempts + 1
+			WHERE local_npub = ? AND group_id = ? AND envelope_type = ? AND send_key = ? AND recipient_npub = ?`,
+			row.key.LocalNpub, row.key.GroupID, row.key.EnvelopeType, row.key.SendKey, row.recipient); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
 	}
 	return tx.Commit()
 }

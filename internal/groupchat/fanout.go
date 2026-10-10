@@ -217,8 +217,9 @@ func fanoutInt(value any) (int64, bool) {
 // supplied when the target state is queued (never same-state prepared, which
 // would otherwise forge one), is required to be nonempty when entering
 // queued, and a same-state queued call may never replace an already-
-// confirmed value. attempts/last_attempt_at/relay_count/max_retries/
-// accepted_at/updated_at are monotonic (MAX) on every transition.
+// confirmed value. updated_at is monotonic (MAX) on every transition;
+// attempts, last_attempt_at and accepted_at are also written with MAX, while
+// relay_count is assigned and max_retries is immutable.
 func transitionFanoutTx(tx queryExecer, key FanoutKey, recipient string, from, to RecipientDeliveryState, fields map[string]any) (bool, error) {
 	fromRank, toRank := fanoutRank(from), fanoutRank(to)
 	if fromRank < 0 || toRank < 0 || toRank < fromRank ||
@@ -304,14 +305,7 @@ func transitionFanoutTx(tx queryExecer, key FanoutKey, recipient string, from, t
 	sort.Strings(columns)
 	for _, column := range columns {
 		value := fields[column]
-		if from == RecipientRelayAccepted {
-			switch column {
-			case "relay_acks", "accepted_at", "issue":
-				continue
-			default:
-				return false, fmt.Errorf("accepted fanout row is frozen")
-			}
-		}
+		// An accepted row already returned above, so no guard is needed here.
 		expression := column + " = ?"
 		switch column {
 		case "queue_id":
