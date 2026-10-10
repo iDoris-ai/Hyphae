@@ -165,19 +165,18 @@ func NewFanoutOutboxHandler(store *Store) *FanoutOutboxHandler {
 }
 
 type fanoutDBRow struct {
-	key        FanoutKey
-	recipient  string
-	eventID    string
-	queueID    string
-	state      RecipientDeliveryState
-	attempts   int
-	acceptedAt int64
+	key       FanoutKey
+	recipient string
+	eventID   string
+	queueID   string
+	state     RecipientDeliveryState
+	attempts  int
 }
 
 func (h *FanoutOutboxHandler) findRowByEventID(eventID string) (fanoutDBRow, error) {
 	var r fanoutDBRow
 	var envType string
-	err := h.store.db.QueryRow(`SELECT local_npub, group_id, envelope_type, send_key, recipient_npub, event_id, queue_id, state, attempts, accepted_at FROM groupchat_fanout WHERE event_id = ?`, eventID).Scan(&r.key.LocalNpub, &r.key.GroupID, &envType, &r.key.SendKey, &r.recipient, &r.eventID, &r.queueID, &r.state, &r.attempts, &r.acceptedAt)
+	err := h.store.db.QueryRow(`SELECT local_npub, group_id, envelope_type, send_key, recipient_npub, event_id, queue_id, state, attempts FROM groupchat_fanout WHERE event_id = ?`, eventID).Scan(&r.key.LocalNpub, &r.key.GroupID, &envType, &r.key.SendKey, &r.recipient, &r.eventID, &r.queueID, &r.state, &r.attempts)
 	if err != nil {
 		return fanoutDBRow{}, err
 	}
@@ -218,14 +217,23 @@ func (h *FanoutOutboxHandler) MarkRelayAccepted(entry types.OutboxEntry, relayAc
 	if relayAcks != 1 {
 		return fmt.Errorf("fanout relay acceptance requires relay_acks = 1")
 	}
-	acceptedAt := row.acceptedAt
-	if acceptedAt <= 0 {
-		acceptedAt = time.Now().Unix()
-	}
-
 	tx, err := h.store.beginImmediate()
 	if err != nil {
 		return err
+	}
+	var lastAttemptAt int64
+	if err := tx.QueryRow(`SELECT last_attempt_at FROM groupchat_fanout
+		WHERE local_npub=? AND group_id=? AND envelope_type=? AND send_key=? AND recipient_npub=? AND state=?`,
+		row.key.LocalNpub, row.key.GroupID, row.key.EnvelopeType, row.key.SendKey, row.recipient, row.state).Scan(&lastAttemptAt); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	acceptedAt := time.Now().Unix()
+	if acceptedAt < lastAttemptAt {
+		acceptedAt = lastAttemptAt
+	}
+	if acceptedAt <= 0 {
+		acceptedAt = 1
 	}
 	fields := map[string]any{"relay_acks": relayAcks, "relay_count": relayCount, "accepted_at": acceptedAt}
 	changed, err := transitionFanoutTx(tx, row.key, row.recipient, row.state, RecipientRelayAccepted, fields)

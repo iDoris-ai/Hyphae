@@ -14,10 +14,11 @@ import (
 )
 
 type testMember struct {
-	sk    nostr.SecretKey
-	npub  string
-	db    *sql.DB
-	store *Store
+	sk     nostr.SecretKey
+	npub   string
+	dbPath string
+	db     *sql.DB
+	store  *Store
 }
 
 type threeMemberGroup struct {
@@ -32,13 +33,14 @@ type threeMemberGroup struct {
 func newMember(t *testing.T) testMember {
 	t.Helper()
 	sk := nostr.Generate()
-	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "groupchat.db"))
+	dbPath := filepath.Join(t.TempDir(), "groupchat.db")
+	db, err := sql.Open("sqlite", dbPath)
 	require.NoError(t, err)
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 	store, err := NewStore(db)
 	require.NoError(t, err)
-	return testMember{sk: sk, npub: common.EncodeNpub(sk.Public()), db: db, store: store}
+	return testMember{sk: sk, npub: common.EncodeNpub(sk.Public()), dbPath: dbPath, db: db, store: store}
 }
 
 func newPoolMember(t *testing.T) testMember {

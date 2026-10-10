@@ -120,7 +120,7 @@ func reserveFanoutAttemptTx(tx queryExecer, key FanoutKey, recipient string) (fa
 	if token.queueID == "" || token.generation < 0 || revision < 0 || token.generation == math.MaxInt64 || revision == math.MaxInt64 {
 		return fanoutAttemptToken{}, fmt.Errorf("fanout attempt reservation is invalid or exhausted")
 	}
-	if phase != "idle" && phase != "failed" && phase != "accepted" {
+	if phase != "idle" && phase != "failed" && phase != "reserved" && phase != "started" && phase != "accepted" {
 		return fanoutAttemptToken{}, fmt.Errorf("fanout attempt phase %q cannot be reserved", phase)
 	}
 	if phase == "accepted" {
@@ -241,6 +241,16 @@ func transitionFanoutTx(tx queryExecer, key FanoutKey, recipient string, from, t
 		}
 		if acceptedAt, ok := fanoutInt(fields["accepted_at"]); !ok || acceptedAt <= 0 {
 			return false, fmt.Errorf("fanout relay acceptance requires a nonzero accepted_at")
+		}
+		var lastAttemptAt int64
+		if err := tx.QueryRow(`SELECT last_attempt_at FROM groupchat_fanout
+			WHERE local_npub=? AND group_id=? AND envelope_type=? AND send_key=? AND recipient_npub=? AND state=?`,
+			localNpub, key.GroupID, key.EnvelopeType, key.SendKey, recipient, from).Scan(&lastAttemptAt); err != nil {
+			return false, err
+		}
+		acceptedAt, _ := fanoutInt(fields["accepted_at"])
+		if lastAttemptAt < 0 || acceptedAt < lastAttemptAt {
+			return false, fmt.Errorf("fanout accepted_at cannot precede last_attempt_at")
 		}
 	}
 	sets := []string{"updated_at = MAX(updated_at, ?)"}

@@ -137,6 +137,9 @@ func TestFanoutOutboxHandler(t *testing.T) {
 
 	t.Run("MarkRelayAccepted_guards_and_success", func(t *testing.T) {
 		entry := types.OutboxEntry{ID: eID, QueueID: "q1", RecipientNpub: "recipient1"}
+		const futureAttempt = int64(2000000000)
+		_, err := member.db.Exec(`UPDATE groupchat_fanout SET last_attempt_at=? WHERE event_id=?`, futureAttempt, eID)
+		require.NoError(t, err)
 
 		// Invalid relay acks count (must be 1)
 		require.Error(t, handler.MarkRelayAccepted(entry, 0, 2))
@@ -156,14 +159,22 @@ func TestFanoutOutboxHandler(t *testing.T) {
 		require.Equal(t, 1, report.Recipients[0].RelayAcks)
 		require.Equal(t, 2, report.Recipients[0].RelayCount)
 		require.Greater(t, report.Recipients[0].AcceptedAt, int64(0))
+		require.Equal(t, futureAttempt, report.Recipients[0].AcceptedAt, "acceptance cannot precede publish start")
 
 		// BeforePublish returns skip=true after relay accepted
 		skip, err := handler.BeforePublish(entry)
 		require.NoError(t, err)
 		require.True(t, skip)
 
-		// Idempotent call succeeds
+		// A replayed ACK is a true no-op, including timestamps and row revision.
+		var revisionBefore, updatedBefore, acceptedBefore int64
+		require.NoError(t, member.db.QueryRow(`SELECT row_revision,updated_at,accepted_at FROM groupchat_fanout WHERE event_id=?`, eID).Scan(&revisionBefore, &updatedBefore, &acceptedBefore))
 		require.NoError(t, handler.MarkRelayAccepted(entry, 1, 2))
+		var revisionAfter, updatedAfter, acceptedAfter int64
+		require.NoError(t, member.db.QueryRow(`SELECT row_revision,updated_at,accepted_at FROM groupchat_fanout WHERE event_id=?`, eID).Scan(&revisionAfter, &updatedAfter, &acceptedAfter))
+		require.Equal(t, revisionBefore, revisionAfter)
+		require.Equal(t, updatedBefore, updatedAfter)
+		require.Equal(t, acceptedBefore, acceptedAfter)
 	})
 
 	t.Run("MarkRelayAccepted_prepared_rejected", func(t *testing.T) {

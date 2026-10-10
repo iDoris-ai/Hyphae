@@ -644,3 +644,71 @@ func TestFanoutAccountingReservationAndStart(t *testing.T) {
 	require.Error(t, startFanoutAttemptTx(tx, token, 1, 91), "the same reservation cannot start twice")
 	require.NoError(t, tx.Rollback())
 }
+
+func reopenTestMember(t *testing.T, member testMember) testMember {
+	t.Helper()
+	require.NoError(t, member.db.Close())
+	db, err := sql.Open("sqlite", member.dbPath)
+	require.NoError(t, err)
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = db.Close() })
+	store, err := NewStore(db)
+	require.NoError(t, err)
+	member.db, member.store = db, store
+	return member
+}
+
+func TestFanoutReservationSupersedesUnfinishedGenerationAfterReopen(t *testing.T) {
+	for _, phase := range []string{"reserved", "started"} {
+		t.Run(phase, func(t *testing.T) {
+			member := newMember(t)
+			key := FanoutKey{member.npub, "g", EnvelopeMessage, "reopen-" + phase}
+			insertFanout(t, member, key, "r", RecipientQueued, "event-"+phase)
+			_, err := member.db.Exec(`UPDATE groupchat_fanout SET attempts=4,retry_count=2,retry_queue_id='q',last_attempt_at=80,relay_count=3,issue='send_failed'`)
+			require.NoError(t, err)
+
+			tx, err := member.store.beginImmediate()
+			require.NoError(t, err)
+			oldToken, err := reserveFanoutAttemptTx(tx, key, "r")
+			require.NoError(t, err)
+			if phase == "started" {
+				require.NoError(t, startFanoutAttemptTx(tx, oldToken, 5, 100))
+			}
+			require.NoError(t, tx.Commit())
+			before, err := member.store.LoadFanoutReport(key)
+			require.NoError(t, err)
+			beforeRow := before.Recipients[0]
+			var beforeUpdatedAt, beforeAcceptedAt int64
+			require.NoError(t, member.db.QueryRow(`SELECT updated_at,accepted_at FROM groupchat_fanout WHERE recipient_npub='r'`).Scan(&beforeUpdatedAt, &beforeAcceptedAt))
+
+			member = reopenTestMember(t, member)
+			tx, err = member.store.beginImmediate()
+			require.NoError(t, err)
+			newToken, err := reserveFanoutAttemptTx(tx, key, "r")
+			require.NoError(t, err)
+			require.NoError(t, tx.Commit())
+			require.Equal(t, oldToken.generation+1, newToken.generation)
+
+			// The superseded generation cannot perform a later token-guarded operation.
+			tx, err = member.store.beginImmediate()
+			require.NoError(t, err)
+			require.Error(t, startFanoutAttemptTx(tx, oldToken, 9, 200))
+			require.NoError(t, tx.Rollback())
+
+			after, err := member.store.LoadFanoutReport(key)
+			require.NoError(t, err)
+			afterRow := after.Recipients[0]
+			require.Equal(t, beforeRow.Attempts, afterRow.Attempts)
+			require.Equal(t, beforeRow.RetryCount, afterRow.RetryCount)
+			require.Equal(t, beforeRow.RetryQueueID, afterRow.RetryQueueID)
+			require.Equal(t, beforeRow.LastAttemptAt, afterRow.LastAttemptAt)
+			require.Equal(t, beforeRow.RelayCount, afterRow.RelayCount)
+			require.Equal(t, beforeRow.Issue, afterRow.Issue)
+			var afterUpdatedAt, afterAcceptedAt int64
+			require.NoError(t, member.db.QueryRow(`SELECT updated_at,accepted_at FROM groupchat_fanout WHERE recipient_npub='r'`).Scan(&afterUpdatedAt, &afterAcceptedAt))
+			require.Equal(t, beforeUpdatedAt, afterUpdatedAt)
+			require.Equal(t, beforeAcceptedAt, afterAcceptedAt)
+			require.Equal(t, "reserved", afterRow.AttemptPhase)
+		})
+	}
+}
