@@ -157,6 +157,9 @@ func (s *Store) RequeueFailed(key FanoutKey, recipient string) (FanoutReport, er
 // FanoutOutboxHandler coordinates fanout intent updates with outbox lifecycle events.
 type FanoutOutboxHandler struct {
 	store *Store
+	// beforeRelayAcceptedTx is an internal synchronization hook used to exercise
+	// the stale-read boundary in deterministic tests.
+	beforeRelayAcceptedTx func()
 }
 
 // NewFanoutOutboxHandler builds a handler bound to the store.
@@ -217,21 +220,14 @@ func (h *FanoutOutboxHandler) MarkRelayAccepted(entry types.OutboxEntry, relayAc
 	if relayAcks != 1 {
 		return fmt.Errorf("fanout relay acceptance requires relay_acks = 1")
 	}
+	if h.beforeRelayAcceptedTx != nil {
+		h.beforeRelayAcceptedTx()
+	}
 	tx, err := h.store.beginImmediate()
 	if err != nil {
 		return err
 	}
-	var lastAttemptAt int64
-	if err := tx.QueryRow(`SELECT last_attempt_at FROM groupchat_fanout
-		WHERE local_npub=? AND group_id=? AND envelope_type=? AND send_key=? AND recipient_npub=? AND state=?`,
-		row.key.LocalNpub, row.key.GroupID, row.key.EnvelopeType, row.key.SendKey, row.recipient, row.state).Scan(&lastAttemptAt); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
 	acceptedAt := time.Now().Unix()
-	if acceptedAt < lastAttemptAt {
-		acceptedAt = lastAttemptAt
-	}
 	if acceptedAt <= 0 {
 		acceptedAt = 1
 	}

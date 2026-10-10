@@ -260,6 +260,15 @@ func transitionFanoutTx(tx queryExecer, key FanoutKey, recipient string, from, t
 		if lastAttemptAt < 0 {
 			return false, fmt.Errorf("fanout last_attempt_at must be non-negative")
 		}
+		if callerLastAttemptAt, ok := fields["last_attempt_at"]; ok {
+			value, valid := fanoutInt(callerLastAttemptAt)
+			if !valid || value < 0 {
+				return false, fmt.Errorf("fanout last_attempt_at must be a non-negative integer")
+			}
+			if value > lastAttemptAt {
+				lastAttemptAt = value
+			}
+		}
 		normalizedAcceptedAt = time.Now().Unix()
 		if normalizedAcceptedAt < lastAttemptAt {
 			normalizedAcceptedAt = lastAttemptAt
