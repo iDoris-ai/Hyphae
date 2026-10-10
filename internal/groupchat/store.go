@@ -198,7 +198,72 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("create groupchat schema: %w", err)
 		}
 	}
-	return nil
+	return s.migrateFanoutAccounting()
+}
+
+// migrateFanoutAccounting adds the rev7 F1 columns without deriving retry
+// history from legacy attempts. A NULL retry_count remains explicitly unknown.
+func (s *Store) migrateFanoutAccounting() error {
+	tx, err := s.beginImmediate()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	columns := map[string]bool{}
+	rows, err := tx.Query(`PRAGMA table_info(groupchat_fanout)`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, typ string
+		var def sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &def, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		columns[name] = true
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	addedOrigin := !columns["accounting_origin"]
+	add := map[string]string{
+		"row_revision":           `INTEGER NOT NULL DEFAULT 0 CHECK (row_revision >= 0)`,
+		"attempt_generation":     `INTEGER NOT NULL DEFAULT 0 CHECK (attempt_generation >= 0)`,
+		"attempt_phase":          `TEXT NOT NULL DEFAULT 'idle' CHECK (attempt_phase IN ('idle','reserved','started','failed','accepted'))`,
+		"last_result_generation": `INTEGER NOT NULL DEFAULT 0 CHECK (last_result_generation >= 0)`,
+		"last_failure_receipt":   `TEXT NOT NULL DEFAULT ''`,
+		"retry_count":            `INTEGER CHECK (retry_count IS NULL OR retry_count >= 0)`,
+		"retry_queue_id":         `TEXT NOT NULL DEFAULT ''`,
+		"last_recovery_id":       `TEXT NOT NULL DEFAULT ''`,
+		"last_recovery_digest":   `TEXT NOT NULL DEFAULT ''`,
+		"accounting_origin":      `TEXT NOT NULL DEFAULT 'native' CHECK (accounting_origin IN ('native','legacy'))`,
+		"legacy_attempts_base":   `INTEGER NOT NULL DEFAULT 0 CHECK (legacy_attempts_base >= 0)`,
+	}
+	for name, definition := range add {
+		if columns[name] {
+			continue
+		}
+		if _, err := tx.Exec(`ALTER TABLE groupchat_fanout ADD COLUMN ` + name + ` ` + definition); err != nil {
+			return fmt.Errorf("add fanout %s: %w", name, err)
+		}
+	}
+	if addedOrigin {
+		var invalid int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM groupchat_fanout WHERE attempts < 0 OR max_retries <= 0 OR relay_acks < 0 OR relay_acks > 1 OR relay_count < 0 OR last_attempt_at < 0 OR accepted_at < 0`).Scan(&invalid); err != nil {
+			return err
+		}
+		if invalid != 0 {
+			return fmt.Errorf("legacy fanout accounting contains invalid counters")
+		}
+		_, err = tx.Exec(`UPDATE groupchat_fanout SET accounting_origin='legacy', legacy_attempts_base=attempts,
+            attempt_generation=attempts, attempt_phase=CASE WHEN state='relay_accepted' THEN 'accepted' ELSE 'idle' END`)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) createGroupTx(tx queryExecer, name, creator string, invitees []string) (GroupDraft, error) {
