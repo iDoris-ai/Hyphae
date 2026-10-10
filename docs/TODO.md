@@ -57,3 +57,7 @@
 - [x] `internal/nostr`、`internal/common`、`internal/daemon` 三个包单元测试覆盖率分别是 0%/0%/0.5%（其余包普遍 27%-86%），其中 `internal/daemon` 是 outbox 重试/自动回复的核心逻辑，值得补几个关键路径的单元测试（`specs/m1.5/tasks/09-nostr-daemon-test-coverage.md`，[#22](https://github.com/iDoris-ai/hyphae/pull/22)）
 - [x] daemon 的 outbox 里有历史遗留的失效队列条目（重试全部失败），加一个 `hyphae storage outbox` 诊断/清理子命令，方便定位和清理陈旧数据（`specs/m1.5/tasks/08-daemon-outbox-diagnostics.md`，[#21](https://github.com/iDoris-ai/hyphae/pull/21)）
 - [x] `history stats`（以及大概率 `history` 系列其他命令）在零消息的全新身份上会因为 `internal/storage/message.go` 的 SQL 扫描把 NULL 列转成 `int` 而崩溃（`sql: Scan error ... converting NULL to int is unsupported`）——PR #14 code review 时用一个全新身份复现，和 `--json` 无关，两种模式下都会崩，值得单开一个任务修
+
+## 跨仓部署与交付协同（Post-M1）
+
+- [ ] **Relay 产品化与网络交付路径**（契约详见 [`docs/agent/hyphae-agent24-distribution-install-update.md`](./agent/hyphae-agent24-distribution-install-update.md)）：四平台拆包、安全安装器、Agent24 入网三选一引导与按需下载。状态：**WAITING**（等待 Hyphae M1 验收通过后启动，当前非 P0；两边契约 PR 合并只建立基线，健康阈值与 schema/回滚矩阵的互链 follow-up 合并后才冻结 `DEP-HN0`）。
