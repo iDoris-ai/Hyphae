@@ -80,3 +80,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
+
+replace fiatjaf.com/nostr => github.com/iDoris-ai/nostr v0.0.0-20261010055930-5e4886cd1253
