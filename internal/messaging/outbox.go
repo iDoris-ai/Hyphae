@@ -314,14 +314,35 @@ func refreshOutbox(dst, src *types.Outbox) {
 
 // SendResult describes the outcome of a single AttemptSend call.
 type SendResult struct {
-	Attempted         bool // true once a relay publish was attempted
-	Sent              bool // true only when a relay acknowledged the event
-	Queued            bool // true when the same entry remains pending and below its retry limit
-	MarkedFailed      bool // true when the same entry is marked failed after this outcome
-	HistoryStored     bool // true when a successful publish was stored in local history
-	Superseded        bool // true when the queue entry was removed or replaced by another operation
-	QueueStateUnknown bool // true when a post-rename durability error prevents confirming queue state
+	Attempted         bool                      // true once a relay publish was attempted
+	Sent              bool                      // true only when a relay acknowledged the event
+	Queued            bool                      // true when the same entry remains pending and below its retry limit
+	MarkedFailed      bool                      // true when the same entry is marked failed after this outcome
+	HistoryStored     bool                      // true when a successful publish was stored in local history
+	Superseded        bool                      // true when the queue entry was removed or replaced by another operation
+	QueueStateUnknown bool                      // true when a post-rename durability error prevents confirming queue state
+	Issue             AgentMessageDeliveryIssue // reason for a group attempt that was skipped or failed; zero for DM
 }
+
+// GroupOutboxHandler owns the group-specific state transitions surrounding a
+// relay publish. Implementations must make their persistence operations
+// idempotent because a process can stop between the handler and outbox writes.
+type GroupOutboxHandler interface {
+	BeforePublish(entry types.OutboxEntry) (skip bool, err error)
+	MarkRelayAccepted(entry types.OutboxEntry, relayAcks, relayCount int) error
+	RecordAttemptFailure(entry types.OutboxEntry, exhausted bool, issue AgentMessageDeliveryIssue) error
+}
+
+type OutboxHandlers struct{ Group GroupOutboxHandler }
+
+// AttemptOptions supplies the route handler and the caller's unlocked
+// keystore, when available for encrypted history recovery on the DM path.
+type AttemptOptions struct {
+	Handlers OutboxHandlers
+	KeyStore *types.KeyStore
+}
+
+var ErrGroupRouteHandlerMissing = errors.New("group outbox entry has no route handler")
 
 var errOutboxEntrySuperseded = errors.New("outbox entry was removed or replaced")
 
@@ -358,14 +379,113 @@ func countByID(entries []types.OutboxEntry, id string) int {
 // guess which queued payload the caller intended. Checking disk under the
 // transaction lock protects both CLI retries and the daemon retry loop.
 func AttemptSend(ctx context.Context, ob *types.Outbox, entry types.OutboxEntry, defaultRelays []string, dialTimeout time.Duration) (SendResult, error) {
-	return AttemptSendWithKeyStore(ctx, ob, entry, defaultRelays, dialTimeout, nil)
+	return AttemptSendRouted(ctx, ob, entry, defaultRelays, dialTimeout, AttemptOptions{})
 }
 
 // AttemptSendWithKeyStore lets callers that already have an unlocked
 // keystore use it when reconstructing encrypted history. A nil keystore keeps
 // daemon and CLI retry behavior independent of an in-memory caller state.
 func AttemptSendWithKeyStore(ctx context.Context, ob *types.Outbox, entry types.OutboxEntry, defaultRelays []string, dialTimeout time.Duration, ks *types.KeyStore) (SendResult, error) {
-	return attemptSendWithKeyStore(ctx, ob, entry, defaultRelays, dialTimeout, publishToRelays, StoreOutgoingMessage, ks)
+	return AttemptSendRouted(ctx, ob, entry, defaultRelays, dialTimeout, AttemptOptions{KeyStore: ks})
+}
+
+// AttemptSendRouted sends DM entries through the existing DM implementation
+// and group entries through the supplied group handler. Unknown routes fail
+// closed so they can never be written to DM history.
+func AttemptSendRouted(ctx context.Context, ob *types.Outbox, entry types.OutboxEntry, defaultRelays []string, dialTimeout time.Duration, opts AttemptOptions) (SendResult, error) {
+	return attemptSendRouted(ctx, ob, entry, defaultRelays, dialTimeout, opts, publishToRelays, StoreOutgoingMessage)
+}
+
+func attemptSendRouted(ctx context.Context, ob *types.Outbox, entry types.OutboxEntry, defaultRelays []string, dialTimeout time.Duration, opts AttemptOptions, publish outboxPublisher, store outgoingMessageStore) (SendResult, error) {
+	if entry.Route == "" {
+		return attemptSendWithKeyStore(ctx, ob, entry, defaultRelays, dialTimeout, publish, store, opts.KeyStore)
+	}
+	if entry.Route != OutboxRouteGroup {
+		return SendResult{}, fmt.Errorf("unsupported outbox route %q", entry.Route)
+	}
+	if opts.Handlers.Group == nil {
+		return SendResult{Issue: AgentMessageIssueRouteHandlerMissing}, ErrGroupRouteHandlerMissing
+	}
+	return attemptSendGroup(ctx, ob, entry, defaultRelays, dialTimeout, opts.Handlers.Group, publish)
+}
+
+func attemptSendGroup(ctx context.Context, ob *types.Outbox, entry types.OutboxEntry, defaultRelays []string, dialTimeout time.Duration, handler GroupOutboxHandler, publish outboxPublisher) (SendResult, error) {
+	current, err := currentOutboxAttempt(entry)
+	if errors.Is(err, errOutboxEntrySuperseded) {
+		return SendResult{Superseded: true}, err
+	}
+	if err != nil {
+		result := SendResult{}
+		var uncertain *outboxCommitUncertainError
+		if errors.As(err, &uncertain) {
+			result.QueueStateUnknown = true
+		}
+		return result, err
+	}
+	refreshOutbox(ob, current.outbox)
+
+	skip, err := handler.BeforePublish(current.entry)
+	if err != nil {
+		return SendResult{}, fmt.Errorf("check group outbox state: %w", err)
+	}
+	if skip {
+		return removeGroupOutboxEntry(ob, current.entry, SendResult{})
+	}
+
+	var event nostr.Event
+	if err := json.Unmarshal([]byte(current.entry.EventJSON), &event); err != nil {
+		return SendResult{}, fmt.Errorf("parse event: %w", err)
+	}
+	targets := current.entry.Relays
+	if len(targets) == 0 {
+		targets = defaultRelays
+	}
+	result := SendResult{Attempted: true, Sent: publish(ctx, targets, event, dialTimeout)}
+	if !result.Sent {
+		result.Issue = AgentMessageIssueSendFailed
+		return recordGroupAttemptFailure(ob, current.entry, result, handler)
+	}
+	if err := handler.MarkRelayAccepted(current.entry, 1, len(targets)); err != nil {
+		result.Issue = AgentMessageIssueOutboxBookkeepingFailed
+		return result, fmt.Errorf("mark group relay accepted: %w", err)
+	}
+	result.Issue = AgentMessageIssueNone
+	return removeGroupOutboxEntry(ob, current.entry, result)
+}
+
+func recordGroupAttemptFailure(ob *types.Outbox, entry types.OutboxEntry, result SendResult, handler GroupOutboxHandler) (SendResult, error) {
+	result, err := recordAttemptFailure(ob, entry, result)
+	if err != nil {
+		return result, err
+	}
+	if err := handler.RecordAttemptFailure(entry, result.MarkedFailed, result.Issue); err != nil {
+		return result, fmt.Errorf("record group attempt failure: %w", err)
+	}
+	return result, nil
+}
+
+func removeGroupOutboxEntry(ob *types.Outbox, entry types.OutboxEntry, result SendResult) (SendResult, error) {
+	updated, err := UpdateOutbox(func(latest *types.Outbox) error {
+		index := findOutboxQueueEntry(latest, entry)
+		if index < 0 || latest.Entries[index].Status == "sent" {
+			return errOutboxEntrySuperseded
+		}
+		latest.Entries = append(latest.Entries[:index], latest.Entries[index+1:]...)
+		return nil
+	})
+	if errors.Is(err, errOutboxEntrySuperseded) {
+		result.Superseded = true
+		return result, nil
+	}
+	if err != nil {
+		var uncertain *outboxCommitUncertainError
+		if errors.As(err, &uncertain) {
+			result.QueueStateUnknown = true
+		}
+		return result, fmt.Errorf("remove group outbox entry: %w", err)
+	}
+	refreshOutbox(ob, updated)
+	return result, nil
 }
 
 type outboxPublisher func(context.Context, []string, nostr.Event, time.Duration) bool
