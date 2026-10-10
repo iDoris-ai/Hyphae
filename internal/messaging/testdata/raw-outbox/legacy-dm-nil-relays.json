@@ -1,0 +1,16 @@
+{
+  "entries": [
+    {
+      "queue_id": "219bdbf9ed70b96893cc2382f365f24c",
+      "id": "7c3d244aadd48d6fca073dad9cbe061e379a4d5281fe67465185a696790d7bda",
+      "event_json": "{\"kind\":30078,\"id\":\"7c3d244aadd48d6fca073dad9cbe061e379a4d5281fe67465185a696790d7bda\",\"pubkey\":\"dd3f645a2ca9006cbcacd3d745806c9485788158562914347c12fce839375461\",\"created_at\":1791539064,\"tags\":[[\"p\",\"fd2c80f2606c250c55a0f4253fb8bdb6fe5461c9f8a09b6f2be23ad8f92ded25\"],[\"c\",\"agent\"],[\"z\",\"zstd\"],[\"v\",\"v1\"],[\"d\",\"agent-message:0123456789abcdef\"],[\"enc\",\"nip44\"]],\"content\":\"KLUv/QQAIQQAQXVESnhMSytBMmZaOTErbGtCUnhMd1pUOVJ3b3dNblFSQTNpRExxK2VJNm1JWlpYUFpnQ01NM3p6M00waTMyaGVVTGxkNnNOTE5CNVJnbk5WMlFiS0hsRkJ0MUtpbWowT1YrRElUTXA2M2JKK1U1aFErZG1ULzJJQnlOYjc1LzdrOUQw/UQOKQ==\",\"sig\":\"fcc27f485ee0e851fb6d2ed241281161b99c1a58f7f2850ff81390bf2646a30512e46b13cbabe6967bfb1a45caccc1554738e072f440b792c8eaae914d05acb6\"}",
+      "recipient_npub": "npub1l5kgpunqdsjsc4dq7sjnlw9akml9gcwflzsfkmetugad37fda5js0056en",
+      "relays": null,
+      "retry_count": 0,
+      "max_retries": 10,
+      "last_attempt": 0,
+      "created_at": 1791539064,
+      "status": "pending"
+    }
+  ]
+}

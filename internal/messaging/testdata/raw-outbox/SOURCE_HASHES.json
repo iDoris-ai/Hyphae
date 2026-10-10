@@ -1,0 +1,10 @@
+{
+  "internal/groupchat/fanout_queue.go": "6f436798b7da8e6c771d7d0a69894d20cab37c5dcf6bd5f09277d7b83ab88f72",
+  "internal/groupchat/verified_test.go": "7a95be43e12c7c5eb3fa3c599226ed4d94560187b07b1ab7e5bb8cd67c9edb49",
+  "internal/groupchat/fanout_queue_test.go": "245387ad305124615e91e45fc234606d3c9be474835513f9648700286ca70701",
+  "internal/groupchat/store_test.go": "966627430c3ac2f35a75cfaff0f919482e300049ff4524d0b5a06b60d43abff7",
+  "internal/messaging/outbox_group.go": "38e90cff3ef381feea481c6c7c7106b1fd1fcf970bc639cef670be19f0d317fc",
+  "pkg/types/types.go": "eb23c34231b7ad01635bacf6e5896bcd73f2044d899db7937042cacb1a82ef73",
+  "internal/messaging/outbox.go:writeOutbox": "9df0849f7d88af45ffae1837a67578952e501df92e5f52337540cd930ca5ec08",
+  "internal/messaging/outbox.go:enqueueOutboxEntry": "0dd03b8411c7248eaa87fbae24829a247650d85af1b0e216c3c33b40757ffa80"
+}
