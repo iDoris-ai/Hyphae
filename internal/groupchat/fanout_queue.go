@@ -242,16 +242,8 @@ func (h *FanoutOutboxHandler) MarkRelayAccepted(entry types.OutboxEntry, relayAc
 		return err
 	}
 	if !changed {
-		var curState string
-		if err := tx.QueryRow(`SELECT state FROM groupchat_fanout WHERE local_npub = ? AND group_id = ? AND envelope_type = ? AND send_key = ? AND recipient_npub = ?`,
-			row.key.LocalNpub, row.key.GroupID, row.key.EnvelopeType, row.key.SendKey, row.recipient).Scan(&curState); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-		if RecipientDeliveryState(curState) != RecipientRelayAccepted {
-			_ = tx.Rollback()
-			return fmt.Errorf("transition to relay_accepted was not applied")
-		}
+		// A stale ACK is a harmless no-op. transitionFanoutTx only returns
+		// unchanged without an error for a stale CAS (or an absent row).
 	}
 	return tx.Commit()
 }

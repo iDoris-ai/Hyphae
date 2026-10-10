@@ -60,6 +60,25 @@ func applyFanout(t *testing.T, member testMember, key FanoutKey, recipient strin
 	return changed, err
 }
 
+func fanoutRowSnapshot(t *testing.T, member testMember, eventID string) []any {
+	t.Helper()
+	rows, err := member.db.Query(`SELECT * FROM groupchat_fanout WHERE event_id = ?`, eventID)
+	require.NoError(t, err)
+	defer rows.Close()
+	columns, err := rows.Columns()
+	require.NoError(t, err)
+	require.True(t, rows.Next())
+	values := make([]any, len(columns))
+	dest := make([]any, len(columns))
+	for i := range values {
+		dest[i] = &values[i]
+	}
+	require.NoError(t, rows.Scan(dest...))
+	require.False(t, rows.Next())
+	require.NoError(t, rows.Err())
+	return values
+}
+
 func TestFanoutTransitionMatrix(t *testing.T) {
 	states := []RecipientDeliveryState{RecipientPrepared, RecipientQueued, RecipientRelayAccepted, RecipientFailed}
 	// Rows and columns: prepared, queued, relay_accepted, failed. D14 permits
@@ -78,6 +97,7 @@ func TestFanoutTransitionMatrix(t *testing.T) {
 				insertFanout(t, member, key, "recipient", from, "event")
 				before, err := member.store.LoadFanoutReport(key)
 				require.NoError(t, err)
+				beforeRow := fanoutRowSnapshot(t, member, "event")
 				fields := map[string]any{"attempts": 2, "issue": messaging.AgentMessageIssueSendFailed}
 				if from == RecipientRelayAccepted && to == RecipientRelayAccepted {
 					fields = nil
@@ -90,7 +110,12 @@ func TestFanoutTransitionMatrix(t *testing.T) {
 				require.NoError(t, loadErr)
 				if allowed[i][j] {
 					require.NoError(t, err)
-					require.True(t, changed)
+					if from == RecipientRelayAccepted {
+						require.False(t, changed)
+						require.Equal(t, beforeRow, fanoutRowSnapshot(t, member, "event"))
+					} else {
+						require.True(t, changed)
+					}
 					require.Equal(t, to, after.Recipients[0].State)
 					if from != RecipientRelayAccepted {
 						require.Equal(t, 2, after.Recipients[0].Attempts)
@@ -180,15 +205,25 @@ func TestFanoutTransitionMatrix(t *testing.T) {
 			map[string]any{"relay_acks": 1, "accepted_at": int64(456)})
 		require.NoError(t, err)
 		require.True(t, changed)
-		before, err := member.store.LoadFanoutReport(key)
-		require.NoError(t, err)
+		before := fanoutRowSnapshot(t, member, "event")
 		changed, err = applyFanout(t, member, key, "recipient", RecipientRelayAccepted, RecipientRelayAccepted,
 			map[string]any{"relay_acks": 0, "accepted_at": int64(0)})
 		require.NoError(t, err)
-		require.True(t, changed)
-		after, err := member.store.LoadFanoutReport(key)
-		require.NoError(t, err)
+		require.False(t, changed)
+		after := fanoutRowSnapshot(t, member, "event")
 		require.Equal(t, before, after)
+	})
+
+	t.Run("stale_relay_acceptance_cas_is_noop", func(t *testing.T) {
+		member := newMember(t)
+		key := FanoutKey{member.npub, "group", EnvelopeMessage, "logical"}
+		insertFanout(t, member, key, "recipient", RecipientFailed, "event")
+		before := fanoutRowSnapshot(t, member, "event")
+		changed, err := applyFanout(t, member, key, "recipient", RecipientQueued, RecipientRelayAccepted,
+			map[string]any{"relay_acks": 1, "accepted_at": int64(1)})
+		require.NoError(t, err)
+		require.False(t, changed)
+		require.Equal(t, before, fanoutRowSnapshot(t, member, "event"))
 	})
 
 	t.Run("reject_unknown_states_and_frozen_fields", func(t *testing.T) {
@@ -222,9 +257,11 @@ func TestFanoutTransitionMatrix(t *testing.T) {
 			{"accepted_at": int64(1)}, // missing relay_acks
 			{"relay_acks": 1, "accepted_at": int64(0)}, // accepted_at must be nonzero
 		} {
+			before := fanoutRowSnapshot(t, member, "event")
 			changed, err := applyFanout(t, member, key, "recipient", RecipientQueued, RecipientRelayAccepted, fields)
 			require.Error(t, err)
 			require.False(t, changed)
+			require.Equal(t, before, fanoutRowSnapshot(t, member, "event"))
 		}
 		report, err := member.store.LoadFanoutReport(key)
 		require.NoError(t, err)
@@ -352,14 +389,33 @@ func TestFanoutTransitionMatrix(t *testing.T) {
 		require.True(t, changed)
 		// A same-state call that tries to report a failure issue on an
 		// already-accepted row must leave it untouched.
+		before := fanoutRowSnapshot(t, member, "event")
 		changed, err = applyFanout(t, member, key, "recipient", RecipientRelayAccepted, RecipientRelayAccepted,
 			map[string]any{"issue": messaging.AgentMessageIssueSendFailed})
 		require.NoError(t, err)
-		require.True(t, changed)
+		require.False(t, changed)
+		require.Equal(t, before, fanoutRowSnapshot(t, member, "event"))
 		report, err := member.store.LoadFanoutReport(key)
 		require.NoError(t, err)
 		require.Equal(t, messaging.AgentMessageIssueNone, report.Recipients[0].Issue)
 		require.Equal(t, "original-queue", report.Recipients[0].QueueID)
+	})
+
+	t.Run("relay_acceptance_timestamp_is_normalized_at_transition_boundary", func(t *testing.T) {
+		member := newMember(t)
+		key := FanoutKey{member.npub, "group", EnvelopeMessage, "logical"}
+		insertFanout(t, member, key, "recipient", RecipientQueued, "event")
+		const futureAttempt = int64(2000000000)
+		_, err := member.db.Exec(`UPDATE groupchat_fanout SET last_attempt_at=? WHERE event_id=?`, futureAttempt, "event")
+		require.NoError(t, err)
+		changed, err := applyFanout(t, member, key, "recipient", RecipientQueued, RecipientRelayAccepted,
+			map[string]any{"relay_acks": 1, "accepted_at": int64(1)})
+		require.NoError(t, err)
+		require.True(t, changed)
+		var acceptedAt, lastAttemptAt int64
+		require.NoError(t, member.db.QueryRow(`SELECT accepted_at,last_attempt_at FROM groupchat_fanout WHERE event_id=?`, "event").Scan(&acceptedAt, &lastAttemptAt))
+		require.Equal(t, futureAttempt, lastAttemptAt)
+		require.GreaterOrEqual(t, acceptedAt, lastAttemptAt)
 	})
 
 	t.Run("queue_id_rejected_outside_queued_target", func(t *testing.T) {
@@ -589,20 +645,32 @@ func TestFanoutAccountingCAS(t *testing.T) {
 		require.Error(t, err)
 		require.False(t, changed)
 	}
+	beforeInvalidAcceptedAt := fanoutRowSnapshot(t, member, "e")
+	for _, acceptedAt := range []any{int64(0), int64(-1), "1"} {
+		changed, err = applyFanout(t, member, key, "r", RecipientQueued, RecipientRelayAccepted,
+			map[string]any{"relay_acks": 1, "accepted_at": acceptedAt})
+		require.Error(t, err)
+		require.False(t, changed)
+		require.Equal(t, beforeInvalidAcceptedAt, fanoutRowSnapshot(t, member, "e"))
+	}
 	changed, err = applyFanout(t, member, key, "r", RecipientQueued, RecipientRelayAccepted, map[string]any{"relay_acks": 1, "accepted_at": int64(10)})
 	require.NoError(t, err)
 	require.True(t, changed)
+	acceptedSnapshot := fanoutRowSnapshot(t, member, "e")
 	changed, err = applyFanout(t, member, key, "r", RecipientRelayAccepted, RecipientRelayAccepted, map[string]any{"relay_count": 4})
-	require.Error(t, err)
+	require.NoError(t, err)
 	require.False(t, changed)
+	require.Equal(t, acceptedSnapshot, fanoutRowSnapshot(t, member, "e"))
 	var phase string
 	require.NoError(t, member.db.QueryRow(`SELECT attempt_phase FROM groupchat_fanout`).Scan(&phase))
 	require.Equal(t, "accepted", phase)
 	_, err = member.db.Exec(`UPDATE groupchat_fanout SET row_revision=?`, int64(math.MaxInt64))
 	require.NoError(t, err)
+	acceptedSnapshot = fanoutRowSnapshot(t, member, "e")
 	changed, err = applyFanout(t, member, key, "r", RecipientRelayAccepted, RecipientRelayAccepted, nil)
-	require.Error(t, err, "revision overflow fails closed")
+	require.NoError(t, err)
 	require.False(t, changed)
+	require.Equal(t, acceptedSnapshot, fanoutRowSnapshot(t, member, "e"))
 }
 
 func TestFanoutAccountingReservationAndStart(t *testing.T) {

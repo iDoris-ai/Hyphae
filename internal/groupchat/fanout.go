@@ -229,7 +229,13 @@ func transitionFanoutTx(tx queryExecer, key FanoutKey, recipient string, from, t
 	if err != nil {
 		return false, err
 	}
+	// Relay acceptance is terminal. Replaying any transition against an
+	// accepted row must not touch bookkeeping or advance its revision.
+	if from == RecipientRelayAccepted {
+		return false, nil
+	}
 	entering := from != to
+	var normalizedAcceptedAt int64
 	if entering && to == RecipientQueued {
 		if queueID, ok := fields["queue_id"].(string); !ok || queueID == "" {
 			return false, fmt.Errorf("fanout queue_id is required when transitioning into queued")
@@ -246,11 +252,20 @@ func transitionFanoutTx(tx queryExecer, key FanoutKey, recipient string, from, t
 		if err := tx.QueryRow(`SELECT last_attempt_at FROM groupchat_fanout
 			WHERE local_npub=? AND group_id=? AND envelope_type=? AND send_key=? AND recipient_npub=? AND state=?`,
 			localNpub, key.GroupID, key.EnvelopeType, key.SendKey, recipient, from).Scan(&lastAttemptAt); err != nil {
+			if err == sql.ErrNoRows {
+				return false, nil
+			}
 			return false, err
 		}
-		acceptedAt, _ := fanoutInt(fields["accepted_at"])
-		if lastAttemptAt < 0 || acceptedAt < lastAttemptAt {
-			return false, fmt.Errorf("fanout accepted_at cannot precede last_attempt_at")
+		if lastAttemptAt < 0 {
+			return false, fmt.Errorf("fanout last_attempt_at must be non-negative")
+		}
+		normalizedAcceptedAt = time.Now().Unix()
+		if normalizedAcceptedAt < lastAttemptAt {
+			normalizedAcceptedAt = lastAttemptAt
+		}
+		if normalizedAcceptedAt <= 0 {
+			normalizedAcceptedAt = 1
 		}
 	}
 	sets := []string{"updated_at = MAX(updated_at, ?)"}
@@ -321,6 +336,9 @@ func transitionFanoutTx(tx queryExecer, key FanoutKey, recipient string, from, t
 			n, ok := fanoutInt(value)
 			if !ok || n < 0 {
 				return false, fmt.Errorf("fanout %s must be a non-negative integer", column)
+			}
+			if column == "accepted_at" && entering && to == RecipientRelayAccepted {
+				n = normalizedAcceptedAt
 			}
 			value = n
 			expression = column + " = MAX(" + column + ", ?)"
