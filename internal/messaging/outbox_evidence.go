@@ -177,8 +177,17 @@ func validateEvidenceEvent(raw []byte, entry types.OutboxEntry) error {
 			}
 		}
 	}
+	// Decode only the values collected by evidenceObject. The nostr Event
+	// decoder skips unescaping object keys, so an escaped spelling such as
+	// "created\\u005fat" would otherwise be ignored by ID/signature checks.
+	// Re-keying these already validated raw values keeps those checks aligned
+	// with strict validation without changing the retained event_json bytes.
+	canonical, err := json.Marshal(fields)
+	if err != nil {
+		return err
+	}
 	var event nostr.Event
-	if err := json.Unmarshal(raw, &event); err != nil {
+	if err := json.Unmarshal(canonical, &event); err != nil {
 		return err
 	}
 	if event.ID.Hex() != entry.ID || !event.CheckID() || !event.VerifySignature() {
@@ -187,9 +196,12 @@ func validateEvidenceEvent(raw []byte, entry types.OutboxEntry) error {
 	if err := ValidateAgentMessageEvent(&event); err != nil {
 		return err
 	}
+	enc, hasEnc, err := outboxTagValue(event.Tags, "enc")
+	if err != nil || (hasEnc && enc != "nip44") {
+		return fmt.Errorf("invalid encryption tag")
+	}
 	if entry.Route == OutboxRouteGroup {
-		enc, found, err := outboxTagValue(event.Tags, "enc")
-		if err != nil || !found || enc != "nip44" {
+		if !hasEnc || enc != "nip44" {
 			return fmt.Errorf("invalid group encryption tag")
 		}
 	}

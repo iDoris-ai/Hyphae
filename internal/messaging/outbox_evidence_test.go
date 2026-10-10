@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"fiatjaf.com/nostr"
+	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/stretchr/testify/require"
 )
 
@@ -47,6 +49,31 @@ func editEvidenceEvent(t *testing.T, raw []byte, edit func(string) string) []byt
 	text, err := json.Marshal(edit(root.Entries[0].Event))
 	require.NoError(t, err)
 	return editEvidence(t, raw, "event_json", string(text))
+}
+
+func signedRawDM(t *testing.T, tags nostr.Tags, created nostr.Timestamp, content string) ([]byte, nostr.Event, string) {
+	t.Helper()
+	sender := nostr.Generate()
+	recipient := nostr.Generate().Public()
+	event := nostr.Event{
+		PubKey: sender.Public(), CreatedAt: created, Kind: AgentKind,
+		Tags:    append(nostr.Tags{{"p", recipient.Hex()}, {"c", "agent"}, {"v", "v1"}, {"d", "agent-message:0123456789abcdef"}}, tags...),
+		Content: content,
+	}
+	require.NoError(t, event.Sign(sender))
+	eventJSON, err := json.Marshal(event)
+	require.NoError(t, err)
+	entry := editEvidence(t, rawFixture(t, "legacy-dm-nil-relays"), "id", `"`+event.ID.Hex()+`"`)
+	entry = editEvidence(t, entry, "recipient_npub", `"`+common.EncodeNpub(recipient)+`"`)
+	entry = editEvidence(t, entry, "event_json", mustJSONString(t, string(eventJSON)))
+	return entry, event, string(eventJSON)
+}
+
+func mustJSONString(t *testing.T, value string) string {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	require.NoError(t, err)
+	return string(encoded)
 }
 
 func TestLegacyNilRelaysSourceBytes(t *testing.T) {
@@ -302,4 +329,38 @@ func TestRawOutboxEvidenceWhitespaceAndEventFieldSchema(t *testing.T) {
 	empty, err := ParseRawOutboxEvidence([]byte(`{"entries":[]}`))
 	require.NoError(t, err)
 	require.Empty(t, empty.Entries)
+}
+
+func TestRawOutboxEvidenceUsesOneEventFieldInterpretation(t *testing.T) {
+	base, event, eventJSON := signedRawDM(t, nil, 0, "")
+	require.True(t, event.VerifySignature())
+	_, err := ParseRawOutboxEvidence(base)
+	require.NoError(t, err)
+	// The nostr decoder skips unescaping field names. Before strict values were
+	// re-keyed for signature checks, it interpreted this as the original signed
+	// created_at=0/content="" event while raw validation saw the replacements.
+	forgedEvent := strings.Replace(eventJSON, `"created_at":0`, `"created\u005fat":123`, 1)
+	forgedEvent = strings.Replace(forgedEvent, `"content":""`, `"cont\u0065nt":"unsigned replacement"`, 1)
+	forged := editEvidence(t, base, "event_json", mustJSONString(t, forgedEvent))
+	_, err = ParseRawOutboxEvidence(forged)
+	require.Error(t, err)
+
+	for name, tags := range map[string]nostr.Tags{
+		"unsupported": {{"enc", "future"}},
+		"one-member":  {{"enc"}},
+		"conflicting": {{"enc", "nip44"}, {"enc", "future"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw, _, _ := signedRawDM(t, tags, 1, "cipher")
+			_, err := ParseRawOutboxEvidence(raw)
+			require.Error(t, err)
+		})
+	}
+
+	// An escaped equivalent duplicate remains invalid even though the decoder
+	// used for signature verification now receives canonical field names.
+	duplicate := strings.Replace(eventJSON, `"created_at":0`, `"created_at":0,"created\u005fat":0`, 1)
+	duplicateRaw := editEvidence(t, base, "event_json", mustJSONString(t, duplicate))
+	_, err = ParseRawOutboxEvidence(duplicateRaw)
+	require.Error(t, err)
 }
