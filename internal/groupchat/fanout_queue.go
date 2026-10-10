@@ -157,6 +157,9 @@ func (s *Store) RequeueFailed(key FanoutKey, recipient string) (FanoutReport, er
 // FanoutOutboxHandler coordinates fanout intent updates with outbox lifecycle events.
 type FanoutOutboxHandler struct {
 	store *Store
+	// beforeRelayAcceptedTx is an internal synchronization hook used to exercise
+	// the stale-read boundary in deterministic tests.
+	beforeRelayAcceptedTx func()
 }
 
 // NewFanoutOutboxHandler builds a handler bound to the store.
@@ -165,19 +168,18 @@ func NewFanoutOutboxHandler(store *Store) *FanoutOutboxHandler {
 }
 
 type fanoutDBRow struct {
-	key        FanoutKey
-	recipient  string
-	eventID    string
-	queueID    string
-	state      RecipientDeliveryState
-	attempts   int
-	acceptedAt int64
+	key       FanoutKey
+	recipient string
+	eventID   string
+	queueID   string
+	state     RecipientDeliveryState
+	attempts  int
 }
 
 func (h *FanoutOutboxHandler) findRowByEventID(eventID string) (fanoutDBRow, error) {
 	var r fanoutDBRow
 	var envType string
-	err := h.store.db.QueryRow(`SELECT local_npub, group_id, envelope_type, send_key, recipient_npub, event_id, queue_id, state, attempts, accepted_at FROM groupchat_fanout WHERE event_id = ?`, eventID).Scan(&r.key.LocalNpub, &r.key.GroupID, &envType, &r.key.SendKey, &r.recipient, &r.eventID, &r.queueID, &r.state, &r.attempts, &r.acceptedAt)
+	err := h.store.db.QueryRow(`SELECT local_npub, group_id, envelope_type, send_key, recipient_npub, event_id, queue_id, state, attempts FROM groupchat_fanout WHERE event_id = ?`, eventID).Scan(&r.key.LocalNpub, &r.key.GroupID, &envType, &r.key.SendKey, &r.recipient, &r.eventID, &r.queueID, &r.state, &r.attempts)
 	if err != nil {
 		return fanoutDBRow{}, err
 	}
@@ -218,14 +220,16 @@ func (h *FanoutOutboxHandler) MarkRelayAccepted(entry types.OutboxEntry, relayAc
 	if relayAcks != 1 {
 		return fmt.Errorf("fanout relay acceptance requires relay_acks = 1")
 	}
-	acceptedAt := row.acceptedAt
-	if acceptedAt <= 0 {
-		acceptedAt = time.Now().Unix()
+	if h.beforeRelayAcceptedTx != nil {
+		h.beforeRelayAcceptedTx()
 	}
-
 	tx, err := h.store.beginImmediate()
 	if err != nil {
 		return err
+	}
+	acceptedAt := time.Now().Unix()
+	if acceptedAt <= 0 {
+		acceptedAt = 1
 	}
 	fields := map[string]any{"relay_acks": relayAcks, "relay_count": relayCount, "accepted_at": acceptedAt}
 	changed, err := transitionFanoutTx(tx, row.key, row.recipient, row.state, RecipientRelayAccepted, fields)
@@ -234,15 +238,36 @@ func (h *FanoutOutboxHandler) MarkRelayAccepted(entry types.OutboxEntry, relayAc
 		return err
 	}
 	if !changed {
+		// The row moved between the pre-transaction read and this CAS. Re-read
+		// the authoritative state inside the transaction instead of committing
+		// silently: a concurrent RecordAttemptFailure can push a queued row to
+		// failed, and swallowing that would permanently record a delivery the
+		// relay actually accepted as failed while the caller deletes the outbox
+		// entry. Main returned an error here; keep that, and additionally
+		// re-apply the rank-legal failed -> relay_accepted step.
 		var curState string
-		if err := tx.QueryRow(`SELECT state FROM groupchat_fanout WHERE local_npub = ? AND group_id = ? AND envelope_type = ? AND send_key = ? AND recipient_npub = ?`,
+		if err := tx.QueryRow(`SELECT state FROM groupchat_fanout
+			WHERE local_npub = ? AND group_id = ? AND envelope_type = ? AND send_key = ? AND recipient_npub = ?`,
 			row.key.LocalNpub, row.key.GroupID, row.key.EnvelopeType, row.key.SendKey, row.recipient).Scan(&curState); err != nil {
 			_ = tx.Rollback()
 			return err
 		}
-		if RecipientDeliveryState(curState) != RecipientRelayAccepted {
+		switch current := RecipientDeliveryState(curState); current {
+		case RecipientRelayAccepted:
+			// Already accepted: replaying the ACK is a genuine no-op.
+		case RecipientFailed:
+			changed, err = transitionFanoutTx(tx, row.key, row.recipient, current, RecipientRelayAccepted, fields)
+			if err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+			if !changed {
+				_ = tx.Rollback()
+				return fmt.Errorf("fanout relay acceptance was not applied for event %s (state %s)", entry.ID, current)
+			}
+		default:
 			_ = tx.Rollback()
-			return fmt.Errorf("transition to relay_accepted was not applied")
+			return fmt.Errorf("fanout relay acceptance was not applied for event %s (state %s)", entry.ID, current)
 		}
 	}
 	return tx.Commit()
@@ -273,10 +298,21 @@ func (h *FanoutOutboxHandler) RecordAttemptFailure(entry types.OutboxEntry, exha
 	if err != nil {
 		return err
 	}
-	fields := map[string]any{"attempts": row.attempts + 1, "last_attempt_at": time.Now().Unix(), "issue": issue}
-	if _, err := transitionFanoutTx(tx, row.key, row.recipient, row.state, targetState, fields); err != nil {
+	fields := map[string]any{"last_attempt_at": time.Now().Unix(), "issue": issue}
+	changed, err := transitionFanoutTx(tx, row.key, row.recipient, row.state, targetState, fields)
+	if err != nil {
 		_ = tx.Rollback()
 		return err
+	}
+	if changed {
+		// row.attempts was read before this transaction; a stale read would lose
+		// one increment when two failures race, so bump the column in place.
+		if _, err := tx.Exec(`UPDATE groupchat_fanout SET attempts = attempts + 1
+			WHERE local_npub = ? AND group_id = ? AND envelope_type = ? AND send_key = ? AND recipient_npub = ?`,
+			row.key.LocalNpub, row.key.GroupID, row.key.EnvelopeType, row.key.SendKey, row.recipient); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
 	}
 	return tx.Commit()
 }
