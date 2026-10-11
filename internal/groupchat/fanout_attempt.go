@@ -36,6 +36,9 @@ func (s *Store) fanoutBarrierTx(tx queryExecer, path string, key FanoutKey, reci
 	if entry.QueueID != row.token.queueID {
 		return row, ErrFanoutQueueConflict
 	}
+	if w := messaging.OutboxWitnessDigest(entry); w != "" && w != row.recoveryDigest {
+		return row, fmt.Errorf("%w: unconsumed recovery_witness on the queue entry", ErrFanoutRecoveryPending)
+	}
 	if receipt != "" && receipt != row.receipt {
 		if err := replayFanoutFailureTx(tx, &row, entry, receipt); err != nil {
 			return row, err
