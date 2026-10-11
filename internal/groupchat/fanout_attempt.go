@@ -34,7 +34,15 @@ func (s *Store) fanoutBarrierTx(tx queryExecer, path string, key FanoutKey, reci
 		return row, fmt.Errorf("%s: outbox has no entry for the queued event", messaging.AgentMessageIssueQueueMissing)
 	}
 	if entry.QueueID != row.token.queueID {
-		return row, ErrFanoutQueueConflict
+		// A failed row whose outbox already holds the next epoch: D6 landed
+		// but T2' did not. Replay it (or hold); anything else is D14.
+		if RecipientDeliveryState(row.state) == RecipientFailed && entry.RecoveryWitness != nil {
+			if err := replayFanoutRecoveryTx(tx, &row, entry); err != nil {
+				return row, err
+			}
+		} else {
+			return row, ErrFanoutQueueConflict
+		}
 	}
 	if w := messaging.OutboxWitnessDigest(entry); w != "" && w != row.recoveryDigest {
 		return row, fmt.Errorf("%w: unconsumed recovery_witness on the queue entry", ErrFanoutRecoveryPending)

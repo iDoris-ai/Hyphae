@@ -180,11 +180,7 @@ func TestAuthorizeFanoutRecoveryT2PrimeFailureLeavesUnconsumedWitness(t *testing
 	_, err = f.member.db.Exec(`DROP TRIGGER inject_t2_failure`)
 	require.NoError(t, err)
 
-	// Every writer now holds until the barrier replays T2'; no second D6.
-	unchanged := f.snapshot(t)
-	_, err = f.member.store.authorizeFanoutRecovery(f.key, f.recipient, time.Now().Unix())
-	require.ErrorIs(t, err, ErrFanoutRecoveryPending)
-	unchanged()
+	// The barrier replay of this witness is covered in fanout_recovery_replay_test.go.
 }
 
 func TestFanoutBarrierHoldsUnconsumedWitness(t *testing.T) {
