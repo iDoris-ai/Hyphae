@@ -60,4 +60,4 @@
 
 ## 跨仓部署与交付协同（Post-M1）
 
-- [ ] **Relay 产品化与网络交付路径**（契约详见 [`docs/agent/hyphae-agent24-distribution-install-update.md`](./agent/hyphae-agent24-distribution-install-update.md)）：四平台拆包、安全安装器、Agent24 入网三选一引导与按需下载。状态：**WAITING**（等待 Hyphae M1 验收通过后启动，当前非 P0；两边契约 PR 合并只建立基线，健康阈值与 schema/回滚矩阵的互链 follow-up 合并后才冻结 `DEP-HN0`）。
+- [ ] **Relay 产品化与网络交付路径**（[Hyphae 配套设计](./agent/hyphae-agent24-distribution-install-update.md)；Agent24 [PR #905 完整 DEP-HN0 契约](https://github.com/iDoris-ai/Agent24/pull/905)，head `0db6871d8bcef041ed4a3e123ccda3b622ce5b51`）：四平台拆包、安全安装器、Agent24 入网三选一引导与按需下载。状态：**WAITING**（HN0 等待两仓互链最终 head 经外部评审并合并；M1 仍是唯一 P0 及全部实现启动门。HN1 先交结构化 readiness/维护隔离/确认停机及 15/20/10s 界限，方可进入 C8；精确候选兼容和恢复证据属后续晋升门）。
