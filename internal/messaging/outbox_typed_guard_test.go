@@ -193,3 +193,29 @@ func TestTypedOutboxGuardMembers(t *testing.T) {
 	}
 	requireOutboxUnchanged(t, path, []byte(`{"entries":[`))
 }
+
+// With protocol records present, cleanup ages out only DM entries and leaves
+// the exhausted group epoch -- its failure_result is recovery evidence.
+func TestCleanupOutboxRetainsGroupEvidenceBesideProtocolRecords(t *testing.T) {
+	o3 := bytes.TrimSpace(readF2BFixture(t, "p-o3-entry.json"))
+	oldFailed := bytes.Replace(o3, []byte(`"retry_count": 1`), []byte(`"retry_count": 10`), 1)
+	oldFailed = bytes.Replace(oldFailed, []byte(`"group_pending"`), []byte(`"group_failed"`), 1)
+	dm := legacyFixtureEntry(t, "legacy-dm-nil-relays.json")
+	oldDM := bytes.Replace(dm, []byte(`"status": "pending"`), []byte(`"status": "failed"`), 1)
+	path := stageHomeOutbox(t, rawOutboxDoc(oldFailed, oldDM))
+	groupBefore, err := ParseRawGroupEntry(oldFailed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := CleanupOutbox(&types.Outbox{}, time.Hour); err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	ob, err := LoadOutbox()
+	if err != nil || len(ob.Entries) != 1 || ob.Entries[0].ID != groupBefore.Entry.ID {
+		t.Fatalf("expected only the group evidence to remain: %+v %v", ob.Entries, err)
+	}
+	entry, _, err := ReadGroupEntryLocked(path, groupBefore.Entry.ID)
+	if err != nil || entry == nil || !bytes.Equal(entry.Raw, groupBefore.Raw) {
+		t.Fatalf("group evidence bytes changed: %v", err)
+	}
+}
