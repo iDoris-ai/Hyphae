@@ -24,6 +24,13 @@ var (
 	ErrFanoutBookkeepingConflict = errors.New("fanout failure bookkeeping conflict")
 )
 
+// Raw-writer seams: tests wrap them to return commit-uncertain errors with
+// or without a durable write, exercising confirmFanout*Commit end to end.
+var (
+	commitGroupFailureLocked  = messaging.CommitGroupFailureLocked
+	commitGroupRecoveryLocked = messaging.CommitGroupRecoveryLocked
+)
+
 // fanoutCrashGate is called between a durable JSON commit (O3, D6) and its
 // SQLite projection (T4, T2') while both locks are held. Production is a
 // no-op; crash tests replace it to stop the process at that exact boundary.
@@ -75,7 +82,7 @@ func (s *Store) commitFanoutFailure(token fanoutAttemptToken) error {
 		}
 		result := row.failureResult()
 		_, lastDigest, _ := strings.Cut(row.receipt, ":")
-		receipt, err := messaging.CommitGroupFailureLocked(path, messaging.GroupFailureRecord{
+		receipt, err := commitGroupFailureLocked(path, messaging.GroupFailureRecord{
 			Result: result, LastResultDigest: lastDigest, LastRecoveryDigest: row.recoveryDigest,
 			FrozenEventJSON: row.eventJSON, MaxRetries: row.maxRetries,
 		})

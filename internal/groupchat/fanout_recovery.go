@@ -76,7 +76,7 @@ func (s *Store) authorizeFanoutRecovery(key FanoutKey, recipient string, authori
 			_, rec.LastResultDigest, _ = strings.Cut(row.receipt, ":")
 			rec.LastRecoveryDigest = row.recoveryDigest
 		}
-		digest, err := messaging.CommitGroupRecoveryLocked(path, rec)
+		digest, err := commitGroupRecoveryLocked(path, rec)
 		if messaging.IsOutboxCommitUncertain(err) {
 			if digest, err = confirmFanoutRecoveryCommit(path, row, witness); err != nil {
 				return err
