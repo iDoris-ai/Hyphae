@@ -76,7 +76,12 @@ func SaveOutbox(ob *types.Outbox) error {
 	if err != nil {
 		return err
 	}
-	return withOutboxLock(file, func() error { return writeOutbox(file, ob) })
+	return withOutboxLock(file, func() error {
+		if err := requireTypedOutboxRoundTrip(file); err != nil {
+			return err
+		}
+		return writeOutbox(file, ob)
+	})
 }
 
 // UpdateOutbox serializes a read-modify-write transaction across processes.
@@ -89,6 +94,12 @@ func UpdateOutbox(update func(*types.Outbox) error) (*types.Outbox, error) {
 	}
 	var updated *types.Outbox
 	err = withOutboxLock(file, func() error {
+		// Refuse even a no-op transaction: every typed send, enqueue, clear and
+		// cleanup path starts here, so legacy code cannot publish or rewrite
+		// entries whose protocol records it cannot see.
+		if err := requireTypedOutboxRoundTrip(file); err != nil {
+			return err
+		}
 		ob, err := readOutbox(file)
 		if err != nil {
 			return err
