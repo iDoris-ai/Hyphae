@@ -308,7 +308,12 @@ type GroupOutboxHandler interface {
 	RecordAttemptFailure(entry types.OutboxEntry, exhausted bool, issue AgentMessageDeliveryIssue) error
 }
 
-type OutboxHandlers struct{ Group GroupOutboxHandler }
+// OutboxHandlers selects the group route implementation. Attempt (rev7 F3
+// boundary) takes precedence over the legacy Group handler when both are set.
+type OutboxHandlers struct {
+	Group   GroupOutboxHandler
+	Attempt GroupAttemptHandler
+}
 
 // AttemptOptions supplies the route handler and the caller's unlocked
 // keystore, when available for encrypted history recovery on the DM path.
@@ -377,6 +382,9 @@ func attemptSendRouted(ctx context.Context, ob *types.Outbox, entry types.Outbox
 	}
 	if entry.Route != OutboxRouteGroup {
 		return SendResult{}, fmt.Errorf("unsupported outbox route %q", entry.Route)
+	}
+	if opts.Handlers.Attempt != nil {
+		return attemptSendGroupAttempt(ctx, entry, defaultRelays, dialTimeout, opts.Handlers.Attempt, publish)
 	}
 	if opts.Handlers.Group == nil {
 		return SendResult{Issue: AgentMessageIssueRouteHandlerMissing}, ErrGroupRouteHandlerMissing

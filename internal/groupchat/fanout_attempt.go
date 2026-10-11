@@ -13,6 +13,9 @@ import (
 // reservation, publish or deletion happens (rev7 §3.5, schema supplement §5).
 var ErrFanoutQueueConflict = errors.New("fanout queue conflict: outbox queue_id differs from the persisted queue_id")
 
+// ErrFanoutQueueMissing: the outbox has no entry for the queued row's event.
+var ErrFanoutQueueMissing = errors.New("queue_missing: outbox has no entry for the queued event")
+
 // fanoutBarrierTx is the recovery barrier that every R and S must pass
 // (rev7 §3.3): under the outbox lock and the caller's SQLite transaction it
 // replays an unconsumed O3 record (or holds on conflict), then checks D14
@@ -33,7 +36,7 @@ func (s *Store) fanoutBarrierTx(tx queryExecer, path string, key FanoutKey, reci
 		return row, false, err
 	}
 	if entry == nil {
-		return row, false, fmt.Errorf("%s: outbox has no entry for the queued event", messaging.AgentMessageIssueQueueMissing)
+		return row, false, ErrFanoutQueueMissing
 	}
 	if entry.QueueID != row.token.queueID {
 		// A failed row whose outbox already holds the next epoch: D6 landed

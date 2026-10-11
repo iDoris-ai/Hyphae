@@ -42,6 +42,9 @@ const (
 	AgentMessageIssueQueueSuperseded         AgentMessageDeliveryIssue = "queue_superseded"
 	AgentMessageIssueOutboxBookkeepingFailed AgentMessageDeliveryIssue = "outbox_bookkeeping_failed"
 	AgentMessageIssueRetryExhausted          AgentMessageDeliveryIssue = "retry_exhausted"
+	// AgentMessageIssueQueueConflict is D14: the persisted queue_id and the
+	// unique outbox entry's queue_id differ; both stores are held unchanged.
+	AgentMessageIssueQueueConflict AgentMessageDeliveryIssue = "queue_conflict"
 )
 
 // QueuedAgentMessageResult describes the durable queue/send outcome. A relay
