@@ -840,8 +840,11 @@ func CleanupOutbox(ob *types.Outbox, maxAge time.Duration) error {
 		newEntries := make([]types.OutboxEntry, 0)
 		for _, entry := range latest.Entries {
 			// Preserve pending and corrupt route/status entries for inspection.
+			// Group entries are never aged out here: a failed group entry is
+			// recovery evidence (rev7 §3.5) and an accepted one is removed by
+			// the precise O2, so generic cleanup only touches DM entries.
 			pending, _ := outboxRouteStatuses(entry)
-			if !validGroupOutboxEntry(entry) || entry.Status == pending || entry.LastAttempt > cutoff {
+			if !validGroupOutboxEntry(entry) || entry.Route == OutboxRouteGroup || entry.Status == pending || entry.LastAttempt > cutoff {
 				newEntries = append(newEntries, entry)
 			}
 		}
