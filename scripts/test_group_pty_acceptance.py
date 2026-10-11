@@ -44,6 +44,20 @@ class GroupPtyFixtureTests(unittest.TestCase):
         self.assertEqual(len(lines), len(runner.CHECKS))
         self.assertTrue(all(line.startswith("NOT_IMPLEMENTED ") for line in lines))
 
+    def test_requirement_matrix_names_every_required_scenario(self):
+        labels = dict(runner.CHECKS)
+        self.assertEqual(set(labels), {
+            "three_isolated_identities", "invite_accept_activate", "three_tui_exactly_once",
+            "restart_history", "recipient_retry", "relay_outage_retry",
+            "negative_roster_hash", "negative_wrong_invitee", "negative_authority",
+            "negative_unknown_sender", "negative_cross_group_replay", "negative_bad_crypto",
+            "negative_unknown_version_field", "negative_zero_value",
+        })
+        for key in ("negative_roster_hash", "negative_wrong_invitee", "negative_authority",
+                    "negative_unknown_sender", "negative_cross_group_replay", "negative_bad_crypto",
+                    "negative_unknown_version_field", "negative_zero_value"):
+            self.assertIn("without history or state changes", labels[key])
+
     def test_evidence_is_status_only_and_exclusive_create(self):
         report = runner.Report()
         with tempfile.TemporaryDirectory() as temp_name:
@@ -53,6 +67,8 @@ class GroupPtyFixtureTests(unittest.TestCase):
             self.assertEqual(payload["checks"], report.statuses)
             self.assertNotIn("homes", payload)
             self.assertNotIn("identities", payload)
+            self.assertNotIn("reasons", payload)
+            self.assertEqual(evidence.stat().st_mode & 0o777, 0o600)
             with self.assertRaises(FileExistsError):
                 runner.write_evidence(str(evidence), report)
 
