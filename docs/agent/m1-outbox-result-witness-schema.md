@@ -75,7 +75,7 @@ row_revision **不在 token 内**：R/S/T4 正常改变 revision，不改变既�
 
 原 rev7 有真实矛盾：§2「验收」要求“Carol 重试耗尽 → Carol 行 failed、issue retry_exhausted”，§3.5 写“当前 O3 的 send_failed”，§3.3 要求 T4 投影 O3 issue。反例是第 M 次真实 P 失败，O3 写 group_failed，T4 提交后立即 LoadFanoutReport；无条件 send_failed 不满足 §2，直接 retry_exhausted 不满足 §3.5 无条件文字。不能靠事后再改 failed row 补验收。
 
-**待接受的 rev7 §3.5 精确替换文本**（本任务保留两份 docs 上限，因此在这里给出可直接评审的修订，不更改第三份 contract）：将末段的「当前 O3 的 send_failed」替换为「当前 O3 在 result.retry_count < MaxRetries 时的 send_failed，或在 result.retry_count >= MaxRetries 时的 retry_exhausted；T4 精确投影该 O3 的 status/issue」。§3.1/§3.3 的投影规则读作此条件映射，不改变计数/锁/CAS/屏障或 §2 验收；§3.5 同队列耗尽/queue_missing 分类的既有 Issue 分工保持。补充中的该条件 mapping 是显式契约修订提案，不能声称原 rev7 已无矛盾。
+**待外部评审接受的 rev7 §3.5 精确替换文本**（协调者已将本修订同步应用于本 PR 的原契约）：将末段的「当前 O3 的 send_failed」替换为「当前 O3 在 result.retry_count < MaxRetries 时的 send_failed，或在 result.retry_count >= MaxRetries 时的 retry_exhausted；T4 精确投影该 O3 的 status/issue」。§3.1/§3.3 的投影规则读作此条件映射，不改变计数/锁/CAS/屏障或 §2 验收；§3.5 同队列耗尽/queue_missing 分类的既有 Issue 分工保持。补充中的该条件 mapping 是显式契约修订提案；本 PR 同步修订 §3.5，待外部精确 head 批准后才能称为冻结。
 
 B-schema-1 仍是**独立评审/原契约修订待接受的 blocker**，而非已经解决或已冻结：coordinator 已确认矛盾并提出上述候选，但未以独立 review PASS 关闭它。裁定前 parser 可 inert 实现提案并提交评审，完整 F2b schema freeze、F3 exhausted T4 及 gates 不得关闭；不得先改 writer。queue_missing 和 operation diagnostics 不受这项修订影响。
 
@@ -482,6 +482,6 @@ F3 受控部署/完整 writer gate 的 V7 仍是既有计划的独立必交项�
 
 新增选择清单：P1 enc 同值重复/字符串后缀接受且对象 extra 拒绝；P2 完整 key/token 布局、canonical wire identity/opaque IDs及QueueID保留；P3 摘要输入范围、编码与token派生result_id/随机recovery_id；P4 非耗尽send_failed/耗尽retry_exhausted的显式条件修订提案，B-schema-1等待独立接受；P5 witness具体成员及条件/重复recipient一致性；P6 新epoch created_at。表内 counter词法/range沿用F2a，version=1及optional仅省略沿用rev7，非新增null豁免。所有P项为**proposed decisions awaiting independent review**，不得以本文存在就称为schema freeze获准。
 
-**真实 blocker B-schema-1**：§2 耗尽验收 retry_exhausted 与 §3.5 current-O3 send_failed、§3.3 T4 issue 投影的组合互斥，详见 P4 的单次耗尽反例。coordinator 已确认并提出 P4 的最小条件修订，仍等待独立接受及原契约修订；本补充未改第三份 rev7 文件，不偷偷覆盖其语义。其余“生成一个规范enc”与兼容reader同值重复、旧relays:null与新条目[]、旧消费凭据与后来S不同revision有不同作用域，不算契约矛盾。代码现状与目标的差距仍为实现blocker；评审若发现其它真实矛盾，登记具体条款/反例并阻塞受影响实现，不允许实现者静默选择一边。
+**真实 blocker B-schema-1**：§2 耗尽验收 retry_exhausted 与 §3.5 current-O3 send_failed、§3.3 T4 issue 投影的组合互斥，详见 P4 的单次耗尽反例。coordinator 已确认并提出 P4 的最小条件修订，协调者独立复核 PASS 后已在本 PR 同步修订原契约；仍等待外部 PR-Daemon 精确 head 批准，未提前宣称冻结。其余“生成一个规范enc”与兼容reader同值重复、旧relays:null与新条目[]、旧消费凭据与后来S不同revision有不同作用域，不算契约矛盾。代码现状与目标的差距仍为实现blocker；评审若发现其它真实矛盾，登记具体条款/反例并阻塞受影响实现，不允许实现者静默选择一边。
 
 仍未关闭：B-schema-1 exhausted issue裁定；本补充逐项独立评审；F2b实现；完整F1/F2/V6验收；F3跨存储fence/barrier/全部writer与受控部署V7；F4来源witness/幂等恢复验收。coordinator为独立reviewer，外部PR-Daemon执行后续acceptance；本任务只提交两份docs的本地commit，不push/PR/merge、不运行发布或新schema写入。S7/S8/S9继续等待这些gates。
