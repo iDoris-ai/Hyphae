@@ -36,6 +36,14 @@ func ApplyRawOutboxPatches(raw []byte, patches []RawOutboxPatch) ([]byte, error)
 	return out, nil
 }
 
+// syncOutboxDir is the post-rename directory fsync; tests replace it to
+// provoke the commit-uncertain path.
+var syncOutboxDir = func(dir *os.File) error { return dir.Sync() }
+
+// MarkOutboxCommitUncertain wraps err so IsOutboxCommitUncertain reports it;
+// for callers that stand in for the raw writer (test seams).
+func MarkOutboxCommitUncertain(err error) error { return &outboxCommitUncertainError{err} }
+
 // writeRawOutboxAtomic writes data through a sibling temp file (write → fsync →
 // close), renames it over path, then fsyncs the directory. A step that fails
 // after the rename returns a *outboxCommitUncertainError because the
@@ -69,7 +77,7 @@ func writeRawOutboxAtomic(path string, data []byte) error {
 	if err != nil {
 		return &outboxCommitUncertainError{fmt.Errorf("open outbox directory after rename: %w", err)}
 	}
-	if err := dir.Sync(); err != nil {
+	if err := syncOutboxDir(dir); err != nil {
 		_ = dir.Close()
 		return &outboxCommitUncertainError{fmt.Errorf("fsync outbox directory after rename: %w", err)}
 	}

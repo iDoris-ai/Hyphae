@@ -139,7 +139,7 @@ func ConfirmOutboxDurable(path string) error {
 		return &outboxCommitUncertainError{err}
 	}
 	defer dir.Close()
-	if err := dir.Sync(); err != nil {
+	if err := syncOutboxDir(dir); err != nil {
 		return &outboxCommitUncertainError{err}
 	}
 	return nil
