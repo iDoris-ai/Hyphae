@@ -86,6 +86,7 @@ func (s *Store) authorizeFanoutRecovery(key FanoutKey, recipient string, authori
 		}
 		// D6 is durable from here; a failure leaves the witness unconsumed
 		// for the barrier, never a second D6.
+		fanoutCrashGate("d6")
 		if err := projectFanoutRecoveryTx(tx, row, witness, digest); err != nil {
 			return fmt.Errorf("%w: %v", ErrFanoutRecoveryPending, err)
 		}

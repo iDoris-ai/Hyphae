@@ -24,6 +24,11 @@ var (
 	ErrFanoutBookkeepingConflict = errors.New("fanout failure bookkeeping conflict")
 )
 
+// fanoutCrashGate is called between a durable JSON commit (O3, D6) and its
+// SQLite projection (T4, T2') while both locks are held. Production is a
+// no-op; crash tests replace it to stop the process at that exact boundary.
+var fanoutCrashGate = func(stage string) {}
+
 // fanoutFailureRow is the locked SQLite pre-image that O3 and T4 rely on.
 type fanoutFailureRow struct {
 	token                                                     fanoutAttemptToken
@@ -86,6 +91,7 @@ func (s *Store) commitFanoutFailure(token fanoutAttemptToken) error {
 		}
 		// From here the O3 record is durable: any failure leaves it unconsumed
 		// for the recovery barrier, never a second O3.
+		fanoutCrashGate("o3")
 		if err := projectFanoutFailureTx(tx, row, result, receipt); err != nil {
 			return fmt.Errorf("%w: %v", ErrFanoutBookkeepingPending, err)
 		}
