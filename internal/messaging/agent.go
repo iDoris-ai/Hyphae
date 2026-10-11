@@ -541,6 +541,7 @@ var AgentInboxCmd = &cli.Command{
 			events = events[:limit]
 		}
 
+		groupMessages := 0
 		entries := make([]agentInboxEntry, 0, len(events))
 		var auditWarnings []string
 		for _, evt := range events {
@@ -553,10 +554,33 @@ var AgentInboxCmd = &cli.Command{
 				}
 			}
 
-			content, isEncrypted, decrypted, err := decodeInboxContent(&evt, recipientSK, autoDecrypt)
-			if err != nil {
-				eventErrors = append(eventErrors, fmt.Sprintf("event %s: decode message: %v", evt.ID.Hex(), err))
-				continue
+			var content string
+			var isEncrypted, decrypted bool
+			if autoDecrypt {
+				msg, err := VerifyAgentMessage(evt, recipientSK)
+				if err != nil {
+					eventErrors = append(eventErrors, fmt.Sprintf("event %s: decode message: %v", evt.ID.Hex(), err))
+					continue
+				}
+				switch msg.Route() {
+				case AgentRouteReservedGroup:
+					groupMessages++
+					continue
+				case AgentRouteDirect:
+					content = msg.Plaintext()
+					isEncrypted = msg.IsEncrypted()
+					decrypted = true
+				default:
+					eventErrors = append(eventErrors, fmt.Sprintf("event %s: invalid message route", evt.ID.Hex()))
+					continue
+				}
+			} else {
+				var err error
+				content, isEncrypted, decrypted, err = decodeInboxContent(&evt, recipientSK, false)
+				if err != nil {
+					eventErrors = append(eventErrors, fmt.Sprintf("event %s: decode message: %v", evt.ID.Hex(), err))
+					continue
+				}
 			}
 			if err := RejectReservedGroupPayload(content); err != nil {
 				eventErrors = append(eventErrors, fmt.Sprintf("event %s: %v", evt.ID.Hex(), err))
@@ -565,6 +589,7 @@ var AgentInboxCmd = &cli.Command{
 
 			first := false
 			if !isEncrypted || autoDecrypt {
+				var err error
 				first, err = StoreIncomingMessageOnce(&evt, recipient.Npub, content, isEncrypted)
 				if err != nil {
 					eventErrors = append(eventErrors, fmt.Sprintf("event %s: store received message: %v", evt.ID.Hex(), err))
@@ -617,6 +642,9 @@ var AgentInboxCmd = &cli.Command{
 					prefix = "🔒 "
 				}
 				fmt.Printf("[%s] %s: %s\n", e.Time, e.From, common.TruncateString(prefix+e.Content, 50))
+			}
+			if groupMessages > 0 {
+				fmt.Printf("\n%d group messages (use `hyphae groupchat`)\n", groupMessages)
 			}
 		})
 		return nil
