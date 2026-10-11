@@ -15,10 +15,8 @@ import (
 )
 
 // Inert F2b-1 reader for the proposed outbox failure-result wire schema
-// (docs/agent/m1-outbox-result-witness-schema.md §2–§3). ParseRawFailureResult
-// clones the caller's bytes into Raw and keeps each member's exact value
-// fragment in Fields; no production path calls this yet and the schema is still
-// awaiting external review.
+// (docs/agent/m1-outbox-result-witness-schema.md §2–§3). No production path
+// calls it yet and the schema is still awaiting external review.
 const failureResultDomain = "hyphae.failure-result.v1"
 
 const (
@@ -89,10 +87,10 @@ func ParseRawFailureResult(raw []byte) (*RawFailureResult, error) {
 	if result.RetryCount != result.PriorRetryCount+1 {
 		return result, fmt.Errorf("retry_count: must equal prior_retry_count+1")
 	}
-	if json.Unmarshal(fields["status"], &result.Status) != nil {
+	if result.Status, err = strictJSONString(fields["status"]); err != nil {
 		return result, fmt.Errorf("status: invalid string")
 	}
-	if json.Unmarshal(fields["issue"], &result.Issue) != nil {
+	if result.Issue, err = strictJSONString(fields["issue"]); err != nil {
 		return result, fmt.Errorf("issue: invalid string")
 	}
 	if !validStatusIssue(result.Status, result.Issue) {
@@ -113,7 +111,7 @@ func parseRawAttemptToken(raw []byte) (OutboxAttemptToken, error) {
 	if token.EventID, err = requireLowerHex(fields["event_id"], 64); err != nil {
 		return token, fmt.Errorf("event_id: %w", err)
 	}
-	if json.Unmarshal(fields["queue_id"], &token.QueueID) != nil || token.QueueID == "" {
+	if token.QueueID, err = strictJSONString(fields["queue_id"]); err != nil || token.QueueID == "" {
 		return token, fmt.Errorf("queue_id: invalid string")
 	}
 	if token.AttemptGeneration, err = evidenceIntegerValue(fields["attempt_generation"], 1, maxSignedInt64); err != nil {
@@ -140,16 +138,16 @@ func parseRawFanoutKey(raw []byte) (OutboxFanoutKey, error) {
 	if key.SendKey, err = requireLowerHex(fields["send_key"], 32); err != nil {
 		return key, fmt.Errorf("send_key: %w", err)
 	}
-	if json.Unmarshal(fields["envelope_type"], &key.EnvelopeType) != nil || !isEnvelopeType(key.EnvelopeType) {
+	if key.EnvelopeType, err = strictJSONString(fields["envelope_type"]); err != nil || !isEnvelopeType(key.EnvelopeType) {
 		return key, fmt.Errorf("envelope_type: invalid")
 	}
 	return key, nil
 }
 
 func requireCanonicalNpub(raw []byte) (string, error) {
-	var npub string
-	if json.Unmarshal(raw, &npub) != nil {
-		return "", fmt.Errorf("invalid string")
+	npub, err := strictJSONString(raw)
+	if err != nil {
+		return "", err
 	}
 	pk, err := common.ParsePublicKey(npub)
 	if err != nil || common.EncodeNpub(pk) != npub {
@@ -159,8 +157,8 @@ func requireCanonicalNpub(raw []byte) (string, error) {
 }
 
 func requireLowerHex(raw []byte, size int) (string, error) {
-	var value string
-	if json.Unmarshal(raw, &value) != nil || len(value) != size || value != strings.ToLower(value) || !isHexString(value) {
+	value, err := strictJSONString(raw)
+	if err != nil || len(value) != size || value != strings.ToLower(value) || !isHexString(value) {
 		return "", fmt.Errorf("expected %d lowercase hex characters", size)
 	}
 	return value, nil

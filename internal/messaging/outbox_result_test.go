@@ -129,3 +129,47 @@ func TestAppendJSONStringEscaping(t *testing.T) {
 		}
 	}
 }
+
+func TestStrictJSONStringRejectsNormalizingForms(t *testing.T) {
+	valid := []struct{ raw, want string }{
+		{`"plain"`, "plain"},
+		{`"\ud83d\ude00"`, "\U0001F600"},
+		{`"a\\b"`, `a\b`},
+		{`"a\"b"`, `a"b`},
+		{`"tab\there"`, "tab\there"},
+	}
+	for _, tc := range valid {
+		got, err := strictJSONString([]byte(tc.raw))
+		if err != nil || got != tc.want {
+			t.Fatalf("strictJSONString(%s) = %q, %v; want %q", tc.raw, got, err, tc.want)
+		}
+	}
+	invalid := []struct {
+		name string
+		raw  []byte
+	}{
+		{"lone high surrogate", []byte(`"\ud800"`)},
+		{"lone low surrogate", []byte(`"\udc00"`)},
+		{"lone high mid-string", []byte(`"a\ud800b"`)},
+		{"two high surrogates", []byte(`"\ud800\ud800"`)},
+		{"high not followed by escape", []byte(`"\ud83dx"`)},
+		{"high without low", []byte(`"\ud800\u0041"`)},
+		{"truncated escape", []byte(`"\u12"`)},
+		{"invalid escape", []byte(`"\x41"`)},
+		{"invalid UTF-8 bytes", []byte{0x22, 0xff, 0xfe, 0x22}},
+	}
+	for _, tc := range invalid {
+		if got, err := strictJSONString(tc.raw); err == nil {
+			t.Fatalf("%s: strictJSONString(%q) = %q, want error", tc.name, tc.raw, got)
+		}
+	}
+}
+
+func TestParseRawFailureResultRejectsNormalizingQueueID(t *testing.T) {
+	for _, q := range []string{`"\ud800"`, `"a\udc00b"`, `"\ud800\ud800"`} {
+		raw := mutateResult(t, `"queue_id": "2fc72e7f8539e9eff9120c979198790b"`, `"queue_id": `+q)
+		if _, err := ParseRawFailureResult(raw); err == nil {
+			t.Fatalf("queue_id %s: expected rejection", q)
+		}
+	}
+}
