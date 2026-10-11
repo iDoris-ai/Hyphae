@@ -200,7 +200,10 @@ func TestGroupOutboxCorruptFailureDoesNotMutate(t *testing.T) {
 	require.Equal(t, []types.OutboxEntry{entry}, latest.Entries)
 }
 
-func TestCleanupOutboxKeepsGroupPending(t *testing.T) {
+// Generic cleanup ages out DM entries only. Every group entry stays: pending
+// ones are work, failed ones are recovery evidence (rev7 §3.5), accepted ones
+// are removed by the precise O2 at acceptance time.
+func TestCleanupOutboxKeepsGroupEntries(t *testing.T) {
 	setupTempOutbox(t)
 	ob := &types.Outbox{Entries: []types.OutboxEntry{
 		{ID: "new-group", Route: OutboxRouteGroup, Status: OutboxStatusGroupPending},
@@ -222,7 +225,7 @@ func TestCleanupOutboxKeepsGroupPending(t *testing.T) {
 	for _, entry := range ob.Entries {
 		ids = append(ids, entry.ID)
 	}
-	require.Equal(t, []string{"new-group", "corrupt-group", "corrupt-route", "legacy-dm", "recent-group"}, ids)
+	require.Equal(t, []string{"new-group", "corrupt-group", "corrupt-route", "legacy-dm", "old-group", "recent-group"}, ids)
 }
 
 // TestLegacyRoundTripRecoversGroupRoute covers Blocker A from the S5a
