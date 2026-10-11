@@ -190,25 +190,29 @@ func nextRawValue(raw []byte, base int, decoder *json.Decoder) (rawSpan, error) 
 // they pass the same scan. A scan or edit error, or bytes identical to the
 // snapshot, writes nothing and leaves the file's mtime untouched.
 func commitRawOutboxEdit(path string, edit func(*rawOutboxFile) ([]byte, error)) error {
-	return withOutboxLock(path, func() error {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		file, err := scanRawOutboxFile(raw)
-		if err != nil {
-			return err
-		}
-		next, err := edit(file)
-		if err != nil {
-			return err
-		}
-		if bytes.Equal(next, raw) {
-			return nil
-		}
-		if _, err := scanRawOutboxFile(next); err != nil {
-			return fmt.Errorf("edited outbox fails strict scan: %w", err)
-		}
-		return writeRawOutboxAtomic(path, next)
-	})
+	return withOutboxLock(path, func() error { return commitRawOutboxEditLocked(path, edit) })
+}
+
+// commitRawOutboxEditLocked is commitRawOutboxEdit for a caller that already
+// holds the outbox lock (WithGroupOutboxLock).
+func commitRawOutboxEditLocked(path string, edit func(*rawOutboxFile) ([]byte, error)) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	file, err := scanRawOutboxFile(raw)
+	if err != nil {
+		return err
+	}
+	next, err := edit(file)
+	if err != nil {
+		return err
+	}
+	if bytes.Equal(next, raw) {
+		return nil
+	}
+	if _, err := scanRawOutboxFile(next); err != nil {
+		return fmt.Errorf("edited outbox fails strict scan: %w", err)
+	}
+	return writeRawOutboxAtomic(path, next)
 }
