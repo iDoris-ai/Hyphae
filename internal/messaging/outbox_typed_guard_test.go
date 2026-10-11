@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
+	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 )
 
@@ -37,12 +38,18 @@ func requireTypedWriteHeld(t *testing.T, name string, err error) {
 	}
 }
 
-func TestTypedOutboxWritersRefuseProtocolRecords(t *testing.T) {
+// With protocol records in the file, typed transactions are committed as
+// DM-only raw patches: DM traffic keeps flowing, group entries are immutable
+// through the typed path, and SaveOutbox (whole-file replacement) is refused.
+func TestTypedOutboxWritersWithProtocolRecords(t *testing.T) {
 	dm := legacyFixtureEntry(t, "legacy-dm-nil-relays.json")
 	o3 := bytes.TrimSpace(readF2BFixture(t, "p-o3-entry.json"))
-	raw := rawOutboxDoc(dm, o3)
-	path := stageHomeOutbox(t, raw)
+	path := stageHomeOutbox(t, rawOutboxDoc(dm, o3))
 	dmParsed, err := ParseRawGroupEntry(dm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	groupParsed, err := ParseRawGroupEntry(o3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,33 +57,108 @@ func TestTypedOutboxWritersRefuseProtocolRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	groupIntact := func(step string) {
+		t.Helper()
+		entry, _, err := ReadGroupEntryLocked(path, groupParsed.Entry.ID)
+		if err != nil || entry == nil || !bytes.Equal(entry.Raw, groupParsed.Raw) {
+			t.Fatalf("%s: group entry bytes changed (%v)", step, err)
+		}
+	}
 
-	_, err = UpdateOutbox(func(*types.Outbox) error { return nil })
-	requireTypedWriteHeld(t, "no-op UpdateOutbox", err)
+	// Group-touching typed operations are refused with zero writes.
+	raw, _ := os.ReadFile(path)
 	_, err = UpdateOutbox(func(ob *types.Outbox) error { ob.Entries = nil; return nil })
-	requireTypedWriteHeld(t, "UpdateOutbox", err)
-	requireTypedWriteHeld(t, "SaveOutbox", SaveOutbox(&types.Outbox{}))
-	requireTypedWriteHeld(t, "CleanupOutbox", CleanupOutbox(&types.Outbox{}, 0))
-	requireTypedWriteHeld(t, "RemoveFromOutbox", RemoveFromOutbox(&types.Outbox{}, dmParsed.Entry.ID))
-	requireTypedWriteHeld(t, "UpdateOutboxStatus", UpdateOutboxStatus(&types.Outbox{}, dmParsed.Entry.ID, "sent"))
-	_, _, err = EnqueueGroupOutboxEntry(legacyGroup.Entry.EventJSON, legacyGroup.Entry.RecipientNpub, nil, 10)
+	requireTypedWriteHeld(t, "typed removal of a group entry", err)
+	requireTypedWriteHeld(t, "SaveOutbox", SaveOutbox(&types.Outbox{Entries: []types.OutboxEntry{}}))
+	requireTypedWriteHeld(t, "UpdateOutboxStatus on group", UpdateOutboxStatus(&types.Outbox{}, groupParsed.Entry.ID, "group_failed"))
+	freshGroup := makeInboxEvent(t, nostr.Generate().Public(), nostr.Generate(), nostr.Now(), "new group event", nil)
+	freshJSON, _ := freshGroup.MarshalJSON()
+	_, _, err = EnqueueGroupOutboxEntry(string(freshJSON), legacyGroup.Entry.RecipientNpub, nil, 10)
 	requireTypedWriteHeld(t, "EnqueueGroupOutboxEntry", err)
-	_, _, err = RequeueGroupOutboxEntry(legacyGroup.Entry.EventJSON, legacyGroup.Entry.RecipientNpub, nil, 10)
-	requireTypedWriteHeld(t, "RequeueGroupOutboxEntry", err)
+	_, err = UpdateOutbox(func(ob *types.Outbox) error { ob.Entries[0], ob.Entries[1] = ob.Entries[1], ob.Entries[0]; return nil })
+	requireTypedWriteHeld(t, "reorder", err)
+	_, err = UpdateOutbox(func(ob *types.Outbox) error { ob.Entries[0].MaxRetries = 3; return nil })
+	requireTypedWriteHeld(t, "immutable DM field", err)
+	requireOutboxUnchanged(t, path, raw)
 
+	// DM operations succeed and the group entry stays byte-identical.
+	if _, err := UpdateOutbox(func(*types.Outbox) error { return nil }); err != nil {
+		t.Fatalf("no-op: %v", err)
+	}
+	requireOutboxUnchanged(t, path, raw)
+	if err := UpdateOutboxStatus(&types.Outbox{}, dmParsed.Entry.ID, "failed"); err != nil {
+		t.Fatalf("UpdateOutboxStatus DM: %v", err)
+	}
+	groupIntact("status")
+	if err := IncrementOutboxRetry(&types.Outbox{}, dmParsed.Entry.ID); err != nil {
+		t.Fatalf("IncrementOutboxRetry: %v", err)
+	}
+	ob, err := LoadOutbox()
+	if err != nil || len(ob.Entries) != 2 || ob.Entries[0].Status != "failed" || ob.Entries[0].RetryCount != 1 {
+		t.Fatalf("DM patches not visible: %+v %v", ob.Entries, err)
+	}
+	groupIntact("retry")
+
+	sender, recipient := nostr.Generate(), nostr.Generate()
+	event := makeInboxEvent(t, recipient.Public(), sender, nostr.Now(), "dm beside group records", nil)
+	if err := AddToOutbox(&types.Outbox{}, &event, common.EncodeNpub(recipient.Public()), nil); err != nil {
+		t.Fatalf("AddToOutbox: %v", err)
+	}
+	groupIntact("append")
 	published := false
 	publish := func(context.Context, []string, nostr.Event, time.Duration) bool { published = true; return true }
 	store := func(*nostr.Event, string, string, bool) error { return nil }
+	ob, _ = LoadOutbox()
+	result, err := attemptSend(context.Background(), ob, ob.Entries[2], []string{"wss://relay.invalid"}, time.Second, publish, store)
+	if err != nil || !published || !result.Sent || result.Superseded {
+		t.Fatalf("DM send beside group records: %+v %v", result, err)
+	}
+	groupIntact("send")
+	if err := RemoveFromOutbox(&types.Outbox{}, dmParsed.Entry.ID); err != nil {
+		t.Fatalf("RemoveFromOutbox: %v", err)
+	}
+	if err := CleanupOutbox(&types.Outbox{}, 0); err != nil {
+		t.Fatalf("CleanupOutbox: %v", err)
+	}
+	groupIntact("remove+cleanup")
+	ob, _ = LoadOutbox()
+	if len(ob.Entries) != 1 || ob.Entries[0].ID != groupParsed.Entry.ID {
+		t.Fatalf("expected only the group entry to remain: %+v", ob.Entries)
+	}
+}
+
+func TestTypedDiffAssignsQueueIDToLegacyEntry(t *testing.T) {
+	dm := legacyFixtureEntry(t, "legacy-dm-nil-relays.json")
+	legacy := bytes.Replace(dm, []byte(`"queue_id": "219bdbf9ed70b96893cc2382f365f24c",`), nil, 1)
+	if bytes.Equal(legacy, dm) {
+		t.Fatal("fixture edit did not apply")
+	}
+	o3 := bytes.TrimSpace(readF2BFixture(t, "p-o3-entry.json"))
+	path := stageHomeOutbox(t, rawOutboxDoc(legacy, o3))
 	ob, err := LoadOutbox()
+	if err != nil || ob.Entries[0].QueueID != "" {
+		t.Fatalf("legacy entry: %+v %v", ob.Entries, err)
+	}
+	current, err := currentOutboxAttempt(ob.Entries[0])
+	if err != nil || current.entry.QueueID == "" {
+		t.Fatalf("currentOutboxAttempt: %+v %v", current.entry, err)
+	}
+	after, _ := LoadOutbox()
+	if after.Entries[0].QueueID != current.entry.QueueID || after.Entries[0].Status != "pending" {
+		t.Fatalf("queue_id not persisted: %+v", after.Entries[0])
+	}
+	if _, err := scanRawOutboxFile(mustRead(t, path)); err != nil {
+		t.Fatalf("file after queue_id assignment fails the strict scan: %v", err)
+	}
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("read-only LoadOutbox must still work: %v", err)
+		t.Fatal(err)
 	}
-	_, err = attemptSend(context.Background(), ob, dmParsed.Entry, []string{"wss://relay.invalid"}, time.Second, publish, store)
-	requireTypedWriteHeld(t, "attemptSend", err)
-	if published {
-		t.Fatal("legacy send path published while protocol records were present")
-	}
-	requireOutboxUnchanged(t, path, raw)
+	return data
 }
 
 func TestTypedOutboxGuardMembers(t *testing.T) {
@@ -92,7 +174,10 @@ func TestTypedOutboxGuardMembers(t *testing.T) {
 			t.Fatalf("%s: mutation did not apply", name)
 		}
 		path := stageHomeOutbox(t, raw)
-		_, err := UpdateOutbox(func(*types.Outbox) error { return nil })
+		_, err := UpdateOutbox(func(ob *types.Outbox) error {
+			ob.Entries = append(ob.Entries, types.OutboxEntry{QueueID: "ffffffffffffffffffffffffffffffff", ID: "x", Status: "pending"})
+			return nil
+		})
 		requireTypedWriteHeld(t, name, err)
 		requireOutboxUnchanged(t, path, raw)
 	}
