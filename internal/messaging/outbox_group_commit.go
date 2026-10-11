@@ -3,6 +3,7 @@ package messaging
 import (
 	"errors"
 	"fmt"
+	"os"
 )
 
 // WithGroupOutboxLock holds the outbox sibling lock for one F3 cross-store
@@ -75,4 +76,26 @@ func FailureReceipt(resultID, fragmentDigest string) string {
 func IsOutboxCommitUncertain(err error) bool {
 	var uncertain *outboxCommitUncertainError
 	return errors.As(err, &uncertain)
+}
+
+// ReadGroupFailureLocked strictly scans the outbox for a caller holding
+// WithGroupOutboxLock and returns the entry with queueID plus the receipt its
+// failure_result would have once consumed ("" when it carries none).
+func ReadGroupFailureLocked(path, queueID string) (*RawGroupEntry, string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, "", err
+	}
+	file, err := scanRawOutboxFile(raw)
+	if err != nil {
+		return nil, "", err
+	}
+	entry, err := file.entryByQueueID(queueID)
+	if err != nil {
+		return nil, "", err
+	}
+	if entry.Parsed.FailureResult == nil {
+		return entry.Parsed, "", nil
+	}
+	return entry.Parsed, FailureReceipt(entry.Parsed.FailureResult.ResultID, sha256Hex(entry.Parsed.Fields["failure_result"])), nil
 }
