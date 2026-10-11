@@ -74,3 +74,45 @@ func TestInspectFanoutBookkeepingMissingRow(t *testing.T) {
 	_, err = f.member.store.inspectFanoutBookkeeping(FanoutKey{LocalNpub: "bad"}, f.recipient)
 	require.Error(t, err)
 }
+
+func TestInspectFanoutBookkeepingByKey(t *testing.T) {
+	f, npubs := newPreparedFixture(t, 2)
+	_, err := f.member.store.enqueuePreparedRaw(f.key, 1)
+	require.NoError(t, err)
+	unchanged := f.snapshot(t)
+
+	reports, err := f.member.store.InspectFanoutBookkeeping(f.key)
+	require.NoError(t, err)
+	require.Len(t, reports, 2)
+	require.True(t, reports[0].RecipientNpub < reports[1].RecipientNpub, "npub order")
+	for _, r := range reports {
+		require.Contains(t, npubs, r.RecipientNpub)
+		require.Equal(t, BookkeepingNormal, r.Bookkeeping)
+	}
+	unchanged()
+
+	// One recipient left with an unconsumed O3: only that recipient changes class.
+	f.failO3BeforeT4(t, f.startAttempt(t, 1))
+	unchanged = f.snapshot(t)
+	reports, err = f.member.store.InspectFanoutBookkeeping(f.key)
+	require.NoError(t, err)
+	classes := map[string]FanoutBookkeeping{}
+	for _, r := range reports {
+		classes[r.RecipientNpub] = r.Bookkeeping
+	}
+	require.Equal(t, BookkeepingPendingFailure, classes[f.recipient])
+	for _, n := range npubs {
+		if n != f.recipient {
+			require.Equal(t, BookkeepingNormal, classes[n])
+		}
+	}
+	unchanged()
+
+	// Unknown key: empty, not an error. Bad npub: error.
+	empty, err := f.member.store.InspectFanoutBookkeeping(FanoutKey{LocalNpub: f.key.LocalNpub, GroupID: f.key.GroupID, EnvelopeType: f.key.EnvelopeType, SendKey: "nope"})
+	require.NoError(t, err)
+	require.Empty(t, empty)
+	require.NotNil(t, empty)
+	_, err = f.member.store.InspectFanoutBookkeeping(FanoutKey{LocalNpub: "bad"})
+	require.Error(t, err)
+}

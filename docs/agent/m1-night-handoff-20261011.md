@@ -1,6 +1,6 @@
 # M1 night stack handoff (2026-10-11)
 
-Review guide for the 23 stacked branches produced on the night of 2026-10-11.
+Review guide for the stacked branches produced on the night of 2026-10-11.
 All branches are pushed to `origin`; no pull requests were opened from the CLI
 (no valid GitHub token on the build machine). Open them bottom-up with the
 compare order below, or with `gh pr create --base <previous> --head <branch>`.
@@ -41,6 +41,8 @@ It contains zero new code; open it as a draft and close it once those PRs land.
 | 21 | m1-w3b-queue-targets-raw | W-3b | `enqueuePreparedRaw`: O1+T2 under the rev7 lock order | no (inert) |
 | 22 | m1-w5a-bookkeeping-status | W-5a | read-only bookkeeping classification for `groupchat status` | no (inert) |
 | 23 | m1-f2e2c-cleanup-retention | F2e-2c | generic `CleanupOutbox` never ages out group entries | yes (behaviour change) |
+| 24 | m1-f5-night-handoff | — | this document | docs |
+| 25 | m1-w5b-bookkeeping-key-inspect | W-5b | `InspectFanoutBookkeeping(key)`: all recipients classified under one outbox lock | no (inert) |
 
 Behaviour changes visible to users today are only #5, #19 and #23. Everything
 else is inert until the W-2/W-3c switches below are made.
