@@ -173,6 +173,33 @@ func TestAgentMsgCmd_AcknowledgedEventIsQueuedBeforePublishAndRemovedAfter(t *te
 	assert.False(t, stored.IsEncrypted)
 }
 
+func TestAgentMsgCmdEncryptedMessage(t *testing.T) {
+	setupAgentMsgCLI(t)
+	relayURL, received := startAgentTestRelay(t, true)
+	args := agentMsgArgs(relayURL)
+	args[len(args)-1] = "--encrypt=true"
+	captureStdout(t, func() {
+		require.NoError(t, runAgentMsgCLICommand(context.Background(), args))
+	})
+	var event nostr.Event
+	select {
+	case event = <-received:
+	case <-time.After(3 * time.Second):
+		t.Fatal("test relay did not receive the encrypted message")
+	}
+	require.NoError(t, ValidateAgentMessageEvent(&event))
+	assert.True(t, event.CheckID())
+	assert.True(t, event.VerifySignature())
+	ks, err := identity.LoadKeyStore()
+	require.NoError(t, err)
+	recipientSK, err := identity.GetSecretKey(ks, "bob")
+	require.NoError(t, err)
+	plaintext, encrypted, err := DecodeMessageContent(&event, recipientSK)
+	require.NoError(t, err)
+	assert.True(t, encrypted)
+	assert.Equal(t, "reliable send test", plaintext)
+}
+
 func TestStoreIncomingMessageOnceRejectsProfileEvent(t *testing.T) {
 	resetStore(t)
 	event := &nostr.Event{
