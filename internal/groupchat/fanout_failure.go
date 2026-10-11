@@ -75,9 +75,13 @@ func (s *Store) commitFanoutFailure(token fanoutAttemptToken) error {
 			FrozenEventJSON: row.eventJSON, MaxRetries: row.maxRetries,
 		})
 		if messaging.IsOutboxCommitUncertain(err) {
-			return fmt.Errorf("%w: %v", ErrFanoutBookkeepingPending, err)
-		}
-		if err != nil {
+			// Never write a second O3: confirm the directory and reread. The
+			// record present and exact → continue to T4; the old snapshot →
+			// no durable evidence of this P outcome; anything else → hold.
+			if receipt, err = confirmFanoutFailureCommit(path, row, result); err != nil {
+				return err
+			}
+		} else if err != nil {
 			return err
 		}
 		// From here the O3 record is durable: any failure leaves it unconsumed
@@ -100,41 +104,27 @@ func (s *Store) commitFanoutFailure(token fanoutAttemptToken) error {
 // pre-image returns ErrFanoutBookkeepingConflict. replayed reports whether T4
 // was written.
 func (s *Store) recoverFanoutFailure(key FanoutKey, recipient string) (replayed bool, err error) {
-	local, err := canonicalNpub(key.LocalNpub)
-	if err != nil {
-		return false, err
-	}
-	key.LocalNpub = local
 	err = messaging.WithGroupOutboxLock(func(path string) error {
 		tx, err := s.beginImmediate()
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
-		row := fanoutFailureRow{token: fanoutAttemptToken{key: key, recipient: recipient}}
-		if err := row.scan(tx.QueryRow(`SELECT `+fanoutFailureColumns+` FROM groupchat_fanout
-            WHERE local_npub=? AND group_id=? AND envelope_type=? AND send_key=? AND recipient_npub=?`,
-			key.LocalNpub, key.GroupID, key.EnvelopeType, key.SendKey, recipient)); err != nil {
+		row, err := loadFanoutFailureRow(tx, key, recipient)
+		if err != nil {
 			return err
 		}
 		if row.token.queueID == "" {
 			return nil // prepared rows have no queue entry and no O3 record
 		}
-		entry, receipt, err := messaging.ReadGroupFailureLocked(path, row.token.queueID)
-		if err != nil || receipt == "" || receipt == row.receipt {
+		entry, receipt, err := messaging.ReadGroupEntryLocked(path, row.token.eventID)
+		if err != nil || entry == nil || receipt == "" || receipt == row.receipt {
 			return err
 		}
-		stored := entry.FailureResult
-		want := row.failureResult()
-		if RecipientDeliveryState(row.state) != RecipientQueued || row.phase != "started" || row.lastResultGeneration >= row.token.generation ||
-			!row.retryCount.Valid || entry.Entry.EventJSON != row.eventJSON || int64(entry.Entry.MaxRetries) != row.maxRetries ||
-			int64(entry.Entry.RetryCount) != want.RetryCount || entry.Entry.Status != want.Status || entry.Entry.LastAttempt != want.LastAttemptAt ||
-			stored.Token != want.Token || stored.ExpectedRowRevision != want.ExpectedRowRevision || stored.Attempts != want.Attempts ||
-			stored.LastAttemptAt != want.LastAttemptAt || stored.RelayCount != want.RelayCount || stored.PriorRetryCount != want.PriorRetryCount ||
-			stored.RetryCount != want.RetryCount || stored.Status != want.Status || stored.Issue != want.Issue {
-			return ErrFanoutBookkeepingConflict
+		if entry.QueueID != row.token.queueID {
+			return ErrFanoutQueueConflict
 		}
-		if err := projectFanoutFailureTx(tx, row, want, receipt); err != nil {
+		if err := replayFanoutFailureTx(tx, &row, entry, receipt); err != nil {
 			return err
 		}
 		if err := tx.Commit(); err != nil {
@@ -144,6 +134,40 @@ func (s *Store) recoverFanoutFailure(key FanoutKey, recipient string) (replayed 
 		return nil
 	})
 	return replayed, err
+}
+
+// replayFanoutFailureTx projects an unconsumed outbox failure_result into the
+// row when it is an exact replay of the row's started attempt (token, O3
+// pre-image and projected entry fields); otherwise it returns
+// ErrFanoutBookkeepingConflict and writes nothing. row is updated to the
+// post-image on success.
+func replayFanoutFailureTx(tx queryExecer, row *fanoutFailureRow, entry *messaging.RawGroupEntry, receipt string) error {
+	want := row.failureResult()
+	if RecipientDeliveryState(row.state) != RecipientQueued || row.phase != "started" || row.lastResultGeneration >= row.token.generation ||
+		!row.retryCount.Valid || !matchesFailureResult(entry, want, row) {
+		return ErrFanoutBookkeepingConflict
+	}
+	if err := projectFanoutFailureTx(tx, *row, want, receipt); err != nil {
+		return err
+	}
+	row.revision++
+	row.phase, row.receipt, row.lastResultGeneration = "failed", receipt, row.token.generation
+	row.retryCount = sql.NullInt64{Int64: want.RetryCount, Valid: true}
+	if want.Status == messaging.OutboxStatusGroupFailed {
+		row.state = string(RecipientFailed)
+	}
+	return nil
+}
+
+// matchesFailureResult reports whether the entry's failure_result and its
+// projected fields equal the O3 record derived from the row's pre-image.
+func matchesFailureResult(entry *messaging.RawGroupEntry, want messaging.RawFailureResult, row *fanoutFailureRow) bool {
+	stored := entry.FailureResult
+	return stored != nil && entry.Entry.EventJSON == row.eventJSON && int64(entry.Entry.MaxRetries) == row.maxRetries &&
+		int64(entry.Entry.RetryCount) == want.RetryCount && entry.Entry.Status == want.Status && entry.Entry.LastAttempt == want.LastAttemptAt &&
+		stored.Token == want.Token && stored.ExpectedRowRevision == want.ExpectedRowRevision && stored.Attempts == want.Attempts &&
+		stored.LastAttemptAt == want.LastAttemptAt && stored.RelayCount == want.RelayCount && stored.PriorRetryCount == want.PriorRetryCount &&
+		stored.RetryCount == want.RetryCount && stored.Status == want.Status && stored.Issue == want.Issue
 }
 
 // failureResult derives the O3 record for the row's started attempt; status
@@ -189,4 +213,26 @@ func projectFanoutFailureTx(tx queryExecer, row fanoutFailureRow, result messagi
 		return fmt.Errorf("T4 CAS affected %d rows (%v)", n, err)
 	}
 	return nil
+}
+
+// confirmFanoutFailureCommit resolves a commit-uncertain O3 write while the
+// locks are still held and returns the receipt to project.
+func confirmFanoutFailureCommit(path string, row fanoutFailureRow, want messaging.RawFailureResult) (string, error) {
+	if err := messaging.ConfirmOutboxDurable(path); err != nil {
+		return "", fmt.Errorf("%w: outbox directory durability unconfirmed: %v", ErrFanoutBookkeepingPending, err)
+	}
+	entry, receipt, err := messaging.ReadGroupEntryLocked(path, row.token.eventID)
+	if err != nil {
+		return "", fmt.Errorf("%w: reread after uncertain commit: %v", ErrFanoutBookkeepingPending, err)
+	}
+	if entry == nil || entry.QueueID != row.token.queueID {
+		return "", fmt.Errorf("%w: outbox entry missing or replaced after uncertain commit", ErrFanoutBookkeepingConflict)
+	}
+	if receipt == "" {
+		return "", fmt.Errorf("%w: old snapshot survived; this publish outcome has no durable evidence", ErrFanoutBookkeepingPending)
+	}
+	if !matchesFailureResult(entry, want, &row) {
+		return "", fmt.Errorf("%w: outbox record after uncertain commit is not this attempt's result", ErrFanoutBookkeepingConflict)
+	}
+	return receipt, nil
 }
