@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -118,10 +122,15 @@ func TestFanoutAttemptHandlerRejectsStaleAndForgedSnapshotsWithoutMutation(t *te
 		entry.EventJSON = strings.Replace(entry.EventJSON, `"content":"`, `"content":"x`, 1)
 		require.NotEqual(t, f.typedEntry(t).EventJSON, entry.EventJSON)
 		unchanged := f.snapshot(t)
-		result, err := messaging.AttemptSendRouted(context.Background(), nil, entry, []string{"ws://127.0.0.1:1"}, 200*time.Millisecond,
-			messaging.AttemptOptions{Handlers: messaging.OutboxHandlers{Attempt: NewFanoutAttemptHandler(f.member.store)}})
+		var starts, relayConnections atomic.Int32
+		relay := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { relayConnections.Add(1) }))
+		defer relay.Close()
+		result, err := messaging.AttemptSendRouted(context.Background(), nil, entry, []string{"ws" + strings.TrimPrefix(relay.URL, "http")}, 200*time.Millisecond,
+			messaging.AttemptOptions{Handlers: messaging.OutboxHandlers{Attempt: countingAttempt{GroupAttemptHandler: NewFanoutAttemptHandler(f.member.store), starts: &starts}}})
 		require.ErrorIs(t, err, messaging.ErrGroupAttemptStale)
 		require.False(t, result.Attempted, "a forged snapshot must be refused before publish start")
+		require.Zero(t, starts.Load(), "a forged snapshot must not call Start")
+		require.Zero(t, relayConnections.Load(), "a forged snapshot must not reach the relay")
 		unchanged()
 	})
 }
@@ -158,10 +167,11 @@ func TestFanoutAttemptReservationRacesLockedQueueRotation(t *testing.T) {
 	stale := f.typedEntry(t)
 	locked := make(chan struct{})
 	rotationErr := make(chan error, 1)
-	reserveStarted := make(chan struct{})
+	reserveEntered := make(chan struct{})
 	type baselineState struct {
-		outbox []byte
-		row    []any
+		outbox     []byte
+		row        []any
+		generation int64
 	}
 	baseline := make(chan baselineState, 1)
 	rotate := "rotated-queue-epoch"
@@ -191,10 +201,18 @@ func TestFanoutAttemptReservationRacesLockedQueueRotation(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			baseline <- baselineState{outbox: data, row: fanoutRowSnapshot(t, f.member, stale.ID)}
+			var generation int64
+			if err := f.member.db.QueryRow(`SELECT attempt_generation FROM groupchat_fanout WHERE event_id=?`, stale.ID).Scan(&generation); err != nil {
+				return err
+			}
+			baseline <- baselineState{outbox: data, row: fanoutRowSnapshot(t, f.member, stale.ID), generation: generation}
 			close(locked)
-			// Hold the same lock Reserve needs until its call is launched.
-			<-reserveStarted
+			// Hold the lock until the reservation is visibly blocked in the
+			// same flock call used by Reserve.
+			<-reserveEntered
+			if err := waitForReservationFlock(); err != nil {
+				return err
+			}
 			return nil
 		})
 	}()
@@ -204,21 +222,76 @@ func TestFanoutAttemptReservationRacesLockedQueueRotation(t *testing.T) {
 		err    error
 	}
 	reserved := make(chan reserveResult, 1)
+	var starts atomic.Int32
 	go func() {
-		close(reserveStarted)
 		result, err := messaging.AttemptSendRouted(context.Background(), nil, stale, []string{"ws://127.0.0.1:1"}, 200*time.Millisecond,
-			messaging.AttemptOptions{Handlers: messaging.OutboxHandlers{Attempt: NewFanoutAttemptHandler(f.member.store)}})
+			messaging.AttemptOptions{Handlers: messaging.OutboxHandlers{Attempt: signalReserve{
+				handler: countingAttempt{GroupAttemptHandler: NewFanoutAttemptHandler(f.member.store), starts: &starts}, entered: reserveEntered,
+			}}})
 		reserved <- reserveResult{result: result, err: err}
 	}()
 	got := <-reserved
 	require.NoError(t, <-rotationErr)
 	require.ErrorIs(t, got.err, messaging.ErrGroupAttemptStale)
 	require.False(t, got.result.Attempted, "stale snapshot must be refused before publish")
+	require.Zero(t, starts.Load(), "stale snapshot must not call Start")
 	state := <-baseline
 	after, err := os.ReadFile(f.outboxPath)
 	require.NoError(t, err)
 	require.Equal(t, string(state.outbox), string(after), "stale reservation changed rotated outbox")
 	require.Equal(t, state.row, fanoutRowSnapshot(t, f.member, stale.ID), "stale reservation changed rotated row")
+	var generation int64
+	require.NoError(t, f.member.db.QueryRow(`SELECT attempt_generation FROM groupchat_fanout WHERE event_id=?`, stale.ID).Scan(&generation))
+	require.Equal(t, state.generation, generation, "stale reservation changed attempt generation")
+}
+
+type countingAttempt struct {
+	messaging.GroupAttemptHandler
+	starts *atomic.Int32
+}
+
+func (c countingAttempt) Start(token messaging.GroupAttemptToken, targets int, now int64) error {
+	c.starts.Add(1)
+	return c.GroupAttemptHandler.Start(token, targets, now)
+}
+
+type signalReserve struct {
+	handler messaging.GroupAttemptHandler
+	entered chan struct{}
+}
+
+func (s signalReserve) Reserve(entry types.OutboxEntry) (messaging.GroupAttemptToken, error) {
+	close(s.entered)
+	return s.handler.Reserve(entry)
+}
+func (s signalReserve) Start(token messaging.GroupAttemptToken, targets int, now int64) error {
+	return s.handler.Start(token, targets, now)
+}
+func (s signalReserve) Accepted(token messaging.GroupAttemptToken, now int64) error {
+	return s.handler.Accepted(token, now)
+}
+func (s signalReserve) Failed(token messaging.GroupAttemptToken) (bool, error) {
+	return s.handler.Failed(token)
+}
+
+func waitForReservationFlock() error {
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	for {
+		buf := make([]byte, 1<<20)
+		n := runtime.Stack(buf, true)
+		for _, stack := range strings.Split(string(buf[:n]), "\n\n") {
+			if strings.Contains(stack, "internal/messaging.withOutboxLock") && strings.Contains(stack, "syscall.Flock") {
+				return nil
+			}
+		}
+		select {
+		case <-deadline.C:
+			return errors.New("reservation never blocked in the outbox flock while rotation held it")
+		default:
+			runtime.Gosched()
+		}
+	}
 }
 
 func TestValidateFanoutAttemptSnapshotAcceptsOpaqueLegacyQueueID(t *testing.T) {
