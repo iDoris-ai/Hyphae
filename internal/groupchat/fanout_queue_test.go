@@ -19,7 +19,7 @@ func fixedQueueTestSecret(n byte) nostr.SecretKey {
 
 func signedGroupEvent(t *testing.T, sender nostr.SecretKey, recipient nostr.SecretKey, key FanoutKey) (string, string, string) {
 	t.Helper()
-	logicalID := mustOpaque(t)
+	logicalID := key.SendKey
 	payload, err := Encode(Envelope{Type: EnvelopeMessage, Version: Version, GroupID: key.GroupID,
 		LogicalID: logicalID, Body: "fixture group message"})
 	require.NoError(t, err)
@@ -28,6 +28,7 @@ func signedGroupEvent(t *testing.T, sender nostr.SecretKey, recipient nostr.Secr
 	require.True(t, event.VerifySignature())
 	verified, err := VerifyIncoming(event, recipient)
 	require.NoError(t, err, "fixture must decrypt for the addressed test recipient")
+	require.Equal(t, common.EncodeNpub(sender.Public()), verified.SenderNpub())
 	require.Equal(t, common.EncodeNpub(recipient.Public()), verified.RecipientNpub())
 	require.True(t, verified.IsEncrypted())
 	decoded, err := envelopeFrom(verified, EnvelopeMessage)
@@ -38,6 +39,16 @@ func signedGroupEvent(t *testing.T, sender nostr.SecretKey, recipient nostr.Secr
 	data, err := json.Marshal(event)
 	require.NoError(t, err)
 	return event.ID.Hex(), string(data), common.EncodeNpub(recipient.Public())
+}
+
+func requireDistinctEncryptedEvents(t *testing.T, firstJSON, secondJSON string) {
+	t.Helper()
+	var first, second nostr.Event
+	require.NoError(t, json.Unmarshal([]byte(firstJSON), &first))
+	require.NoError(t, json.Unmarshal([]byte(secondJSON), &second))
+	require.NotEqual(t, first.ID, second.ID, "recipient envelopes retain distinct event IDs")
+	require.NotEqual(t, first.Sig, second.Sig, "recipient envelopes retain distinct signatures")
+	require.NotEqual(t, first.Content, second.Content, "recipient envelopes retain distinct ciphertexts")
 }
 
 func insertTestFanout(t *testing.T, member testMember, key FanoutKey, recipient string, state RecipientDeliveryState, eventID, eventJSON, queueID string, attempts int) {
@@ -65,9 +76,11 @@ func TestEnqueuePrepared(t *testing.T) {
 	t.Run("success_prepared_to_queued", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		member := newMemberWithSecret(t, fixedQueueTestSecret(1))
-		key := FanoutKey{LocalNpub: member.npub, GroupID: mustOpaque(t), EnvelopeType: EnvelopeMessage, SendKey: "logical1"}
+		key := FanoutKey{LocalNpub: member.npub, GroupID: mustOpaque(t), EnvelopeType: EnvelopeMessage, SendKey: mustOpaque(t)}
 		eID1, eJSON1, r1 := signedGroupEvent(t, member.sk, fixedQueueTestSecret(2), key)
 		eID2, eJSON2, r2 := signedGroupEvent(t, member.sk, fixedQueueTestSecret(3), key)
+		requireDistinctEncryptedEvents(t, eJSON1, eJSON2)
+		require.NotEqual(t, r1, r2, "fanout recipients are distinct")
 
 		insertTestFanout(t, member, key, r1, RecipientPrepared, eID1, eJSON1, "", 0)
 		insertTestFanout(t, member, key, r2, RecipientPrepared, eID2, eJSON2, "", 0)
@@ -77,6 +90,7 @@ func TestEnqueuePrepared(t *testing.T) {
 		require.Equal(t, 2, report.Queued)
 		require.Equal(t, 0, report.Failed)
 		require.Equal(t, messaging.AgentMessageQueued, report.State)
+		require.Equal(t, key.SendKey, report.LogicalID)
 		require.Len(t, report.Recipients, 2)
 		require.NotEmpty(t, report.Recipients[0].QueueID)
 		require.NotEmpty(t, report.Recipients[1].QueueID)
@@ -92,7 +106,7 @@ func TestEnqueuePrepared(t *testing.T) {
 	t.Run("crash_idempotence_O1_to_T2", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		member := newMemberWithSecret(t, fixedQueueTestSecret(4))
-		key := FanoutKey{LocalNpub: member.npub, GroupID: mustOpaque(t), EnvelopeType: EnvelopeMessage, SendKey: "logical2"}
+		key := FanoutKey{LocalNpub: member.npub, GroupID: mustOpaque(t), EnvelopeType: EnvelopeMessage, SendKey: mustOpaque(t)}
 		eID, eJSON, recipient := signedGroupEvent(t, member.sk, fixedQueueTestSecret(5), key)
 		insertTestFanout(t, member, key, recipient, RecipientPrepared, eID, eJSON, "", 0)
 
@@ -123,7 +137,7 @@ func TestEnqueuePrepared(t *testing.T) {
 	t.Run("message_only_extension_guard", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		member := newMemberWithSecret(t, fixedQueueTestSecret(14))
-		key := FanoutKey{LocalNpub: member.npub, GroupID: mustOpaque(t), EnvelopeType: EnvelopeType("activate"), SendKey: "invite1"}
+		key := FanoutKey{LocalNpub: member.npub, GroupID: mustOpaque(t), EnvelopeType: EnvelopeType("activate"), SendKey: mustOpaque(t)}
 		eID, eJSON, recipient := signedGroupEvent(t, member.sk, fixedQueueTestSecret(6), key)
 		insertTestFanout(t, member, key, recipient, RecipientPrepared, eID, eJSON, "", 0)
 
@@ -142,7 +156,7 @@ func TestFanoutOutboxHandler(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	member := newMemberWithSecret(t, fixedQueueTestSecret(12))
 	handler := NewFanoutOutboxHandler(member.store)
-	key := FanoutKey{LocalNpub: member.npub, GroupID: mustOpaque(t), EnvelopeType: EnvelopeMessage, SendKey: "logical3"}
+	key := FanoutKey{LocalNpub: member.npub, GroupID: mustOpaque(t), EnvelopeType: EnvelopeMessage, SendKey: mustOpaque(t)}
 	eID, eJSON, recipient := signedGroupEvent(t, member.sk, fixedQueueTestSecret(7), key)
 
 	t.Run("BeforePublish", func(t *testing.T) {
@@ -201,7 +215,7 @@ func TestFanoutOutboxHandler(t *testing.T) {
 	})
 
 	t.Run("MarkRelayAccepted_prepared_rejected", func(t *testing.T) {
-		keyPrep := FanoutKey{LocalNpub: member.npub, GroupID: mustOpaque(t), EnvelopeType: EnvelopeMessage, SendKey: "logical_prep"}
+		keyPrep := FanoutKey{LocalNpub: member.npub, GroupID: mustOpaque(t), EnvelopeType: EnvelopeMessage, SendKey: mustOpaque(t)}
 		eIDPrep, eJSONPrep, recipientPrep := signedGroupEvent(t, member.sk, fixedQueueTestSecret(8), keyPrep)
 		insertTestFanout(t, member, keyPrep, recipientPrep, RecipientPrepared, eIDPrep, eJSONPrep, "", 0)
 
@@ -210,7 +224,7 @@ func TestFanoutOutboxHandler(t *testing.T) {
 	})
 
 	t.Run("RecordAttemptFailure_and_terminal_guard", func(t *testing.T) {
-		keyFail := FanoutKey{LocalNpub: member.npub, GroupID: mustOpaque(t), EnvelopeType: EnvelopeMessage, SendKey: "logical_fail"}
+		keyFail := FanoutKey{LocalNpub: member.npub, GroupID: mustOpaque(t), EnvelopeType: EnvelopeMessage, SendKey: mustOpaque(t)}
 		eIDFail, eJSONFail, recipientFail := signedGroupEvent(t, member.sk, fixedQueueTestSecret(9), keyFail)
 		insertTestFanout(t, member, keyFail, recipientFail, RecipientQueued, eIDFail, eJSONFail, "q_fail", 0)
 
@@ -244,7 +258,7 @@ func TestFanoutOutboxHandler(t *testing.T) {
 func TestRequeueFailed(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	member := newMemberWithSecret(t, fixedQueueTestSecret(13))
-	key := FanoutKey{LocalNpub: member.npub, GroupID: mustOpaque(t), EnvelopeType: EnvelopeMessage, SendKey: "logical_requeue"}
+	key := FanoutKey{LocalNpub: member.npub, GroupID: mustOpaque(t), EnvelopeType: EnvelopeMessage, SendKey: mustOpaque(t)}
 	eID1, eJSON1, bobNpub := signedGroupEvent(t, member.sk, fixedQueueTestSecret(10), key)
 	eID2, eJSON2, carolNpub := signedGroupEvent(t, member.sk, fixedQueueTestSecret(11), key)
 

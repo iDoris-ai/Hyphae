@@ -21,10 +21,11 @@ func newPreparedFixture(t *testing.T, recipients int) (failureFixture, []string)
 	now := time.Now().Unix()
 	var npubs []string
 	var first failureFixture
+	var firstEventJSON string
 	for i := 0; i < recipients; i++ {
 		recipientSK := fixedQueueTestSecret(byte(22 + i))
 		recipient := common.EncodeNpub(recipientSK.Public())
-		logicalID := mustOpaque(t)
+		logicalID := key.SendKey
 		payload, err := Encode(Envelope{Type: EnvelopeMessage, Version: Version, GroupID: key.GroupID,
 			LogicalID: logicalID, Body: "prepared hello"})
 		require.NoError(t, err)
@@ -33,6 +34,8 @@ func newPreparedFixture(t *testing.T, recipients int) (failureFixture, []string)
 		require.True(t, event.VerifySignature())
 		verified, err := VerifyIncoming(event, recipientSK)
 		require.NoError(t, err)
+		require.Equal(t, member.npub, verified.SenderNpub())
+		require.Equal(t, recipient, verified.RecipientNpub())
 		decoded, err := envelopeFrom(verified, EnvelopeMessage)
 		require.NoError(t, err)
 		require.Equal(t, key.GroupID, decoded.GroupID)
@@ -40,6 +43,11 @@ func newPreparedFixture(t *testing.T, recipients int) (failureFixture, []string)
 		require.Equal(t, "prepared hello", decoded.Body)
 		eventJSON, err := json.Marshal(event)
 		require.NoError(t, err)
+		if i == 0 {
+			firstEventJSON = string(eventJSON)
+		} else {
+			requireDistinctEncryptedEvents(t, firstEventJSON, string(eventJSON))
+		}
 		_, err = member.db.Exec(`INSERT INTO groupchat_fanout
             (local_npub,group_id,envelope_type,send_key,recipient_npub,event_id,event_json,queue_id,state,max_retries,retry_count,created_at,updated_at)
             VALUES (?,?,?,?,?,?,?,'',?,3,0,?,?)`,
@@ -52,6 +60,9 @@ func newPreparedFixture(t *testing.T, recipients int) (failureFixture, []string)
 			first = failureFixture{member: member, key: key, recipient: recipient, eventID: event.ID.Hex(), outboxPath: path}
 		}
 	}
+	if recipients > 1 {
+		require.NotEqual(t, npubs[0], npubs[1], "fanout recipients are distinct")
+	}
 	return first, npubs
 }
 
@@ -62,6 +73,7 @@ func TestEnqueuePreparedRawO1ThenT2(t *testing.T) {
 
 	report, err := f.member.store.enqueuePreparedRaw(f.key, 1_800_000_000)
 	require.NoError(t, err)
+	require.Equal(t, f.key.SendKey, report.LogicalID)
 	require.Equal(t, 2, report.Queued)
 	require.Len(t, report.Recipients, 2)
 	data, err := os.ReadFile(f.outboxPath)
