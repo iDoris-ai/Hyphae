@@ -32,7 +32,11 @@ type threeMemberGroup struct {
 
 func newMember(t *testing.T) testMember {
 	t.Helper()
-	sk := nostr.Generate()
+	return newMemberWithSecret(t, nostr.Generate())
+}
+
+func newMemberWithSecret(t *testing.T, sk nostr.SecretKey) testMember {
+	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "groupchat.db")
 	db, err := sql.Open("sqlite", dbPath)
 	require.NoError(t, err)
