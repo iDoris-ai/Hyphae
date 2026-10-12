@@ -2,9 +2,12 @@ package groupchat
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 
+	"fiatjaf.com/nostr"
+	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/messaging"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 )
@@ -18,33 +21,90 @@ func NewFanoutAttemptHandler(store *Store) *FanoutAttemptHandler {
 	return &FanoutAttemptHandler{store: store}
 }
 
-// Reserve resolves the row that froze entry's event and runs R behind the
-// barrier. The entry's recipient must be the row's recipient.
+// Reserve validates the caller's immutable snapshot against both stores before
+// R, while the stable outbox lock and SQLite transaction are held.
 func (h *FanoutAttemptHandler) Reserve(entry types.OutboxEntry) (messaging.GroupAttemptToken, error) {
-	var key FanoutKey
-	var envelope, recipient string
-	err := h.store.db.QueryRow(`SELECT local_npub,group_id,envelope_type,send_key,recipient_npub FROM groupchat_fanout WHERE event_id=?`, entry.ID).
-		Scan(&key.LocalNpub, &key.GroupID, &envelope, &key.SendKey, &recipient)
-	if errors.Is(err, sql.ErrNoRows) {
-		return messaging.GroupAttemptToken{}, fmt.Errorf("%w: no fanout row froze event %s", messaging.ErrGroupAttemptConflict, entry.ID)
-	}
-	if err != nil {
-		return messaging.GroupAttemptToken{}, err
-	}
-	key.EnvelopeType = EnvelopeType(envelope)
-	if entry.RecipientNpub != recipient {
-		return messaging.GroupAttemptToken{}, fmt.Errorf("%w: outbox recipient %q is not the fanout row's %q", messaging.ErrGroupAttemptConflict, entry.RecipientNpub, recipient)
-	}
-	token, err := h.store.reserveFanoutAttempt(key, recipient)
+	token, err := h.store.reserveFanoutAttemptSnapshot(entry)
 	if err != nil {
 		return messaging.GroupAttemptToken{}, mapFanoutError(err)
 	}
-	if entry.QueueID != "" && entry.QueueID != token.queueID {
-		// The caller's snapshot predates a D6; the barrier already judged the
-		// current epoch, so report the stale snapshot without undoing R.
-		return toGroupAttemptToken(token), fmt.Errorf("%w: snapshot queue %q is not the current epoch %q", messaging.ErrGroupAttemptStale, entry.QueueID, token.queueID)
-	}
 	return toGroupAttemptToken(token), nil
+}
+
+// reserveFanoutAttemptSnapshot keeps caller validation, the live outbox read,
+// the recovery barrier, and R within the same lock → BEGIN IMMEDIATE window.
+func (s *Store) reserveFanoutAttemptSnapshot(snapshot types.OutboxEntry) (token fanoutAttemptToken, err error) {
+	err = messaging.WithGroupOutboxLock(func(path string) error {
+		tx, err := s.beginImmediate()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+
+		var key FanoutKey
+		var envelope, recipient, frozenEvent, queueID string
+		err = tx.QueryRow(`SELECT local_npub,group_id,envelope_type,send_key,recipient_npub,event_json,queue_id
+			FROM groupchat_fanout WHERE event_id=?`, snapshot.ID).
+			Scan(&key.LocalNpub, &key.GroupID, &envelope, &key.SendKey, &recipient, &frozenEvent, &queueID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: no fanout row froze event %s", messaging.ErrGroupAttemptConflict, snapshot.ID)
+		}
+		if err != nil {
+			return err
+		}
+		key.EnvelopeType = EnvelopeType(envelope)
+		row, err := loadFanoutFailureRow(tx, key, recipient)
+		if err != nil {
+			return err
+		}
+		current, _, err := messaging.ReadGroupEntryLocked(path, row.token.eventID)
+		if err != nil {
+			return err
+		}
+		if current == nil {
+			return messaging.ErrGroupAttemptQueueMissing
+		}
+		if err := validateFanoutAttemptSnapshot(snapshot, current.Entry, frozenEvent, queueID, recipient, key.LocalNpub); err != nil {
+			return err
+		}
+		if _, replayed, err := s.fanoutBarrierTx(tx, path, key, recipient); err != nil {
+			return commitReplayOnRefusal(tx, replayed, err)
+		}
+		if token, err = reserveFanoutAttemptTx(tx, key, recipient); err != nil {
+			return err
+		}
+		return tx.Commit()
+	})
+	if err != nil {
+		return fanoutAttemptToken{}, err
+	}
+	return token, nil
+}
+
+// validateFanoutAttemptSnapshot intentionally treats QueueID as an opaque
+// nonempty epoch. Legacy values need not be hex; all identities and event bytes
+// must still match the frozen signed event and current locked outbox entry.
+func validateFanoutAttemptSnapshot(snapshot, current types.OutboxEntry, frozenEvent, rowQueueID, recipient, localNpub string) error {
+	if rowQueueID != current.QueueID {
+		return fmt.Errorf("%w: persisted queue %q differs from current outbox epoch %q", messaging.ErrGroupAttemptQueueConflict, rowQueueID, current.QueueID)
+	}
+	if snapshot.QueueID == "" || snapshot.QueueID != current.QueueID {
+		return fmt.Errorf("%w: snapshot queue %q is not the current epoch %q", messaging.ErrGroupAttemptStale, snapshot.QueueID, current.QueueID)
+	}
+	if snapshot.ID != current.ID || snapshot.RecipientNpub != recipient || current.RecipientNpub != recipient {
+		return fmt.Errorf("%w: event or recipient identity differs from the frozen fanout row", messaging.ErrGroupAttemptConflict)
+	}
+	if snapshot.EventJSON != frozenEvent || current.EventJSON != frozenEvent {
+		return fmt.Errorf("%w: snapshot event content differs from the frozen fanout event", messaging.ErrGroupAttemptStale)
+	}
+	var event nostr.Event
+	if err := json.Unmarshal([]byte(frozenEvent), &event); err != nil {
+		return fmt.Errorf("%w: frozen event is invalid: %v", messaging.ErrGroupAttemptConflict, err)
+	}
+	if event.ID.Hex() != snapshot.ID || common.EncodeNpub(event.PubKey) != localNpub {
+		return fmt.Errorf("%w: frozen event ID or sender identity differs from the fanout row", messaging.ErrGroupAttemptConflict)
+	}
+	return nil
 }
 
 func (h *FanoutAttemptHandler) Start(token messaging.GroupAttemptToken, targets int, now int64) error {

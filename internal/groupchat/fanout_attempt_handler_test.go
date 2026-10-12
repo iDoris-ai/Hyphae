@@ -3,6 +3,7 @@ package groupchat
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,6 +94,43 @@ func TestFanoutAttemptHandlerAcceptedAndMappings(t *testing.T) {
 	unknown.ID = "0000000000000000000000000000000000000000000000000000000000000000"
 	_, err = handler.Reserve(unknown)
 	require.ErrorIs(t, err, messaging.ErrGroupAttemptConflict)
+}
+
+func TestFanoutAttemptHandlerRejectsStaleAndForgedSnapshotsWithoutMutation(t *testing.T) {
+	t.Run("stale queue epoch", func(t *testing.T) {
+		f := newFailureFixture(t)
+		stale := f.typedEntry(t)
+		f.exhaust(t)
+		_, err := f.member.store.authorizeFanoutRecovery(f.key, f.recipient, time.Now().Unix())
+		require.NoError(t, err)
+
+		unchanged := f.snapshot(t)
+		_, err = NewFanoutAttemptHandler(f.member.store).Reserve(stale)
+		require.ErrorIs(t, err, messaging.ErrGroupAttemptStale)
+		unchanged()
+	})
+
+	t.Run("same ID forged content never publishes", func(t *testing.T) {
+		f := newFailureFixture(t)
+		entry := f.typedEntry(t)
+		entry.EventJSON = strings.Replace(entry.EventJSON, `"content":"`, `"content":"x`, 1)
+		require.NotEqual(t, f.typedEntry(t).EventJSON, entry.EventJSON)
+		unchanged := f.snapshot(t)
+		result, err := messaging.AttemptSendRouted(context.Background(), nil, entry, []string{"ws://127.0.0.1:1"}, 200*time.Millisecond,
+			messaging.AttemptOptions{Handlers: messaging.OutboxHandlers{Attempt: NewFanoutAttemptHandler(f.member.store)}})
+		require.ErrorIs(t, err, messaging.ErrGroupAttemptStale)
+		require.False(t, result.Attempted, "a forged snapshot must be refused before publish start")
+		unchanged()
+	})
+}
+
+func TestValidateFanoutAttemptSnapshotAcceptsOpaqueLegacyQueueID(t *testing.T) {
+	f := newFailureFixture(t)
+	entry := f.typedEntry(t)
+	entry.QueueID = "legacy-queue-id"
+	entry.Route = messaging.OutboxRouteGroup
+	entry.Status = messaging.OutboxStatusGroupPending
+	require.NoError(t, validateFanoutAttemptSnapshot(entry, entry, entry.EventJSON, entry.QueueID, f.recipient, f.key.LocalNpub))
 }
 
 func TestFanoutAttemptHandlerPendingAndQueueMappings(t *testing.T) {
