@@ -3,6 +3,7 @@ package groupchat
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"fiatjaf.com/nostr"
 	"github.com/iDoris-ai/hyphae/internal/common"
@@ -262,17 +263,27 @@ func TestRequeueFailed(t *testing.T) {
 	eID1, eJSON1, bobNpub := signedGroupEvent(t, member.sk, fixedQueueTestSecret(10), key)
 	eID2, eJSON2, carolNpub := signedGroupEvent(t, member.sk, fixedQueueTestSecret(11), key)
 
-	// Bob is failed with prior outbox entry
-	insertTestFanout(t, member, key, bobNpub, RecipientFailed, eID1, eJSON1, "old_q_bob", 2)
-	// Carol is relay_accepted
-	insertTestFanout(t, member, key, carolNpub, RecipientRelayAccepted, eID2, eJSON2, "q_carol", 1)
+	// Prepare and enqueue Bob and Carol
+	insertTestFanout(t, member, key, bobNpub, RecipientPrepared, eID1, eJSON1, "", 0)
+	insertTestFanout(t, member, key, carolNpub, RecipientPrepared, eID2, eJSON2, "", 0)
+	reportPrep, err := member.store.EnqueuePrepared(key)
+	require.NoError(t, err)
+	require.Equal(t, 2, reportPrep.Queued)
 
-	// Seed outbox with group_failed for Bob
-	_, _, err := messaging.EnqueueGroupOutboxEntry(eJSON1, bobNpub, nil, 1)
+	// Carol is relay_accepted
+	_, err = member.db.Exec(`UPDATE groupchat_fanout SET state=?, accepted_at=? WHERE local_npub=? AND group_id=? AND envelope_type=? AND send_key=? AND recipient_npub=?`,
+		RecipientRelayAccepted, time.Now().Unix(), key.LocalNpub, key.GroupID, key.EnvelopeType, key.SendKey, carolNpub)
 	require.NoError(t, err)
-	ob, err := messaging.LoadOutbox()
-	require.NoError(t, err)
-	require.NoError(t, messaging.UpdateOutboxStatus(ob, eID1, messaging.OutboxStatusGroupFailed))
+
+	// Exhaust Bob to failed via attempts
+	var oldBobQueueID string
+	for range 10 {
+		token, err := member.store.reserveFanoutAttempt(key, bobNpub)
+		require.NoError(t, err)
+		oldBobQueueID = token.queueID
+		require.NoError(t, member.store.startFanoutAttempt(token, 1, time.Now().Unix()))
+		require.NoError(t, member.store.commitFanoutFailure(token))
+	}
 
 	t.Run("guard_relay_accepted_cannot_requeue", func(t *testing.T) {
 		_, err := member.store.RequeueFailed(key, carolNpub)
@@ -292,7 +303,7 @@ func TestRequeueFailed(t *testing.T) {
 		require.Equal(t, RecipientQueued, bob.State)
 		require.Equal(t, eID1, bob.EventID)
 		require.NotEmpty(t, bob.QueueID)
-		require.NotEqual(t, "old_q_bob", bob.QueueID)
+		require.NotEqual(t, oldBobQueueID, bob.QueueID)
 		require.Equal(t, messaging.AgentMessageIssueNone, bob.Issue)
 
 		// Outbox contains new queue_id and group_pending

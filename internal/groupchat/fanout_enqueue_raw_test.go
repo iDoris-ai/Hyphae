@@ -3,6 +3,7 @@ package groupchat
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -170,4 +171,150 @@ func TestEnqueuePreparedRawRefusals(t *testing.T) {
 	after, err := os.ReadFile(f.outboxPath)
 	require.NoError(t, err)
 	require.Equal(t, string(before), string(after))
+}
+
+func TestRequeueFailedRawSuccess(t *testing.T) {
+	f, npubs := newPreparedFixture(t, 2)
+	reportPrep, err := f.member.store.EnqueuePrepared(f.key)
+	require.NoError(t, err)
+	require.Equal(t, 2, reportPrep.Queued)
+
+	// Exhaust both recipients to failed state.
+	for _, recipient := range npubs {
+		for range 3 {
+			token, err := f.member.store.reserveFanoutAttempt(f.key, recipient)
+			require.NoError(t, err)
+			require.NoError(t, f.member.store.startFanoutAttempt(token, 1, time.Now().Unix()))
+			require.NoError(t, f.member.store.commitFanoutFailure(token))
+		}
+	}
+
+	reportBefore, err := f.member.store.LoadFanoutReport(f.key)
+	require.NoError(t, err)
+	require.Equal(t, 2, reportBefore.Failed)
+	require.Equal(t, 0, reportBefore.Queued)
+
+	// 1. Requeue single recipient.
+	report1, err := f.member.store.RequeueFailed(f.key, npubs[0])
+	require.NoError(t, err)
+	require.Equal(t, 1, report1.Queued)
+	require.Equal(t, 1, report1.Failed)
+
+	row0 := f.recovery(t)
+	require.Equal(t, string(RecipientQueued), row0.State)
+	require.EqualValues(t, 0, row0.RetryCount)
+	require.Equal(t, row0.QueueID, row0.RetryQueueID)
+	require.NotEmpty(t, row0.RecoveryID)
+	require.NotEmpty(t, row0.RecoveryDigest)
+
+	entry0, _, err := messaging.ReadGroupEntryLocked(f.outboxPath, f.eventID)
+	require.NoError(t, err)
+	require.NotNil(t, entry0)
+	require.Equal(t, row0.QueueID, entry0.QueueID)
+	require.NotNil(t, entry0.RecoveryWitness)
+	require.Equal(t, row0.RecoveryID, entry0.RecoveryWitness.RecoveryID)
+	require.Equal(t, messaging.OutboxWitnessDigest(entry0), row0.RecoveryDigest)
+
+	// 2. Requeue remaining failed recipients with recipient == "".
+	report2, err := f.member.store.RequeueFailed(f.key, "")
+	require.NoError(t, err)
+	require.Equal(t, 2, report2.Queued)
+	require.Equal(t, 0, report2.Failed)
+
+	for _, recipient := range npubs {
+		var state, queueID, retryQueueID, recID, recDigest string
+		var retryCount int64
+		require.NoError(t, f.member.db.QueryRow(`SELECT state, queue_id, retry_queue_id, retry_count, last_recovery_id, last_recovery_digest
+			FROM groupchat_fanout WHERE local_npub=? AND group_id=? AND send_key=? AND recipient_npub=?`,
+			f.key.LocalNpub, f.key.GroupID, f.key.SendKey, recipient).
+			Scan(&state, &queueID, &retryQueueID, &retryCount, &recID, &recDigest))
+		require.Equal(t, string(RecipientQueued), state)
+		require.Equal(t, queueID, retryQueueID)
+		require.EqualValues(t, 0, retryCount)
+		require.NotEmpty(t, recID)
+		require.NotEmpty(t, recDigest)
+	}
+}
+
+func TestEnqueueAndRequeuePreservesUnrelatedOutboxEntries(t *testing.T) {
+	f, _ := newPreparedFixture(t, 1)
+
+	// Pre-populate outbox with a valid DM entry.
+	dmFixturePath := filepath.Join("..", "messaging", "testdata", "raw-outbox", "legacy-dm-nil-relays.json")
+	dmData, err := os.ReadFile(dmFixturePath)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(f.outboxPath, dmData, 0600))
+
+	// EnqueuePrepared must append group entry and preserve the DM entry.
+	report, err := f.member.store.EnqueuePrepared(f.key)
+	require.NoError(t, err)
+	require.Equal(t, 1, report.Queued)
+
+	latestOB, err := messaging.LoadOutbox()
+	require.NoError(t, err)
+	require.Len(t, latestOB.Entries, 2)
+	require.Equal(t, "219bdbf9ed70b96893cc2382f365f24c", latestOB.Entries[0].QueueID)
+	require.Equal(t, "", latestOB.Entries[0].Route)
+	require.Equal(t, report.Recipients[0].QueueID, latestOB.Entries[1].QueueID)
+	require.Equal(t, messaging.OutboxRouteGroup, latestOB.Entries[1].Route)
+
+	// Exhaust the group entry.
+	for range 3 {
+		token, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+		require.NoError(t, err)
+		require.NoError(t, f.member.store.startFanoutAttempt(token, 1, time.Now().Unix()))
+		require.NoError(t, f.member.store.commitFanoutFailure(token))
+	}
+	require.Equal(t, string(RecipientFailed), f.recovery(t).State)
+
+	// RequeueFailed must replace the group entry with D6 while still preserving DM entry.
+	requeueReport, err := f.member.store.RequeueFailed(f.key, f.recipient)
+	require.NoError(t, err)
+	require.Equal(t, 1, requeueReport.Queued)
+
+	latestOBAfter, err := messaging.LoadOutbox()
+	require.NoError(t, err)
+	require.Len(t, latestOBAfter.Entries, 2)
+	require.Equal(t, "219bdbf9ed70b96893cc2382f365f24c", latestOBAfter.Entries[0].QueueID)
+	require.Equal(t, "", latestOBAfter.Entries[0].Route)
+	require.Equal(t, requeueReport.Recipients[0].QueueID, latestOBAfter.Entries[1].QueueID)
+	require.Equal(t, messaging.OutboxRouteGroup, latestOBAfter.Entries[1].Route)
+}
+
+func TestEnqueueAndRequeueFailClosedOnCorruption(t *testing.T) {
+	f, _ := newPreparedFixture(t, 1)
+
+	corruptContent := []byte("{\n  \"entries\": [{\"corrupted\":true\n}\n")
+	require.NoError(t, os.WriteFile(f.outboxPath, corruptContent, 0600))
+
+	// EnqueuePrepared must fail closed without mutating SQLite or outbox.
+	_, err := f.member.store.EnqueuePrepared(f.key)
+	require.Error(t, err)
+	row := f.recovery(t)
+	require.Equal(t, string(RecipientPrepared), row.State)
+	outboxData, err := os.ReadFile(f.outboxPath)
+	require.NoError(t, err)
+	require.Equal(t, corruptContent, outboxData)
+
+	// Fresh fixture to test RequeueFailed fail-closed behavior.
+	f2, _ := newPreparedFixture(t, 1)
+	_, err = f2.member.store.EnqueuePrepared(f2.key)
+	require.NoError(t, err)
+	for range 3 {
+		token, err := f2.member.store.reserveFanoutAttempt(f2.key, f2.recipient)
+		require.NoError(t, err)
+		require.NoError(t, f2.member.store.startFanoutAttempt(token, 1, time.Now().Unix()))
+		require.NoError(t, f2.member.store.commitFanoutFailure(token))
+	}
+	require.Equal(t, string(RecipientFailed), f2.recovery(t).State)
+
+	// Corrupt outbox and verify RequeueFailed fails closed.
+	require.NoError(t, os.WriteFile(f2.outboxPath, corruptContent, 0600))
+	_, err = f2.member.store.RequeueFailed(f2.key, f2.recipient)
+	require.Error(t, err)
+	row2 := f2.recovery(t)
+	require.Equal(t, string(RecipientFailed), row2.State)
+	outboxData2, err := os.ReadFile(f2.outboxPath)
+	require.NoError(t, err)
+	require.Equal(t, corruptContent, outboxData2)
 }
