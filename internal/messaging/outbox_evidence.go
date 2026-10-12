@@ -224,18 +224,28 @@ func validateEvidenceEvent(raw []byte, entry types.OutboxEntry) error {
 // canonicalized event interpretation used by the strict outbox reader. The
 // entry's exact event bytes are still compared separately by callers.
 func VerifiedGroupEventIdentity(raw []byte, entry types.OutboxEntry) (string, string, error) {
-	if err := validateEvidenceEvent(raw, entry); err != nil {
-		return "", "", err
-	}
-	fields, err := evidenceObject(raw, "id pubkey created_at kind tags content sig", "")
-	if err != nil {
-		return "", "", err
-	}
-	event, err := decodeEvidenceEvent(fields)
+	event, err := DecodeVerifiedGroupEvent(raw, entry)
 	if err != nil {
 		return "", "", err
 	}
 	return event.ID.Hex(), common.EncodeNpub(event.PubKey), nil
+}
+
+// DecodeVerifiedGroupEvent returns the canonical event represented by the
+// strict outbox reader, after binding its ID, sender, and signature to entry.
+func DecodeVerifiedGroupEvent(raw []byte, entry types.OutboxEntry) (*nostr.Event, error) {
+	if err := validateEvidenceEvent(raw, entry); err != nil {
+		return nil, err
+	}
+	fields, err := evidenceObject(raw, "id pubkey created_at kind tags content sig", "")
+	if err != nil {
+		return nil, err
+	}
+	event, err := decodeEvidenceEvent(fields)
+	if err != nil {
+		return nil, err
+	}
+	return event, nil
 }
 
 func decodeEvidenceEvent(fields map[string]json.RawMessage) (*nostr.Event, error) {

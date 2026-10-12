@@ -2,12 +2,10 @@ package messaging
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
-	"fiatjaf.com/nostr"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 )
 
@@ -53,8 +51,8 @@ func attemptSendGroupAttempt(ctx context.Context, entry types.OutboxEntry, defau
 	if err != nil {
 		return groupAttemptRefusal(err)
 	}
-	var event nostr.Event
-	if err := json.Unmarshal([]byte(entry.EventJSON), &event); err != nil {
+	event, err := DecodeVerifiedGroupEvent([]byte(entry.EventJSON), entry)
+	if err != nil {
 		return SendResult{Issue: AgentMessageIssueOutboxBookkeepingFailed}, fmt.Errorf("parse frozen event: %w", err)
 	}
 	targets := entry.Relays
@@ -65,7 +63,7 @@ func attemptSendGroupAttempt(ctx context.Context, entry types.OutboxEntry, defau
 		return groupAttemptRefusal(err)
 	}
 	result := SendResult{Attempted: true}
-	if !publish(ctx, targets, event, dialTimeout) {
+	if !publish(ctx, targets, *event, dialTimeout) {
 		exhausted, err := h.Failed(token)
 		if err != nil {
 			refusal, err := groupAttemptRefusal(err)

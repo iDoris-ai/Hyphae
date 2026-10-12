@@ -2,8 +2,10 @@ package messaging
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -167,5 +169,45 @@ func TestAttemptSendRoutedPrefersAttemptHandlerAndKeepsLegacyFallback(t *testing
 	result, err = attemptSendRouted(context.Background(), &types.Outbox{}, bad, nil, time.Second, AttemptOptions{Handlers: OutboxHandlers{Attempt: h}}, publish, store)
 	if err == nil || result.Issue != AgentMessageIssueOutboxBookkeepingFailed || len(h.calls) != 1 {
 		t.Fatalf("corrupt frozen event: %+v %v calls=%v", result, err, h.calls)
+	}
+}
+
+func TestAttemptSendGroupAttemptCapturesCanonicalEscapedEvent(t *testing.T) {
+	entry := groupAttemptEntry(t)
+	var expected nostr.Event
+	if err := json.Unmarshal([]byte(entry.EventJSON), &expected); err != nil {
+		t.Fatal(err)
+	}
+	entry.EventJSON = strings.Replace(entry.EventJSON, `"id":`, `"\u0069d":`, 1)
+	entry.EventJSON = strings.Replace(entry.EventJSON, `"pubkey":`, `"pub\u006bey":`, 1)
+	originalBytes := entry.EventJSON
+	handler := &fakeAttemptHandler{}
+	var captured nostr.Event
+	publish := func(_ context.Context, targets []string, event nostr.Event, _ time.Duration) bool {
+		if len(targets) != 2 {
+			t.Fatalf("publish got targets %v", targets)
+		}
+		captured = event
+		return false
+	}
+	store := func(*nostr.Event, string, string, bool) error {
+		t.Fatal("DM history store must not run on the group route")
+		return nil
+	}
+	result, err := attemptSendRouted(context.Background(), nil, entry, []string{"wss://a", "wss://b"}, time.Second,
+		AttemptOptions{Handlers: OutboxHandlers{Attempt: handler}}, publish, store)
+	if err != nil || !result.Attempted || result.Sent {
+		t.Fatalf("result = %+v, err = %v", result, err)
+	}
+	if captured.ID != expected.ID || captured.PubKey != expected.PubKey || captured.Sig != expected.Sig ||
+		!captured.CheckID() || !captured.VerifySignature() {
+		t.Fatalf("captured event ID/pubkey/signature invalid: id=%s pubkey=%x", captured.ID.Hex(), captured.PubKey)
+	}
+	if entry.EventJSON != originalBytes {
+		t.Fatal("publish path modified the original signed event bytes")
+	}
+	wantCalls := []string{"reserve", "start:7:2", "failed:7"}
+	if fmt.Sprint(handler.calls) != fmt.Sprint(wantCalls) {
+		t.Fatalf("handler calls = %v, want %v", handler.calls, wantCalls)
 	}
 }
