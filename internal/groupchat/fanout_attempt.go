@@ -38,6 +38,9 @@ func (s *Store) fanoutBarrierTx(tx queryExecer, path string, key FanoutKey, reci
 	if entry == nil {
 		return row, false, ErrFanoutQueueMissing
 	}
+	if entry.Entry.ID != row.token.eventID || entry.Entry.RecipientNpub != recipient || entry.Entry.EventJSON != row.eventJSON {
+		return row, false, fmt.Errorf("%w: outbox event identity or content differs from the frozen fanout row", ErrFanoutBookkeepingConflict)
+	}
 	if entry.QueueID != row.token.queueID {
 		// A failed row whose outbox already holds the next epoch: D6 landed
 		// but T2' did not. Replay it (or hold); anything else is D14.
