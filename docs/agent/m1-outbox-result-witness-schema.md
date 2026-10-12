@@ -37,7 +37,7 @@ entry 字符串/计数/事件验证沿用 rev7 §3.2 和 F2a。群 route 必须�
 
 AttemptToken allowlist 全 required：`fanout_key`（上述对象）、`event_id`（64 位小写 hex，匹配 entry.id/signed ID）、`queue_id`（非空字符串，精确匹配 entry.queue_id）、`attempt_generation`（整数 `[1,I64]`）。QueueID reader 只要求非空有效 JSON 字符串，逐值精确比较、不 trim、不强迫 legacy ID 为 hex；新 writer 沿用 16 random bytes→32 位小写 hex 并做全文件唯一性检查。R 才 +generation，generation 不等于 attempts 或 retry_count；legacy generation=0/idle 可以存在于 row，不能构造 generation=0 的发布结果。
 
-row_revision **不在 token 内**：R/S/T4 正常改变 revision，不改变既有 token 身份。result/witness 的 expected revision 是写入/重放前 row 的 CAS 前像；锁内重新读取，不接受 caller 的过期值。这是 rev7 §3.1/§3.3 的具体表达，不新增 state/revision 弱化。
+row_revision **不在 token 内**：R/S/T4 正常改变 revision，不改变既有 token 身份。failure_result 的 expected_row_revision 即 `post_S_pre_O3` 快照中的 revision（亦是 T4 CAS 前像），recovery_witness 的 expected_row_revision 是已提交 failed row 的 D6 CAS 前像；锁内重新读取，不接受 caller 的过期值。这是 rev7 §3.1/§3.3 的具体表达，不新增 state/revision 弱化。
 
 **P3 — 摘要与 ID 编码选择**：所有 digest 为 SHA-256 小写 hex（64 字符，无 `sha256:` 前缀）。三种摘要输入明确分开：
 
@@ -56,20 +56,20 @@ row_revision **不在 token 内**：R/S/T4 正常改变 revision，不改变既�
 | `version` | 整数，恰 1 |
 | `token` | §2 AttemptToken 对象 |
 | `result_id` | §2 token 派生 64 位 hex；必须重算相等 |
-| `expected_row_revision` | 整数 `[0,I64-1]`，O3/T4 前的当前 started row revision |
-| `attempts` | 整数 `[1,C]`，S 已提交的累计 publish starts（含 legacy base），不是失败预算 |
-| `last_attempt_at` | 整数 `[0,I64]`，S 已提交的单调时间快照 |
-| `relay_count` | 整数 `[0,C]`，S 的 len(targets)；零目标不伪造 ACK |
-| `prior_retry_count` | 整数 `[0,C-1]`，当前 QueueID 的 O3 前失败数 |
+| `expected_row_revision` | 整数 `[0,I64-1]`，命名 `post_S_pre_O3` 快照中的 revision（O3/T4 前当前 started row revision，亦是 T4 CAS 前像） |
+| `attempts` | 整数 `[1,C]`，命名 `post_S_pre_O3` 快照中的 attempts（S 提交完成 attempts += 1 后的累计 publish starts，含 legacy base），不是失败预算，绝非 pre-S |
+| `last_attempt_at` | 整数 `[0,I64]`，命名 `post_S_pre_O3` 快照中的 last_attempt_at（S 提交记录的单调时间快照） |
+| `relay_count` | 整数 `[0,C]`，命名 `post_S_pre_O3` 快照中的 relay_count（S 提交记录的 len(targets)；零目标不伪造 ACK） |
+| `prior_retry_count` | 整数 `[0,C-1]`，命名 `post_S_pre_O3` 快照中的 prior retry budget（当前 QueueID 的 O3 前失败数，即 SQLite retry_count） |
 | `retry_count` | 整数 `[1,C]`，恰 prior_retry_count+1 |
 | `status` | 字符串 `group_pending` 或 `group_failed`，按预算推导 |
 | `issue` | 字符串，枚举 `send_failed,retry_exhausted`；count<max 恰 send_failed，count>=max 恰 retry_exhausted；**P4/B-schema-1 条件修订提案，待独立评审** |
 
-写入前：row.state=queued、phase=started、完整 token/recipient/frozen event/max_retries 匹配、generation 尚无结果、revision 相等；current entry active pending 且 prior_retry_count<max_retries。O3 在同一个 JSON 原子提交写 result + entry.retry_count=result.retry_count + entry.status=result.status + entry.last_attempt=result.last_attempt_at；新 count<max_retries 则 status=group_pending/issue=send_failed，否则 status=group_failed/issue=retry_exhausted（P4 条件修订提案）。新记录的 count 最大为 max_retries，不把 legacy 已超预算条目当可再发；legacy count>max 仍按 rev7 exhausted 处理。
+结果构造与写入前：在锁内读取当前 SQLite 行，要求 row.state=queued、phase=started、完整 token/recipient/frozen event/max_retries 匹配、generation 尚无结果。定义单一命名快照 `post_S_pre_O3` = (revision, attempts, last_attempt_at, relay_count, prior retry budget)，其中 prior retry budget 为当前 SQLite row 的 retry_count（旧预算若 legacy unknown 必须在 R 前严格初始化，不能此时猜测）。因 S 提交已完成 attempts += 1、记录 last_attempt_at 与 relay_count 并推进 revision，故该快照严格为 S 提交后、O3 写入前当前 started 行的持久状态，绝非 pre-S。O3 依 `post_S_pre_O3` 快照构造 failure_result（expected_row_revision、attempts、last_attempt_at、relay_count 与 prior_retry_count 均取该快照对应字段，retry_count=prior_retry_count+1），并在 current entry active pending 且 prior_retry_count<max_retries 时，在同一个 JSON 原子提交写 result + entry.retry_count=result.retry_count + entry.status=result.status + entry.last_attempt=result.last_attempt_at；新 count<max_retries 则 status=group_pending/issue=send_failed，否则 status=group_failed/issue=retry_exhausted（P4 条件修订提案）。新记录的 count 最大为 max_retries，不把 legacy 已超预算条目当可再发；legacy count>max 仍按 rev7 exhausted 处理。
 
-未消费重放：当前 SQLite token/queued/started、expected revision、attempts、last_attempt_at、relay_count 和旧预算都匹配 S 前像（旧预算若 legacy unknown 必须在 R 前严格初始化，不能此时猜测）；JSON entry 与 result 后像相等。T4 不增加 attempts/generation/RetryCount，投影预算、phase=failed、state（耗尽为 failed，否则 queued）、issue、last_result_generation、完整 token+raw digest receipt，revision +1。任何不一致 hold，不先写再 callback fence。
+未消费重放：恢复屏障在锁内验证未消费 failure_result 时，当前 SQLite 必须为匹配的 token/queued/started；因为 S 已递增 attempts 并推进状态，重放必须将当前 SQLite 状态与 failure_result 中记录的单一命名快照 `post_S_pre_O3`（revision, attempts, last_attempt_at, relay_count, prior retry budget）进行一致性比对，绝不能与 pre-S 前像比对。即 SQLite 的 row_revision==result.expected_row_revision、attempts==result.attempts、last_attempt_at==result.last_attempt_at、relay_count==result.relay_count，且 SQLite 的当前旧预算==result.prior_retry_count（旧预算若 legacy unknown 必须在 R 前严格初始化，不能此时猜测）；同时 JSON entry 与 result 后像相等。T4 不增加 attempts/generation/RetryCount，投影预算、phase=failed、state（耗尽为 failed，否则 queued）、issue、last_result_generation、完整 token+raw digest receipt，revision +1。任何不一致 hold，不先写再 callback fence。
 
-已消费检测先查完整 token+raw digest receipt；匹配是 no-op，即使后续 R/S/T3 改了 generation/revision/attempts/targets。只比较 immutable attribution，不把 result 的旧 S 快照与后来的 S 混比。last_result_generation 单独相等或大于不足以证明消费；同 token/ID 不同 digest、仅水位但没有精确 receipt、无法解释的未来 token 是 bookkeeping_conflict。result 的 token.queue_id 始终匹配所在 entry，D6 不把旧 epoch result 复制到新 entry。未消费 result 禁止任何新 R/S/D6/O2/row 修改（stale callback 只读返回的例外见 §5）。已消费 result 保留至下次经验证 O3/D6 替换或授权 O2 删除。
+已消费检测先查完整 token+raw digest receipt；匹配是 no-op，即使后续 R/S/T3 改了 generation/revision/attempts/targets。只比较 immutable attribution，不把 result 记录的旧 `post_S_pre_O3` 快照与后来的 S 混比。last_result_generation 单独相等或大于不足以证明消费；同 token/ID 不同 digest、仅水位但没有精确 receipt、无法解释的未来 token 是 bookkeeping_conflict。result 的 token.queue_id 始终匹配所在 entry，D6 不把旧 epoch result 复制到新 entry。未消费 result 禁止任何新 R/S/D6/O2/row 修改（stale callback 只读返回的例外见 §5）。已消费 result 保留至下次经验证 O3/D6 替换或授权 O2 删除。
 
 **P4 / B-schema-1 — 耗尽 issue 的最小条件修订提案（coordinator 提议，等待独立评审）**：O3 result.retry_count<entry.max_retries 时，status=group_pending、issue=send_failed；result.retry_count>=entry.max_retries 时，status=group_failed、issue=retry_exhausted。实际 O3 prior<max 且只+1，因此新耗尽结果落在恰好等于 max 的边界；旧 legacy 超限仍按原 exhaustion 分类。T4 始终精确投影 O3 的 status/issue，无另一次补偿迁移。此选择保留 rev7 §2 Carol 耗尽验收，也保留非耗尽 current-O3 send_failed。
 
@@ -114,7 +114,7 @@ D6 必须先通过 §5 优先级及恢复屏障，且有显式目标 failed reci
 
 ## 5. hold、writer 与 D14
 
-F2b 是 inert parser/schema 子片；reader 不能通过 JSON 单独证明 SQLite revision/receipt 或“曾经显式 retry”。结构、自身字段一致性由 parser 检查，跨存储前像/消费情况由 F3/F4 共享锁内 validator 检查，不能把结构合法等同授权。
+F2b 是 inert parser/schema 子片；reader 不能通过 JSON 单独证明 SQLite revision/receipt 或“曾经显式 retry”。结构、自身字段一致性由 parser 检查，跨存储快照（result 的 `post_S_pre_O3` 与 witness 的 failed 前像）与消费情况由 F3/F4 共享锁内 validator 检查，不能把结构合法等同授权。
 
 沿用 rev7 §3.5 first-match：不可枚举 file corrupt → fanout corrupt → 全 route EventID duplicate → 唯一 entry schema/QueueID collision corrupt → 确无匹配 row 的 orphan → frozen intent / queued或accepted QueueID conflict → bookkeeping conflict → 未消费凭据投影 → 正常状态。能归属 EventID 的坏条目参与 duplicate 优先级，不能因 parser 一次返回 error 就丢掉其原始身份；不可归属才 file hold。
 
@@ -130,7 +130,7 @@ O3 的 RetryCount/status/LastAttempt/result 同生同灭；D6 的旧 entry 移�
 
 ### P-O3：O3 已提交，T4 前崩溃
 
-context：冻结 key 如 token；row queued/started，revision=15、generation=7、attempts=4、last_attempt_at=1791539070、relay_count=2、retry_queue_id=原 QueueID、retry_count=0、max_retries=10，last_result_generation<7，无本 token receipt。result 的 raw fragment 包括冒号后换行缩进及 `}` 后换行缩进。屏障应仅投影 T4 一次，预算 1/10，relays:null/event bytes 保留；后续 S 改 revision/targets 后再次读此已消费 result 仍 no-op。
+context：冻结 key 如 token；row queued/started，处于 `post_S_pre_O3` 快照（revision=15、generation=7、attempts=4、last_attempt_at=1791539070、relay_count=2、retry_queue_id=原 QueueID、retry_count=0、max_retries=10），last_result_generation<7，无本 token receipt。result 的 raw fragment 包括冒号后换行缩进及 `}` 后换行缩进。屏障应仅投影 T4 一次，预算 1/10，relays:null/event bytes 保留；后续 S 改 revision/targets 后再次读此已消费 result 仍 no-op。
 
 ```json
 {
@@ -179,7 +179,7 @@ context：冻结 key 如 token；row queued/started，revision=15、generation=7
 
 ### P-BUDGET-9 / P-BUDGET-10 / N-BUDGET-10：临界值与 crash/replay
 
-以下为完整 raw failure_result 对象；各自替换 P-O3 的 failure_result，outer retry_count/status/last_attempt 同步取该对象后像，max_retries仍10，event/QueueID/null原片段不变；不是三个结果同时写同一entry。各自 context 的 row queued/started，generation、revision、attempts、S时间/targets取该对象，SQLite旧预算为prior_retry_count，last_result_generation低于token且未有本token receipt。
+以下为完整 raw failure_result 对象；各自替换 P-O3 的 failure_result，outer retry_count/status/last_attempt 同步取该对象后像，max_retries仍10，event/QueueID/null原片段不变；不是三个结果同时写同一entry。各自 context 的 row queued/started，其 `post_S_pre_O3` 快照（revision、attempts、last_attempt_at、relay_count、prior retry budget）取该对象记录值，generation 取 token.attempt_generation，last_result_generation低于token且未有本token receipt。
 
 P-BUDGET-9：8→9<10，T4只投影 queued/send_failed、failure budget=9，generation/attempts不再加；O3后kill、T4前rollback、restart屏障及T4后再次kill均只能消费一次。
 
@@ -447,7 +447,7 @@ legacy failed 从未有 QueueID 的 missing 正例：使用 P-MISSING，但 witn
 | generation=0/-1/I64+1/1e0/"7"；count=1.0；observed_absent="true"/false | 类型/范围或 missing 条件拒绝 |
 | P-O3 retry_count 改 2；prior>=max；status 改 group_failed 但新 count=1<10；issue=queue_conflict/retry_exhausted | 跨字段拒绝；不投影、不发布 |
 | token key recipient 或 local_npub 改成另一有效 npub；entry EventJSON 与 row bytes 有空白差异但签名仍有效 | 自身绑定错误先 corrupt；只与 frozen row 不同走 queue_conflict，原证据保留 |
-| result expected revision / S count/time/targets 改值且 row 为未消费 | bookkeeping_conflict；有精确 consumed receipt 时旧 S 与后续 S 差异本身不冲突；改 raw digest 则冲突 |
+| result 记录的 `post_S_pre_O3` 快照（expected revision、attempts、last_attempt_at、relay_count、prior 预算）改值且 row 为未消费 | bookkeeping_conflict；有精确 consumed receipt 时旧 `post_S_pre_O3` 快照与后续 S 差异本身不冲突；改 raw digest 则冲突 |
 | missing witness 加 old_entry_digest/old_status/old_retry_count（含 null） | conditional 禁用成员拒绝 |
 | exhausted witness 带 observed_absent（含 false/null）、缺旧摘要、old_status 不配 reason、old count<max | conditional/schema 拒绝，不假称 exhaustion |
 | witness old_queue_id=new_queue_id；new ID 碰撞另一 DM 的 QueueID；missing old_queue_id="" 但非 legacy failed | 拒绝/hold，不替换；跨 QueueID 碰撞归 corrupt |
@@ -482,6 +482,6 @@ F3 受控部署/完整 writer gate 的 V7 仍是既有计划的独立必交项�
 
 新增选择清单：P1 enc 同值重复/字符串后缀接受且对象 extra 拒绝；P2 完整 key/token 布局、canonical wire identity/opaque IDs及QueueID保留；P3 摘要输入范围、编码与token派生result_id/随机recovery_id；P4 非耗尽send_failed/耗尽retry_exhausted的显式条件修订提案，B-schema-1等待独立接受；P5 witness具体成员及条件/重复recipient一致性；P6 新epoch created_at。表内 counter词法/range沿用F2a，version=1及optional仅省略沿用rev7，非新增null豁免。所有P项为**proposed decisions awaiting independent review**，不得以本文存在就称为schema freeze获准。
 
-**真实 blocker B-schema-1**：§2 耗尽验收 retry_exhausted 与 §3.5 current-O3 send_failed、§3.3 T4 issue 投影的组合互斥，详见 P4 的单次耗尽反例。coordinator 已确认并提出 P4 的最小条件修订，协调者独立复核 PASS 后已在本 PR 同步修订原契约；仍等待外部 PR-Daemon 精确 head 批准，未提前宣称冻结。其余“生成一个规范enc”与兼容reader同值重复、旧relays:null与新条目[]、旧消费凭据与后来S不同revision有不同作用域，不算契约矛盾。代码现状与目标的差距仍为实现blocker；评审若发现其它真实矛盾，登记具体条款/反例并阻塞受影响实现，不允许实现者静默选择一边。
+**真实 blocker B-schema-1**：§2 耗尽验收 retry_exhausted 与 §3.5 current-O3 send_failed、§3.3 T4 issue 投影的组合互斥，详见 P4 的单次耗尽反例。coordinator 已确认并提出 P4 的最小条件修订，协调者独立复核 PASS 后已在本 PR 同步修订原契约；仍等待外部 PR-Daemon 精确 head 批准，未提前宣称冻结。其余“生成一个规范enc”与兼容reader同值重复、旧relays:null与新条目[]、已消费凭据记录的 `post_S_pre_O3` 快照与后来 S 推进 revision 有不同作用域，不算契约矛盾。代码现状与目标的差距仍为实现blocker；评审若发现其它真实矛盾，登记具体条款/反例并阻塞受影响实现，不允许实现者静默选择一边。
 
 仍未关闭：B-schema-1 exhausted issue裁定；本补充逐项独立评审；F2b实现；完整F1/F2/V6验收；F3跨存储fence/barrier/全部writer与受控部署V7；F4来源witness/幂等恢复验收。coordinator为独立reviewer，外部PR-Daemon执行后续acceptance；本任务只提交两份docs的本地commit，不push/PR/merge、不运行发布或新schema写入。S7/S8/S9继续等待这些gates。
