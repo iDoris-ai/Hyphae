@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 
 	"github.com/iDoris-ai/hyphae/pkg/types"
 )
@@ -49,8 +50,16 @@ func CommitGroupEnqueueLocked(path string, rec GroupEnqueueRecord) (queueID stri
 			if e.Entry.ID != eventID {
 				continue
 			}
-			if e.Route == OutboxRouteGroup && e.Entry.EventJSON == rec.EventJSON && e.Entry.RecipientNpub == rec.RecipientNpub &&
-				e.Entry.Status == OutboxStatusGroupPending && int64(e.Entry.RetryCount) < int64(e.Entry.MaxRetries) {
+			if e.Route == OutboxRouteGroup &&
+				e.QueueID != "" &&
+				e.Entry.EventJSON == rec.EventJSON &&
+				e.Entry.RecipientNpub == rec.RecipientNpub &&
+				e.Entry.Status == OutboxStatusGroupPending &&
+				int64(e.Entry.MaxRetries) == rec.MaxRetries &&
+				e.Entry.RetryCount == 0 &&
+				e.FailureResult == nil &&
+				e.RecoveryWitness == nil &&
+				((len(e.Entry.Relays) == 0 && len(rec.Relays) == 0) || slices.Equal(e.Entry.Relays, rec.Relays)) {
 				queueID, existed = e.QueueID, true
 				return file.Raw, nil
 			}

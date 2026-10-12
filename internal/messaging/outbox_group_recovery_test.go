@@ -2,7 +2,9 @@ package messaging
 
 import (
 	"bytes"
+	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -47,4 +49,61 @@ func TestCommitGroupRecoveryLocked(t *testing.T) {
 	if !bytes.Contains(after, []byte(`"recovery_witness"`)) {
 		t.Fatal("witness missing from the written file")
 	}
+}
+
+func TestCommitGroupRecoveryLockedMissingFile(t *testing.T) {
+	want, missing := fixtureMissingWitness(t)
+	failed := exhaustedGroupEntry(t, OutboxStatusGroupFailed)
+	exhausted := exhaustedWitness(t, failed, witnessReasonExhaustedFailed, OutboxStatusGroupFailed, 10)
+
+	t.Run("missing reason creates file and writes D6", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "outbox.json")
+		digest, err := CommitGroupRecoveryLocked(path, GroupRecoveryRecord{Witness: missing, FrozenEventJSON: want.Entry.EventJSON})
+		if err != nil {
+			t.Fatalf("missing recovery on absent file: %v", err)
+		}
+		if digest == "" {
+			t.Fatal("empty digest")
+		}
+		after, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("reading created outbox: %v", err)
+		}
+		got := scanO3Target(t, after, missing.NewQueueID)
+		if got == nil || got.RecoveryWitness == nil || OutboxWitnessDigest(got) != digest {
+			t.Fatalf("witness mismatch: got=%+v", got)
+		}
+		if got.RecoveryWitness.Reason != "missing" || !got.RecoveryWitness.ObservedAbsent {
+			t.Fatalf("witness reason/absent mismatch: %+v", got.RecoveryWitness)
+		}
+	})
+
+	t.Run("exhausted reason on absent file fails closed", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "outbox.json")
+		if _, err := CommitGroupRecoveryLocked(path, GroupRecoveryRecord{Witness: exhausted}); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("exhausted on absent file must return ErrNotExist, got: %v", err)
+		}
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("outbox file must remain absent")
+		}
+	})
+
+	t.Run("injected failure on absent file rolls back cleanly", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "outbox.json")
+		badDigestWitness := missing
+		badDigestWitness.EventJSONDigest = sha256Hex([]byte("mismatched-event"))
+		if _, err := CommitGroupRecoveryLocked(path, GroupRecoveryRecord{Witness: badDigestWitness, FrozenEventJSON: want.Entry.EventJSON}); err == nil {
+			t.Fatal("mismatched event digest must fail")
+		}
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("outbox file must remain absent after injected failure")
+		}
+
+		if _, err := CommitGroupRecoveryLocked(path, GroupRecoveryRecord{Witness: missing, FrozenEventJSON: ""}); err == nil {
+			t.Fatal("missing reason with empty event must fail")
+		}
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("outbox file must remain absent after empty event failure")
+		}
+	})
 }

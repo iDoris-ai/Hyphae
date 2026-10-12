@@ -2,6 +2,7 @@ package groupchat
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -317,4 +318,81 @@ func TestEnqueueAndRequeueFailClosedOnCorruption(t *testing.T) {
 	outboxData2, err := os.ReadFile(f2.outboxPath)
 	require.NoError(t, err)
 	require.Equal(t, corruptContent, outboxData2)
+}
+
+func TestRequeueFailedRawMissingFile(t *testing.T) {
+	t.Run("missing outbox file successfully recovered via D6 missing witness", func(t *testing.T) {
+		f, _ := newPreparedFixture(t, 1)
+		_, err := f.member.store.EnqueuePrepared(f.key)
+		require.NoError(t, err)
+
+		for range 3 {
+			token, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+			require.NoError(t, err)
+			require.NoError(t, f.member.store.startFanoutAttempt(token, 1, time.Now().Unix()))
+			require.NoError(t, f.member.store.commitFanoutFailure(token))
+		}
+		require.Equal(t, string(RecipientFailed), f.recovery(t).State)
+
+		// Physically remove outbox file.
+		require.NoError(t, os.Remove(f.outboxPath))
+		_, err = os.Stat(f.outboxPath)
+		require.True(t, os.IsNotExist(err), "outbox file must be physically absent")
+
+		report, err := f.member.store.RequeueFailed(f.key, f.recipient)
+		require.NoError(t, err)
+		require.Equal(t, 1, report.Queued)
+		require.Equal(t, 0, report.Failed)
+
+		row := f.recovery(t)
+		require.Equal(t, string(RecipientQueued), row.State)
+		require.EqualValues(t, 0, row.RetryCount)
+		require.Equal(t, row.QueueID, row.RetryQueueID)
+		require.NotEmpty(t, row.RecoveryID)
+		require.NotEmpty(t, row.RecoveryDigest)
+
+		entry, _, err := messaging.ReadGroupEntryLocked(f.outboxPath, f.eventID)
+		require.NoError(t, err)
+		require.NotNil(t, entry)
+		require.Equal(t, row.QueueID, entry.QueueID)
+		require.NotNil(t, entry.RecoveryWitness)
+		require.Equal(t, "missing", entry.RecoveryWitness.Reason)
+		require.True(t, entry.RecoveryWitness.ObservedAbsent)
+		require.Equal(t, row.RecoveryID, entry.RecoveryWitness.RecoveryID)
+		require.Equal(t, messaging.OutboxWitnessDigest(entry), row.RecoveryDigest)
+	})
+
+	t.Run("injected failure on absent file rolls back SQLite and does not create outbox", func(t *testing.T) {
+		f, _ := newPreparedFixture(t, 1)
+		_, err := f.member.store.EnqueuePrepared(f.key)
+		require.NoError(t, err)
+
+		for range 3 {
+			token, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+			require.NoError(t, err)
+			require.NoError(t, f.member.store.startFanoutAttempt(token, 1, time.Now().Unix()))
+			require.NoError(t, f.member.store.commitFanoutFailure(token))
+		}
+		require.Equal(t, string(RecipientFailed), f.recovery(t).State)
+
+		require.NoError(t, os.Remove(f.outboxPath))
+		_, err = os.Stat(f.outboxPath)
+		require.True(t, os.IsNotExist(err))
+
+		origSeam := commitGroupRecoveryLocked
+		defer func() { commitGroupRecoveryLocked = origSeam }()
+		commitGroupRecoveryLocked = func(path string, rec messaging.GroupRecoveryRecord) (string, error) {
+			return "", errors.New("injected locked recovery write failure")
+		}
+
+		_, err = f.member.store.RequeueFailed(f.key, f.recipient)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "injected locked recovery write failure")
+
+		// SQLite remains failed.
+		require.Equal(t, string(RecipientFailed), f.recovery(t).State)
+		// Outbox file remains absent.
+		_, err = os.Stat(f.outboxPath)
+		require.True(t, os.IsNotExist(err), "outbox file must remain absent after rollback")
+	})
 }

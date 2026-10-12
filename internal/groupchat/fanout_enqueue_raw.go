@@ -46,6 +46,10 @@ func (s *Store) enqueuePreparedRaw(key FanoutKey, now int64) (FanoutReport, erro
 			}
 			targets = append(targets, r)
 		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
 		if err := rows.Close(); err != nil {
 			return err
 		}

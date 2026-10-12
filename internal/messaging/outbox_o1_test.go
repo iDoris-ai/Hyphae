@@ -90,6 +90,104 @@ func TestCommitGroupEnqueueLockedExhaustedEntryConflicts(t *testing.T) {
 	requireOutboxUnchanged(t, path, rawOutboxDoc(failed))
 }
 
+func TestCommitGroupEnqueueLockedPreimageAdoptionRegressions(t *testing.T) {
+	group, err := ParseRawGroupEntry(legacyFixtureEntry(t, "legacy-165-group-nil-relays.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseRec := GroupEnqueueRecord{
+		EventJSON:     group.Entry.EventJSON,
+		RecipientNpub: group.Entry.RecipientNpub,
+		MaxRetries:    10,
+		CreatedAt:     1_791_539_064,
+	}
+
+	t.Run("mismatch budget", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "outbox.json")
+		qID, existed, err := CommitGroupEnqueueLocked(path, baseRec)
+		if err != nil || existed || qID == "" {
+			t.Fatalf("setup O1: %v", err)
+		}
+		before, _ := os.ReadFile(path)
+
+		mismatchedBudget := baseRec
+		mismatchedBudget.MaxRetries = 5
+		if _, _, err := CommitGroupEnqueueLocked(path, mismatchedBudget); !errors.Is(err, ErrOutboxEnqueueConflict) {
+			t.Fatalf("mismatched budget must conflict: %v", err)
+		}
+		requireOutboxBytes(t, path, before)
+	})
+
+	t.Run("nonzero retries", func(t *testing.T) {
+		nonzero := bytes.Replace(legacyFixtureEntry(t, "legacy-165-group-nil-relays.json"), []byte(`"retry_count": 0`), []byte(`"retry_count": 1`), 1)
+		path := writeOutboxFile(t, rawOutboxDoc(nonzero))
+		before, _ := os.ReadFile(path)
+
+		if _, _, err := CommitGroupEnqueueLocked(path, baseRec); !errors.Is(err, ErrOutboxEnqueueConflict) {
+			t.Fatalf("nonzero retries must conflict: %v", err)
+		}
+		requireOutboxBytes(t, path, before)
+	})
+
+	t.Run("result evidence present", func(t *testing.T) {
+		entryWithResult := readF2BFixture(t, "p-o3-entry.json")
+		parsed, err := ParseRawGroupEntry(entryWithResult)
+		if err != nil || parsed.FailureResult == nil {
+			t.Fatalf("p-o3 fixture: %v", err)
+		}
+		path := writeOutboxFile(t, rawOutboxDoc(entryWithResult))
+		before, _ := os.ReadFile(path)
+
+		rec := GroupEnqueueRecord{
+			EventJSON:     parsed.Entry.EventJSON,
+			RecipientNpub: parsed.Entry.RecipientNpub,
+			MaxRetries:    int64(parsed.Entry.MaxRetries),
+			CreatedAt:     parsed.Entry.CreatedAt,
+		}
+		if _, _, err := CommitGroupEnqueueLocked(path, rec); !errors.Is(err, ErrOutboxEnqueueConflict) {
+			t.Fatalf("failure result evidence must conflict: %v", err)
+		}
+		requireOutboxBytes(t, path, before)
+	})
+
+	t.Run("recovery witness evidence present", func(t *testing.T) {
+		entryWithWitness := readF2BFixture(t, "p-missing-entry.json")
+		parsed, err := ParseRawGroupEntry(entryWithWitness)
+		if err != nil || parsed.RecoveryWitness == nil {
+			t.Fatalf("p-missing fixture: %v", err)
+		}
+		path := writeOutboxFile(t, rawOutboxDoc(entryWithWitness))
+		before, _ := os.ReadFile(path)
+
+		rec := GroupEnqueueRecord{
+			EventJSON:     parsed.Entry.EventJSON,
+			RecipientNpub: parsed.Entry.RecipientNpub,
+			MaxRetries:    int64(parsed.Entry.MaxRetries),
+			CreatedAt:     parsed.Entry.CreatedAt,
+		}
+		if _, _, err := CommitGroupEnqueueLocked(path, rec); !errors.Is(err, ErrOutboxEnqueueConflict) {
+			t.Fatalf("recovery witness evidence must conflict: %v", err)
+		}
+		requireOutboxBytes(t, path, before)
+	})
+
+	t.Run("mismatched relays", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "outbox.json")
+		_, _, err := CommitGroupEnqueueLocked(path, baseRec)
+		if err != nil {
+			t.Fatalf("setup O1: %v", err)
+		}
+		before, _ := os.ReadFile(path)
+
+		mismatchedRelays := baseRec
+		mismatchedRelays.Relays = []string{"wss://different.relay"}
+		if _, _, err := CommitGroupEnqueueLocked(path, mismatchedRelays); !errors.Is(err, ErrOutboxEnqueueConflict) {
+			t.Fatalf("mismatched relays must conflict: %v", err)
+		}
+		requireOutboxBytes(t, path, before)
+	})
+}
+
 func requireOutboxBytes(t *testing.T, path string, want []byte) {
 	t.Helper()
 	got, err := os.ReadFile(path)

@@ -1,6 +1,11 @@
 package messaging
 
-import "fmt"
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"os"
+)
 
 // GroupRecoveryRecord is the D6 input derived from the locked failed SQLite
 // row. Witness's typed members are serialized (Raw/Fields ignored).
@@ -20,7 +25,7 @@ type GroupRecoveryRecord struct {
 // IsOutboxCommitUncertain(err).
 func CommitGroupRecoveryLocked(path string, rec GroupRecoveryRecord) (string, error) {
 	var digest string
-	err := commitRawOutboxEditLocked(path, func(file *rawOutboxFile) ([]byte, error) {
+	edit := func(file *rawOutboxFile) ([]byte, error) {
 		next, err := planOutboxD6(file, outboxD6{
 			Witness: rec.Witness, EventJSON: rec.FrozenEventJSON,
 			ConsumedResultDigest: rec.LastResultDigest, ConsumedWitnessDigest: rec.LastRecoveryDigest,
@@ -41,8 +46,32 @@ func CommitGroupRecoveryLocked(path string, rec GroupRecoveryRecord) (string, er
 		}
 		digest = OutboxWitnessDigest(entry.Parsed)
 		return next, nil
-	})
-	if err != nil {
+	}
+	if rec.Witness.Reason == witnessReasonMissing {
+		raw, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			raw = []byte("{\n  \"entries\": []\n}\n")
+			file, err := scanRawOutboxFile(raw)
+			if err != nil {
+				return "", err
+			}
+			next, err := edit(file)
+			if err != nil {
+				return "", err
+			}
+			if bytes.Equal(next, raw) {
+				return "", nil
+			}
+			if _, err := scanRawOutboxFile(next); err != nil {
+				return "", fmt.Errorf("edited outbox fails strict scan: %w", err)
+			}
+			if err := writeRawOutboxAtomic(path, next); err != nil {
+				return "", err
+			}
+			return digest, nil
+		}
+	}
+	if err := commitRawOutboxEditLocked(path, edit); err != nil {
 		return "", err
 	}
 	return digest, nil
