@@ -182,18 +182,14 @@ func validateEvidenceEvent(raw []byte, entry types.OutboxEntry) error {
 	// "created\\u005fat" would otherwise be ignored by ID/signature checks.
 	// Re-keying these already validated raw values keeps those checks aligned
 	// with strict validation without changing the retained event_json bytes.
-	canonical, err := json.Marshal(fields)
+	event, err := decodeEvidenceEvent(fields)
 	if err != nil {
-		return err
-	}
-	var event nostr.Event
-	if err := json.Unmarshal(canonical, &event); err != nil {
 		return err
 	}
 	if event.ID.Hex() != entry.ID || !event.CheckID() || !event.VerifySignature() {
 		return fmt.Errorf("invalid event identity/signature")
 	}
-	if err := ValidateAgentMessageEvent(&event); err != nil {
+	if err := ValidateAgentMessageEvent(event); err != nil {
 		return err
 	}
 	enc, hasEnc, err := outboxTagValue(event.Tags, "enc")
@@ -222,6 +218,38 @@ func validateEvidenceEvent(raw []byte, entry types.OutboxEntry) error {
 		return fmt.Errorf("event requires one recipient")
 	}
 	return nil
+}
+
+// VerifiedGroupEventIdentity returns the ID and sender from the same
+// canonicalized event interpretation used by the strict outbox reader. The
+// entry's exact event bytes are still compared separately by callers.
+func VerifiedGroupEventIdentity(raw []byte, entry types.OutboxEntry) (string, string, error) {
+	if err := validateEvidenceEvent(raw, entry); err != nil {
+		return "", "", err
+	}
+	fields, err := evidenceObject(raw, "id pubkey created_at kind tags content sig", "")
+	if err != nil {
+		return "", "", err
+	}
+	event, err := decodeEvidenceEvent(fields)
+	if err != nil {
+		return "", "", err
+	}
+	return event.ID.Hex(), common.EncodeNpub(event.PubKey), nil
+}
+
+func decodeEvidenceEvent(fields map[string]json.RawMessage) (*nostr.Event, error) {
+	// nostr's decoder does not unescape JSON member names. Re-key values already
+	// collected by evidenceObject so escaped names share the reader's meaning.
+	canonical, err := json.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+	var event nostr.Event
+	if err := json.Unmarshal(canonical, &event); err != nil {
+		return nil, err
+	}
+	return &event, nil
 }
 
 // Decode keys before comparison so escaped-equivalent spellings collide. Read

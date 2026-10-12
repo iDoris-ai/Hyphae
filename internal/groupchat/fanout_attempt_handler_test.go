@@ -2,7 +2,9 @@ package groupchat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -122,6 +124,101 @@ func TestFanoutAttemptHandlerRejectsStaleAndForgedSnapshotsWithoutMutation(t *te
 		require.False(t, result.Attempted, "a forged snapshot must be refused before publish start")
 		unchanged()
 	})
+}
+
+func TestFanoutAttemptHandlerReservesEscapedEventMemberNames(t *testing.T) {
+	f := newFailureFixture(t)
+	entry := f.typedEntry(t)
+	entry.EventJSON = strings.Replace(entry.EventJSON, `"id":`, `"\u0069d":`, 1)
+	entry.EventJSON = strings.Replace(entry.EventJSON, `"pubkey":`, `"pub\u006bey":`, 1)
+	require.NotEqual(t, f.outboxEntry(t).Entry.EventJSON, entry.EventJSON)
+
+	outbox, err := messaging.LoadOutbox()
+	require.NoError(t, err)
+	for i := range outbox.Entries {
+		if outbox.Entries[i].ID == entry.ID {
+			outbox.Entries[i].EventJSON = entry.EventJSON
+		}
+	}
+	require.NoError(t, messaging.SaveOutbox(outbox))
+	_, err = f.member.db.Exec(`UPDATE groupchat_fanout SET event_json=? WHERE event_id=?`, entry.EventJSON, entry.ID)
+	require.NoError(t, err)
+
+	parsed := f.outboxEntry(t)
+	require.Equal(t, entry.EventJSON, parsed.Entry.EventJSON)
+	token, err := NewFanoutAttemptHandler(f.member.store).Reserve(entry)
+	require.NoError(t, err)
+	require.Equal(t, entry.ID, token.EventID)
+	require.Equal(t, entry.QueueID, token.QueueID)
+	require.EqualValues(t, 1, token.AttemptGeneration)
+}
+
+func TestFanoutAttemptReservationRacesLockedQueueRotation(t *testing.T) {
+	f := newFailureFixture(t)
+	stale := f.typedEntry(t)
+	locked := make(chan struct{})
+	rotationErr := make(chan error, 1)
+	reserveStarted := make(chan struct{})
+	type baselineState struct {
+		outbox []byte
+		row    []any
+	}
+	baseline := make(chan baselineState, 1)
+	rotate := "rotated-queue-epoch"
+
+	go func() {
+		rotationErr <- messaging.WithGroupOutboxLock(func(string) error {
+			outbox, err := messaging.LoadOutbox()
+			if err != nil {
+				return err
+			}
+			for i := range outbox.Entries {
+				if outbox.Entries[i].ID == stale.ID {
+					outbox.Entries[i].QueueID = rotate
+				}
+			}
+			data, err := json.Marshal(outbox)
+			if err != nil {
+				return err
+			}
+			if err := os.WriteFile(f.outboxPath, data, 0o600); err != nil {
+				return err
+			}
+			if _, err := f.member.db.Exec(`UPDATE groupchat_fanout SET queue_id=? WHERE event_id=?`, rotate, stale.ID); err != nil {
+				return err
+			}
+			data, err = os.ReadFile(f.outboxPath)
+			if err != nil {
+				return err
+			}
+			baseline <- baselineState{outbox: data, row: fanoutRowSnapshot(t, f.member, stale.ID)}
+			close(locked)
+			// Hold the same lock Reserve needs until its call is launched.
+			<-reserveStarted
+			return nil
+		})
+	}()
+	<-locked
+	type reserveResult struct {
+		result messaging.SendResult
+		err    error
+	}
+	reserved := make(chan reserveResult, 1)
+	go func() {
+		close(reserveStarted)
+		result, err := messaging.AttemptSendRouted(context.Background(), nil, stale, []string{"ws://127.0.0.1:1"}, 200*time.Millisecond,
+			messaging.AttemptOptions{Handlers: messaging.OutboxHandlers{Attempt: NewFanoutAttemptHandler(f.member.store)}})
+		reserved <- reserveResult{result: result, err: err}
+	}()
+	got := <-reserved
+	require.NoError(t, <-rotationErr)
+	require.ErrorIs(t, got.err, messaging.ErrGroupAttemptStale)
+	require.False(t, got.result.Attempted, "stale snapshot must be refused before publish")
+	state := <-baseline
+	after, err := os.ReadFile(f.outboxPath)
+	require.NoError(t, err)
+	require.Equal(t, string(state.outbox), string(after), "stale reservation changed rotated outbox")
+	require.Equal(t, state.row, fanoutRowSnapshot(t, f.member, stale.ID), "stale reservation changed rotated row")
 }
 
 func TestValidateFanoutAttemptSnapshotAcceptsOpaqueLegacyQueueID(t *testing.T) {

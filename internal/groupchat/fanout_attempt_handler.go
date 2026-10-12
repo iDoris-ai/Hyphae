@@ -2,12 +2,9 @@ package groupchat
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 
-	"fiatjaf.com/nostr"
-	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/messaging"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 )
@@ -82,8 +79,10 @@ func (s *Store) reserveFanoutAttemptSnapshot(snapshot types.OutboxEntry) (token 
 }
 
 // validateFanoutAttemptSnapshot intentionally treats QueueID as an opaque
-// nonempty epoch. Legacy values need not be hex; all identities and event bytes
-// must still match the frozen signed event and current locked outbox entry.
+// nonempty epoch. Legacy values need not be hex. It compares snapshot identity
+// and event bytes with the current locked entry and frozen event. Event ID and
+// sender use the strict reader's validation and canonicalized member names;
+// the raw event string is compared byte for byte above.
 func validateFanoutAttemptSnapshot(snapshot, current types.OutboxEntry, frozenEvent, rowQueueID, recipient, localNpub string) error {
 	if rowQueueID != current.QueueID {
 		return fmt.Errorf("%w: persisted queue %q differs from current outbox epoch %q", messaging.ErrGroupAttemptQueueConflict, rowQueueID, current.QueueID)
@@ -97,11 +96,11 @@ func validateFanoutAttemptSnapshot(snapshot, current types.OutboxEntry, frozenEv
 	if snapshot.EventJSON != frozenEvent || current.EventJSON != frozenEvent {
 		return fmt.Errorf("%w: snapshot event content differs from the frozen fanout event", messaging.ErrGroupAttemptStale)
 	}
-	var event nostr.Event
-	if err := json.Unmarshal([]byte(frozenEvent), &event); err != nil {
+	eventID, sender, err := messaging.VerifiedGroupEventIdentity([]byte(frozenEvent), current)
+	if err != nil {
 		return fmt.Errorf("%w: frozen event is invalid: %v", messaging.ErrGroupAttemptConflict, err)
 	}
-	if event.ID.Hex() != snapshot.ID || common.EncodeNpub(event.PubKey) != localNpub {
+	if eventID != snapshot.ID || sender != localNpub {
 		return fmt.Errorf("%w: frozen event ID or sender identity differs from the fanout row", messaging.ErrGroupAttemptConflict)
 	}
 	return nil
