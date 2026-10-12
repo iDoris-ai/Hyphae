@@ -132,43 +132,7 @@ func writeOutbox(file string, ob *types.Outbox) error {
 	if err != nil {
 		return err
 	}
-
-	f, err := os.CreateTemp(filepath.Dir(file), ".outbox-*.tmp")
-	if err != nil {
-		return fmt.Errorf("open temp outbox: %w", err)
-	}
-	tmp := f.Name()
-	defer os.Remove(tmp)
-	if err := f.Chmod(0600); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("chmod temp outbox: %w", err)
-	}
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("write temp outbox: %w", err)
-	}
-	if err := f.Sync(); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("fsync temp outbox: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("close temp outbox: %w", err)
-	}
-	if err := renameOutbox(tmp, file); err != nil {
-		return fmt.Errorf("rename outbox: %w", err)
-	}
-	dir, err := os.Open(filepath.Dir(file))
-	if err != nil {
-		return &outboxCommitUncertainError{fmt.Errorf("open outbox directory after rename: %w", err)}
-	}
-	if err := dir.Sync(); err != nil {
-		_ = dir.Close()
-		return &outboxCommitUncertainError{fmt.Errorf("fsync outbox directory after rename: %w", err)}
-	}
-	if err := dir.Close(); err != nil {
-		return &outboxCommitUncertainError{fmt.Errorf("close outbox directory after rename: %w", err)}
-	}
-	return nil
+	return writeRawOutboxAtomic(file, data)
 }
 
 type outboxCommitUncertainError struct{ err error }
