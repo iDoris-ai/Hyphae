@@ -331,3 +331,133 @@ func TestFanoutAttemptHandlerPendingAndQueueMappings(t *testing.T) {
 	require.ErrorIs(t, mapFanoutError(ErrFanoutCleanupPending), messaging.ErrGroupAttemptCleanupPending)
 	require.ErrorIs(t, mapFanoutError(errors.New("other")), messaging.ErrGroupAttemptConflict)
 }
+
+func TestFanoutAttemptHandlerReplaysCrashedD6AndReserves(t *testing.T) {
+	f := newFailureFixture(t)
+	newQueue := f.crashD6BeforeT2(t)
+	entry := f.outboxEntry(t)
+	token, err := NewFanoutAttemptHandler(f.member.store).Reserve(entry.Entry)
+	require.NoError(t, err, "barrier should replay T2' then reserve")
+	require.Equal(t, newQueue, token.QueueID)
+	require.Equal(t, f.eventID, token.EventID)
+	row := f.recovery(t)
+	require.Equal(t, newQueue, row.QueueID)
+	require.Equal(t, "reserved", row.Phase)
+	require.EqualValues(t, 0, row.RetryCount)
+}
+
+func TestFanoutAttemptHandlerOldEpochSnapshotReplaysDurableOnceThenStale(t *testing.T) {
+	f := newFailureFixture(t)
+	staleSnapshot := f.typedEntry(t)
+	newQueue := f.crashD6BeforeT2(t)
+
+	// Old snapshot triggers T2' replay committed on refusal, then returns Stale (no R).
+	_, err := NewFanoutAttemptHandler(f.member.store).Reserve(staleSnapshot)
+	require.ErrorIs(t, err, messaging.ErrGroupAttemptStale)
+	row := f.recovery(t)
+	require.Equal(t, newQueue, row.QueueID, "barrier should commit T2' replay durably on refusal")
+	require.Equal(t, string(RecipientQueued), row.State)
+	require.Equal(t, "idle", row.Phase)
+	require.EqualValues(t, 0, row.RetryCount)
+
+	// Second attempt with old snapshot is still stale, and no further mutation occurs.
+	unchanged := f.snapshot(t)
+	_, err = NewFanoutAttemptHandler(f.member.store).Reserve(staleSnapshot)
+	require.ErrorIs(t, err, messaging.ErrGroupAttemptStale)
+	unchanged()
+
+	// New snapshot now reserves without re-replaying.
+	currentEntry := f.typedEntry(t)
+	token, err := NewFanoutAttemptHandler(f.member.store).Reserve(currentEntry)
+	require.NoError(t, err)
+	require.Equal(t, newQueue, token.QueueID)
+	require.Equal(t, "reserved", f.recovery(t).Phase)
+}
+
+func TestFanoutAttemptHandlerReplaysCrashedO3T4Once(t *testing.T) {
+	f := newFailureFixture(t)
+	token := f.startAttempt(t, 1)
+	f.failO3BeforeT4(t, token)
+	require.EqualValues(t, 0, f.row(t).RetryCount, "T4 aborted before DB commit")
+
+	handler := NewFanoutAttemptHandler(f.member.store)
+	entry := f.typedEntry(t)
+	nextToken, err := handler.Reserve(entry)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, nextToken.AttemptGeneration)
+	row := f.row(t)
+	require.EqualValues(t, 1, row.RetryCount, "barrier replayed T4 once before reserving")
+	require.Equal(t, token.generation, row.LastResultGeneration)
+	require.Equal(t, "reserved", row.Phase)
+	require.Equal(t, messaging.FailureReceipt(f.outboxEntry(t).FailureResult.ResultID, sha256Hex(f.outboxEntry(t).Fields["failure_result"])), row.Receipt)
+}
+
+func TestFanoutAttemptHandlerLivePersistedEventMismatchIsConflictNoMutation(t *testing.T) {
+	f := newFailureFixture(t)
+	entry := f.typedEntry(t)
+
+	// Tamper live outbox eventJSON to simulate physical durable corruption.
+	outbox, err := messaging.LoadOutbox()
+	require.NoError(t, err)
+	for i := range outbox.Entries {
+		if outbox.Entries[i].ID == entry.ID {
+			outbox.Entries[i].EventJSON = strings.Replace(outbox.Entries[i].EventJSON, `"content":"`, `"content":"corrupted_`, 1)
+		}
+	}
+	require.NoError(t, messaging.SaveOutbox(outbox))
+
+	unchanged := f.snapshot(t)
+	_, err = NewFanoutAttemptHandler(f.member.store).Reserve(entry)
+	require.ErrorIs(t, err, messaging.ErrGroupAttemptConflict, "live event != frozen must be Conflict, not Stale")
+	unchanged()
+}
+
+func TestFanoutAttemptHandlerForgedSnapshotNoMutation(t *testing.T) {
+	t.Run("forged ID", func(t *testing.T) {
+		f := newFailureFixture(t)
+		forged := f.typedEntry(t)
+		forged.ID = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+		unchanged := f.snapshot(t)
+		_, err := NewFanoutAttemptHandler(f.member.store).Reserve(forged)
+		require.ErrorIs(t, err, messaging.ErrGroupAttemptConflict)
+		unchanged()
+	})
+
+	t.Run("forged recipient", func(t *testing.T) {
+		f := newFailureFixture(t)
+		forged := f.typedEntry(t)
+		forged.RecipientNpub = f.key.LocalNpub
+		unchanged := f.snapshot(t)
+		_, err := NewFanoutAttemptHandler(f.member.store).Reserve(forged)
+		require.ErrorIs(t, err, messaging.ErrGroupAttemptConflict)
+		unchanged()
+	})
+
+	t.Run("forged snapshot event", func(t *testing.T) {
+		f := newFailureFixture(t)
+		forged := f.typedEntry(t)
+		forged.EventJSON = strings.Replace(forged.EventJSON, `"content":"`, `"content":"forged_`, 1)
+		unchanged := f.snapshot(t)
+		_, err := NewFanoutAttemptHandler(f.member.store).Reserve(forged)
+		require.ErrorIs(t, err, messaging.ErrGroupAttemptStale)
+		unchanged()
+	})
+}
+
+func TestFanoutAttemptHandlerQueuedWrongEpochWithoutWitnessD14ZeroMutation(t *testing.T) {
+	f := newFailureFixture(t)
+	outbox, err := messaging.LoadOutbox()
+	require.NoError(t, err)
+	for i := range outbox.Entries {
+		if outbox.Entries[i].ID == f.eventID {
+			outbox.Entries[i].QueueID = "unwitnessed-wrong-epoch"
+		}
+	}
+	require.NoError(t, messaging.SaveOutbox(outbox))
+
+	unchanged := f.snapshot(t)
+	entry := f.typedEntry(t)
+	_, err = NewFanoutAttemptHandler(f.member.store).Reserve(entry)
+	require.ErrorIs(t, err, messaging.ErrGroupAttemptQueueConflict, "D14 queue conflict")
+	unchanged()
+}

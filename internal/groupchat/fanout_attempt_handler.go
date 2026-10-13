@@ -49,6 +49,9 @@ func (s *Store) reserveFanoutAttemptSnapshot(snapshot types.OutboxEntry) (token 
 		if err != nil {
 			return err
 		}
+		if snapshot.RecipientNpub != recipient {
+			return fmt.Errorf("%w: snapshot recipient %q differs from frozen row recipient %q", messaging.ErrGroupAttemptConflict, snapshot.RecipientNpub, recipient)
+		}
 		key.EnvelopeType = EnvelopeType(envelope)
 		row, err := loadFanoutFailureRow(tx, key, recipient)
 		if err != nil {
@@ -61,10 +64,14 @@ func (s *Store) reserveFanoutAttemptSnapshot(snapshot types.OutboxEntry) (token 
 		if current == nil {
 			return messaging.ErrGroupAttemptQueueMissing
 		}
-		if err := validateFanoutAttemptSnapshot(snapshot, current.Entry, frozenEvent, queueID, recipient, key.LocalNpub); err != nil {
+		if err := validateFanoutAttemptImmutable(snapshot, current.Entry, frozenEvent, recipient, key.LocalNpub); err != nil {
 			return err
 		}
-		if _, replayed, err := s.fanoutBarrierTx(tx, path, key, recipient); err != nil {
+		barrierRow, replayed, err := s.fanoutBarrierTx(tx, path, key, recipient)
+		if err != nil {
+			return commitReplayOnRefusal(tx, replayed, err)
+		}
+		if err := validateFanoutAttemptEpoch(snapshot, current.Entry, barrierRow.token.queueID); err != nil {
 			return commitReplayOnRefusal(tx, replayed, err)
 		}
 		if token, err = reserveFanoutAttemptTx(tx, key, recipient); err != nil {
@@ -84,16 +91,20 @@ func (s *Store) reserveFanoutAttemptSnapshot(snapshot types.OutboxEntry) (token 
 // sender use the strict reader's validation and canonicalized member names;
 // the raw event string is compared byte for byte above.
 func validateFanoutAttemptSnapshot(snapshot, current types.OutboxEntry, frozenEvent, rowQueueID, recipient, localNpub string) error {
-	if rowQueueID != current.QueueID {
-		return fmt.Errorf("%w: persisted queue %q differs from current outbox epoch %q", messaging.ErrGroupAttemptQueueConflict, rowQueueID, current.QueueID)
+	if err := validateFanoutAttemptImmutable(snapshot, current, frozenEvent, recipient, localNpub); err != nil {
+		return err
 	}
-	if snapshot.QueueID == "" || snapshot.QueueID != current.QueueID {
-		return fmt.Errorf("%w: snapshot queue %q is not the current epoch %q", messaging.ErrGroupAttemptStale, snapshot.QueueID, current.QueueID)
-	}
+	return validateFanoutAttemptEpoch(snapshot, current, rowQueueID)
+}
+
+func validateFanoutAttemptImmutable(snapshot, current types.OutboxEntry, frozenEvent, recipient, localNpub string) error {
 	if snapshot.ID != current.ID || snapshot.RecipientNpub != recipient || current.RecipientNpub != recipient {
 		return fmt.Errorf("%w: event or recipient identity differs from the frozen fanout row", messaging.ErrGroupAttemptConflict)
 	}
-	if snapshot.EventJSON != frozenEvent || current.EventJSON != frozenEvent {
+	if current.EventJSON != frozenEvent {
+		return fmt.Errorf("%w: live outbox event content differs from the frozen fanout event", messaging.ErrGroupAttemptConflict)
+	}
+	if snapshot.EventJSON != frozenEvent {
 		return fmt.Errorf("%w: snapshot event content differs from the frozen fanout event", messaging.ErrGroupAttemptStale)
 	}
 	eventID, sender, err := messaging.VerifiedGroupEventIdentity([]byte(frozenEvent), current)
@@ -102,6 +113,16 @@ func validateFanoutAttemptSnapshot(snapshot, current types.OutboxEntry, frozenEv
 	}
 	if eventID != snapshot.ID || sender != localNpub {
 		return fmt.Errorf("%w: frozen event ID or sender identity differs from the fanout row", messaging.ErrGroupAttemptConflict)
+	}
+	return nil
+}
+
+func validateFanoutAttemptEpoch(snapshot, current types.OutboxEntry, rowQueueID string) error {
+	if rowQueueID != current.QueueID {
+		return fmt.Errorf("%w: persisted queue %q differs from current outbox epoch %q", messaging.ErrGroupAttemptQueueConflict, rowQueueID, current.QueueID)
+	}
+	if snapshot.QueueID == "" || snapshot.QueueID != current.QueueID {
+		return fmt.Errorf("%w: snapshot queue %q is not the current epoch %q", messaging.ErrGroupAttemptStale, snapshot.QueueID, current.QueueID)
 	}
 	return nil
 }
@@ -151,6 +172,18 @@ func fromGroupAttemptToken(t messaging.GroupAttemptToken) fanoutAttemptToken {
 func mapFanoutError(err error) error {
 	if err == nil {
 		return nil
+	}
+	for _, sentinel := range []error{
+		messaging.ErrGroupAttemptStale,
+		messaging.ErrGroupAttemptPending,
+		messaging.ErrGroupAttemptCleanupPending,
+		messaging.ErrGroupAttemptQueueConflict,
+		messaging.ErrGroupAttemptQueueMissing,
+		messaging.ErrGroupAttemptConflict,
+	} {
+		if errors.Is(err, sentinel) {
+			return err
+		}
 	}
 	for _, m := range []struct {
 		from, to error
