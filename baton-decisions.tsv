@@ -1,2 +1,5 @@
 timestamp	task_id	attempt_id	decision	rationale
 2026-10-13T16:19:05Z	m1-214-ack-guard-20261013-161820	2647f400-46e1-4fa1-95ea-6c79c8c6d422	start	Branch created from exact base_sha 8410c07; started receipt pushed first.
+2026-10-13T16:23:11Z	m1-214-ack-guard-20261013-161820	2647f400-46e1-4fa1-95ea-6c79c8c6d422	guard-scope	Enforce exactly rev7 O2 ACK conditions (queue_id non-empty, relay_acks=1, accepted_at>0); do not require attempt_phase=accepted to keep legacy relay_accepted rows valid.
+2026-10-13T16:23:11Z	m1-214-ack-guard-20261013-161820	2647f400-46e1-4fa1-95ea-6c79c8c6d422	error-priority	New ErrFanoutAcceptedEvidenceCorrupt, not wrapped in ErrFanoutCleanupPending, and checked before O2 so the zero-entry idempotent success cannot mask corrupt rows.
+2026-10-13T16:23:11Z	m1-214-ack-guard-20261013-161820	2647f400-46e1-4fa1-95ea-6c79c8c6d422	complete	Code SHA 0ada07e5c4ec83487dd664f8f926156c22f40625; focused race x20, package race, vet, diff-check all exit 0; pushed branch only, no PR/merge.

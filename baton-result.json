@@ -2,13 +2,36 @@
   "schema": "baton-result/v1",
   "task_id": "m1-214-ack-guard-20261013-161820",
   "attempt_id": "2647f400-46e1-4fa1-95ea-6c79c8c6d422",
-  "sequence": 1,
-  "status": "started",
+  "sequence": 2,
+  "status": "completed",
   "base_sha": "8410c074cade5b13552e347f420ff3185b2a0c06",
-  "result_sha": null,
-  "summary": "Started: durable accepted-cleanup guard validating QueueID plus ACK evidence before outbox deletion.",
-  "tests": [],
+  "result_sha": "0ada07e5c4ec83487dd664f8f926156c22f40625",
+  "summary": "cleanupAcceptedFanout now loads relay_acks/accepted_at in the same SQLite snapshot as the row and enforces exactly the rev7 section 3.5 O2 ACK conditions (persisted queue_id non-empty, relay_acks=1, accepted_at>0) before authorizing O2; otherwise it fails closed with ErrFanoutAcceptedEvidenceCorrupt (ahead of cleanup_pending and the zero-entry idempotent path), no auto-repair. attempt_phase is not required, so legacy relay_accepted rows still clean. Lock order unchanged (outbox flock then SQLite BEGIN IMMEDIATE; no network IO). Production diff: 36 insertions, 1 deletion in internal/groupchat/fanout_accepted.go. New regressions: 8 corrupt-evidence subtests (acks=0/at=0, acks=0/at>0, acks=1/at=0, empty queue_id; phases accepted and idle) assert the whole SQLite row plus exact outbox bytes and mtime unchanged across two attempts; corrupt row with entry already gone still errors; valid evidence cleans for phases accepted/idle/started. The two negative tests were confirmed to FAIL against the baseline implementation.",
+  "tests": [
+    {
+      "command": "go test ./internal/groupchat -run 'CleanupAccepted|CommitFanoutAccepted' -race -count=20 -v",
+      "exit_code": 0,
+      "note": "440 PASS lines (7 tests incl. subtests x20), 0 FAIL"
+    },
+    {
+      "command": "go test ./internal/groupchat ./internal/messaging -race -count=1",
+      "exit_code": 0
+    },
+    {
+      "command": "go vet ./...",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    },
+    {
+      "command": "baseline check: new negative tests against base fanout_accepted.go",
+      "exit_code": 1,
+      "note": "expected failure, proves regressions detect the #214 bug"
+    }
+  ],
   "blocker": null,
-  "next": null,
-  "updated_at": "2026-10-13T16:19:05Z"
+  "next": "Coordinator independently reviews and accepts, then transfers the fix to PR #214. No PR/merge opened by this lane.",
+  "updated_at": "2026-10-13T16:23:11Z"
 }
