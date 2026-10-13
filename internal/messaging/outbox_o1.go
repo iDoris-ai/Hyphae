@@ -57,6 +57,7 @@ func CommitGroupEnqueueLocked(path string, rec GroupEnqueueRecord) (queueID stri
 				e.Entry.Status == OutboxStatusGroupPending &&
 				int64(e.Entry.MaxRetries) == rec.MaxRetries &&
 				e.Entry.RetryCount == 0 &&
+				e.Entry.LastAttempt == 0 &&
 				e.FailureResult == nil &&
 				e.RecoveryWitness == nil &&
 				((len(e.Entry.Relays) == 0 && len(rec.Relays) == 0) || slices.Equal(e.Entry.Relays, rec.Relays)) {

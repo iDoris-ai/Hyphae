@@ -1,6 +1,7 @@
 package groupchat
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -172,6 +173,42 @@ func TestEnqueuePreparedRawRefusals(t *testing.T) {
 	after, err := os.ReadFile(f.outboxPath)
 	require.NoError(t, err)
 	require.Equal(t, string(before), string(after))
+}
+
+func TestEnqueuePreparedRawRefusesNonzeroLastAttempt(t *testing.T) {
+	f, _ := newPreparedFixture(t, 1)
+	var eventJSON string
+	require.NoError(t, f.member.db.QueryRow(`SELECT event_json FROM groupchat_fanout WHERE event_id=?`, f.eventID).Scan(&eventJSON))
+
+	require.NoError(t, messaging.WithGroupOutboxLock(func(path string) error {
+		id, existed, err := messaging.CommitGroupEnqueueLocked(path, messaging.GroupEnqueueRecord{
+			EventJSON:     eventJSON,
+			RecipientNpub: f.recipient,
+			MaxRetries:    3,
+			CreatedAt:     7,
+		})
+		require.NoError(t, err)
+		require.False(t, existed)
+		require.NotEmpty(t, id)
+		return nil
+	}))
+
+	raw, err := os.ReadFile(f.outboxPath)
+	require.NoError(t, err)
+	rawNonzero := bytes.Replace(raw, []byte(`"last_attempt":0`), []byte(`"last_attempt":1`), 1)
+	if bytes.Equal(rawNonzero, raw) {
+		rawNonzero = bytes.Replace(raw, []byte(`"last_attempt": 0`), []byte(`"last_attempt": 1`), 1)
+	}
+	require.NotEqual(t, raw, rawNonzero)
+	require.NoError(t, os.WriteFile(f.outboxPath, rawNonzero, 0600))
+
+	assertUnchanged := f.snapshot(t)
+
+	_, err = f.member.store.enqueuePreparedRaw(f.key, 8)
+	require.ErrorIs(t, err, messaging.ErrOutboxEnqueueConflict)
+
+	assertUnchanged()
+	require.Equal(t, string(RecipientPrepared), f.recovery(t).State)
 }
 
 func TestRequeueFailedRawSuccess(t *testing.T) {

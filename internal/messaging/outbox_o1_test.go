@@ -129,6 +129,17 @@ func TestCommitGroupEnqueueLockedPreimageAdoptionRegressions(t *testing.T) {
 		requireOutboxBytes(t, path, before)
 	})
 
+	t.Run("nonzero last attempt", func(t *testing.T) {
+		nonzero := bytes.Replace(legacyFixtureEntry(t, "legacy-165-group-nil-relays.json"), []byte(`"last_attempt": 0`), []byte(`"last_attempt": 1`), 1)
+		path := writeOutboxFile(t, rawOutboxDoc(nonzero))
+		before, _ := os.ReadFile(path)
+
+		if _, _, err := CommitGroupEnqueueLocked(path, baseRec); !errors.Is(err, ErrOutboxEnqueueConflict) {
+			t.Fatalf("nonzero last attempt must conflict: %v", err)
+		}
+		requireOutboxBytes(t, path, before)
+	})
+
 	t.Run("result evidence present", func(t *testing.T) {
 		entryWithResult := readF2BFixture(t, "p-o3-entry.json")
 		parsed, err := ParseRawGroupEntry(entryWithResult)
