@@ -1,0 +1,14 @@
+{
+  "schema": "baton-result/v1",
+  "task_id": "m1-214-ack-guard-20261013-161820",
+  "attempt_id": "2647f400-46e1-4fa1-95ea-6c79c8c6d422",
+  "sequence": 1,
+  "status": "started",
+  "base_sha": "8410c074cade5b13552e347f420ff3185b2a0c06",
+  "result_sha": null,
+  "summary": "Started: durable accepted-cleanup guard validating QueueID plus ACK evidence before outbox deletion.",
+  "tests": [],
+  "blocker": null,
+  "next": null,
+  "updated_at": "2026-10-13T16:19:05Z"
+}

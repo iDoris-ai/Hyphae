@@ -1,0 +1,2 @@
+timestamp	task_id	attempt_id	decision	rationale
+2026-10-13T16:19:05Z	m1-214-ack-guard-20261013-161820	2647f400-46e1-4fa1-95ea-6c79c8c6d422	start	Branch created from exact base_sha 8410c07; started receipt pushed first.
