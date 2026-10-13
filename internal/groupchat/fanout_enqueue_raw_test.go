@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"fiatjaf.com/nostr"
 	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/messaging"
 	"github.com/stretchr/testify/require"
@@ -17,17 +16,38 @@ import (
 func newPreparedFixture(t *testing.T, recipients int) (failureFixture, []string) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	member := newMember(t)
+	member := newMemberWithSecret(t, fixedQueueTestSecret(21))
 	key := FanoutKey{LocalNpub: member.npub, GroupID: mustOpaque(t), EnvelopeType: EnvelopeMessage, SendKey: mustOpaque(t)}
 	now := time.Now().Unix()
 	var npubs []string
 	var first failureFixture
+	var firstEventJSON string
 	for i := 0; i < recipients; i++ {
-		recipientSK := nostr.Generate()
+		recipientSK := fixedQueueTestSecret(byte(22 + i))
 		recipient := common.EncodeNpub(recipientSK.Public())
-		event := testAgentEvent(t, "prepared hello", member.sk, recipientSK, true)
+		logicalID := key.SendKey
+		payload, err := Encode(Envelope{Type: EnvelopeMessage, Version: Version, GroupID: key.GroupID,
+			LogicalID: logicalID, Body: "prepared hello"})
+		require.NoError(t, err)
+		event := testAgentEvent(t, payload, member.sk, recipientSK, true)
+		require.True(t, event.CheckID())
+		require.True(t, event.VerifySignature())
+		verified, err := VerifyIncoming(event, recipientSK)
+		require.NoError(t, err)
+		require.Equal(t, member.npub, verified.SenderNpub())
+		require.Equal(t, recipient, verified.RecipientNpub())
+		decoded, err := envelopeFrom(verified, EnvelopeMessage)
+		require.NoError(t, err)
+		require.Equal(t, key.GroupID, decoded.GroupID)
+		require.Equal(t, logicalID, decoded.LogicalID)
+		require.Equal(t, "prepared hello", decoded.Body)
 		eventJSON, err := json.Marshal(event)
 		require.NoError(t, err)
+		if i == 0 {
+			firstEventJSON = string(eventJSON)
+		} else {
+			requireDistinctEncryptedEvents(t, firstEventJSON, string(eventJSON))
+		}
 		_, err = member.db.Exec(`INSERT INTO groupchat_fanout
             (local_npub,group_id,envelope_type,send_key,recipient_npub,event_id,event_json,queue_id,state,max_retries,retry_count,created_at,updated_at)
             VALUES (?,?,?,?,?,?,?,'',?,3,0,?,?)`,
@@ -40,6 +60,9 @@ func newPreparedFixture(t *testing.T, recipients int) (failureFixture, []string)
 			first = failureFixture{member: member, key: key, recipient: recipient, eventID: event.ID.Hex(), outboxPath: path}
 		}
 	}
+	if recipients > 1 {
+		require.NotEqual(t, npubs[0], npubs[1], "fanout recipients are distinct")
+	}
 	return first, npubs
 }
 
@@ -50,6 +73,7 @@ func TestEnqueuePreparedRawO1ThenT2(t *testing.T) {
 
 	report, err := f.member.store.enqueuePreparedRaw(f.key, 1_800_000_000)
 	require.NoError(t, err)
+	require.Equal(t, f.key.SendKey, report.LogicalID)
 	require.Equal(t, 2, report.Queued)
 	require.Len(t, report.Recipients, 2)
 	data, err := os.ReadFile(f.outboxPath)
@@ -89,6 +113,12 @@ func TestEnqueuePreparedRawO1ThenT2(t *testing.T) {
 	require.NoError(t, f.member.store.startFanoutAttempt(token, 1, time.Now().Unix()))
 	require.NoError(t, f.member.store.commitFanoutFailure(token))
 	require.EqualValues(t, 1, f.recovery(t).RetryCount)
+	entry, receipt, err := messaging.ReadGroupEntryLocked(f.outboxPath, f.eventID)
+	require.NoError(t, err)
+	require.NotNil(t, entry.FailureResult)
+	require.Equal(t, row.QueueID, entry.QueueID, "failure result must retain the raw O1 QueueID")
+	require.Equal(t, messaging.FailureReceipt(entry.FailureResult.ResultID, sha256Hex(entry.Fields["failure_result"])), receipt)
+	require.Equal(t, receipt, f.row(t).Receipt, "T4 receipt must match the exact raw failure fragment")
 }
 
 func TestEnqueuePreparedRawReusesO1AfterCrashBeforeT2(t *testing.T) {
