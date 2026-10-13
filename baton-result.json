@@ -2,13 +2,16 @@
   "schema": "baton-result/v1",
   "task_id": "receipt-smoke-20261013-160524",
   "attempt_id": "43c50051-053f-437e-a6c2-6ffe28b5a771",
-  "sequence": 1,
-  "status": "started",
+  "sequence": 2,
+  "status": "completed",
   "base_sha": "f3f877773cf773a938c4db01e2e14f80d1526f85",
-  "result_sha": "f3f877773cf773a938c4db01e2e14f80d1526f85",
-  "summary": "Started receipt smoke test on independent branch pinned to base_sha.",
-  "tests": [],
+  "result_sha": "ee7e64664d3118a6720e9e04f2d722a909cf83f5",
+  "summary": "Created baton-smoke.txt containing exactly '# Baton receipt smoke test.' plus newline in a single code commit. No production files touched. Started receipt (seq 1) was pushed before the task.",
+  "tests": [
+    {"command": "git diff --check --cached", "exit_code": 0},
+    {"command": "python3 -c \"assert open('baton-smoke.txt','rb').read()==b'# Baton receipt smoke test.\\n'\"", "exit_code": 0}
+  ],
   "blocker": null,
   "next": null,
-  "updated_at": "2026-10-13T16:06:09Z"
+  "updated_at": "2026-10-13T16:06:34Z"
 }

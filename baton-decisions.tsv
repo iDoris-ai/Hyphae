@@ -1,0 +1,2 @@
+timestamp	task_id	attempt_id	decision
+2026-10-13T16:06:34Z	receipt-smoke-20261013-160524	43c50051-053f-437e-a6c2-6ffe28b5a771	Pinned base_sha; pushed started receipt first; committed only baton-smoke.txt as result_sha; tests passed; pushed completed receipt; no PR/merge/comment.
