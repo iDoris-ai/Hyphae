@@ -25,8 +25,9 @@ var ErrOutboxEnqueueConflict = errors.New("outbox already holds a conflicting en
 // CommitGroupEnqueueLocked performs O1 for a caller holding
 // WithGroupOutboxLock: it appends a protocol-tagged (fanout_protocol=1)
 // group_pending entry with a fresh queue_id, or, when the same frozen event
-// is already an active pending group entry for the same recipient, returns
-// that entry's queue_id with existed=true and writes nothing. Any other
+// is already an active pending group entry for the same recipient and
+// max_retries, returns that entry's queue_id with existed=true and writes
+// nothing. Any other
 // entry carrying the event ID is ErrOutboxEnqueueConflict. A missing file is
 // created. The caller's T2 (prepared → queued with the returned queue_id)
 // follows in SQLite.
@@ -50,7 +51,8 @@ func CommitGroupEnqueueLocked(path string, rec GroupEnqueueRecord) (queueID stri
 				continue
 			}
 			if e.Route == OutboxRouteGroup && e.Entry.EventJSON == rec.EventJSON && e.Entry.RecipientNpub == rec.RecipientNpub &&
-				e.Entry.Status == OutboxStatusGroupPending && int64(e.Entry.RetryCount) < int64(e.Entry.MaxRetries) {
+				e.Entry.Status == OutboxStatusGroupPending && int64(e.Entry.RetryCount) < int64(e.Entry.MaxRetries) &&
+				int64(e.Entry.MaxRetries) == rec.MaxRetries {
 				queueID, existed = e.QueueID, true
 				return file.Raw, nil
 			}

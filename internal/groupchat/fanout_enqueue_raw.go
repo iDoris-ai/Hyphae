@@ -1,6 +1,7 @@
 package groupchat
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/iDoris-ai/hyphae/internal/messaging"
@@ -21,6 +22,10 @@ type preparedRowIter interface {
 var openPreparedFanoutRows = func(tx *immediateTx, query string, args ...any) (preparedRowIter, error) {
 	return tx.Query(query, args...)
 }
+
+// errPreparedCountersWithoutEpoch: a native prepared row already carries
+// attempts or retry_count but no outbox entry exists to adopt them from.
+var errPreparedCountersWithoutEpoch = errors.New("native prepared row has counters but no outbox entry to adopt")
 
 // enqueuePreparedRaw is O1 + T2 for every prepared recipient of key under
 // the rev7 lock order (outbox lock → BEGIN IMMEDIATE → O1 raw append → T2 CAS
@@ -47,18 +52,23 @@ func (s *Store) enqueuePreparedRaw(key FanoutKey, now int64) (FanoutReport, erro
 			return err
 		}
 		defer tx.Rollback()
-		rows, err := openPreparedFanoutRows(tx, `SELECT recipient_npub, event_id, event_json, max_retries FROM groupchat_fanout
+		rows, err := openPreparedFanoutRows(tx, `SELECT recipient_npub, event_id, event_json, max_retries,
+            accounting_origin = 'native' AND (attempts <> 0 OR COALESCE(retry_count, 0) <> 0) FROM groupchat_fanout
             WHERE local_npub = ? AND group_id = ? AND envelope_type = ? AND send_key = ? AND state = ? ORDER BY recipient_npub`,
 			local, key.GroupID, key.EnvelopeType, key.SendKey, RecipientPrepared)
 		if err != nil {
 			return err
 		}
-		var targets []fanoutQueueTarget
+		var targets, seeded []fanoutQueueTarget
 		for rows.Next() {
 			var r fanoutQueueTarget
-			if err := rows.Scan(&r.recipient, &r.eventID, &r.eventJSON, &r.maxRetries); err != nil {
+			var nativeCounters bool
+			if err := rows.Scan(&r.recipient, &r.eventID, &r.eventJSON, &r.maxRetries, &nativeCounters); err != nil {
 				rows.Close()
 				return err
+			}
+			if nativeCounters {
+				seeded = append(seeded, r)
 			}
 			targets = append(targets, r)
 		}
@@ -68,6 +78,17 @@ func (s *Store) enqueuePreparedRaw(key FanoutKey, now int64) (FanoutReport, erro
 		}
 		if err := rows.Close(); err != nil {
 			return err
+		}
+		// A native row with nonzero counters is not fresh: without an outbox
+		// epoch to adopt (O1 still decides compatibility) refuse before any O1.
+		for _, target := range seeded {
+			entry, _, err := messaging.ReadGroupEntryLocked(path, target.eventID)
+			if err != nil {
+				return err
+			}
+			if entry == nil {
+				return fmt.Errorf("%w: %s", errPreparedCountersWithoutEpoch, target.recipient)
+			}
 		}
 		for _, target := range targets {
 			queueID, _, err := messaging.CommitGroupEnqueueLocked(path, messaging.GroupEnqueueRecord{

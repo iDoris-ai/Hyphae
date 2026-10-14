@@ -97,3 +97,25 @@ func requireOutboxBytes(t *testing.T, path string, want []byte) {
 		t.Fatalf("outbox bytes changed (%v):\n%s", err, got)
 	}
 }
+
+// An active entry whose max_retries differs from the frozen record is not
+// reusable: O1 refuses without adopting or rewriting the budget.
+func TestCommitGroupEnqueueLockedMaxRetriesMismatchConflicts(t *testing.T) {
+	group, err := ParseRawGroupEntry(legacyFixtureEntry(t, "legacy-165-group-nil-relays.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := GroupEnqueueRecord{EventJSON: group.Entry.EventJSON, RecipientNpub: group.Entry.RecipientNpub, MaxRetries: 3, CreatedAt: 7}
+	path := filepath.Join(t.TempDir(), "outbox.json")
+	if _, _, err := CommitGroupEnqueueLocked(path, rec); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(path)
+	rec.MaxRetries++
+	if _, _, err := CommitGroupEnqueueLocked(path, rec); !errors.Is(err, ErrOutboxEnqueueConflict) {
+		t.Fatalf("max_retries mismatch must conflict, got %v", err)
+	}
+	if after, _ := os.ReadFile(path); string(after) != string(before) {
+		t.Fatal("conflict must not rewrite the outbox")
+	}
+}
