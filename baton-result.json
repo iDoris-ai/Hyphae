@@ -2,13 +2,22 @@
   "schema": "baton-result/v1",
   "task_id": "cloud-m1-schema-linux-20261014-105349",
   "attempt_id": "be89bb80-81c5-4a20-a04e-8289b45b43d0",
-  "sequence": 1,
-  "status": "started",
+  "sequence": 2,
+  "status": "completed",
   "base_sha": "47d8daf824a5dcee2bfb6488da3b62ce75594aa2",
-  "result_sha": "47d8daf824a5dcee2bfb6488da3b62ce75594aa2",
-  "summary": "Started Linux-only M1 schema proof on frozen base_sha; no runtime activation.",
-  "tests": [],
+  "result_sha": "aa69dcdc61034e1a177c54bb10adcea4804893d3",
+  "summary": "Linux-only M1 schema proof PASS on frozen 47d8daf (delivery, not acceptance). Carried 7 _test.go from ab1544d (FAIL on 042d279); expanded original 3 negatives + 36 VIEW/wrong-shape/no-PK matrix, nullable invite_id lower/mixed accept + missing refuse, healthy CreateGroup/legacy fanout, compiled daemon exit 4 / zero RelayDial / unchanged outbox (127 invite_id red closed). Full race/vet/build/integration green. PTY UNPROVEN; no runtime/V7 activation. Evidence: baton-schema-linux-proof.md.",
+  "tests": [
+    {"command": "go vet ./...", "exit_code": 0},
+    {"command": "go vet -tags integration ./...", "exit_code": 0},
+    {"command": "go build -o hyphae ./cmd/hyphae", "exit_code": 0},
+    {"command": "go test -race -count=1 -timeout 25m -skip TestProof|TestCloud ./... (774 listed excl Proof/Cloud)", "exit_code": 0},
+    {"command": "go test -race -tags integration -count=1 -timeout 15m ./tests/... (10 listed)", "exit_code": 0},
+    {"command": "go test -race -count=1 -run TestProof ./internal/{groupchat,daemon,tui}/ (51 PASS incl subtests, 0 fail, 0 skip; daemon exit status 4)", "exit_code": 0},
+    {"command": "go test -race -count=1 -run TestCloud ./internal/{daemon,tui,groupchat,messaging}/", "exit_code": 0},
+    {"command": "go test -race -count=1 -run TestNewStoreRejects|TestNewStoreAccepts|TestValidateTableShape|TestDaemonFailClosed|TestSameBrokenFile|TestHealthyGroupDDL|TestDMCLIHealthy|TestOwnedStartup ./internal/{groupchat,daemon}/", "exit_code": 0}
+  ],
   "blocker": null,
-  "next": null,
-  "updated_at": "2026-10-14T10:55:08Z"
+  "next": "Coordinator cross-model acceptance and M1 DAG next step; stop after delivery. PTY uncaptured remains UNPROVEN; no V7 claim from safeCandidate.",
+  "updated_at": "2026-10-14T11:01:53Z"
 }
