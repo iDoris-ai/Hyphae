@@ -12,16 +12,42 @@ import (
 // FanoutAttemptHandler adapts the F3/F4 store boundaries to
 // messaging.GroupAttemptHandler (wiring plan W-1). It is inert until a caller
 // passes it in AttemptOptions.Handlers.Attempt.
-type FanoutAttemptHandler struct{ store *Store }
+type FanoutAttemptHandler struct {
+	store     *Store
+	localNpub string
+}
 
+// NewFanoutAttemptHandler returns an unbound handler retained ONLY for current
+// inert tests/backcompat. Future production callers MUST use
+// NewFanoutAttemptHandlerFor.
 func NewFanoutAttemptHandler(store *Store) *FanoutAttemptHandler {
 	return &FanoutAttemptHandler{store: store}
+}
+
+// NewFanoutAttemptHandlerFor constructs a bound FanoutAttemptHandler for a
+// trusted caller process identity. It validates localNpub at construction
+// consistent with existing identity types. Future production callers MUST use
+// this bound API.
+func NewFanoutAttemptHandlerFor(store *Store, localNpub string) (*FanoutAttemptHandler, error) {
+	if store == nil {
+		return nil, errors.New("nil store")
+	}
+	canonical, err := canonicalNpub(localNpub)
+	if err != nil {
+		return nil, fmt.Errorf("validate caller local npub: %w", err)
+	}
+	return &FanoutAttemptHandler{store: store, localNpub: canonical}, nil
+}
+
+// LocalNpub returns the bound local npub identity, or empty string if unbound.
+func (h *FanoutAttemptHandler) LocalNpub() string {
+	return h.localNpub
 }
 
 // Reserve validates the caller's immutable snapshot against both stores before
 // R, while the stable outbox lock and SQLite transaction are held.
 func (h *FanoutAttemptHandler) Reserve(entry types.OutboxEntry) (messaging.GroupAttemptToken, error) {
-	token, err := h.store.reserveFanoutAttemptSnapshot(entry)
+	token, err := h.store.reserveFanoutAttemptSnapshot(entry, h.localNpub)
 	if err != nil {
 		return messaging.GroupAttemptToken{}, mapFanoutError(err)
 	}
@@ -30,7 +56,7 @@ func (h *FanoutAttemptHandler) Reserve(entry types.OutboxEntry) (messaging.Group
 
 // reserveFanoutAttemptSnapshot keeps caller validation, the live outbox read,
 // the recovery barrier, and R within the same lock → BEGIN IMMEDIATE window.
-func (s *Store) reserveFanoutAttemptSnapshot(snapshot types.OutboxEntry) (token fanoutAttemptToken, err error) {
+func (s *Store) reserveFanoutAttemptSnapshot(snapshot types.OutboxEntry, localNpub string) (token fanoutAttemptToken, err error) {
 	err = messaging.WithGroupOutboxLock(func(path string) error {
 		tx, err := s.beginImmediate()
 		if err != nil {
@@ -40,8 +66,18 @@ func (s *Store) reserveFanoutAttemptSnapshot(snapshot types.OutboxEntry) (token 
 
 		var key FanoutKey
 		var envelope, recipient, frozenEvent, queueID string
-		err = tx.QueryRow(`SELECT local_npub,group_id,envelope_type,send_key,recipient_npub,event_json,queue_id
-			FROM groupchat_fanout WHERE event_id=?`, snapshot.ID).
+		var query string
+		var args []any
+		if localNpub != "" {
+			query = `SELECT local_npub,group_id,envelope_type,send_key,recipient_npub,event_json,queue_id
+				FROM groupchat_fanout WHERE local_npub=? AND event_id=?`
+			args = []any{localNpub, snapshot.ID}
+		} else {
+			query = `SELECT local_npub,group_id,envelope_type,send_key,recipient_npub,event_json,queue_id
+				FROM groupchat_fanout WHERE event_id=?`
+			args = []any{snapshot.ID}
+		}
+		err = tx.QueryRow(query, args...).
 			Scan(&key.LocalNpub, &key.GroupID, &envelope, &key.SendKey, &recipient, &frozenEvent, &queueID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("%w: no fanout row froze event %s", messaging.ErrGroupAttemptConflict, snapshot.ID)
@@ -127,16 +163,32 @@ func validateFanoutAttemptEpoch(snapshot, current types.OutboxEntry, rowQueueID 
 	return nil
 }
 
+func (h *FanoutAttemptHandler) validateTokenIdentity(token messaging.GroupAttemptToken) error {
+	if h.localNpub != "" && token.Key.LocalNpub != h.localNpub {
+		return fmt.Errorf("%w: token local npub %q differs from bound identity %q", messaging.ErrGroupAttemptConflict, token.Key.LocalNpub, h.localNpub)
+	}
+	return nil
+}
+
 func (h *FanoutAttemptHandler) Start(token messaging.GroupAttemptToken, targets int, now int64) error {
+	if err := h.validateTokenIdentity(token); err != nil {
+		return err
+	}
 	return mapFanoutError(h.store.startFanoutAttempt(fromGroupAttemptToken(token), targets, now))
 }
 
 func (h *FanoutAttemptHandler) Accepted(token messaging.GroupAttemptToken, now int64) error {
+	if err := h.validateTokenIdentity(token); err != nil {
+		return err
+	}
 	return mapFanoutError(h.store.commitFanoutAccepted(fromGroupAttemptToken(token), now))
 }
 
 // Failed runs O3+T4 and reports whether the row is now failed (budget exhausted).
 func (h *FanoutAttemptHandler) Failed(token messaging.GroupAttemptToken) (bool, error) {
+	if err := h.validateTokenIdentity(token); err != nil {
+		return false, err
+	}
 	t := fromGroupAttemptToken(token)
 	if err := h.store.commitFanoutFailure(t); err != nil {
 		return false, mapFanoutError(err)
