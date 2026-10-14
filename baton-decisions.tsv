@@ -3,3 +3,4 @@ ts	lane	run	branch	baseline_sha	host	os	test_command	test_result	decision	next	n
 2026-10-14T10:55:08Z	1	started	Started Linux-only M1 schema proof on frozen 47d8daf; hostname=grok-bot-vm-307756233; go=1.24.4 linux/amd64; no runtime activation.
 2026-10-14T11:01:41Z	code	in-progress	Carried 7 _test.go from ab1544d onto 47d8daf; expanded 36 matrix + invite_id ± + daemon exit4; wrote baton-schema-linux-proof.md; hostname=grok-bot-vm-307756233 go1.26.0 linux/amd64.
 2026-10-14T11:01:53Z	2	completed	Linux schema proof PASS on 47d8daf; result_sha=aa69dcdc61034e1a177c54bb10adcea4804893d3; daemon exit4 zero-dial outbox-unchanged; 36 matrix + invite_id; PTY UNPROVEN; push pending.
+2026-10-14T11:24:36Z	1	started	Proof-gap followup started on 8955794fa274e8e485c8a332d7bc5165368d11ab; baseline=127f460c0eacc2e2d23067fdba485c636cb7dd0f candidate=47d8daf824a5dcee2bfb6488da3b62ce75594aa2; hostname=grok-bot-vm-307756233; production changes=0 planned.
