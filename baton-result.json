@@ -1,0 +1,14 @@
+{
+  "schema": "baton-result/v1",
+  "task_id": "cloud-m1-linux-reliability-proof-20261014",
+  "attempt_id": "2d5e2330-ee07-435a-8c02-1e59f92c5f1e",
+  "sequence": 1,
+  "status": "started",
+  "base_sha": "09ac32c048b790d2f62f6bb9b0b51bd87dfbf1ae",
+  "result_sha": null,
+  "summary": "Started independent Linux reliability proof on cloud VM",
+  "tests": [],
+  "blocker": null,
+  "next": null,
+  "updated_at": "2026-10-14T02:13:20Z"
+}
