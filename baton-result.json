@@ -2,13 +2,46 @@
   "schema": "baton-result/v1",
   "task_id": "cloud-m1-paired-dm-control-20261014-120037",
   "attempt_id": "121cdc0c-3f1c-4f5e-8e6e-1261ff0d2567",
-  "sequence": 1,
-  "status": "started",
+  "sequence": 2,
+  "status": "completed",
   "base_sha": "79ce1431a9893de273ecf196a3082ab037f2a482",
-  "result_sha": null,
-  "summary": "Started test-only DM positive-control extraction on base_branch tip 0b027f3 (code 79ce143); paired 127f460/47d8daf planned; production changes=0 planned.",
-  "tests": [],
+  "result_sha": "c900cdbd6d91e1df8cffffeb139fd54ba660d4a1",
+  "summary": "Standalone TestProofGapDMPositiveControl (internal/messaging, new test file only, production=0): real storage DM CRUD + compiled CLI 'history conversation --with bob --json' on messages.db carrying exact 47d8daf groupchat_members missing invite_id. Identical overlay (sha256 61c89360...1247) PASS on 127f460 x3 and 47d8daf x3 (-race, JSON: run+pass, 0 fail, 0 skip). Old 6 raw logs untouched; candidate/refusal tests unmodified. WorkStarted UNPROVEN; DM relay send not exercised.",
+  "tests": [
+    {
+      "command": "go vet ./internal/messaging/ (127f460 overlay)",
+      "exit_code": 0
+    },
+    {
+      "command": "go test -race -count=1 -json -timeout 5m -run ^TestProofGapDMPositiveControl$ ./internal/messaging/ (127f460 overlay) run1",
+      "exit_code": 0
+    },
+    {
+      "command": "same (127f460) run2",
+      "exit_code": 0
+    },
+    {
+      "command": "same (127f460) run3",
+      "exit_code": 0
+    },
+    {
+      "command": "go vet ./internal/messaging/ (47d8daf overlay)",
+      "exit_code": 0
+    },
+    {
+      "command": "go test -race -count=1 -json -timeout 5m -run ^TestProofGapDMPositiveControl$ ./internal/messaging/ (47d8daf overlay) run1",
+      "exit_code": 0
+    },
+    {
+      "command": "same (47d8daf) run2",
+      "exit_code": 0
+    },
+    {
+      "command": "same (47d8daf) run3",
+      "exit_code": 0
+    }
+  ],
   "blocker": null,
-  "next": "Implement standalone TestProofGapDMPositiveControl; run paired x3.",
-  "updated_at": "2026-10-14T12:01:31+00:00"
+  "next": "Independent Codex acceptance; no activation.",
+  "updated_at": "2026-10-14T12:04:53+00:00"
 }
