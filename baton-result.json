@@ -2,13 +2,18 @@
   "schema": "baton-result/v1",
   "task_id": "cloud-m1-startup-20261014-023744",
   "attempt_id": "408a2d79-adbe-4657-959b-538bcbceb27b",
-  "sequence": 1,
-  "status": "started",
+  "sequence": 2,
+  "status": "completed",
   "base_sha": "09ac32c048b790d2f62f6bb9b0b51bd87dfbf1ae",
-  "result_sha": null,
-  "summary": "Started independent TEST-FIRST startup acceptance on baton/grokbot-20261014-023744-m1-startup from accepted base; exploring daemon Action/NewChatModel APIs for expected-RED group-init gap tests.",
-  "tests": [],
+  "result_sha": "83a377df70f4e147898081f54c2e616dae0f3178",
+  "summary": "TEST-FIRST startup deliverable pushed: Cloud tests + baton-startup-test-matrix.md. Healthy OpenDB/NewStore and DM isolation PASS; expected RED demonstrated for missing daemon/TUI group-init gate (broken fanout dials relay; NewChatModel constructs without refusal). No production changes. Corrupt messages.db also expected-RED for daemon startup refuse-before-dial.",
+  "tests": [
+    {"command": "go test ./internal/groupchat/ -run 'TestCloud' -count=1", "exit_code": 0},
+    {"command": "go test ./internal/messaging/ -run 'TestCloud' -count=1", "exit_code": 0},
+    {"command": "go test ./internal/tui/ -run 'TestCloud' -count=1", "exit_code": 1},
+    {"command": "go test ./internal/daemon/ -run 'TestCloud' -count=1", "exit_code": 1}
+  ],
   "blocker": null,
-  "next": "Design and add test-only startup negatives with temporary HOME and broken group schema",
-  "updated_at": "2026-10-14T02:38:20Z"
+  "next": "Coordinator/AGY: implement daemon Action + NewChatModel group init (OpenDB+NewStore) refuse-before-dial; re-run Cloud RED tests expecting green. Do not treat expected-RED failures as fixture bugs.",
+  "updated_at": "2026-10-14T02:45:40Z"
 }
