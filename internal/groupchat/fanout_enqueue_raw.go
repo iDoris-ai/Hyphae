@@ -27,16 +27,18 @@ var openPreparedFanoutRows = func(tx *immediateTx, query string, args ...any) (p
 // attempts or retry_count but no outbox entry exists to adopt them from.
 var errPreparedCountersWithoutEpoch = errors.New("native prepared row has counters but no outbox entry to adopt")
 
+var errFanoutEnqueuePending = errors.New("fanout enqueue durability pending")
+
 // enqueuePreparedRaw is O1 + T2 for every prepared recipient of key under
 // the rev7 lock order (outbox lock → BEGIN IMMEDIATE → O1 raw append → T2 CAS
 // → commit). It is the raw alternative to EnqueuePrepared (wiring plan
 // W-3b) and is inert until that switch is reviewed: existing callers still
 // use the typed queueTargets path.
 //
-// O1 is idempotent (an active pending entry for the same frozen event and
-// recipient is reused), so a crash between O1 and T2 is healed by re-running
-// this function. T2 persists the adopted (or fresh) outbox entry's
-// retry_count into the queue budget snapshot with retry_queue_id.
+// Refusals follow semantics (a): any deterministic O1 refusal holds the
+// whole key with zero outbox writes and zero SQLite writes. The durability
+// gate before T2 commit confirms outbox directory fsync; failures roll back
+// leaving rows prepared to heal on rerun.
 func (s *Store) enqueuePreparedRaw(key FanoutKey, now int64) (FanoutReport, error) {
 	local, err := canonicalNpub(key.LocalNpub)
 	if err != nil {
@@ -59,7 +61,8 @@ func (s *Store) enqueuePreparedRaw(key FanoutKey, now int64) (FanoutReport, erro
 		if err != nil {
 			return err
 		}
-		var targets, seeded []fanoutQueueTarget
+		var targets []fanoutQueueTarget
+		var seeded []bool
 		for rows.Next() {
 			var r fanoutQueueTarget
 			var nativeCounters bool
@@ -67,10 +70,8 @@ func (s *Store) enqueuePreparedRaw(key FanoutKey, now int64) (FanoutReport, erro
 				rows.Close()
 				return err
 			}
-			if nativeCounters {
-				seeded = append(seeded, r)
-			}
 			targets = append(targets, r)
+			seeded = append(seeded, nativeCounters)
 		}
 		if err := rows.Err(); err != nil {
 			rows.Close()
@@ -79,23 +80,32 @@ func (s *Store) enqueuePreparedRaw(key FanoutKey, now int64) (FanoutReport, erro
 		if err := rows.Close(); err != nil {
 			return err
 		}
-		// A native row with nonzero counters is not fresh: without an outbox
-		// epoch to adopt (O1 still decides compatibility) refuse before any O1.
-		for _, target := range seeded {
-			entry, _, err := messaging.ReadGroupEntryLocked(path, target.eventID)
-			if err != nil {
-				return err
+		precheckedQueues := make([]string, len(targets))
+		for i, target := range targets {
+			rec := messaging.GroupEnqueueRecord{
+				EventJSON: target.eventJSON, RecipientNpub: target.recipient, MaxRetries: int64(target.maxRetries), CreatedAt: now,
 			}
-			if entry == nil {
+			q, existed, err := messaging.CheckGroupEnqueueLocked(path, rec)
+			if err != nil {
+				return fmt.Errorf("O1 precheck for %s: %w", target.recipient, err)
+			}
+			if seeded[i] && !existed {
 				return fmt.Errorf("%w: %s", errPreparedCountersWithoutEpoch, target.recipient)
 			}
+			if existed {
+				precheckedQueues[i] = q
+			}
 		}
-		for _, target := range targets {
-			queueID, _, err := messaging.CommitGroupEnqueueLocked(path, messaging.GroupEnqueueRecord{
+		for i, target := range targets {
+			rec := messaging.GroupEnqueueRecord{
 				EventJSON: target.eventJSON, RecipientNpub: target.recipient, MaxRetries: int64(target.maxRetries), CreatedAt: now,
-			})
+			}
+			queueID, existed, err := messaging.CommitGroupEnqueueLocked(path, rec)
 			if err != nil {
 				return fmt.Errorf("O1 for %s: %w", target.recipient, err)
+			}
+			if precheckedQueues[i] != "" && (!existed || queueID != precheckedQueues[i]) {
+				return fmt.Errorf("O1 adoption queue_id mismatch for %s: expected %s, got %s (existed=%v)", target.recipient, precheckedQueues[i], queueID, existed)
 			}
 			entry, _, err := messaging.ReadGroupEntryLocked(path, target.eventID)
 			if err != nil {
@@ -119,6 +129,11 @@ func (s *Store) enqueuePreparedRaw(key FanoutKey, now int64) (FanoutReport, erro
 			}
 			if err := onFanoutQueuedTx(tx, key, fanoutQueuedRow{RecipientNpub: target.recipient, EventID: target.eventID, QueueID: queueID}); err != nil {
 				return err
+			}
+		}
+		if len(targets) > 0 {
+			if err := confirmOutboxDurable(path); err != nil {
+				return fmt.Errorf("%w: O1 durability unconfirmed before T2: %w", errFanoutEnqueuePending, err)
 			}
 		}
 		return tx.Commit()

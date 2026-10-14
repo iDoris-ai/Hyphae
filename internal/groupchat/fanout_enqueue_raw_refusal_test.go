@@ -1,7 +1,9 @@
 package groupchat
 
 import (
+	"crypto/sha256"
 	"os"
+	"syscall"
 	"testing"
 	"time"
 
@@ -122,4 +124,191 @@ func TestEnqueuePreparedRawAdoptsCompatibleLegacyForSeededRows(t *testing.T) {
 			require.Equal(t, string(RecipientQueued), after.State, "one retry remains of max 3")
 		})
 	}
+}
+
+func writeExhaustedOutboxForRecipient(t *testing.T, f failureFixture, recipient, queueID string) {
+	t.Helper()
+	var eventID, eventJSON string
+	require.NoError(t, f.member.db.QueryRow(`SELECT event_id, event_json FROM groupchat_fanout WHERE recipient_npub=?`, recipient).Scan(&eventID, &eventJSON))
+	entry := `{"queue_id":"` + queueID + `","route":"group","id":"` + eventID + `","event_json":` + marshalJSONString(t, eventJSON) +
+		`,"recipient_npub":"` + recipient + `","relays":null,"retry_count":3,"max_retries":3,"last_attempt":0,"created_at":7,"status":"group_pending"}`
+	require.NoError(t, os.WriteFile(f.outboxPath, []byte("{\n  \"entries\": ["+entry+"]\n}\n"), 0600))
+}
+
+func TestEnqueuePreparedRawHeldRecipientBlocksWholeKeyZeroWrites(t *testing.T) {
+	f, npubs := newPreparedFixture(t, 2)
+	require.Len(t, npubs, 2)
+	rFirst, rLast := npubs[0], npubs[1]
+	if rFirst > rLast {
+		rFirst, rLast = rLast, rFirst
+	}
+
+	// Held recipient sorts LAST.
+	writeExhaustedOutboxForRecipient(t, f, rLast, "deadbeefdeadbeefdeadbeefdeadbeef")
+	bytesBefore, err := os.ReadFile(f.outboxPath)
+	require.NoError(t, err)
+	shaBefore := sha256.Sum256(bytesBefore)
+
+	snapFirstBefore := fanoutRowSnapshotByRecipient(t, f.member, f.key, rFirst)
+	snapLastBefore := fanoutRowSnapshotByRecipient(t, f.member, f.key, rLast)
+
+	_, err = f.member.store.enqueuePreparedRaw(f.key, 8)
+	require.ErrorIs(t, err, messaging.ErrOutboxEnqueueConflict)
+
+	bytesAfter, err := os.ReadFile(f.outboxPath)
+	require.NoError(t, err)
+	shaAfter := sha256.Sum256(bytesAfter)
+	require.Equal(t, shaBefore, shaAfter, "outbox bytes sha256 must be unchanged")
+	require.Equal(t, string(bytesBefore), string(bytesAfter), "outbox bytes must be identical")
+
+	require.Equal(t, snapFirstBefore, fanoutRowSnapshotByRecipient(t, f.member, f.key, rFirst), "first recipient row must be unchanged")
+	require.Equal(t, snapLastBefore, fanoutRowSnapshotByRecipient(t, f.member, f.key, rLast), "last recipient row must be unchanged")
+
+	// Second call -> identical error and bytes
+	_, err = f.member.store.enqueuePreparedRaw(f.key, 9)
+	require.ErrorIs(t, err, messaging.ErrOutboxEnqueueConflict)
+	bytesAfter2, err := os.ReadFile(f.outboxPath)
+	require.NoError(t, err)
+	require.Equal(t, string(bytesBefore), string(bytesAfter2), "outbox bytes must stay identical on rerun")
+}
+
+func TestEnqueuePreparedRawHeldRecipientBlocksWholeKeyZeroWritesSortsFirst(t *testing.T) {
+	f, npubs := newPreparedFixture(t, 2)
+	require.Len(t, npubs, 2)
+	rFirst, rLast := npubs[0], npubs[1]
+	if rFirst > rLast {
+		rFirst, rLast = rLast, rFirst
+	}
+
+	// Held recipient sorts FIRST.
+	writeExhaustedOutboxForRecipient(t, f, rFirst, "deadbeefdeadbeefdeadbeefdeadbeef")
+	bytesBefore, err := os.ReadFile(f.outboxPath)
+	require.NoError(t, err)
+	shaBefore := sha256.Sum256(bytesBefore)
+
+	snapFirstBefore := fanoutRowSnapshotByRecipient(t, f.member, f.key, rFirst)
+	snapLastBefore := fanoutRowSnapshotByRecipient(t, f.member, f.key, rLast)
+
+	_, err = f.member.store.enqueuePreparedRaw(f.key, 8)
+	require.ErrorIs(t, err, messaging.ErrOutboxEnqueueConflict)
+
+	bytesAfter, err := os.ReadFile(f.outboxPath)
+	require.NoError(t, err)
+	shaAfter := sha256.Sum256(bytesAfter)
+	require.Equal(t, shaBefore, shaAfter, "outbox bytes sha256 must be unchanged")
+	require.Equal(t, string(bytesBefore), string(bytesAfter), "outbox bytes must be identical")
+
+	require.Equal(t, snapFirstBefore, fanoutRowSnapshotByRecipient(t, f.member, f.key, rFirst), "first recipient row must be unchanged")
+	require.Equal(t, snapLastBefore, fanoutRowSnapshotByRecipient(t, f.member, f.key, rLast), "last recipient row must be unchanged")
+
+	// Second call -> identical error and bytes
+	_, err = f.member.store.enqueuePreparedRaw(f.key, 9)
+	require.ErrorIs(t, err, messaging.ErrOutboxEnqueueConflict)
+	bytesAfter2, err := os.ReadFile(f.outboxPath)
+	require.NoError(t, err)
+	require.Equal(t, string(bytesBefore), string(bytesAfter2), "outbox bytes must stay identical on rerun")
+}
+
+func TestEnqueuePreparedRawRefusesEntryWithUnconsumedResult(t *testing.T) {
+	f := newFailureFixture(t)
+	token := f.startAttempt(t, 1)
+	f.failO3BeforeT4(t, token)
+
+	// Reset row to prepared to simulate an inconsistent prepared row against the unconsumed failure outbox entry.
+	_, err := f.member.db.Exec(`UPDATE groupchat_fanout SET state = ?, queue_id = '' WHERE event_id = ?`, RecipientPrepared, f.eventID)
+	require.NoError(t, err)
+
+	assertUnchanged := f.snapshot(t)
+
+	_, err = f.member.store.enqueuePreparedRaw(f.key, 8)
+	require.ErrorIs(t, err, messaging.ErrOutboxEnqueueConflict)
+	assertUnchanged()
+	require.Equal(t, string(RecipientPrepared), f.recovery(t).State)
+}
+
+func TestEnqueuePreparedRawAdoptedO1RequiresDurability(t *testing.T) {
+	f, _ := newPreparedFixture(t, 1)
+	var eventJSON string
+	require.NoError(t, f.member.db.QueryRow(`SELECT event_json FROM groupchat_fanout WHERE event_id=?`, f.eventID).Scan(&eventJSON))
+
+	var preQ string
+	require.NoError(t, messaging.WithGroupOutboxLock(func(path string) error {
+		q, existed, err := messaging.CommitGroupEnqueueLocked(path, messaging.GroupEnqueueRecord{
+			EventJSON: eventJSON, RecipientNpub: f.recipient, MaxRetries: 3, CreatedAt: 7,
+		})
+		require.NoError(t, err)
+		require.False(t, existed)
+		preQ = q
+		return nil
+	}))
+
+	orig := confirmOutboxDurable
+	defer func() { confirmOutboxDurable = orig }()
+	confirmOutboxDurable = func(path string) error {
+		return messaging.MarkOutboxCommitUncertain(syscall.EIO)
+	}
+
+	// First call while failing
+	_, err := f.member.store.enqueuePreparedRaw(f.key, 8)
+	require.ErrorIs(t, err, errFanoutEnqueuePending)
+	require.True(t, messaging.IsOutboxCommitUncertain(err))
+	require.Equal(t, string(RecipientPrepared), f.recovery(t).State)
+
+	// Second call while still failing
+	_, err = f.member.store.enqueuePreparedRaw(f.key, 9)
+	require.ErrorIs(t, err, errFanoutEnqueuePending)
+	require.True(t, messaging.IsOutboxCommitUncertain(err))
+	require.Equal(t, string(RecipientPrepared), f.recovery(t).State)
+
+	// Restore hook -> queues row with pre-appended Q, exactly one outbox entry
+	confirmOutboxDurable = orig
+	report, err := f.member.store.enqueuePreparedRaw(f.key, 10)
+	require.NoError(t, err)
+	require.Equal(t, 1, report.Queued)
+	require.Equal(t, preQ, report.Recipients[0].QueueID)
+	require.Equal(t, string(RecipientQueued), f.recovery(t).State)
+
+	data, err := os.ReadFile(f.outboxPath)
+	require.NoError(t, err)
+	evidence, err := messaging.ParseRawOutboxEvidence(data)
+	require.Error(t, err)
+	require.Len(t, evidence.Entries, 1)
+}
+
+func TestEnqueuePreparedRawFreshO1DurabilityFailureHolds(t *testing.T) {
+	f, npubs := newPreparedFixture(t, 2)
+	require.Len(t, npubs, 2)
+
+	orig := confirmOutboxDurable
+	defer func() { confirmOutboxDurable = orig }()
+	confirmOutboxDurable = func(path string) error {
+		return messaging.MarkOutboxCommitUncertain(syscall.EIO)
+	}
+
+	_, err := f.member.store.enqueuePreparedRaw(f.key, 8)
+	require.ErrorIs(t, err, errFanoutEnqueuePending)
+	require.True(t, messaging.IsOutboxCommitUncertain(err))
+
+	for _, recipient := range npubs {
+		var state string
+		require.NoError(t, f.member.db.QueryRow(`SELECT state FROM groupchat_fanout WHERE recipient_npub=?`, recipient).Scan(&state))
+		require.Equal(t, string(RecipientPrepared), state)
+	}
+
+	// Restore hook -> queues both rows, entries not duplicated
+	confirmOutboxDurable = orig
+	report, err := f.member.store.enqueuePreparedRaw(f.key, 9)
+	require.NoError(t, err)
+	require.Equal(t, 2, report.Queued)
+	for _, recipient := range npubs {
+		var state string
+		require.NoError(t, f.member.db.QueryRow(`SELECT state FROM groupchat_fanout WHERE recipient_npub=?`, recipient).Scan(&state))
+		require.Equal(t, string(RecipientQueued), state)
+	}
+
+	data, err := os.ReadFile(f.outboxPath)
+	require.NoError(t, err)
+	evidence, err := messaging.ParseRawOutboxEvidence(data)
+	require.Error(t, err)
+	require.Len(t, evidence.Entries, 2)
 }
