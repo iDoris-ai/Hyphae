@@ -108,7 +108,7 @@ func ParseManifestJSON(data []byte) (*Manifest, error) {
 type jsonScope struct {
 	isObj, inVal bool
 	seen         map[string]bool
-	key          string
+	key, kind    string
 }
 
 func scanJSONStrict(data []byte) error {
@@ -131,21 +131,20 @@ func scanJSONStrict(data []byte) error {
 		case json.Delim:
 			switch t {
 			case '{':
-				stack = append(stack, jsonScope{isObj: true, seen: make(map[string]bool)})
+				stack = append(stack, jsonScope{isObj: true, seen: make(map[string]bool), kind: childKind(stack)})
 			case '[':
-				stack = append(stack, jsonScope{})
+				stack = append(stack, jsonScope{kind: "other"})
 			case '}', ']':
 				if len(stack) == 0 {
 					return fmt.Errorf("unexpected delimiter %q", t)
 				}
 				top := stack[len(stack)-1]
 				stack = stack[:len(stack)-1]
-				var parent string
 				if len(stack) > 0 {
-					parent, stack[len(stack)-1].inVal = stack[len(stack)-1].key, false
+					stack[len(stack)-1].inVal = false
 				}
 				if t == '}' {
-					if err := checkKeys(parent, top.seen); err != nil {
+					if err := checkKeys(top.kind, top.seen); err != nil {
 						return err
 					}
 				}
@@ -177,26 +176,55 @@ func scanJSONStrict(data []byte) error {
 	return nil
 }
 
-func checkKeys(parent string, seen map[string]bool) error {
-	if parent == "allowed_entries" && len(seen) == 0 {
-		return fmt.Errorf("allowed_entries must not be empty")
+// scopeSchema is keyed by nesting path/type, not by key name, so an entry
+// named e.g. "stores" is never mistaken for the root stores object.
+var scopeSchema = map[string][]string{
+	"root":   {"schema_version", "state", "canonical_home", "control_owner_uid", "expected_modes", "stores", "binary_path", "binary_sha256", "launcher_path", "launcher_sha256", "allowed_entries", "inventory_digest"},
+	"modes":  {"dir_mode", "file_mode"},
+	"stores": {"outbox_json", "outbox_lock", "outbox_temp_prefix", "messages_db", "messages_db_wal", "messages_db_shm", "daemon_lock"},
+	"entry":  {"id", "command_class"},
+}
+
+func childKind(stack []jsonScope) string {
+	if len(stack) == 0 {
+		return "root"
 	}
-	var req []string
-	switch parent {
-	case "":
-		req = []string{"schema_version", "state", "canonical_home", "control_owner_uid", "expected_modes", "stores", "binary_path", "binary_sha256", "launcher_path", "launcher_sha256", "allowed_entries", "inventory_digest"}
-	case "expected_modes":
-		req = []string{"dir_mode", "file_mode"}
-	case "stores":
-		req = []string{"outbox_json", "outbox_lock", "outbox_temp_prefix", "messages_db", "messages_db_wal", "messages_db_shm", "daemon_lock"}
-	case "allowed_entries":
-		req = RequiredClasses
-	default:
-		req = []string{"id", "command_class"}
+	switch p := stack[len(stack)-1]; {
+	case p.kind == "entries":
+		return "entry"
+	case p.kind != "root":
+		return "other"
+	case p.key == "expected_modes":
+		return "modes"
+	case p.key == "stores":
+		return "stores"
+	case p.key == "allowed_entries":
+		return "entries"
 	}
+	return "other"
+}
+
+func checkKeys(kind string, seen map[string]bool) error {
+	if kind == "entries" {
+		if len(seen) == 0 {
+			return fmt.Errorf("allowed_entries must not be empty")
+		}
+		return nil
+	}
+	req, ok := scopeSchema[kind]
+	if !ok {
+		return nil
+	}
+	allowed := make(map[string]bool, len(req))
 	for _, k := range req {
+		allowed[k] = true
 		if !seen[k] {
 			return fmt.Errorf("missing required key %q", k)
+		}
+	}
+	for k := range seen {
+		if !allowed[k] {
+			return fmt.Errorf("unknown field %q", k)
 		}
 	}
 	return nil

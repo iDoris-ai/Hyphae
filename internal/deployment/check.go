@@ -32,6 +32,11 @@ func Validate(m *Manifest, obs *Observation) error {
 			return closedErr("PATH_ESCAPED", fmt.Sprintf("store path %q escapes canonical home", p))
 		}
 	}
+	tempDir := filepath.Dir(m.Stores.OutboxTempPrefix)
+	if tempDir != filepath.Dir(m.Stores.OutboxJSON) || tempDir != filepath.Dir(m.Stores.OutboxLock) ||
+		!strings.HasPrefix(filepath.Base(m.Stores.OutboxTempPrefix), ".outbox-") {
+		return closedErr("PATH_ESCAPED", "outbox temp prefix is not the designated outbox-sibling namespace")
+	}
 	if obs.CanonicalHome != m.CanonicalHome {
 		return closedErr("FOREIGN_HOME", "observed home does not match canonical home")
 	}
@@ -50,14 +55,16 @@ func Validate(m *Manifest, obs *Observation) error {
 	if !isSHA256Hex(m.InventoryDigest) || obs.InventoryDigest != m.InventoryDigest {
 		return closedErr("DRIFT", "inventory digest drift detected")
 	}
+	seenClasses := map[string]bool{}
 	for k, e := range m.AllowedEntries {
 		if e.ID != k || !isKnownClass(e.CommandClass) {
 			return closedErr("UNKNOWN_ENTRY", fmt.Sprintf("invalid entry %q", k))
 		}
+		seenClasses[e.CommandClass] = true
 	}
 	for _, req := range RequiredClasses {
-		if _, ok := m.AllowedEntries[req]; !ok {
-			return closedErr("MALFORMED_MANIFEST", fmt.Sprintf("missing entry %q", req))
+		if !seenClasses[req] {
+			return closedErr("MALFORMED_MANIFEST", fmt.Sprintf("missing class %q", req))
 		}
 	}
 	entry, ok := m.AllowedEntries[obs.EntryID]
