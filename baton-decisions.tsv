@@ -1,0 +1,2 @@
+timestamp	task_id	attempt_id	decision	rationale
+2026-10-14T01:53:10Z	night-m1-224-typed-diff-20261013	cab008a8-bb18-47a3-bd14-7cfbab4f9ff0	start	Branch created from exact base_sha 73e8ab0 (base_branch head matched); started receipt pushed first.

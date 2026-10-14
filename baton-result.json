@@ -1,0 +1,14 @@
+{
+  "schema": "baton-result/v1",
+  "task_id": "night-m1-224-typed-diff-20261013",
+  "attempt_id": "cab008a8-bb18-47a3-bd14-7cfbab4f9ff0",
+  "sequence": 1,
+  "status": "started",
+  "base_sha": "73e8ab005cf961f8604a631d72a54ae3d064bb9b",
+  "result_sha": null,
+  "summary": "Lane grokbot started #224 typed-diff fixes (contiguous deletion runs; relay nil/empty difference rejection) on branch from exact base_sha.",
+  "tests": [],
+  "blocker": null,
+  "next": null,
+  "updated_at": "2026-10-14T01:53:10Z"
+}
