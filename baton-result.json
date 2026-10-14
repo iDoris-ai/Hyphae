@@ -2,13 +2,42 @@
   "schema": "baton-result/v1",
   "task_id": "cloud-m1-221-20261014-023744",
   "attempt_id": "a23ace1e-33e1-4ab6-88c3-7f4d9fa3a1d6",
-  "sequence": 1,
-  "status": "started",
+  "sequence": 2,
+  "status": "completed",
   "base_sha": "6bfe844000ba3de8a8ab688089f32860aebad9eb",
-  "result_sha": null,
-  "summary": "Started bounded #221 fix: bind signed event identity to entry before Reserve",
-  "tests": [],
+  "result_sha": "49ee9eb8191ef569527c7a3a3c5f39e027df4be5",
+  "summary": "Route now strictly decodes the signed event and binds ID/signature/single recipient (and local sender when a keystore is supplied) to the entry before Reserve, publishing only that verified event. Production FanoutAttemptHandler binds snapshot and live outbox bytes to the frozen fanout event_json and its sender==row local_npub under outbox lock + BEGIN IMMEDIATE before R; stale queue epochs refused before R. Reused minimal DecodeVerifiedGroupEvent/VerifiedGroupEventIdentity and snapshot validation from accepted-base 09ac32c; no schema/storage changes. Repro: entry A metadata + fully valid signed event B (same and foreign sender) asserts zero Reserve/Start/relay hits and unchanged outbox bytes/mtime/SQL row; escaped canonical id/pubkey control passes on route and real handler. Matched tests: messaging TestAttemptSendGroupAttempt{RejectsUnboundSignedEventBeforeReserve,RejectsSenderOutsideProcessIdentity,PublishesCanonicalEscapedEvent,Outcomes},TestAttemptSendRoutedPrefersAttemptHandlerAndKeepsLegacyFallback; groupchat TestFanoutAttemptHandler{RefusesEntryAWithSignedEventB,BindsFrozenSenderAndLiveBytes,ReservesEscapedFrozenEvent,DrivesAttemptSendRouted,AcceptedAndMappings,PendingAndQueueMappings}. Production diff ~153 insertions/38 deletions across 4 files. Behavior change: corrupt frozen event now refused with zero handler calls (old test expectation updated 1->0). Delivery only, not independent acceptance.",
+  "tests": [
+    {
+      "command": "baseline 6bfe844: go test ./internal/messaging/ -run TestAttemptSendGroupAttempt(RejectsUnbound|RejectsSender|PublishesCanonical) -count=1",
+      "exit_code": 1
+    },
+    {
+      "command": "baseline 6bfe844: go test ./internal/groupchat/ -run TestFanoutAttemptHandler(RefusesEntryA|BindsFrozen|ReservesEscaped) -count=1",
+      "exit_code": 1
+    },
+    {
+      "command": "go test -race -count=20 ./internal/messaging/ -run TestAttemptSendGroupAttempt|TestAttemptSendRoutedPrefersAttemptHandler",
+      "exit_code": 0
+    },
+    {
+      "command": "go test -race -count=20 ./internal/groupchat/ -run TestFanoutAttemptHandler",
+      "exit_code": 0
+    },
+    {
+      "command": "go test -race -count=1 ./internal/messaging/... ./internal/groupchat/...",
+      "exit_code": 0
+    },
+    {
+      "command": "go vet ./...",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
   "blocker": null,
-  "next": null,
-  "updated_at": "2026-10-14T02:38:34+00:00"
+  "next": "Coordinator independent acceptance/review; no autonomous next task",
+  "updated_at": "2026-10-14T02:45:58+00:00"
 }

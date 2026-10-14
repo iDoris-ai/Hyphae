@@ -1,2 +1,6 @@
 time	task_id	attempt_id	decision	rationale
 2026-10-14T02:38:34Z	cloud-m1-221-20261014-023744	a23ace1e-33e1-4ab6-88c3-7f4d9fa3a1d6	start	branch from exact base_sha 6bfe844 per handoff
+2026-10-14T02:45:58Z	cloud-m1-221-20261014-023744	a23ace1e-33e1-4ab6-88c3-7f4d9fa3a1d6	bind-before-reserve	route decodes via strict reader and binds ID/sig/recipient(+keystore sender) before Reserve; publishes verified event
+2026-10-14T02:45:58Z	cloud-m1-221-20261014-023744	a23ace1e-33e1-4ab6-88c3-7f4d9fa3a1d6	handler-frozen-binding	ported minimal snapshot validation from accepted-base 09ac32c (frozen event_json, live outbox bytes, sender==local_npub) under existing lock+tx; no schema change, no later runtime/storage transplant
+2026-10-14T02:45:58Z	cloud-m1-221-20261014-023744	a23ace1e-33e1-4ab6-88c3-7f4d9fa3a1d6	stale-before-R	stale queue epoch now refused before R instead of after (no mutation on refusal); empty snapshot QueueID still tolerated as on base
+2026-10-14T02:45:59Z	cloud-m1-221-20261014-023744	a23ace1e-33e1-4ab6-88c3-7f4d9fa3a1d6	completed	code 49ee9eb8191ef569527c7a3a3c5f39e027df4be5 pushed; tests green; stop per next
