@@ -1,0 +1,14 @@
+{
+  "schema": "baton-result/v1",
+  "task_id": "cloud-m1-startup-proof-20261014-031037",
+  "attempt_id": "9d5783ed-dd49-4bb6-af80-f31fb5a3d861",
+  "sequence": 1,
+  "status": "started",
+  "base_sha": "042d2794fae972afa7b07086aca486fd6b93c5cc",
+  "result_sha": null,
+  "summary": "Independent Linux verifier started at exact base 042d279; test-only/report-only scope.",
+  "tests": [],
+  "blocker": null,
+  "next": "Run full race/vet/integration and focused startup/identity tests, then push verdict report.",
+  "updated_at": "2026-10-14T03:11:54+00:00"
+}
