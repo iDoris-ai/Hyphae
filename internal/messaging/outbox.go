@@ -94,11 +94,25 @@ func UpdateOutbox(update func(*types.Outbox) error) (*types.Outbox, error) {
 	}
 	var updated *types.Outbox
 	err = withOutboxLock(file, func() error {
-		// Refuse even a no-op transaction: every typed send, enqueue, clear and
-		// cleanup path starts here, so legacy code cannot publish or rewrite
-		// entries whose protocol records it cannot see.
-		if err := requireTypedOutboxRoundTrip(file); err != nil {
-			return err
+		// A file carrying protocol records cannot be rewritten from the typed
+		// view (F2e-1): the transaction is then committed as DM-only raw
+		// patches, and any group-entry change is refused (F2e-2b).
+		held := requireTypedOutboxRoundTrip(file)
+		if held != nil && !errors.Is(held, ErrOutboxTypedWriteHeld) {
+			return held
+		}
+		if held != nil {
+			// Run the strict scan before the callback and before the no-op
+			// DeepEqual return below: a held file the scan rejects must stay
+			// refused even when the transaction changes nothing, instead of
+			// falling through to a send path that publishes from it (#224).
+			raw, err := os.ReadFile(file)
+			if err != nil {
+				return err
+			}
+			if _, err := scanRawOutboxFile(raw); err != nil {
+				return fmt.Errorf("%w: %w", held, err)
+			}
 		}
 		ob, err := readOutbox(file)
 		if err != nil {
@@ -109,6 +123,13 @@ func UpdateOutbox(update func(*types.Outbox) error) (*types.Outbox, error) {
 			return err
 		}
 		if reflect.DeepEqual(before, ob) {
+			updated = ob
+			return nil
+		}
+		if held != nil {
+			if err := persistOutboxDiffLocked(file, before, ob); err != nil {
+				return fmt.Errorf("%w: %w", held, err)
+			}
 			updated = ob
 			return nil
 		}
