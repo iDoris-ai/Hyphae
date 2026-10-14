@@ -3,13 +3,17 @@ package groupchat
 import (
 	"encoding/json"
 	"testing"
-	"time"
 
 	"fiatjaf.com/nostr"
 	"github.com/iDoris-ai/hyphae/internal/messaging"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/stretchr/testify/require"
 )
+
+// fixtureFanoutCreatedAt is the one logical timestamp shared by recipient rows
+// of a fanout key. LoadFanoutReport rejects a key whose created_at values
+// differ. The helper must not sample the clock once per row.
+const fixtureFanoutCreatedAt int64 = 1_700_000_000
 
 func signedGroupEvent(t *testing.T) (string, string) {
 	t.Helper()
@@ -20,13 +24,22 @@ func signedGroupEvent(t *testing.T) (string, string) {
 	return event.ID.Hex(), string(data)
 }
 
-func insertTestFanout(t *testing.T, member testMember, key FanoutKey, recipient string, state RecipientDeliveryState, eventID, eventJSON, queueID string, attempts int) {
+func insertTestFanout(t *testing.T, member testMember, key FanoutKey, recipient string, state RecipientDeliveryState, eventID, eventJSON, queueID string, attempts int, createdAt ...int64) {
 	t.Helper()
-	now := time.Now().Unix()
+	if len(createdAt) > 1 {
+		t.Fatalf("insertTestFanout accepts one createdAt, got %d", len(createdAt))
+	}
+	stamp := fixtureFanoutCreatedAt
+	if len(createdAt) == 1 {
+		stamp = createdAt[0]
+	}
+	if stamp <= 0 {
+		t.Fatalf("insertTestFanout createdAt must be one shared positive fixture timestamp, got %d", stamp)
+	}
 	acceptedAt := int64(0)
 	relayAcks := 0
 	if state == RecipientRelayAccepted {
-		acceptedAt = now
+		acceptedAt = stamp
 		relayAcks = 1
 	}
 	_, err := member.db.Exec(`INSERT INTO groupchat_fanout
@@ -34,7 +47,7 @@ func insertTestFanout(t *testing.T, member testMember, key FanoutKey, recipient 
 		queue_id, state, issue, relay_acks, relay_count, attempts, max_retries, created_at, updated_at, accepted_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 10, ?, ?, ?)`,
 		key.LocalNpub, key.GroupID, key.EnvelopeType, key.SendKey, recipient, eventID, eventJSON,
-		queueID, state, "", relayAcks, 2, attempts, now, now, acceptedAt)
+		queueID, state, "", relayAcks, 2, attempts, stamp, stamp, acceptedAt)
 	require.NoError(t, err)
 }
 
@@ -46,8 +59,8 @@ func TestEnqueuePrepared(t *testing.T) {
 		eID1, eJSON1 := signedGroupEvent(t)
 		eID2, eJSON2 := signedGroupEvent(t)
 
-		insertTestFanout(t, member, key, "recipient1", RecipientPrepared, eID1, eJSON1, "", 0)
-		insertTestFanout(t, member, key, "recipient2", RecipientPrepared, eID2, eJSON2, "", 0)
+		insertTestFanout(t, member, key, "recipient1", RecipientPrepared, eID1, eJSON1, "", 0, fixtureFanoutCreatedAt)
+		insertTestFanout(t, member, key, "recipient2", RecipientPrepared, eID2, eJSON2, "", 0, fixtureFanoutCreatedAt)
 
 		report, err := member.store.EnqueuePrepared(key)
 		require.NoError(t, err)
@@ -59,6 +72,7 @@ func TestEnqueuePrepared(t *testing.T) {
 		require.NotEmpty(t, report.Recipients[1].QueueID)
 		require.Equal(t, RecipientQueued, report.Recipients[0].State)
 		require.Equal(t, RecipientQueued, report.Recipients[1].State)
+		require.Equal(t, fixtureFanoutCreatedAt, report.CreatedAt)
 
 		ob, err := messaging.LoadOutbox()
 		require.NoError(t, err)
@@ -226,9 +240,9 @@ func TestRequeueFailed(t *testing.T) {
 	eID2, eJSON2 := signedGroupEvent(t)
 
 	// Bob is failed with prior outbox entry
-	insertTestFanout(t, member, key, "bob", RecipientFailed, eID1, eJSON1, "old_q_bob", 2)
+	insertTestFanout(t, member, key, "bob", RecipientFailed, eID1, eJSON1, "old_q_bob", 2, fixtureFanoutCreatedAt)
 	// Carol is relay_accepted
-	insertTestFanout(t, member, key, "carol", RecipientRelayAccepted, eID2, eJSON2, "q_carol", 1)
+	insertTestFanout(t, member, key, "carol", RecipientRelayAccepted, eID2, eJSON2, "q_carol", 1, fixtureFanoutCreatedAt)
 
 	// Seed outbox with group_failed for Bob
 	_, _, err := messaging.EnqueueGroupOutboxEntry(eJSON1, "bob", nil, 1)
@@ -249,6 +263,7 @@ func TestRequeueFailed(t *testing.T) {
 		require.Equal(t, 1, report.Queued)
 		require.Equal(t, 1, report.Accepted)
 		require.Equal(t, 0, report.Failed)
+		require.Equal(t, fixtureFanoutCreatedAt, report.CreatedAt)
 
 		bob := report.Recipients[0]
 		require.Equal(t, "bob", bob.RecipientNpub)
