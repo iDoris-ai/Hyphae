@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -23,10 +24,12 @@ import (
 	"fiatjaf.com/nostr"
 	"github.com/gorilla/websocket"
 	"github.com/iDoris-ai/hyphae/internal/common"
+	"github.com/iDoris-ai/hyphae/internal/groupchat"
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/internal/messaging"
 	"github.com/iDoris-ai/hyphae/internal/relayconfig"
 	"github.com/iDoris-ai/hyphae/internal/relayquery"
+	"github.com/iDoris-ai/hyphae/internal/storage"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -246,8 +249,13 @@ func TestDaemonJSONLocalRelayStorageFailure(t *testing.T) {
 		PubKey:  sender.Public(),
 	}
 	require.NoError(t, event.Sign(sender))
-	require.NoError(t, os.MkdirAll(filepath.Join(home, ".hyphae"), 0o700))
-	require.NoError(t, os.WriteFile(filepath.Join(home, ".hyphae", "messages.db"), []byte("not a sqlite database"), 0o600))
+	db, err := storage.OpenDB()
+	require.NoError(t, err)
+	_, err = groupchat.NewStore(db)
+	require.NoError(t, err)
+	_, err = db.Exec(`CREATE TRIGGER test_fail_insert BEFORE INSERT ON messages BEGIN SELECT RAISE(ABORT, 'storage failure'); END;`)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
 	relayURL, _ := startHistoryRelay(t, []*nostr.Event{event})
 	lines := runDaemonJSONChildForRelay(t, home, []string{relayURL}, func(line StatusEnvelope) bool {
 		return line.Data.Scan.State == StatusScanIncomplete
@@ -259,6 +267,41 @@ func TestDaemonJSONLocalRelayStorageFailure(t *testing.T) {
 	assert.Zero(t, scan.Data.Scan.Relays[0].NewMessages)
 	assert.NotContains(t, lineText(scan), "storage-error-fixture")
 	assert.NotEmpty(t, myIdentity.Npub)
+}
+
+func TestDaemonJSONCorruptDBStartupRefusal(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	ks := &types.KeyStore{Identities: make(map[string]*types.Identity), Contacts: make(map[string]*types.Contact)}
+	_, err := identity.CreateIdentityWithPassword(ks, "alice", "s2b-test-secret")
+	require.NoError(t, err)
+	require.NoError(t, identity.SaveKeyStore(ks))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".hyphae"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".hyphae", "messages.db"), []byte("not a sqlite database"), 0o600))
+
+	var relayConnections atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		relayConnections.Add(1)
+	}))
+	defer server.Close()
+	relayURL := "ws" + strings.TrimPrefix(server.URL, "http")
+
+	args := []string{"--json", "daemon", "--identity", "alice", "--relay", relayURL, "--password-stdin"}
+	command := exec.Command(daemonLockCLI, args...)
+	command.Stdin = strings.NewReader("s2b-test-secret\n")
+	command.Env = withoutDaemonOutputEnv(os.Environ())
+	command.Env = append(command.Env, "HOME="+home)
+
+	output, err := command.CombinedOutput()
+	require.Error(t, err, "corrupt database must refuse daemon startup with nonzero exit")
+	assert.Zero(t, relayConnections.Load(), "corrupt database must not make any network connections")
+
+	var result common.Result
+	require.NoError(t, json.Unmarshal(output, &result), "output must be a valid JSON error envelope: %s", string(output))
+	assert.False(t, result.OK)
+	assert.Equal(t, common.ErrCodeOther, result.Error)
+	assert.Contains(t, result.Message, "group storage init failed")
 }
 
 func TestDaemonJSONConfigRelaySetAvailableAndUnavailable(t *testing.T) {

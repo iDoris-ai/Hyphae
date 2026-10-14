@@ -14,6 +14,8 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/iDoris-ai/hyphae/internal/common"
+	"github.com/iDoris-ai/hyphae/internal/groupchat"
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/internal/messaging"
 	"github.com/iDoris-ai/hyphae/internal/relayconfig"
@@ -85,6 +87,7 @@ type ChatModel struct {
 	myIdentity            *types.Identity
 	store                 *storage.MessageStore
 	db                    *sql.DB
+	groupStore            *groupchat.Store
 	relays                []string
 	width                 int
 	height                int
@@ -113,6 +116,14 @@ type ChatModel struct {
 	messageLoadGeneration uint64
 }
 
+// GroupStore returns the borrowed group chat store handle, if present.
+func (m *ChatModel) GroupStore() *groupchat.Store {
+	if m == nil {
+		return nil
+	}
+	return m.groupStore
+}
+
 // NewChatModel creates a new chat model. relays may be empty, in which case
 // defaultRelay is used.
 func NewChatModel(contactName string, relays ...string) (*ChatModel, error) {
@@ -138,9 +149,14 @@ func NewChatModel(contactName string, relays ...string) (*ChatModel, error) {
 		return nil, fmt.Errorf("failed to access sender key: %w", err)
 	}
 
-	db, err := storage.InitDB()
+	db, err := storage.OpenDB()
 	if err != nil {
-		return nil, fmt.Errorf("failed to init storage: %w", err)
+		return nil, common.NewExitError(common.ErrCodeOther, fmt.Errorf("group storage init failed: %w", err))
+	}
+	groupStore, err := groupchat.NewStore(db)
+	if err != nil {
+		_ = db.Close()
+		return nil, common.NewExitError(common.ErrCodeOther, fmt.Errorf("group storage init failed: %w", err))
 	}
 
 	store := storage.NewMessageStore(db)
@@ -168,6 +184,7 @@ func NewChatModel(contactName string, relays ...string) (*ChatModel, error) {
 		myIdentity:     myIdentity,
 		store:          store,
 		db:             db,
+		groupStore:     groupStore,
 		relays:         relays,
 		loading:        true,
 		inboxCtx:       inboxCtx,

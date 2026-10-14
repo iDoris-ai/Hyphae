@@ -18,11 +18,13 @@ import (
 	"fiatjaf.com/nostr"
 	"github.com/iDoris-ai/hyphae/internal/audit"
 	"github.com/iDoris-ai/hyphae/internal/common"
+	"github.com/iDoris-ai/hyphae/internal/groupchat"
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/internal/messaging"
 	"github.com/iDoris-ai/hyphae/internal/notify"
 	"github.com/iDoris-ai/hyphae/internal/relayconfig"
 	"github.com/iDoris-ai/hyphae/internal/relayquery"
+	"github.com/iDoris-ai/hyphae/internal/storage"
 	"github.com/iDoris-ai/hyphae/pkg/crypto"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/urfave/cli/v3"
@@ -143,6 +145,19 @@ Run this in a separate terminal or as a system service.`,
 		myIdentity, err := identity.GetIdentity(ks, c.String("identity"))
 		if err != nil {
 			return err
+		}
+
+		db, err := storage.OpenDB()
+		if err != nil {
+			return common.NewExitError(common.ErrCodeOther, fmt.Errorf("group storage init failed: %w", err))
+		}
+		defer func() {
+			if db != nil {
+				_ = db.Close()
+			}
+		}()
+		if _, err := groupchat.NewStore(db); err != nil {
+			return common.NewExitError(common.ErrCodeOther, fmt.Errorf("group storage init failed: %w", err))
 		}
 
 		relays, err := common.ResolveRelays(c)
