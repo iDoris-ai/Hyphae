@@ -1,0 +1,2 @@
+timestamp	decision	rationale
+2026-10-14T02:12:40Z	started	Exact baseline checkout; begin #226 QueueTargetsRaw rows.Err + adoption retry budget repair

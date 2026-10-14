@@ -1,0 +1,14 @@
+{
+  "schema": "baton-result/v1",
+  "task_id": "cloud-m1-226-adoption-budget-20261014",
+  "attempt_id": "f145f61c-2427-476b-a6c3-e653545eaa23",
+  "sequence": 1,
+  "status": "started",
+  "base_sha": "b4e2042ef16cf4e21897599252a7ca1249c2f60c",
+  "result_sha": null,
+  "summary": "Started #226 QueueTargetsRaw rows.Err + adoption retry budget repair on exact baseline",
+  "tests": [],
+  "blocker": null,
+  "next": null,
+  "updated_at": "2026-10-14T02:12:40Z"
+}
