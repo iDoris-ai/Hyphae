@@ -1,0 +1,14 @@
+{
+  "schema": "baton-result/v1",
+  "task_id": "cloud-m1-schema-linux-20261014-105349",
+  "attempt_id": "be89bb80-81c5-4a20-a04e-8289b45b43d0",
+  "sequence": 1,
+  "status": "started",
+  "base_sha": "47d8daf824a5dcee2bfb6488da3b62ce75594aa2",
+  "result_sha": "47d8daf824a5dcee2bfb6488da3b62ce75594aa2",
+  "summary": "Started Linux-only M1 schema proof on frozen base_sha; no runtime activation.",
+  "tests": [],
+  "blocker": null,
+  "next": null,
+  "updated_at": "2026-10-14T10:55:08Z"
+}
