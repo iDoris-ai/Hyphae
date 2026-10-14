@@ -14,14 +14,16 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/internal/messaging"
+	"github.com/iDoris-ai/hyphae/internal/storage"
 	"github.com/stretchr/testify/require"
 )
 
 // TestTUIOfflineRestartSameSignedEventThroughSendSeam drives the production
-// chat command path: KeyEnter returns sendMessage, and the worker result is
-// applied as outboxDeliveryUpdateMsg. It does not inject outboxSendRequest,
-// call the CLI, or start a daemon. The relay is a loopback WebSocket that is
-// down for the original send and later accepts the same signed event.
+// chat command path. KeyEnter returns sendMessage. Worker results come back
+// through the wait command Update schedules, then through Update again as
+// outboxDeliveryUpdateMsg. It does not inject outboxSendRequest, call the CLI,
+// or start a daemon. The relay is a loopback WebSocket that is down for the
+// original send and later holds the ACK until history has been recovered.
 func TestTUIOfflineRestartSameSignedEventThroughSendSeam(t *testing.T) {
 	cleanup := setupTestEnv(t)
 	defer cleanup()
@@ -48,13 +50,12 @@ func TestTUIOfflineRestartSameSignedEventThroughSendSeam(t *testing.T) {
 	model, err := NewChatModel(peer.Nickname, relay.url())
 	require.NoError(t, err)
 	resizeTUI(model)
-	startProductionOutboxWorker(t, model)
+	loop := armOutboxLoop(t, model)
 
 	driveEnterSend(t, model, body)
-	queued := waitTUIOutboxUpdate(t, model.outboxUpdates, func(update outboxDeliveryUpdate) bool {
-		return update.requestID == model.activeSendID && update.state == messaging.AgentMessageQueued
-	})
-	applyDeliveryAndLoad(t, model, queued)
+	queued := loop.next(t)
+	require.Equal(t, model.activeSendID, queued.requestID)
+	require.Equal(t, messaging.AgentMessageQueued, queued.state)
 	require.Contains(t, model.outboxStatus, "not delivered")
 	require.Contains(t, model.outboxStatus, "awaiting relay ACK")
 	require.NotContains(t, model.outboxStatus, "relay accepted")
@@ -65,8 +66,9 @@ func TestTUIOfflineRestartSameSignedEventThroughSendSeam(t *testing.T) {
 	assertEncryptedDMViewport(t, model, body, groupBody, groupID)
 	require.NoError(t, model.Close())
 
-	// The signed event must still be the original one while the relay is down
-	// and no TUI process is running.
+	// Drop the history row after the worker is gone. Reopen must rebuild it
+	// from the signed outbox event before the relay ACK, or this fails.
+	forgetHistoryRow(t, original.ID.Hex())
 	reloaded := requirePersistedSignedDM(t, original.ID.Hex(), peerSK, body)
 	require.Equal(t, original.ID, reloaded.ID)
 	require.Equal(t, original.Sig, reloaded.Sig)
@@ -77,21 +79,16 @@ func TestTUIOfflineRestartSameSignedEventThroughSendSeam(t *testing.T) {
 	require.NoError(t, err)
 	defer reopened.Close()
 	resizeTUI(reopened)
-	startProductionOutboxWorker(t, reopened)
+	missing, err := reopened.store.GetMessage(original.ID.Hex())
+	require.NoError(t, err)
+	require.Nil(t, missing, "history is absent until the reopened worker restores it")
+	reopenLoop := armOutboxLoop(t, reopened)
 
-	restored := waitTUIOutboxUpdate(t, reopened.outboxUpdates, func(update outboxDeliveryUpdate) bool {
-		return update.eventID == original.ID.Hex() && update.state == messaging.AgentMessageQueued
-	})
-	applyDeliveryAndLoad(t, reopened, restored)
+	restored := reopenLoop.next(t)
+	require.Equal(t, original.ID.Hex(), restored.eventID)
+	require.Equal(t, messaging.AgentMessageQueued, restored.state)
 	require.Contains(t, reopened.outboxStatus, original.ID.Hex()[:12])
-	assertEncryptedDMViewport(t, reopened, body, groupBody, groupID)
-
-	accepted := waitTUIOutboxUpdate(t, reopened.outboxUpdates, func(update outboxDeliveryUpdate) bool {
-		return update.eventID == original.ID.Hex() && update.state == messaging.AgentMessageRelayAccepted
-	})
-	applyDeliveryAndLoad(t, reopened, accepted)
-	require.Contains(t, reopened.outboxStatus, "recipient delivery/read not confirmed")
-	require.NotContains(t, reopened.outboxStatus, "recipient received")
+	require.Contains(t, reopened.outboxStatus, "not delivered")
 
 	published := relay.receive(t)
 	require.Equal(t, original.ID, published.ID, "reconnect must retry the original event id")
@@ -100,6 +97,19 @@ func TestTUIOfflineRestartSameSignedEventThroughSendSeam(t *testing.T) {
 	require.Equal(t, original.PubKey, published.PubKey)
 	require.True(t, published.VerifySignature())
 	require.NotContains(t, published.Content, body)
+	recovered, err := reopened.store.GetMessage(original.ID.Hex())
+	require.NoError(t, err)
+	require.NotNil(t, recovered, "restore must write history before the relay ACK")
+	require.Equal(t, body, recovered.Plaintext)
+	require.True(t, recovered.IsEncrypted)
+	require.NotEqual(t, body, recovered.Content)
+
+	relay.release()
+	accepted := reopenLoop.next(t)
+	require.Equal(t, original.ID.Hex(), accepted.eventID)
+	require.Equal(t, messaging.AgentMessageRelayAccepted, accepted.state)
+	require.Contains(t, reopened.outboxStatus, "recipient delivery/read not confirmed")
+	require.NotContains(t, reopened.outboxStatus, "recipient received")
 
 	assertEncryptedDMViewport(t, reopened, body, groupBody, groupID)
 	requireOneHistoryRow(t, reopened, original.ID.Hex())
@@ -113,13 +123,49 @@ func resizeTUI(model *ChatModel) {
 	model.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 }
 
-func startProductionOutboxWorker(t *testing.T, model *ChatModel) {
+// outboxLoop is the production wait command scheduled by Update. The test
+// blocks in that command and feeds its message back into Update. It never
+// reads outboxUpdates itself.
+type outboxLoop struct {
+	model *ChatModel
+	wait  tea.Cmd
+}
+
+func armOutboxLoop(t *testing.T, model *ChatModel) *outboxLoop {
 	t.Helper()
 	msg := model.startOutboxWorker()()
 	require.IsType(t, outboxWorkerStartedMsg{}, msg)
-	// The started handler only schedules waitOutboxUpdate. The test reads that
-	// same channel and feeds outboxDeliveryUpdateMsg back through Update, which
-	// is the production result message. Running the waiter here would steal it.
+	_, cmd := model.Update(msg)
+	require.NotNil(t, cmd, "starting the worker must schedule waitOutboxUpdate")
+	return &outboxLoop{model: model, wait: cmd}
+}
+
+func (l *outboxLoop) next(t *testing.T) outboxDeliveryUpdate {
+	t.Helper()
+	require.NotNil(t, l.wait)
+	msg := l.wait()
+	delivery, ok := msg.(outboxDeliveryUpdateMsg)
+	require.Truef(t, ok, "scheduled waiter returned %T, not the delivery message", msg)
+	require.NotEqual(t, messaging.AgentMessageFailed, delivery.update.state, "status=%s issue=%s", delivery.update.state, delivery.update.issue)
+	_, cmd := l.model.Update(delivery)
+	l.wait = scheduleNextWait(t, l.model, cmd)
+	return delivery.update
+}
+
+// scheduleNextWait runs the history refresh Update scheduled and keeps the
+// following waiter unstarted until the next result is wanted.
+func scheduleNextWait(t *testing.T, model *ChatModel, cmd tea.Cmd) tea.Cmd {
+	t.Helper()
+	require.NotNil(t, cmd)
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	require.Truef(t, ok, "delivery Update must schedule history refresh and the next waiter, got %T", msg)
+	require.GreaterOrEqual(t, len(batch), 2)
+	loaded := batch[0]()
+	messages, isMessages := loaded.(messagesMsg)
+	require.Truef(t, isMessages, "first delivery follow-up must refresh history, got %T", loaded)
+	model.Update(messages)
+	return batch[1]
 }
 
 func driveEnterSend(t *testing.T, model *ChatModel, body string) {
@@ -151,37 +197,19 @@ func runProductionSendCmd(cmd tea.Cmd) {
 	}()
 }
 
-func applyDeliveryAndLoad(t *testing.T, model *ChatModel, update outboxDeliveryUpdate) {
+func forgetHistoryRow(t *testing.T, eventID string) {
 	t.Helper()
-	_, cmd := model.Update(outboxDeliveryUpdateMsg{update: update})
-	require.NotNil(t, cmd, "a delivery result must schedule history refresh and the next waiter")
-	requireScheduledHistoryRefresh(t, model, cmd)
-}
-
-// requireScheduledHistoryRefresh runs the history command scheduled by Update.
-// The following outbox waiter is left unstarted so it cannot consume the retry
-// result the test is about to read from the same channel.
-func requireScheduledHistoryRefresh(t *testing.T, model *ChatModel, cmd tea.Cmd) {
-	t.Helper()
-	msg := cmd()
-	batch, ok := msg.(tea.BatchMsg)
-	if !ok {
-		messages, isMessages := msg.(messagesMsg)
-		require.Truef(t, isMessages, "delivery follow-up must refresh history, got %T", msg)
-		model.Update(messages)
-		return
-	}
-	require.NotEmpty(t, batch)
-	refreshed := make(chan tea.Msg, 1)
-	go func() { refreshed <- batch[0]() }()
-	select {
-	case result := <-refreshed:
-		messages, isMessages := result.(messagesMsg)
-		require.Truef(t, isMessages, "first delivery follow-up must refresh history, got %T", result)
-		model.Update(messages)
-	case <-time.After(2 * time.Second):
-		t.Fatal("delivery follow-up did not refresh history")
-	}
+	db, err := storage.OpenDB()
+	require.NoError(t, err)
+	defer db.Close()
+	result, err := db.Exec(`DELETE FROM messages WHERE id = ?`, eventID)
+	require.NoError(t, err)
+	removed, err := result.RowsAffected()
+	require.NoError(t, err)
+	require.Equal(t, int64(1), removed)
+	var count int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM messages`).Scan(&count))
+	require.Equal(t, 0, count)
 }
 
 func assertEncryptedDMViewport(t *testing.T, model *ChatModel, body, groupBody, groupID string) {
@@ -281,13 +309,15 @@ func requireGroupHistoryUntouched(t *testing.T, model *ChatModel, body string) {
 }
 
 // restartableTUIRelay is a real loopback WebSocket. It starts with nothing
-// listening, then binds the same address when the TUI should retry.
+// listening, then binds the same address and holds each OK until release.
 type restartableTUIRelay struct {
 	addr   string
 	events chan nostr.Event
+	hold   chan struct{}
 
-	mu     sync.Mutex
-	server *http.Server
+	mu          sync.Mutex
+	server      *http.Server
+	releaseOnce sync.Once
 }
 
 func newRestartableTUIRelay(t *testing.T) *restartableTUIRelay {
@@ -297,14 +327,22 @@ func newRestartableTUIRelay(t *testing.T) *restartableTUIRelay {
 	relay := &restartableTUIRelay{
 		addr:   ln.Addr().String(),
 		events: make(chan nostr.Event, 8),
+		hold:   make(chan struct{}),
 	}
 	require.NoError(t, ln.Close())
-	t.Cleanup(func() { relay.disconnect() })
+	t.Cleanup(func() {
+		relay.release()
+		relay.disconnect()
+	})
 	return relay
 }
 
 func (r *restartableTUIRelay) url() string {
 	return "ws://" + r.addr
+}
+
+func (r *restartableTUIRelay) release() {
+	r.releaseOnce.Do(func() { close(r.hold) })
 }
 
 func (r *restartableTUIRelay) connect(t *testing.T) {
@@ -343,6 +381,11 @@ func (r *restartableTUIRelay) connect(t *testing.T) {
 			select {
 			case r.events <- event:
 			default:
+			}
+			select {
+			case <-r.hold:
+			case <-req.Context().Done():
+				return
 			}
 			response, _ := json.Marshal([]any{"OK", event.ID.Hex(), true, ""})
 			if conn.WriteMessage(websocket.TextMessage, response) != nil {
