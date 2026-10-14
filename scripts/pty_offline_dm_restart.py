@@ -10,6 +10,12 @@ case. Group runtime is not started and stays UNPROVEN.
 The fixture relay speaks only the nostr EVENT/OK and REQ/EOSE frames this
 client already uses. It lives in this test helper. Production code is not
 modified.
+
+Exit status is 0 only when Bob's TUI has the decrypted plaintext for the
+original event id, rendered once. A PTY reset, one existing history row, the
+same ciphertext and signature, relay ACK, and the absence of a daemon are not
+enough. `--drop-recipient` still ACKs Alice and answers Bob's REQ with EOSE
+and no EVENT, so that bounded run must exit non-zero.
 """
 
 from __future__ import annotations
@@ -137,8 +143,9 @@ def handshake(conn: socket.socket) -> ByteReader:
 class FixtureRelay:
     """Loopback nostr relay. It can be down, then withhold OK until release."""
 
-    def __init__(self, port: int) -> None:
+    def __init__(self, port: int, drop_recipient: bool = False) -> None:
         self.port = port
+        self.drop_recipient = drop_recipient
         self.hold = threading.Event()
         self.arrived = threading.Event()
         self.stop = threading.Event()
@@ -219,7 +226,7 @@ class FixtureRelay:
         if command == "REQ" and len(message) >= 2:
             sub = str(message[1])
             with self._lock:
-                events = list(self.events)
+                events = [] if self.drop_recipient else list(self.events)
                 self.req_answered += 1
             for event in events:
                 frame = json.dumps(["EVENT", sub, event], separators=(",", ":")).encode()
@@ -578,6 +585,45 @@ def verify_event(binary: Path, home: Path, cache: Path, event_json: str) -> bool
     return result.returncode == 0 and b"Signature is VALID" in result.stdout
 
 
+def recipient_observation(
+    rows: list[dict[str, object]],
+    body: str,
+    ciphertext: str,
+    event_id: str,
+    screen_text: str,
+) -> str | None:
+    """Classify Bob's view of this event. None means it has not arrived yet."""
+    matched = [row for row in rows if row.get("id") == event_id or row.get("plaintext") == body]
+    if not matched:
+        return None
+    if len(matched) != 1:
+        return "fail"
+    row = matched[0]
+    visible = screen_text.count(body)
+    exact = (
+        row.get("id") == event_id
+        and row.get("content") == ciphertext
+        and row.get("plaintext") == body
+        and row.get("is_encrypted") is True
+        and row.get("is_incoming") is True
+        and visible == 1
+    )
+    return "pass" if exact else "fail"
+
+
+def harness_exit_ok(reps: list[dict[str, object]], reps_requested: int) -> bool:
+    """Require Bob's decrypted event. Core restart claims alone stay false-green."""
+    if reps_requested < 1 or len(reps) != reps_requested:
+        return False
+    for item in reps:
+        marker = item.get("recipient_event_marker")
+        if item.get("ok") is not True or item.get("recipient") != "pass":
+            return False
+        if not isinstance(marker, str) or not marker or marker != item.get("event_id_sha256"):
+            return False
+    return True
+
+
 def composer_ready(session: PtySession) -> bool:
     text = session.screen.text()
     raw = bytes(session.raw)
@@ -599,7 +645,14 @@ def quit_clean(session: PtySession) -> int:
     return session.close()
 
 
-def run_rep(binary: Path, cache: Path, root_temp: Path, real_stamp: dict[str, object], real_home: Path) -> dict[str, object]:
+def run_rep(
+    binary: Path,
+    cache: Path,
+    root_temp: Path,
+    real_stamp: dict[str, object],
+    real_home: Path,
+    drop_recipient: bool = False,
+) -> dict[str, object]:
     rep_id = secrets.token_hex(4)
     body = "pty-dm-" + rep_id
     alice_home = root_temp / f"alice-{rep_id}"
@@ -609,7 +662,7 @@ def run_rep(binary: Path, cache: Path, root_temp: Path, real_stamp: dict[str, ob
     if alice_home.resolve() == real_home or bob_home.resolve() == real_home:
         raise RuntimeError("refusing to use the real HOME")
     port = reserve_port()
-    relay = FixtureRelay(port)
+    relay = FixtureRelay(port, drop_recipient=drop_recipient)
     alice = bob = None
     before_pids = binary_pids(binary)
     checks: dict[str, object] = {
@@ -707,15 +760,15 @@ def run_rep(binary: Path, cache: Path, root_temp: Path, real_stamp: dict[str, ob
         screen_count = alice.screen.text().count(body)
 
         bob = start_chat(binary, bob_home, cache, "alice", relay.url)
-        recipient = "blocked"
+        recipient = "timeout"
         recipient_deadline = time.monotonic() + 20
         while time.monotonic() < recipient_deadline:
             bob.drain(0.2)
-            bob_rows = [row for row in history_rows(bob_home) if row["plaintext"] == body]
-            if len(bob_rows) == 1 and bob_rows[0]["content"] == ciphertext and bob_rows[0]["is_incoming"] and bob_rows[0]["id"] == event_id:
-                visible = bob.screen.text().count(body)
-                recipient = "pass" if visible == 1 else "stored_without_single_visible_row"
-                break
+            seen = recipient_observation(history_rows(bob_home), body, ciphertext, event_id, bob.screen.text())
+            if seen is None:
+                continue
+            recipient = seen
+            break
         bob_exit = quit_clean(bob)
         bob_alt = alt_screen_result(bytes(bob.raw))
         bob = None
@@ -748,6 +801,7 @@ def run_rep(binary: Path, cache: Path, root_temp: Path, real_stamp: dict[str, ob
             "relay_ack": True,
             "alice_visible_count": screen_count,
             "recipient": recipient,
+            "recipient_event_marker": sha256_text(event_id) if recipient == "pass" else "",
             "daemon_started": False,
             "group_runtime": GROUP_RUNTIME,
         })
@@ -768,16 +822,19 @@ def run_rep(binary: Path, cache: Path, root_temp: Path, real_stamp: dict[str, ob
 
 
 def assert_worktree_is_test_kit(root: Path) -> None:
-    diff = subprocess.check_output(["git", "diff", "--name-only", "HEAD"], cwd=root, text=True)
-    if diff.strip():
-        raise RuntimeError("tracked files differ from HEAD; production must stay unchanged")
     allowed = {
         "scripts/pty_offline_dm_restart.py",
         "scripts/test_pty_offline_dm_restart.py",
     }
+    tracked = subprocess.check_output(["git", "diff", "--name-only", "HEAD"], cwd=root, text=True)
+    for path in (line.strip() for line in tracked.splitlines()):
+        if path and path not in allowed:
+            raise RuntimeError("tracked production files differ from HEAD")
     status = subprocess.check_output(["git", "status", "--porcelain"], cwd=root, text=True)
     for line in status.splitlines():
-        path = line[3:] if len(line) > 3 else line
+        path = line[3:].strip() if len(line) > 3 else line.strip()
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1].strip()
         if path not in allowed:
             raise RuntimeError("worktree contains a change outside the PTY test kit")
 
@@ -813,6 +870,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--reps", type=int, default=3)
     parser.add_argument("--receipt", help="write a sanitized JSON receipt")
     parser.add_argument("--bin", help="use this already-built hyphae binary")
+    parser.add_argument(
+        "--drop-recipient",
+        action="store_true",
+        help="ACK Alice and withhold the event from Bob's REQ",
+    )
     args = parser.parse_args(argv)
     if args.reps < 1 or args.reps > 10:
         print(json.dumps({"status": "fail", "failure": "reps must be from 1 to 10"}))
@@ -842,15 +904,25 @@ def main(argv: list[str] | None = None) -> int:
             uname = subprocess.check_output(["uname", "-srm"], text=True).strip()
             reps = []
             for _ in range(args.reps):
-                rep = run_rep(binary, cache, root_temp, real_stamp, real_home)
+                rep = run_rep(
+                    binary,
+                    cache,
+                    root_temp,
+                    real_stamp,
+                    real_home,
+                    drop_recipient=args.drop_recipient,
+                )
                 reps.append({key: value for key, value in rep.items() if key != "rep"})
-                if not rep.get("ok"):
+                if not rep.get("ok") or rep.get("recipient") != "pass":
                     break
             core_ok = len(reps) == args.reps and all(item.get("ok") for item in reps)
             recipient_states = [str(item.get("recipient")) for item in reps]
+            exit_ok = harness_exit_ok(reps, args.reps)
             receipt = {
                 "test": "pty-offline-dm-restart",
-                "status": "pass" if core_ok else "fail",
+                "status": "pass" if exit_ok else "fail",
+                "exit_requires_recipient": True,
+                "drop_recipient": bool(args.drop_recipient),
                 "source_commit": source,
                 "binary_sha256": sha256_file(binary),
                 "go_version": go_version,
@@ -864,7 +936,8 @@ def main(argv: list[str] | None = None) -> int:
                 "relay_ack": "PASS" if core_ok else "FAIL",
                 "alt_screen_cleanup": "PASS" if core_ok else "FAIL",
                 "no_standalone_daemon": "PASS" if core_ok and all(not item.get("daemon_started") for item in reps) else "FAIL",
-                "recipient_tui": "PASS" if recipient_states and all(item == "pass" for item in recipient_states) else "BLOCKED",
+                "recipient_tui": "PASS" if exit_ok else "FAIL",
+                "recipient_observation": recipient_states,
                 "group_runtime": "UNPROVEN",
                 "s7": "NOT_CLAIMED",
                 "m1": "NOT_CLAIMED",
@@ -880,8 +953,11 @@ def main(argv: list[str] | None = None) -> int:
                 ],
                 "reps": reps,
             }
-            if not core_ok:
-                receipt["failure"] = "one repetition did not meet the PTY restart checks"
+            if not exit_ok:
+                if core_ok:
+                    receipt["failure"] = "recipient TUI did not show the decrypted event"
+                else:
+                    receipt["failure"] = "one repetition did not meet the PTY restart checks"
             public_receipt(receipt, forbidden)
             if args.receipt:
                 output = Path(args.receipt)
@@ -892,7 +968,7 @@ def main(argv: list[str] | None = None) -> int:
                     os.chmod(output, 0o600)
                     stream.write(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
             print(json.dumps(receipt, sort_keys=True))
-            return 0 if core_ok else 1
+            return 0 if exit_ok else 1
     except Exception as exc:
         failure = sanitize(str(exc), forbidden)
         print(json.dumps({"status": "fail", "failure": failure, "group_runtime": "UNPROVEN"}))

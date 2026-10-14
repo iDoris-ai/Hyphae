@@ -32,8 +32,7 @@ def connect_client(port: int) -> socket.socket:
     return sock
 
 
-def read_text(sock: socket.socket) -> str:
-    reader = runner.ByteReader(sock)
+def read_text(reader: runner.ByteReader) -> str:
     opcode, payload = reader.read_frame()
     if opcode != 1:
         raise AssertionError("fixture returned a non-text frame")
@@ -54,13 +53,14 @@ class PtyOfflineHarnessTests(unittest.TestCase):
                 sock.recv(1)
             relay.release()
             sock.settimeout(2)
-            ok = json.loads(read_text(sock))
+            ok = json.loads(read_text(runner.ByteReader(sock)))
             self.assertEqual(["OK", event["id"], True, ""], ok)
             query = connect_client(port)
             runner.write_frame(query, 1, json.dumps(["REQ", "hyphae-fetch", {}]).encode(), mask=True)
             query.settimeout(2)
-            replay = json.loads(read_text(query))
-            eose = json.loads(read_text(query))
+            query_reader = runner.ByteReader(query)
+            replay = json.loads(read_text(query_reader))
+            eose = json.loads(read_text(query_reader))
             self.assertEqual("EVENT", replay[0])
             self.assertEqual("hyphae-fetch", replay[1])
             self.assertEqual(event["content"], replay[2]["content"])
@@ -69,6 +69,80 @@ class PtyOfflineHarnessTests(unittest.TestCase):
             query.close()
         finally:
             relay.close()
+
+    def test_fixture_acks_alice_and_drops_bob_delivery(self):
+        port = runner.reserve_port()
+        relay = runner.FixtureRelay(port, drop_recipient=True)
+        relay.start()
+        try:
+            sock = connect_client(port)
+            event = {"id": "a" * 64, "pubkey": "b" * 64, "sig": "c" * 64, "content": "cipher", "kind": 30078, "tags": []}
+            runner.write_frame(sock, 1, json.dumps(["EVENT", event]).encode(), mask=True)
+            relay.release()
+            sock.settimeout(2)
+            ok = json.loads(read_text(runner.ByteReader(sock)))
+            self.assertEqual(["OK", event["id"], True, ""], ok)
+            self.assertEqual(event["content"], relay.events[0]["content"])
+            query = connect_client(port)
+            runner.write_frame(query, 1, json.dumps(["REQ", "hyphae-fetch", {}]).encode(), mask=True)
+            query.settimeout(2)
+            only = json.loads(read_text(runner.ByteReader(query)))
+            self.assertEqual(["EOSE", "hyphae-fetch"], only)
+            query.settimeout(0.3)
+            with self.assertRaises(socket.timeout):
+                query.recv(1)
+            sock.close()
+            query.close()
+        finally:
+            relay.close()
+
+    def test_exit_requires_decrypted_recipient_marker(self):
+        false_green = {
+            "ok": True,
+            "daemon_started": False,
+            "same_event_on_reconnect": True,
+            "relay_ack": True,
+            "history_rows_before_quit": 1,
+            "history_rows_before_ack": 1,
+            "history_rows_after_ack": 1,
+            "offline_exit": 0,
+            "restart_exit": 0,
+            "bob_exit": 0,
+            "event_id_sha256": "ab" * 32,
+            "signature_sha256": "cd" * 32,
+            "ciphertext_sha256": "ef" * 32,
+            "recipient": "timeout",
+            "recipient_event_marker": "",
+        }
+        self.assertFalse(runner.harness_exit_ok([false_green], 1))
+        missing_marker = dict(false_green, recipient="pass", recipient_event_marker="")
+        self.assertFalse(runner.harness_exit_ok([missing_marker], 1))
+        wrong_marker = dict(false_green, recipient="pass", recipient_event_marker="12" * 32)
+        self.assertFalse(runner.harness_exit_ok([wrong_marker], 1))
+        passed = dict(false_green, recipient="pass", recipient_event_marker=false_green["event_id_sha256"])
+        self.assertTrue(runner.harness_exit_ok([passed], 1))
+        self.assertFalse(runner.harness_exit_ok([passed, passed], 3))
+        self.assertIsNone(runner.recipient_observation([], "body", "cipher", "e" * 64, ""))
+        self.assertEqual(
+            "pass",
+            runner.recipient_observation(
+                [{"id": "e" * 64, "content": "cipher", "plaintext": "body", "is_encrypted": True, "is_incoming": True}],
+                "body",
+                "cipher",
+                "e" * 64,
+                "body",
+            ),
+        )
+        self.assertEqual(
+            "fail",
+            runner.recipient_observation(
+                [{"id": "e" * 64, "content": "cipher", "plaintext": "body", "is_encrypted": True, "is_incoming": True}],
+                "body",
+                "cipher",
+                "e" * 64,
+                "body body",
+            ),
+        )
 
     def test_pty_child_enters_and_leaves_alt_screen_and_is_reaped(self):
         code = "import os; os.write(1, b'\\x1b[?1049hHI\\x1b[?1049l')"
