@@ -1,0 +1,9 @@
+{"Time":"2026-10-14T19:04:12.09968711+07:00","Action":"start","Package":"github.com/iDoris-ai/hyphae/internal/messaging"}
+{"Time":"2026-10-14T19:04:13.056406442+07:00","Action":"run","Package":"github.com/iDoris-ai/hyphae/internal/messaging","Test":"TestProofGapDMPositiveControl"}
+{"Time":"2026-10-14T19:04:13.056530558+07:00","Action":"output","Package":"github.com/iDoris-ai/hyphae/internal/messaging","Test":"TestProofGapDMPositiveControl","Output":"=== RUN   TestProofGapDMPositiveControl\n"}
+{"Time":"2026-10-14T19:04:13.261428676+07:00","Action":"output","Package":"github.com/iDoris-ai/hyphae/internal/messaging","Test":"TestProofGapDMPositiveControl","Output":"    proofgap_dm_control_linux_test.go:103: PROOFGAP dm-control inProcIDs=[pg-dm-after pg-dm-keep] cliExit=0 cliOK=true cliIDs=[pg-dm-after pg-dm-keep] jsonErr=\u003cnil\u003e membersStillMissingInviteID=true stderr=\"\"\n"}
+{"Time":"2026-10-14T19:04:13.261697463+07:00","Action":"output","Package":"github.com/iDoris-ai/hyphae/internal/messaging","Test":"TestProofGapDMPositiveControl","Output":"--- PASS: TestProofGapDMPositiveControl (0.21s)\n"}
+{"Time":"2026-10-14T19:04:13.26170939+07:00","Action":"pass","Package":"github.com/iDoris-ai/hyphae/internal/messaging","Test":"TestProofGapDMPositiveControl","Elapsed":0.21}
+{"Time":"2026-10-14T19:04:13.26183009+07:00","Action":"output","Package":"github.com/iDoris-ai/hyphae/internal/messaging","Output":"PASS\n"}
+{"Time":"2026-10-14T19:04:14.269231924+07:00","Action":"output","Package":"github.com/iDoris-ai/hyphae/internal/messaging","Output":"ok  \tgithub.com/iDoris-ai/hyphae/internal/messaging\t2.169s\n"}
+{"Time":"2026-10-14T19:04:14.26929634+07:00","Action":"pass","Package":"github.com/iDoris-ai/hyphae/internal/messaging","Elapsed":2.17}
