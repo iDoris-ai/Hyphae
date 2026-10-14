@@ -2,13 +2,26 @@
   "schema": "baton-result/v1",
   "task_id": "cloud-m1-226-refusal-repair-20261014-034010",
   "attempt_id": "866fd3b5-3367-4f56-a618-6eaabf682cc2",
-  "sequence": 1,
-  "status": "started",
+  "sequence": 2,
+  "status": "completed",
   "base_sha": "9f6e65da53cba009eff7aa285bada7f17ee7dcb5",
-  "result_sha": null,
-  "summary": "Started M1 #226 refusal repair: F1 MaxRetries bind on active-entry reuse; F2 refuse fresh native nonzero counters before O1",
-  "tests": [],
+  "result_sha": "64aa4da8ab0f6389c9537f24a76838d23adb08f2",
+  "summary": "F1: CommitGroupEnqueueLocked reuses an active pending entry only when entry max_retries equals frozen prepared max_retries (else ErrOutboxEnqueueConflict, no write). F2: enqueuePreparedRaw refuses native prepared rows with nonzero attempts/retry_count and no outbox entry to adopt, before any O1/T2. Compatible legacy retry1/max3 adoption kept for native and legacy origins. Production net vs origin/m1-w3a-group-o1-enqueue: +135 -3 = 132 lines.",
+  "tests": [
+    {
+      "command": "go test ./internal/groupchat/ ./internal/messaging/ -count=1",
+      "exit_code": 0
+    },
+    {
+      "command": "go vet ./internal/groupchat/ ./internal/messaging/",
+      "exit_code": 0
+    },
+    {
+      "command": "go test -race ./internal/groupchat/ ./internal/messaging/ -count=1",
+      "exit_code": 0
+    }
+  ],
   "blocker": null,
-  "next": null,
-  "updated_at": "2026-10-14T03:41:13Z"
+  "next": "Stop receipt, different model reruns frozen Mini negatives",
+  "updated_at": "2026-10-14T03:49:13Z"
 }

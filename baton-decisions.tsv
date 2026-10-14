@@ -3,3 +3,6 @@ timestamp	decision	rationale
 2026-10-14T02:21:30Z	fix-a-rows-err	Check rows.Err before O1/T2; Close alone misses Next iteration failure after first row
 2026-10-14T02:21:30Z	fix-b-adopted-retry-budget	Persist adopted outbox entry RetryCount into fanout budget snapshot; keep opaque legacy queue id; reject exhausted without writes
 2026-10-14T03:41:13Z	started	Exact baseline 9f6e65da; begin F1 MaxRetries bind + F2 fresh-native counter refuse before mutation
+2026-10-14T03:49:13Z	f1-max-retries-bind	O1 active-entry reuse requires entry max_retries == frozen prepared max_retries; mismatch is ErrOutboxEnqueueConflict before any write
+2026-10-14T03:49:13Z	f2-seeded-native-refuse	Native prepared rows with nonzero attempts/retry_count (NULL retry treated as 0) refuse before any O1/T2 when no outbox entry exists; existing entries go to O1 for adopt-vs-conflict; legacy origin not refused
+2026-10-14T03:49:13Z	completed	result_sha 64aa4da8; groupchat+messaging tests, vet, race all exit 0; production net 132 <= 300
