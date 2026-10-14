@@ -24,6 +24,62 @@ const (
 	BookkeepingFileCorrupt     FanoutBookkeeping = "file_corrupt"
 )
 
+// FanoutBookkeepingReport is one recipient's bookkeeping class for the
+// status surface (W-5b). It is read-only and inert until `groupchat status`
+// is wired to it.
+type FanoutBookkeepingReport struct {
+	RecipientNpub string            `json:"recipient_npub"`
+	Bookkeeping   FanoutBookkeeping `json:"bookkeeping"`
+}
+
+// InspectFanoutBookkeeping classifies every recipient row of key under one
+// outbox lock, so all classes come from the same outbox snapshot. It never
+// writes. Recipients are returned in npub order; a key without rows yields an
+// empty slice, not an error.
+func (s *Store) InspectFanoutBookkeeping(key FanoutKey) ([]FanoutBookkeepingReport, error) {
+	local, err := canonicalNpub(key.LocalNpub)
+	if err != nil {
+		return nil, err
+	}
+	key.LocalNpub = local
+	reports := []FanoutBookkeepingReport{}
+	err = messaging.WithGroupOutboxLock(func(path string) error {
+		rows, err := s.db.Query(`SELECT recipient_npub FROM groupchat_fanout
+            WHERE local_npub=? AND group_id=? AND envelope_type=? AND send_key=? ORDER BY recipient_npub`,
+			local, key.GroupID, key.EnvelopeType, key.SendKey)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		var recipients []string
+		for rows.Next() {
+			var r string
+			if err := rows.Scan(&r); err != nil {
+				return err
+			}
+			recipients = append(recipients, r)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		for _, recipient := range recipients {
+			class, err := s.inspectFanoutBookkeepingLocked(path, key, recipient)
+			if err != nil {
+				return fmt.Errorf("inspect %s: %w", recipient, err)
+			}
+			reports = append(reports, FanoutBookkeepingReport{RecipientNpub: recipient, Bookkeeping: class})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return reports, nil
+}
+
 // inspectFanoutBookkeeping reads both stores under the outbox lock and
 // classifies them. It never writes: no replay, no mtime change, no SQLite
 // transaction. A missing row is sql.ErrNoRows.
@@ -35,24 +91,29 @@ func (s *Store) inspectFanoutBookkeeping(key FanoutKey, recipient string) (Fanou
 	key.LocalNpub = local
 	var class FanoutBookkeeping
 	err = messaging.WithGroupOutboxLock(func(path string) error {
-		row := fanoutFailureRow{token: fanoutAttemptToken{key: key, recipient: recipient}}
-		if err := row.scan(s.db.QueryRow(`SELECT `+fanoutFailureColumns+` FROM groupchat_fanout
-            WHERE local_npub=? AND group_id=? AND envelope_type=? AND send_key=? AND recipient_npub=?`,
-			local, key.GroupID, key.EnvelopeType, key.SendKey, recipient)); err != nil {
-			return err
-		}
-		entry, receipt, err := messaging.ReadGroupEntryLocked(path, row.token.eventID)
-		if err != nil {
-			class = BookkeepingFileCorrupt
-			return nil
-		}
-		class = classifyFanoutBookkeeping(&row, entry, receipt)
-		return nil
+		class, err = s.inspectFanoutBookkeepingLocked(path, key, recipient)
+		return err
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", fmt.Errorf("fanout row not found: %w", err)
 	}
 	return class, err
+}
+
+// inspectFanoutBookkeepingLocked is the per-recipient classification; the
+// caller holds the outbox lock and has canonicalised key.LocalNpub.
+func (s *Store) inspectFanoutBookkeepingLocked(path string, key FanoutKey, recipient string) (FanoutBookkeeping, error) {
+	row := fanoutFailureRow{token: fanoutAttemptToken{key: key, recipient: recipient}}
+	if err := row.scan(s.db.QueryRow(`SELECT `+fanoutFailureColumns+` FROM groupchat_fanout
+            WHERE local_npub=? AND group_id=? AND envelope_type=? AND send_key=? AND recipient_npub=?`,
+		key.LocalNpub, key.GroupID, key.EnvelopeType, key.SendKey, recipient)); err != nil {
+		return "", err
+	}
+	entry, receipt, err := messaging.ReadGroupEntryLocked(path, row.token.eventID)
+	if err != nil {
+		return BookkeepingFileCorrupt, nil
+	}
+	return classifyFanoutBookkeeping(&row, entry, receipt), nil
 }
 
 func classifyFanoutBookkeeping(row *fanoutFailureRow, entry *messaging.RawGroupEntry, receipt string) FanoutBookkeeping {

@@ -10,15 +10,35 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
+	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/storage"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/stretchr/testify/require"
 )
 
+func groupOutboxTestSecret(n byte) nostr.SecretKey {
+	var key nostr.SecretKey
+	key[len(key)-1] = n
+	return key
+}
+
+func groupOutboxRecipientNpub() string {
+	return common.EncodeNpub(groupOutboxTestSecret(2).Public())
+}
+
 func groupOutboxEventJSON(t *testing.T) string {
 	t.Helper()
-	event := nostr.Event{Kind: 30078, CreatedAt: nostr.Now(), Content: "frozen ciphertext"}
-	require.NoError(t, event.Sign(nostr.Generate()))
+	recipient := groupOutboxTestSecret(2)
+	payload := "hyphae.group/v1\n{\"type\":\"message\",\"version\":1,\"group_id\":\"00000000000000000000000000000001\",\"logical_id\":\"00000000000000000000000000000002\",\"body\":\"frozen ciphertext\"}"
+	event := makeVerifiedAgentEvent(t, payload, groupOutboxTestSecret(1), recipient, true)
+	require.True(t, event.CheckID())
+	require.True(t, event.VerifySignature())
+	verified, err := VerifyAgentMessage(event, recipient)
+	require.NoError(t, err)
+	require.True(t, verified.IsEncrypted())
+	require.Equal(t, AgentRouteReservedGroup, verified.Route())
+	require.Equal(t, payload, verified.Plaintext())
+	require.Equal(t, groupOutboxRecipientNpub(), verified.RecipientNpub())
 	data, err := json.Marshal(event)
 	require.NoError(t, err)
 	return string(data)
@@ -28,7 +48,7 @@ func TestGroupOutboxEnqueueAndRequeue(t *testing.T) {
 	setupTempOutbox(t)
 	eventJSON := groupOutboxEventJSON(t)
 	relays := []string{"wss://relay.example"}
-	first, existed, err := EnqueueGroupOutboxEntry(eventJSON, "recipient", relays, 2)
+	first, existed, err := EnqueueGroupOutboxEntry(eventJSON, groupOutboxRecipientNpub(), relays, 2)
 	require.NoError(t, err)
 	require.False(t, existed)
 	require.NotEmpty(t, first.QueueID)
@@ -38,7 +58,7 @@ func TestGroupOutboxEnqueueAndRequeue(t *testing.T) {
 	relays[0] = "changed"
 	require.Equal(t, "wss://relay.example", first.Relays[0])
 	for _, enqueue := range []func(string, string, []string, int) (types.OutboxEntry, bool, error){EnqueueGroupOutboxEntry, RequeueGroupOutboxEntry} {
-		entry, existed, err := enqueue(eventJSON, "recipient", nil, 10)
+		entry, existed, err := enqueue(eventJSON, groupOutboxRecipientNpub(), nil, 10)
 		require.NoError(t, err)
 		require.True(t, existed)
 		require.Equal(t, first, entry)
@@ -62,11 +82,11 @@ func TestGroupOutboxEnqueueAndRequeue(t *testing.T) {
 	require.Equal(t, OutboxStatusGroupFailed, ob.Entries[0].Status)
 	require.True(t, isFailedOrStuck(ob.Entries[0]))
 	require.Empty(t, GetPendingGroupOutbox(ob))
-	failed, existed, err := EnqueueGroupOutboxEntry(eventJSON, "recipient", nil, 2)
+	failed, existed, err := EnqueueGroupOutboxEntry(eventJSON, groupOutboxRecipientNpub(), nil, 2)
 	require.NoError(t, err)
 	require.True(t, existed)
 	require.Equal(t, ob.Entries[0], failed)
-	requeued, existed, err := RequeueGroupOutboxEntry(eventJSON, "recipient", nil, 3)
+	requeued, existed, err := RequeueGroupOutboxEntry(eventJSON, groupOutboxRecipientNpub(), nil, 3)
 	require.NoError(t, err)
 	require.False(t, existed)
 	require.NotEqual(t, first.QueueID, requeued.QueueID)
@@ -94,7 +114,7 @@ func TestGroupOutboxConcurrentIdempotency(t *testing.T) {
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
-				entries[i], _, errs[i] = enqueue(eventJSON, "recipient", nil, 2)
+				entries[i], _, errs[i] = enqueue(eventJSON, groupOutboxRecipientNpub(), nil, 2)
 			}(i)
 		}
 		wg.Wait()
@@ -113,7 +133,7 @@ func TestGroupOutboxConcurrentIdempotency(t *testing.T) {
 func TestGroupOutboxRejectsCorruptionAndCollisions(t *testing.T) {
 	setupTempOutbox(t)
 	eventJSON := groupOutboxEventJSON(t)
-	entry, _, err := EnqueueGroupOutboxEntry(eventJSON, "recipient", nil, 2)
+	entry, _, err := EnqueueGroupOutboxEntry(eventJSON, groupOutboxRecipientNpub(), nil, 2)
 	require.NoError(t, err)
 	fixtures := []types.OutboxEntry{entry, entry, entry, entry}
 	fixtures[0].Status = "pending"
@@ -127,7 +147,7 @@ func TestGroupOutboxRejectsCorruptionAndCollisions(t *testing.T) {
 	for _, fixture := range fixtures {
 		require.NoError(t, SaveOutbox(&types.Outbox{Entries: []types.OutboxEntry{fixture}}))
 		for _, enqueue := range []func(string, string, []string, int) (types.OutboxEntry, bool, error){EnqueueGroupOutboxEntry, RequeueGroupOutboxEntry} {
-			_, _, err := enqueue(eventJSON, "recipient", nil, 2)
+			_, _, err := enqueue(eventJSON, groupOutboxRecipientNpub(), nil, 2)
 			require.Error(t, err)
 			ob, err := LoadOutbox()
 			require.NoError(t, err)
@@ -135,7 +155,7 @@ func TestGroupOutboxRejectsCorruptionAndCollisions(t *testing.T) {
 		}
 	}
 	require.NoError(t, SaveOutbox(&types.Outbox{Entries: []types.OutboxEntry{entry, entry}}))
-	_, _, err = RequeueGroupOutboxEntry(eventJSON, "recipient", nil, 2)
+	_, _, err = RequeueGroupOutboxEntry(eventJSON, groupOutboxRecipientNpub(), nil, 2)
 	require.Error(t, err)
 	ob, err := LoadOutbox()
 	require.NoError(t, err)
@@ -147,12 +167,12 @@ func TestGroupOutboxValidationAndReadHelpers(t *testing.T) {
 	eventJSON := groupOutboxEventJSON(t)
 	for _, enqueue := range []func(string, string, []string, int) (types.OutboxEntry, bool, error){EnqueueGroupOutboxEntry, RequeueGroupOutboxEntry} {
 		for _, invalid := range []string{"", "{}", "null", "broken", `{ "id": "invalid" }`} {
-			_, _, err := enqueue(invalid, "recipient", nil, 2)
+			_, _, err := enqueue(invalid, groupOutboxRecipientNpub(), nil, 2)
 			require.Error(t, err)
 		}
 		_, _, err := enqueue(eventJSON, "", nil, 2)
 		require.Error(t, err)
-		_, _, err = enqueue(eventJSON, "recipient", nil, 0)
+		_, _, err = enqueue(eventJSON, groupOutboxRecipientNpub(), nil, 0)
 		require.Error(t, err)
 	}
 	require.Empty(t, GetPendingGroupOutbox(nil))
@@ -171,14 +191,14 @@ func TestGroupOutboxValidationAndReadHelpers(t *testing.T) {
 func TestGroupOutboxRequeueCommitFailureKeepsOriginal(t *testing.T) {
 	setupTempOutbox(t)
 	eventJSON := groupOutboxEventJSON(t)
-	entry, _, err := EnqueueGroupOutboxEntry(eventJSON, "recipient", nil, 2)
+	entry, _, err := EnqueueGroupOutboxEntry(eventJSON, groupOutboxRecipientNpub(), nil, 2)
 	require.NoError(t, err)
 	entry.Status = OutboxStatusGroupFailed
 	require.NoError(t, SaveOutbox(&types.Outbox{Entries: []types.OutboxEntry{entry}}))
 	original := persistOutbox
 	t.Cleanup(func() { persistOutbox = original })
 	persistOutbox = func(string, *types.Outbox) error { return errors.New("write failed") }
-	returned, existed, err := RequeueGroupOutboxEntry(eventJSON, "recipient", nil, 2)
+	returned, existed, err := RequeueGroupOutboxEntry(eventJSON, groupOutboxRecipientNpub(), nil, 2)
 	require.Error(t, err)
 	require.False(t, existed)
 	require.Empty(t, returned)
@@ -238,7 +258,7 @@ func TestCleanupOutboxKeepsGroupEntries(t *testing.T) {
 func TestLegacyRoundTripRecoversGroupRoute(t *testing.T) {
 	setupTempOutbox(t)
 	eventJSON := groupOutboxEventJSON(t)
-	entry, _, err := EnqueueGroupOutboxEntry(eventJSON, "recipient", []string{"wss://relay.example"}, 2)
+	entry, _, err := EnqueueGroupOutboxEntry(eventJSON, groupOutboxRecipientNpub(), []string{"wss://relay.example"}, 2)
 	require.NoError(t, err)
 
 	// Mirror an old binary's schema: everything but Route.
@@ -299,12 +319,12 @@ func TestLegacyRoundTripRecoversGroupRoute(t *testing.T) {
 func TestRequeueGroupOutboxEntryResetsExhaustedPending(t *testing.T) {
 	setupTempOutbox(t)
 	eventJSON := groupOutboxEventJSON(t)
-	exhausted, _, err := EnqueueGroupOutboxEntry(eventJSON, "recipient", nil, 2)
+	exhausted, _, err := EnqueueGroupOutboxEntry(eventJSON, groupOutboxRecipientNpub(), nil, 2)
 	require.NoError(t, err)
 	exhausted.RetryCount = exhausted.MaxRetries
 	require.NoError(t, SaveOutbox(&types.Outbox{Entries: []types.OutboxEntry{exhausted}}))
 
-	requeued, existed, err := RequeueGroupOutboxEntry(eventJSON, "recipient", nil, 3)
+	requeued, existed, err := RequeueGroupOutboxEntry(eventJSON, groupOutboxRecipientNpub(), nil, 3)
 	require.NoError(t, err)
 	require.False(t, existed, "an exhausted pending entry must be reset, not returned unchanged")
 	require.NotEqual(t, exhausted.QueueID, requeued.QueueID)
@@ -319,9 +339,9 @@ func TestRequeueGroupOutboxEntryResetsExhaustedPending(t *testing.T) {
 	require.Equal(t, []types.OutboxEntry{requeued}, GetPendingGroupOutbox(ob))
 
 	// A still-active pending entry (below MaxRetries) must be left alone.
-	active, _, err := EnqueueGroupOutboxEntry(groupOutboxEventJSON(t), "recipient2", nil, 5)
+	active, _, err := EnqueueGroupOutboxEntry(groupOutboxEventJSON(t), groupOutboxRecipientNpub(), nil, 5)
 	require.NoError(t, err)
-	activeRequeued, activeExisted, err := RequeueGroupOutboxEntry(active.EventJSON, "recipient2", nil, 5)
+	activeRequeued, activeExisted, err := RequeueGroupOutboxEntry(active.EventJSON, groupOutboxRecipientNpub(), nil, 5)
 	require.NoError(t, err)
 	require.True(t, activeExisted)
 	require.Equal(t, active, activeRequeued)
@@ -332,7 +352,7 @@ func TestLegacyBinaryIgnoresGroupEntries(t *testing.T) {
 	ResetStoreForTest()
 	t.Cleanup(ResetStoreForTest)
 	eventJSON := groupOutboxEventJSON(t)
-	entry, _, err := EnqueueGroupOutboxEntry(eventJSON, "recipient", nil, 2)
+	entry, _, err := EnqueueGroupOutboxEntry(eventJSON, groupOutboxRecipientNpub(), nil, 2)
 	require.NoError(t, err)
 	// Decode the actual disk bytes into the pre-route schema, then run main's
 	// original pending selection and attemptSend combination.
