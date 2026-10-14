@@ -105,8 +105,8 @@ func TestParseManifestJSON_MalformedAndStrictRejection(t *testing.T) {
 			errSubstr: "missing required",
 		},
 		{
-			name:      "empty allowed_entries",
-			rawJSON:   func() string {
+			name: "empty allowed_entries",
+			rawJSON: func() string {
 				raw := validManifestJSON()
 				start := strings.Index(raw, `"allowed_entries": {`)
 				end := strings.Index(raw[start:], "},\n\t\t\"inventory_digest\"") + start + 1
