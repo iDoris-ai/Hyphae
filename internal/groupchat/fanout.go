@@ -11,7 +11,7 @@ import (
 	"github.com/iDoris-ai/hyphae/internal/messaging"
 )
 
-const fanoutSchema = `CREATE TABLE IF NOT EXISTS groupchat_fanout (
+const fanoutTableSchema = `CREATE TABLE IF NOT EXISTS groupchat_fanout (
     local_npub      TEXT    NOT NULL,             -- 发送身份
     group_id        TEXT    NOT NULL,
     envelope_type   TEXT    NOT NULL,             -- 'message' | 'invite' | 'accept' | 'decline' | 'activate' | 'cancel'
@@ -44,7 +44,9 @@ const fanoutSchema = `CREATE TABLE IF NOT EXISTS groupchat_fanout (
     PRIMARY KEY (local_npub, group_id, envelope_type, send_key, recipient_npub),
     UNIQUE (local_npub, event_id)
 );
-CREATE INDEX IF NOT EXISTS idx_groupchat_fanout_pending
+`
+
+const fanoutIndexSchema = `CREATE INDEX IF NOT EXISTS idx_groupchat_fanout_pending
     ON groupchat_fanout(local_npub, state) WHERE state IN ('prepared', 'queued');
 `
 

@@ -287,13 +287,16 @@ func TestDaemonJSONCorruptDBStartupRefusal(t *testing.T) {
 	defer server.Close()
 	relayURL := "ws" + strings.TrimPrefix(server.URL, "http")
 
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 	args := []string{"--json", "daemon", "--identity", "alice", "--relay", relayURL, "--password-stdin"}
-	command := exec.Command(daemonLockCLI, args...)
+	command := exec.CommandContext(ctx, daemonLockCLI, args...)
 	command.Stdin = strings.NewReader("s2b-test-secret\n")
 	command.Env = withoutDaemonOutputEnv(os.Environ())
 	command.Env = append(command.Env, "HOME="+home)
 
 	output, err := command.CombinedOutput()
+	require.NoError(t, ctx.Err(), "corrupt database must refuse before the 15s bound, not hang the suite")
 	require.Error(t, err, "corrupt database must refuse daemon startup with nonzero exit")
 	assert.Zero(t, relayConnections.Load(), "corrupt database must not make any network connections")
 

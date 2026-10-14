@@ -137,7 +137,7 @@ func NewStore(db *sql.DB) (*Store, error) {
 }
 
 func (s *Store) migrate() error {
-	statements := []string{
+	tables := []string{
 		`CREATE TABLE IF NOT EXISTS groupchat_groups (
 			local_npub TEXT NOT NULL,
 			group_id TEXT NOT NULL,
@@ -189,11 +189,26 @@ func (s *Store) migrate() error {
 			PRIMARY KEY (local_npub, group_id, logical_id),
 			UNIQUE (event_id)
 		)`,
+		fanoutTableSchema,
+	}
+	for _, statement := range tables {
+		if _, err := s.db.Exec(statement); err != nil {
+			return fmt.Errorf("create groupchat schema: %w", err)
+		}
+	}
+	// Validate physical shape before any index statement or migration touches
+	// these tables: a VIEW or wrong-shape TABLE occupying a required name
+	// makes CREATE TABLE IF NOT EXISTS a silent no-op, so this is the only
+	// seam that catches it before the daemon/TUI treat startup as healthy.
+	if err := validateGroupchatSchema(s.db); err != nil {
+		return err
+	}
+	indexes := []string{
 		`CREATE INDEX IF NOT EXISTS idx_groupchat_invites_state ON groupchat_invites(local_npub, state)`,
 		`CREATE INDEX IF NOT EXISTS idx_groupchat_messages_order ON groupchat_messages(local_npub, group_id, created_at, logical_id)`,
-		fanoutSchema,
+		fanoutIndexSchema,
 	}
-	for _, statement := range statements {
+	for _, statement := range indexes {
 		if _, err := s.db.Exec(statement); err != nil {
 			return fmt.Errorf("create groupchat schema: %w", err)
 		}
