@@ -1,2 +1,3 @@
 timestamp	task_id	attempt_id	decision	rationale
 2026-10-14T02:38:35Z	cloud-m1-230-20261014-023744	b157afa2-feb0-4c65-a30a-0e7c5a12b2da	start	branch created from exact base_sha 44eee6c; review-only lane, no production edits
+2026-10-14T02:42:22Z	cloud-m1-230-20261014-023744	b157afa2-feb0-4c65-a30a-0e7c5a12b2da	complete	acceptance PASS; baseline FAIL reproduced (partial 1/3 report); fix verified; test-only probe at 8c03d4c; no production edits
