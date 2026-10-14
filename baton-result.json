@@ -1,0 +1,14 @@
+{
+  "schema": "baton-result/v1",
+  "task_id": "cloud-m1-selectors-20261014-031037",
+  "attempt_id": "aee18657-4967-446d-bcfe-0d1a00a90e3f",
+  "sequence": 1,
+  "status": "started",
+  "base_sha": "042d2794fae972afa7b07086aca486fd6b93c5cc",
+  "result_sha": null,
+  "summary": "Started M1 group retry selection handoff on isolated branch; exploring codebase for GetPendingOutbox/group outbox seams.",
+  "tests": [],
+  "blocker": null,
+  "next": "Implement GetPendingGroupOutbox + daemon/TUI routing without DM leakage",
+  "updated_at": "2026-10-14T03:12:08Z"
+}
