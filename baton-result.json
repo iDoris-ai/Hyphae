@@ -1,0 +1,14 @@
+{
+  "schema": "baton-result/v1",
+  "task_id": "cloud-m1-startup-20261014-023744",
+  "attempt_id": "408a2d79-adbe-4657-959b-538bcbceb27b",
+  "sequence": 1,
+  "status": "started",
+  "base_sha": "09ac32c048b790d2f62f6bb9b0b51bd87dfbf1ae",
+  "result_sha": null,
+  "summary": "Started independent TEST-FIRST startup acceptance on baton/grokbot-20261014-023744-m1-startup from accepted base; exploring daemon Action/NewChatModel APIs for expected-RED group-init gap tests.",
+  "tests": [],
+  "blocker": null,
+  "next": "Design and add test-only startup negatives with temporary HOME and broken group schema",
+  "updated_at": "2026-10-14T02:38:20Z"
+}
