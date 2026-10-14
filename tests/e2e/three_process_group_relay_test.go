@@ -66,15 +66,26 @@ func TestThreeProcessGroupRelay(t *testing.T) {
 }
 
 const (
-	dropExitCode = 3
-	bodyOne      = "relay-proof-one"
-	bodyTwo      = "relay-proof-two"
-	foreignBody  = "foreign-not-member"
-	wrongBody    = "wrong-group-body"
-	roleAlice    = "alice"
-	roleBob      = "bob"
-	roleCharlie  = "charlie"
+	dropExitCode  = 3
+	bodyOne       = "relay-proof-one"
+	bodyTwo       = "relay-proof-two"
+	foreignBody   = "foreign-not-member"
+	wrongBody     = "wrong-group-body"
+	roleAlice     = "alice"
+	roleBob       = "bob"
+	roleCharlie   = "charlie"
+	snapshotScope = "groupchat_messages+dm_messages"
+	reorderNeed   = 2
 )
+
+var (
+	errKeyNotReady = errors.New("key file is not a full 32-byte hex key")
+	errKeyInEnv    = errors.New("private key appeared in process environment")
+)
+
+// reorderBarrierTimeout bounds only the missing-event path. A complete pair
+// flushes as soon as the relay has both events; nothing sleeps on success.
+var reorderBarrierTimeout = 5 * time.Second
 
 type runSummary struct {
 	Run            int             `json:"run"`
@@ -111,12 +122,24 @@ type msgReceipt struct {
 }
 
 type negReceipt struct {
-	Name        string `json:"name"`
-	EventID     string `json:"event_id"`
-	Refused     bool   `json:"refused"`
-	DBUnchanged bool   `json:"db_unchanged"`
-	RelayStored bool   `json:"relay_stored"`
-	ErrorClass  string `json:"error_class"`
+	Name          string `json:"name"`
+	EventID       string `json:"event_id"`
+	Refused       bool   `json:"refused"`
+	DBUnchanged   bool   `json:"db_unchanged"`
+	RelayStored   bool   `json:"relay_stored"`
+	ErrorClass    string `json:"error_class"`
+	VerifyInvoked bool   `json:"verify_invoked"`
+	SnapshotScope string `json:"snapshot_scope"`
+}
+
+type keyReadySignal struct {
+	Role string `json:"role"`
+	PID  int    `json:"pid"`
+}
+
+type baselineSnapshot struct {
+	Scope string `json:"scope"`
+	Hash  string `json:"hash"`
 }
 
 type peerReceipt struct {
@@ -169,7 +192,7 @@ func assertGroupRouteHandlerMissing(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	relay := newMisRelay("")
+	relay := newMisRelay("", "")
 	defer relay.close()
 
 	sender, recipient := nostr.Generate(), nostr.Generate()
@@ -253,7 +276,7 @@ func runScenario(cfg scenarioConfig) (runSummary, error) {
 	if err := os.MkdirAll(pub, 0o700); err != nil {
 		return runSummary{}, err
 	}
-	relay := newMisRelay("")
+	relay := newMisRelay("", pub)
 	defer relay.close()
 
 	roles := []string{roleAlice, roleBob, roleCharlie}
@@ -422,32 +445,98 @@ func armDrop(relay *misRelay, pub string) error {
 }
 
 func assertNoKeyInProcessEnv(children []scenarioChild) error {
-	deadline := time.Now().Add(3 * time.Second)
 	for _, c := range children {
+		var sig keyReadySignal
+		if err := waitJSON(filepath.Join(c.home, ".hyphae", "key-ready.json"), &sig, 5*time.Second); err != nil {
+			return fmt.Errorf("%s key ready signal: %w", c.role, err)
+		}
+		if sig.Role != c.role || sig.PID != c.cmd.Process.Pid {
+			return fmt.Errorf("%s key-ready pid %d role %s does not match child pid %d", c.role, sig.PID, sig.Role, c.cmd.Process.Pid)
+		}
+		if !processAlive(sig.PID) {
+			return fmt.Errorf("%s key-ready pid %d is not alive", c.role, sig.PID)
+		}
 		keyPath := filepath.Join(c.home, ".hyphae", "role.key")
-		for {
-			info, err := os.Stat(keyPath)
-			if err == nil {
-				if info.Mode().Perm() != 0o600 {
-					return fmt.Errorf("%s key mode %o", c.role, info.Mode().Perm())
-				}
-				secret, err := os.ReadFile(keyPath)
-				if err != nil {
-					return err
-				}
-				out, _ := exec.Command("ps", "eww", "-p", strconv.Itoa(c.cmd.Process.Pid)).CombinedOutput()
-				if bytes.Contains(out, bytes.TrimSpace(secret)) {
-					return fmt.Errorf("%s private key appeared in process environment", c.role)
-				}
-				break
-			}
-			if time.Now().After(deadline) {
-				return fmt.Errorf("%s key file was not created", c.role)
-			}
-			time.Sleep(20 * time.Millisecond)
+		info, err := os.Stat(keyPath)
+		if err != nil {
+			return fmt.Errorf("%s key file: %w", c.role, err)
+		}
+		if info.Mode().Perm() != 0o600 {
+			return fmt.Errorf("%s key mode %o", c.role, info.Mode().Perm())
+		}
+		secret, err := os.ReadFile(keyPath)
+		if err != nil {
+			return fmt.Errorf("%s key read: %w", c.role, err)
+		}
+		out, err := exec.Command("ps", "eww", "-p", strconv.Itoa(c.cmd.Process.Pid)).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("%s process environment check failed: %w", c.role, err)
+		}
+		if err := keyAbsentFromProcessEnv(out, secret); err != nil {
+			return fmt.Errorf("%s: %w", c.role, err)
 		}
 	}
 	return nil
+}
+
+func readyKeyMaterial(fileBytes []byte) (string, error) {
+	text := strings.TrimSpace(string(fileBytes))
+	if len(text) != 64 {
+		return "", errKeyNotReady
+	}
+	raw, err := hex.DecodeString(text)
+	if err != nil || len(raw) != 32 {
+		return "", errKeyNotReady
+	}
+	nonempty := false
+	for _, b := range raw {
+		if b != 0 {
+			nonempty = true
+			break
+		}
+	}
+	if !nonempty {
+		return "", errKeyNotReady
+	}
+	return text, nil
+}
+
+func keyAbsentFromProcessEnv(psOutput, keyFile []byte) error {
+	hexKey, err := readyKeyMaterial(keyFile)
+	if err != nil {
+		return err
+	}
+	if bytes.Contains(psOutput, []byte(hexKey)) {
+		return errKeyInEnv
+	}
+	return nil
+}
+
+func writeRoleKeyAtomic(path string, sk nostr.SecretKey) error {
+	hexKey, err := readyKeyMaterial([]byte(hex.EncodeToString(sk[:])))
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(path, []byte(hexKey+"\n"), 0o600)
+}
+
+func signalKeyReady(home, role string, pid int) error {
+	keyPath := filepath.Join(home, ".hyphae", "role.key")
+	info, err := os.Stat(keyPath)
+	if err != nil {
+		return err
+	}
+	if info.Mode().Perm() != 0o600 {
+		return fmt.Errorf("key mode %o", info.Mode().Perm())
+	}
+	data, err := os.ReadFile(keyPath)
+	if err != nil {
+		return err
+	}
+	if _, err := readyKeyMaterial(data); err != nil {
+		return err
+	}
+	return writeJSON(filepath.Join(home, ".hyphae", "key-ready.json"), keyReadySignal{Role: role, PID: pid})
 }
 
 func validatePositive(pub string, relay *misRelay, results map[string]childResult, summary *runSummary) error {
@@ -535,11 +624,33 @@ func validatePositive(pub string, relay *misRelay, results map[string]childResul
 		if len(receipt.Negatives) < 4 {
 			return fmt.Errorf("%s recorded %d negative cases", role, len(receipt.Negatives))
 		}
-		for _, neg := range receipt.Negatives {
-			if !neg.Refused || !neg.DBUnchanged {
-				return fmt.Errorf("%s negative %s was not a clean refusal", role, neg.Name)
+		required := []string{"foreign-sender-" + role, "wrong-group-" + role}
+		if role == roleBob {
+			required = append([]string{"copied-claimed-sender", "copied-pubkey"}, required...)
+		}
+		if err := requireNamedNegatives(role, receipt.Negatives, required); err != nil {
+			return err
+		}
+		if err := assertScopedSnapshot(results[role].home, pub, role); err != nil {
+			return err
+		}
+	}
+	if roleBobReceipt, ok := receipts[roleBob]; ok {
+		var claimedID, copiedID string
+		for _, neg := range roleBobReceipt.Negatives {
+			switch neg.Name {
+			case "copied-claimed-sender":
+				claimedID = neg.EventID
+			case "copied-pubkey":
+				copiedID = neg.EventID
 			}
 		}
+		if claimedID == "" || copiedID == "" || claimedID == copiedID {
+			return errors.New("copied-pubkey event id collided with copied-claimed-sender")
+		}
+	}
+	if err := relay.barrierError(); err != nil {
+		return err
 	}
 	if err := hashDBBodies(results[roleBob].home, man); err != nil {
 		return fmt.Errorf("bob db: %w", err)
@@ -671,8 +782,10 @@ func executeRole(role string) error {
 	}
 	sk := nostr.Generate()
 	keyPath := filepath.Join(home, ".hyphae", "role.key")
-	encoded := hex.EncodeToString(sk[:])
-	if err := os.WriteFile(keyPath, []byte(encoded+"\n"), 0o600); err != nil {
+	if err := writeRoleKeyAtomic(keyPath, sk); err != nil {
+		return err
+	}
+	if err := signalKeyReady(home, role, os.Getpid()); err != nil {
 		return err
 	}
 	loaded, err := os.ReadFile(keyPath)
@@ -830,10 +943,7 @@ func (p *roleProc) finished() bool {
 }
 
 func (p *roleProc) caseApplies(want negativeCase) bool {
-	if want.Expect == "verify-other" {
-		return want.TargetNpub == p.card.Npub
-	}
-	return want.TargetNpub == "" || want.TargetNpub == p.card.Npub
+	return caseAppliesTo(want, p.card.Npub)
 }
 
 func (p *roleProc) negativesComplete() bool {
@@ -845,17 +955,53 @@ func (p *roleProc) negativesComplete() bool {
 			return false
 		}
 	}
-	byID := map[string]negReceipt{}
-	for _, neg := range p.negatives {
-		byID[neg.EventID] = neg
+	return casesSatisfied(p.negatives, p.catalog.Cases, p.card.Npub)
+}
+
+func caseAppliesTo(want negativeCase, selfNpub string) bool {
+	if want.Expect == "verify-other" {
+		return want.TargetNpub == selfNpub
 	}
-	matched := 0
-	for _, want := range p.catalog.Cases {
-		if !p.caseApplies(want) {
+	return want.TargetNpub == "" || want.TargetNpub == selfNpub
+}
+
+func catalogOwnerNames(cases []negativeCase, eventID string) []string {
+	names := make([]string, 0, 1)
+	for _, item := range cases {
+		if item.EventID == eventID {
+			names = append(names, item.Name)
+		}
+	}
+	return names
+}
+
+func placeholderNegative(name string) bool {
+	return strings.HasPrefix(name, "verify-refuse-") || strings.HasPrefix(name, "receive-refuse-")
+}
+
+func receiptSatisfies(got []negReceipt, cases []negativeCase, want negativeCase) bool {
+	owners := catalogOwnerNames(cases, want.EventID)
+	for _, neg := range got {
+		if neg.EventID != want.EventID || !neg.Refused || !neg.DBUnchanged || neg.SnapshotScope != snapshotScope {
 			continue
 		}
-		got, ok := byID[want.EventID]
-		if !ok || !got.Refused || !got.DBUnchanged {
+		if neg.Name == want.Name {
+			return true
+		}
+		if len(owners) == 1 && owners[0] == want.Name && placeholderNegative(neg.Name) {
+			return true
+		}
+	}
+	return false
+}
+
+func casesSatisfied(got []negReceipt, cases []negativeCase, selfNpub string) bool {
+	matched := 0
+	for _, want := range cases {
+		if !caseAppliesTo(want, selfNpub) {
+			continue
+		}
+		if !receiptSatisfies(got, cases, want) {
 			return false
 		}
 		matched++
@@ -911,13 +1057,37 @@ func (p *roleProc) progress(peers map[string]identityCard) error {
 	return nil
 }
 
+func (p *roleProc) writeReorderAck(eventID string) error {
+	if p.role == roleAlice || len(p.order) != 1 || eventID == "" {
+		return nil
+	}
+	return writeFileAtomic(filepath.Join(p.pub, "reorder-ack-"+p.card.Hex), []byte(eventID+"\n"), 0o600)
+}
+
+func (p *roleProc) noteOrder() {
+	if p.sawReorder || len(p.order) < 2 {
+		return
+	}
+	var man manifest
+	if readJSON(filepath.Join(p.pub, "manifest.json"), &man) != nil || len(man.Order) != 2 {
+		return
+	}
+	if p.order[0] == man.Order[1] && p.order[1] == man.Order[0] {
+		p.sawReorder = true
+	}
+}
+
 func (p *roleProc) memberProgress() error {
+	p.noteOrder()
 	if len(p.messages) == 2 && p.sawDup && p.baseline == "" {
 		hash, err := p.rowHash()
 		if err != nil {
 			return err
 		}
 		p.baseline = hash
+		if err := writeJSON(filepath.Join(p.pub, "baseline-"+p.role+".json"), baselineSnapshot{Scope: snapshotScope, Hash: hash}); err != nil {
+			return err
+		}
 		if err := os.WriteFile(filepath.Join(p.pub, "messages-ready-"+p.role), []byte("ok\n"), 0o600); err != nil {
 			return err
 		}
@@ -962,6 +1132,11 @@ func (p *roleProc) publishActivations(activations []groupchat.Envelope, peers ma
 }
 
 func (p *roleProc) publishMessages(peers map[string]identityCard) error {
+	for _, role := range []string{roleBob, roleCharlie} {
+		if err := armReorderBarrier(p.relayURL, peers[role].Hex, reorderNeed); err != nil {
+			return err
+		}
+	}
 	logicals := make([]string, 0, 2)
 	bodies := []string{bodyOne, bodyTwo}
 	var man manifest
@@ -1085,8 +1260,10 @@ func (p *roleProc) publishNegatives(peers map[string]identityCard) error {
 	if err := add("copied-claimed-sender", peers[roleBob].Npub, claimed, "verify-refuse", true, false); err != nil {
 		return err
 	}
-	copied := claimed
-	copied.PubKey = p.sk.Public()
+	copied, err := copiedPubkeyEvent(claimed, p.sk.Public())
+	if err != nil {
+		return err
+	}
 	copiedRelayErr := publishRaw(p.relayURL, copied)
 	if copiedRelayErr == nil {
 		return errors.New("copied pubkey was accepted by the relay")
@@ -1207,6 +1384,9 @@ func (p *roleProc) onMessage(event nostr.Event, verified groupchat.VerifiedIncom
 		if _, seen := p.logicalAt[env.LogicalID]; !seen {
 			p.logicalAt[env.LogicalID] = len(p.order)
 			p.order = append(p.order, env.LogicalID)
+			if err := p.writeReorderAck(event.ID.Hex()); err != nil {
+				return err
+			}
 		}
 	} else {
 		p.skips[env.LogicalID]++
@@ -1214,14 +1394,7 @@ func (p *roleProc) onMessage(event nostr.Event, verified groupchat.VerifiedIncom
 	if p.deliveries[event.ID.Hex()] >= 3 && p.skips[env.LogicalID] >= 2 {
 		p.sawDup = true
 	}
-	if len(p.order) >= 2 && p.order[0] != "" {
-		var man manifest
-		if readJSON(filepath.Join(p.pub, "manifest.json"), &man) == nil && len(man.Order) == 2 {
-			if p.order[0] == man.Order[1] && p.order[1] == man.Order[0] {
-				p.sawReorder = true
-			}
-		}
-	}
+	p.noteOrder()
 	p.upsertMessage(event, verified, env)
 	after, err := p.rowHash()
 	if err != nil {
@@ -1259,7 +1432,11 @@ func (p *roleProc) afterProgress() error {
 			if inserted {
 				p.inserts[env.LogicalID]++
 				if _, seen := p.logicalAt[env.LogicalID]; !seen {
+					p.logicalAt[env.LogicalID] = len(p.order)
 					p.order = append(p.order, env.LogicalID)
+					if err := p.writeReorderAck(event.ID.Hex()); err != nil {
+						return err
+					}
 				}
 			} else {
 				p.skips[env.LogicalID]++
@@ -1280,6 +1457,7 @@ func (p *roleProc) afterProgress() error {
 			}
 		}
 	}
+	p.noteOrder()
 	return nil
 }
 
@@ -1317,19 +1495,29 @@ func (p *roleProc) recordNegative(event nostr.Event, class, errClass string, cau
 	if err != nil {
 		return err
 	}
-	p.rememberNeg(event, class, errClass, after == p.baseline)
+	unchanged := after == p.baseline
+	p.rememberNeg(event, class, errClass, unchanged, true)
 	_ = cause
+	if !unchanged {
+		return errors.New("negative refusal mutated the scoped group and DM snapshot")
+	}
 	return nil
 }
 
-func (p *roleProc) rememberNeg(event nostr.Event, class, errClass string, unchanged bool) {
+func (p *roleProc) rememberNeg(event nostr.Event, class, errClass string, unchanged, verifyInvoked bool) {
 	name := p.negativeName(event.ID.Hex())
 	if name == "" {
 		name = class + "-" + event.ID.Hex()[:8]
 	}
-	item := negReceipt{Name: name, EventID: event.ID.Hex(), Refused: true, DBUnchanged: unchanged, RelayStored: true, ErrorClass: errClass}
+	item := negReceipt{
+		Name: name, EventID: event.ID.Hex(), Refused: true, DBUnchanged: unchanged,
+		RelayStored: true, ErrorClass: errClass, VerifyInvoked: verifyInvoked, SnapshotScope: snapshotScope,
+	}
 	for i := range p.negatives {
-		if p.negatives[i].EventID == item.EventID {
+		if p.negatives[i].EventID != item.EventID {
+			continue
+		}
+		if p.negatives[i].Name == item.Name || (placeholderNegative(p.negatives[i].Name) && placeholderNegative(item.Name)) {
 			p.negatives[i] = item
 			return
 		}
@@ -1356,7 +1544,7 @@ func (p *roleProc) observeCatalog() error {
 		}
 	}
 	for _, item := range p.catalog.Cases {
-		if p.hasNegative(item.EventID) {
+		if p.caseClosed(item) {
 			continue
 		}
 		if item.Expect == "verify-other" {
@@ -1385,10 +1573,32 @@ func (p *roleProc) observeCatalog() error {
 			if verr == nil {
 				return fmt.Errorf("%s verified", item.Name)
 			}
-			p.negatives = append(p.negatives, negReceipt{Name: item.Name, EventID: item.EventID, Refused: true, DBUnchanged: after == before, RelayStored: false, ErrorClass: classErr(verr)})
+			if after != before {
+				return fmt.Errorf("%s mutated the scoped group and DM snapshot", item.Name)
+			}
+			p.negatives = append(p.negatives, negReceipt{
+				Name: item.Name, EventID: item.EventID, Refused: true, DBUnchanged: true,
+				RelayStored: false, ErrorClass: classErr(verr), VerifyInvoked: true, SnapshotScope: snapshotScope,
+			})
 		}
 	}
 	return nil
+}
+
+func (p *roleProc) caseClosed(item negativeCase) bool {
+	owners := catalogOwnerNames(p.catalog.Cases, item.EventID)
+	for _, neg := range p.negatives {
+		if neg.EventID != item.EventID || !neg.Refused || !neg.DBUnchanged {
+			continue
+		}
+		if neg.Name == item.Name {
+			return true
+		}
+		if len(owners) == 1 && owners[0] == item.Name {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *roleProc) fetchAndRefuse(item negativeCase) error {
@@ -1417,9 +1627,12 @@ func (p *roleProc) fetchAndRefuse(item negativeCase) error {
 			return err
 		}
 		if verr == nil || after != before {
-			return fmt.Errorf("%s was accepted or mutated the db", item.Name)
+			return fmt.Errorf("%s was accepted or mutated the scoped snapshot", item.Name)
 		}
-		p.negatives = append(p.negatives, negReceipt{Name: item.Name, EventID: item.EventID, Refused: true, DBUnchanged: true, RelayStored: true, ErrorClass: classErr(verr)})
+		p.negatives = append(p.negatives, negReceipt{
+			Name: item.Name, EventID: item.EventID, Refused: true, DBUnchanged: true,
+			RelayStored: true, ErrorClass: classErr(verr), VerifyInvoked: true, SnapshotScope: snapshotScope,
+		})
 		return nil
 	case <-time.After(3 * time.Second):
 		return fmt.Errorf("did not fetch %s", item.Name)
@@ -1455,16 +1668,24 @@ func (p *roleProc) hasNegative(eventID string) bool {
 }
 
 func (p *roleProc) namedNegatives() []negReceipt {
+	if len(p.catalog.Cases) == 0 && fileExists(filepath.Join(p.pub, "negatives.json")) {
+		_ = readJSON(filepath.Join(p.pub, "negatives.json"), &p.catalog)
+	}
 	out := make([]negReceipt, 0, len(p.negatives))
 	seen := map[string]bool{}
 	for _, neg := range p.negatives {
-		if neg.EventID == "" || seen[neg.EventID] {
+		if neg.EventID == "" {
 			continue
 		}
-		if name := p.negativeName(neg.EventID); name != "" {
-			neg.Name = name
+		owners := catalogOwnerNames(p.catalog.Cases, neg.EventID)
+		if len(owners) == 1 {
+			neg.Name = owners[0]
 		}
-		seen[neg.EventID] = true
+		key := neg.Name + "\x00" + neg.EventID
+		if neg.Name == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
 		out = append(out, neg)
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -1500,25 +1721,56 @@ func (p *roleProc) counts() (int, int, error) {
 }
 
 func (p *roleProc) rowHash() (string, error) {
-	rows, err := p.db.Query(`SELECT logical_id, COALESCE(event_id,''), sender_npub, body FROM groupchat_messages ORDER BY logical_id, event_id`)
+	return hashMessageTables(p.db)
+}
+
+func hashMessageTables(db *sql.DB) (string, error) {
+	h := sha256.New()
+	fmt.Fprintf(h, "scope=%s\n", snapshotScope)
+	grows, err := db.Query(`SELECT local_npub, group_id, logical_id, sender_npub, body, created_at, COALESCE(event_id,'')
+		FROM groupchat_messages ORDER BY local_npub, group_id, logical_id, COALESCE(event_id,'')`)
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
-	h := sha256.New()
-	for rows.Next() {
-		var logical, eventID, sender, body string
-		if err := rows.Scan(&logical, &eventID, &sender, &body); err != nil {
+	defer grows.Close()
+	for grows.Next() {
+		var local, groupID, logical, sender, body, eventID string
+		var created int64
+		if err := grows.Scan(&local, &groupID, &logical, &sender, &body, &created, &eventID); err != nil {
 			return "", err
 		}
-		fmt.Fprintf(h, "%s|%s|%s|%s\n", logical, eventID, sender, sha256hex(body))
+		fmt.Fprintf(h, "gm|%s|%s|%s|%s|%s|%d|%s\n", local, groupID, logical, sender, sha256hex(body), created, eventID)
 	}
-	var dm int
-	if err := p.db.QueryRow(`SELECT COUNT(*) FROM messages`).Scan(&dm); err != nil {
+	if err := grows.Err(); err != nil {
 		return "", err
 	}
-	fmt.Fprintf(h, "dm=%d\n", dm)
-	return hex.EncodeToString(h.Sum(nil)), rows.Err()
+	drows, err := db.Query(`SELECT id, COALESCE(event_id,''), sender_npub, recipient_npub, COALESCE(content,''), COALESCE(plaintext,''), created_at, received_at, is_encrypted, is_incoming, COALESCE(relay,''), kind
+		FROM messages ORDER BY id`)
+	if err != nil {
+		return "", err
+	}
+	defer drows.Close()
+	for drows.Next() {
+		var id, eventID, sender, recipient, content, plaintext, relay string
+		var created, received, encrypted, incoming, kind int64
+		if err := drows.Scan(&id, &eventID, &sender, &recipient, &content, &plaintext, &created, &received, &encrypted, &incoming, &relay, &kind); err != nil {
+			return "", err
+		}
+		fmt.Fprintf(h, "dm|%s|%s|%s|%s|%s|%s|%d|%d|%d|%d|%s|%d\n", id, eventID, sender, recipient, sha256hex(content), sha256hex(plaintext), created, received, encrypted, incoming, relay, kind)
+	}
+	if err := drows.Err(); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func hashDBFile(path string) (string, error) {
+	db, err := sql.Open("sqlite", readOnlyFileDSN(path))
+	if err != nil {
+		return "", err
+	}
+	defer db.Close()
+	return hashMessageTables(db)
 }
 
 func publishSigned(sender nostr.SecretKey, recipient nostr.PubKey, recipientNpub string, env groupchat.Envelope, relayURL string) (nostr.Event, error) {
@@ -1621,7 +1873,38 @@ func writeJSON(path string, value any) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o600)
+	return writeFileAtomic(path, data, 0o600)
+}
+
+func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".hyphae-atomic-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }
 
 func readJSON(path string, dest any) error {
@@ -1696,14 +1979,17 @@ type relayRecord struct {
 }
 
 type misRelay struct {
-	URL      string
-	server   *http.Server
-	listener net.Listener
-	mu       sync.Mutex
-	records  map[string]*relayRecord
-	stored   []nostr.Event
-	dropHex  string
-	conns    map[*websocket.Conn]*relayConn
+	URL        string
+	server     *http.Server
+	listener   net.Listener
+	mu         sync.Mutex
+	records    map[string]*relayRecord
+	stored     []nostr.Event
+	dropHex    string
+	pub        string
+	conns      map[*websocket.Conn]*relayConn
+	barriers   map[string]*reorderBarrier
+	barrierErr error
 }
 
 type relayConn struct {
@@ -1715,16 +2001,24 @@ type relayConn struct {
 type relaySub struct {
 	id      string
 	filters []nostr.Filter
-	pending []nostr.Event
-	timer   *time.Timer
 	owner   *relayConn
 }
 
-func newMisRelay(dropHex string) *misRelay {
+type reorderBarrier struct {
+	need   int
+	events []nostr.Event
+	sub    *relaySub
+	done   bool
+	timer  *time.Timer
+}
+
+func newMisRelay(dropHex, pub string) *misRelay {
 	relay := &misRelay{
-		records: map[string]*relayRecord{},
-		dropHex: dropHex,
-		conns:   map[*websocket.Conn]*relayConn{},
+		records:  map[string]*relayRecord{},
+		dropHex:  dropHex,
+		pub:      pub,
+		conns:    map[*websocket.Conn]*relayConn{},
+		barriers: map[string]*reorderBarrier{},
 	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -1734,6 +2028,31 @@ func newMisRelay(dropHex string) *misRelay {
 	relay.URL = "ws://" + ln.Addr().String()
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	mux := http.NewServeMux()
+	mux.HandleFunc("/harness/reorder-barrier", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method", http.StatusMethodNotAllowed)
+			return
+		}
+		defer r.Body.Close()
+		var body struct {
+			RecipientHex string `json:"recipient_hex"`
+			Need         int    `json:"need"`
+		}
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
+		if err := dec.Decode(&body); err != nil || body.Need != reorderNeed || len(body.RecipientHex) != 64 {
+			http.Error(w, "bad reorder barrier", http.StatusBadRequest)
+			return
+		}
+		if _, err := hex.DecodeString(body.RecipientHex); err != nil {
+			http.Error(w, "bad reorder barrier", http.StatusBadRequest)
+			return
+		}
+		if err := relay.armBarrier(body.RecipientHex, body.Need); err != nil {
+			http.Error(w, "reorder barrier rejected", http.StatusConflict)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -1747,6 +2066,13 @@ func newMisRelay(dropHex string) *misRelay {
 }
 
 func (r *misRelay) close() {
+	r.mu.Lock()
+	for _, barrier := range r.barriers {
+		if barrier.timer != nil {
+			barrier.timer.Stop()
+		}
+	}
+	r.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	_ = r.server.Shutdown(ctx)
@@ -1915,55 +2241,292 @@ func (r *misRelay) addSub(state *relayConn, req *nostr.ReqEnvelope) {
 }
 
 func (r *misRelay) queue(sub *relaySub, event nostr.Event) {
+	recipient := eventRecipientHex(event)
 	r.mu.Lock()
-	sub.pending = append(sub.pending, event)
-	if sub.timer != nil {
-		sub.timer.Stop()
+	barrier := r.barriers[recipient]
+	if barrier != nil && !barrier.done {
+		if barrier.sub == nil {
+			barrier.sub = sub
+		}
+		if !eventIDPresent(barrier.events, event.ID.Hex()) {
+			barrier.events = append(barrier.events, event)
+		}
+		if len(barrier.events) < barrier.need {
+			r.mu.Unlock()
+			return
+		}
+		batch := append([]nostr.Event(nil), barrier.events...)
+		target := barrier.sub
+		barrier.done = true
+		if barrier.timer != nil {
+			barrier.timer.Stop()
+		}
+		r.mu.Unlock()
+		r.deliverReversedPair(target, recipient, batch)
+		return
 	}
-	sub.timer = time.AfterFunc(120*time.Millisecond, func() {
-		r.flush(sub)
+	r.mu.Unlock()
+	r.sendEvent(sub, event)
+}
+
+func (r *misRelay) armBarrier(recipientHex string, need int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if cur := r.barriers[recipientHex]; cur != nil && !cur.done {
+		return errors.New("reorder barrier already armed")
+	}
+	barrier := &reorderBarrier{need: need}
+	barrier.timer = time.AfterFunc(reorderBarrierTimeout, func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if barrier.done {
+			return
+		}
+		if r.barrierErr == nil {
+			r.barrierErr = fmt.Errorf("reorder barrier missing actual events: got %d want %d", len(barrier.events), barrier.need)
+		}
 	})
+	r.barriers[recipientHex] = barrier
+	return nil
+}
+
+func (r *misRelay) barrierError() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.barrierErr != nil {
+		return r.barrierErr
+	}
+	if len(r.barriers) != 2 {
+		return fmt.Errorf("reorder barrier count %d, want 2", len(r.barriers))
+	}
+	for hexKey, barrier := range r.barriers {
+		if barrier.done && len(barrier.events) == barrier.need {
+			continue
+		}
+		short := hexKey
+		if len(short) > 8 {
+			short = short[:8]
+		}
+		return fmt.Errorf("reorder barrier incomplete for %s: got %d want %d", short, len(barrier.events), barrier.need)
+	}
+	return nil
+}
+
+func (r *misRelay) noteBarrier(err error) {
+	if err == nil {
+		return
+	}
+	r.mu.Lock()
+	if r.barrierErr == nil {
+		r.barrierErr = err
+	}
 	r.mu.Unlock()
 }
 
-func (r *misRelay) flush(sub *relaySub) {
-	r.mu.Lock()
-	batch := append([]nostr.Event(nil), sub.pending...)
-	sub.pending = nil
-	owner := sub.owner
-	r.mu.Unlock()
-	if len(batch) == 0 || owner == nil {
+func (r *misRelay) deliverReversedPair(sub *relaySub, recipientHex string, batch []nostr.Event) {
+	if sub == nil || len(batch) != reorderNeed {
+		r.noteBarrier(fmt.Errorf("reorder barrier missing actual events: got %d want %d", len(batch), reorderNeed))
 		return
 	}
-	reversed := make([]nostr.Event, len(batch))
-	for i := range batch {
-		reversed[len(batch)-1-i] = batch[i]
+	ids := []string{batch[0].ID.Hex(), batch[1].ID.Hex()}
+	reversedIDs, err := barrierReverseIDs(ids, reorderNeed)
+	if err != nil {
+		r.noteBarrier(err)
+		return
 	}
-	send := func(event nostr.Event) {
-		id := sub.id
-		frame, err := nostr.EventEnvelope{SubscriptionID: &id, Event: event}.MarshalJSON()
-		if err != nil {
-			return
+	byID := map[string]nostr.Event{
+		batch[0].ID.Hex(): batch[0],
+		batch[1].ID.Hex(): batch[1],
+	}
+	order := make([]nostr.Event, 0, reorderNeed)
+	for _, id := range reversedIDs {
+		order = append(order, byID[id])
+	}
+	for i, event := range order {
+		for n := 0; n < 3; n++ {
+			r.sendEvent(sub, event)
 		}
-		owner.writeMu.Lock()
-		err = owner.conn.WriteMessage(websocket.TextMessage, frame)
-		owner.writeMu.Unlock()
-		if err != nil {
-			return
+		if i == 0 {
+			if err := r.waitReorderAck(recipientHex, event.ID.Hex()); err != nil {
+				r.noteBarrier(err)
+				return
+			}
 		}
-		r.mu.Lock()
-		if rec := r.records[event.ID.Hex()]; rec != nil {
-			rec.Deliveries++
+	}
+}
+
+func (r *misRelay) waitReorderAck(recipientHex, eventID string) error {
+	if r.pub == "" {
+		return nil
+	}
+	path := filepath.Join(r.pub, "reorder-ack-"+recipientHex)
+	deadline := time.Now().Add(reorderBarrierTimeout)
+	for {
+		data, err := os.ReadFile(path)
+		if err == nil && strings.TrimSpace(string(data)) == eventID {
+			return nil
 		}
-		r.mu.Unlock()
+		if time.Now().After(deadline) {
+			short := recipientHex
+			if len(short) > 8 {
+				short = short[:8]
+			}
+			return fmt.Errorf("reorder barrier missing actual events: no ack for %s", short)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
-	for _, event := range reversed {
-		send(event)
-		send(event)
+}
+
+func (r *misRelay) sendEvent(sub *relaySub, event nostr.Event) {
+	if sub == nil || sub.owner == nil {
+		return
 	}
-	for _, event := range reversed {
-		send(event)
+	id := sub.id
+	frame, err := nostr.EventEnvelope{SubscriptionID: &id, Event: event}.MarshalJSON()
+	if err != nil {
+		return
 	}
+	sub.owner.writeMu.Lock()
+	err = sub.owner.conn.WriteMessage(websocket.TextMessage, frame)
+	sub.owner.writeMu.Unlock()
+	if err != nil {
+		return
+	}
+	r.mu.Lock()
+	if rec := r.records[event.ID.Hex()]; rec != nil {
+		rec.Deliveries++
+	}
+	r.mu.Unlock()
+}
+
+func eventRecipientHex(event nostr.Event) string {
+	for _, tag := range event.Tags {
+		if len(tag) >= 2 && tag[0] == "p" && len(tag[1]) == 64 {
+			return tag[1]
+		}
+	}
+	return ""
+}
+
+func eventIDPresent(events []nostr.Event, id string) bool {
+	for _, event := range events {
+		if event.ID.Hex() == id {
+			return true
+		}
+	}
+	return false
+}
+
+func barrierReverseIDs(ids []string, need int) ([]string, error) {
+	if len(ids) != need || need < 1 {
+		return nil, fmt.Errorf("reorder barrier missing actual events: got %d want %d", len(ids), need)
+	}
+	out := append([]string(nil), ids...)
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
+}
+
+func armReorderBarrier(relayURL, recipientHex string, need int) error {
+	if need != reorderNeed || len(recipientHex) != 64 {
+		return fmt.Errorf("reorder barrier need %d", need)
+	}
+	endpoint := "http" + strings.TrimPrefix(relayURL, "ws") + "/harness/reorder-barrier"
+	payload, err := json.Marshal(map[string]any{"recipient_hex": recipientHex, "need": need})
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("reorder barrier status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func copiedPubkeyEvent(claimed nostr.Event, sender nostr.PubKey) (nostr.Event, error) {
+	copied := claimed
+	badSig := copied.Sig
+	var zero [64]byte
+	if badSig == zero {
+		return nostr.Event{}, errors.New("copied pubkey source has no signature")
+	}
+	copied.PubKey = sender
+	copied.SetID()
+	if copied.Sig != badSig {
+		return nostr.Event{}, errors.New("copied pubkey lost the retained signature")
+	}
+	if copied.ID == claimed.ID {
+		return nostr.Event{}, errors.New("copied pubkey event id collided with claimed sender")
+	}
+	if !copied.CheckID() || copied.VerifySignature() {
+		return nostr.Event{}, errors.New("copied pubkey must recompute the id and keep a bad signature")
+	}
+	return copied, nil
+}
+
+func requireNamedNegatives(role string, got []negReceipt, required []string) error {
+	byName := map[string]negReceipt{}
+	wrong := 0
+	for _, neg := range got {
+		if prev, ok := byName[neg.Name]; ok && prev.EventID != neg.EventID {
+			return fmt.Errorf("%s duplicate negative name %s", role, neg.Name)
+		}
+		byName[neg.Name] = neg
+		if neg.SnapshotScope != snapshotScope {
+			return fmt.Errorf("%s negative %s snapshot scope %q", role, neg.Name, neg.SnapshotScope)
+		}
+		if !neg.Refused || !neg.DBUnchanged {
+			return fmt.Errorf("%s negative %s was not a clean refusal", role, neg.Name)
+		}
+		if strings.HasPrefix(neg.Name, "wrong-recipient-") {
+			wrong++
+		}
+		if neg.Name == "copied-pubkey" && (!neg.VerifyInvoked || neg.RelayStored) {
+			return fmt.Errorf("%s copied-pubkey was not a direct VerifyIncoming refusal after relay reject", role)
+		}
+		if (neg.Name == "copied-claimed-sender" || strings.HasPrefix(neg.Name, "foreign-sender-")) && (!neg.VerifyInvoked || !neg.RelayStored) {
+			return fmt.Errorf("%s %s was not verified from a relay-accepted event", role, neg.Name)
+		}
+	}
+	for _, name := range required {
+		if _, ok := byName[name]; !ok {
+			return fmt.Errorf("%s missing negative %s", role, name)
+		}
+	}
+	if wrong < 2 {
+		return fmt.Errorf("%s recorded %d wrong-recipient negatives", role, wrong)
+	}
+	return nil
+}
+
+func assertScopedSnapshot(home, pub, role string) error {
+	var base baselineSnapshot
+	if err := readJSON(filepath.Join(pub, "baseline-"+role+".json"), &base); err != nil {
+		return err
+	}
+	if base.Scope != snapshotScope {
+		return fmt.Errorf("%s snapshot scope %q", role, base.Scope)
+	}
+	got, err := hashDBFile(filepath.Join(home, ".hyphae", "messages.db"))
+	if err != nil {
+		return err
+	}
+	if got != base.Hash {
+		return fmt.Errorf("%s scoped snapshot changed after the message barrier", role)
+	}
+	return nil
 }
 
 func writeRelayReport(t *testing.T, summaries []runSummary) {
