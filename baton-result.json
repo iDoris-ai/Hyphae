@@ -1,71 +1,14 @@
 {
   "schema": "baton-result/v1",
-  "task_id": "cloud-m1-schema-linux-proof-gap-20261014-112307",
-  "attempt_id": "d249bfba-97e1-4fa4-8664-5b89a6b9dbe3",
-  "sequence": 2,
-  "status": "completed",
-  "base_sha": "aa69dcdc61034e1a177c54bb10adcea4804893d3",
-  "result_sha": "79ce1431a9893de273ecf196a3082ab037f2a482",
-  "summary": "Test-only proof-gap closed for aa69 (production changes 0). Paired Linux on grok-bot-vm-307756233 (Linux 6.12.94+ x86_64, go1.26.0): identical TestProofGap files overlaid on git-archive 127f460 = RED x3 (NewStore falsely healthy; CreateGroup fails no column invite_id; TUI constructs; compiled daemon dials LOCAL relay ~107ms, 4 status snapshots) and 47d8daf = GREEN x3 (literal exit 4, zero dial, zero status snapshots, nil TUI model, outbox bytes.Equal + sha256 identical). Positive controls nullable invite_id NewStore/CreateGroup + daemon dial and DM insert green on both. aa69 daemon proofs upgraded from size/mtime to bytes/sha256. WorkStarted named counter UNPROVEN (no seam; evidence = zero dial/zero snapshots/nil model + source ordering daemon.go L159-163). Evidence: baton-proofgap/.",
-  "tests": [
-    {
-      "command": "[127f460 overlay] go vet ./internal/{groupchat,daemon,tui}/",
-      "exit_code": 0
-    },
-    {
-      "command": "[127f460 overlay] go build ./cmd/hyphae",
-      "exit_code": 0
-    },
-    {
-      "command": "[127f460 overlay] go test -race -count=1 -json -run TestProofGap ./internal/{groupchat,daemon,tui}/ run1 (pass2/fail3, expected RED)",
-      "exit_code": 1
-    },
-    {
-      "command": "[127f460 overlay] same run2 (pass2/fail3, expected RED)",
-      "exit_code": 1
-    },
-    {
-      "command": "[127f460 overlay] same run3 (pass2/fail3, expected RED)",
-      "exit_code": 1
-    },
-    {
-      "command": "[47d8daf overlay] go vet ./internal/{groupchat,daemon,tui}/",
-      "exit_code": 0
-    },
-    {
-      "command": "[47d8daf overlay] go build ./cmd/hyphae",
-      "exit_code": 0
-    },
-    {
-      "command": "[47d8daf overlay] go test -race -count=1 -json -run TestProofGap ./internal/{groupchat,daemon,tui}/ run1 (pass5/fail0)",
-      "exit_code": 0
-    },
-    {
-      "command": "[47d8daf overlay] same run2 (pass5/fail0)",
-      "exit_code": 0
-    },
-    {
-      "command": "[47d8daf overlay] same run3 (pass5/fail0)",
-      "exit_code": 0
-    },
-    {
-      "command": "[branch] go vet ./...",
-      "exit_code": 0
-    },
-    {
-      "command": "[branch] go build ./cmd/hyphae",
-      "exit_code": 0
-    },
-    {
-      "command": "[branch] go test -race -count=1 -json -run TestProofGap|TestProof|TestCloud ./internal/{groupchat,daemon,tui,messaging}/ x3 (pass66/fail0 each)",
-      "exit_code": 0
-    },
-    {
-      "command": "[branch] go test -race -count=1 -json ./internal/{groupchat,daemon,tui}/ full once (pass448/fail0)",
-      "exit_code": 0
-    }
-  ],
+  "task_id": "cloud-m1-paired-dm-control-20261014-120037",
+  "attempt_id": "121cdc0c-3f1c-4f5e-8e6e-1261ff0d2567",
+  "sequence": 1,
+  "status": "started",
+  "base_sha": "79ce1431a9893de273ecf196a3082ab037f2a482",
+  "result_sha": null,
+  "summary": "Started test-only DM positive-control extraction on base_branch tip 0b027f3 (code 79ce143); paired 127f460/47d8daf planned; production changes=0 planned.",
+  "tests": [],
   "blocker": null,
-  "next": "Cross-model acceptance of 79ce143; no activation, no M1/V7 release closure. PTY and macOS remain UNPROVEN.",
-  "updated_at": "2026-10-14T11:42:01+00:00"
+  "next": "Implement standalone TestProofGapDMPositiveControl; run paired x3.",
+  "updated_at": "2026-10-14T12:01:31+00:00"
 }
