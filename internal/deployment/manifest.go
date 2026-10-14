@@ -12,15 +12,16 @@ import (
 	"io"
 )
 
-const SupportedSchemaVersion = "1"
-
 type SessionMode string
 
 const (
+	SupportedSchemaVersion             = "1"
 	SessionModeRuntime     SessionMode = "runtime"
 	SessionModeMaintenance SessionMode = "maintenance"
 	SessionModeProbe       SessionMode = "probe"
 )
+
+var RequiredClasses = []string{"dm", "group-store", "group-write", "maintenance", "probe"}
 
 type (
 	StorePaths struct {
@@ -55,21 +56,15 @@ type (
 		InventoryDigest string              `json:"inventory_digest"`
 	}
 	Observation struct {
-		CanonicalHome    string
-		ControlOwnerUID  int
-		ObservedDirMode  uint32
-		ObservedFileMode uint32
-		BinaryPath       string
-		BinarySHA256     string
-		LauncherPath     string
-		LauncherSHA256   string
-		EntryID          string
-		SessionMode      SessionMode
-		InventoryDigest  string
+		CanonicalHome, BinaryPath, BinarySHA256 string
+		LauncherPath, LauncherSHA256, EntryID   string
+		InventoryDigest                         string
+		ControlOwnerUID                         int
+		ObservedDirMode, ObservedFileMode       uint32
+		SessionMode                             SessionMode
 	}
 	DeploymentClosedError struct {
-		Code   string
-		Reason string
+		Code, Reason string
 	}
 )
 
@@ -78,27 +73,34 @@ func (e *DeploymentClosedError) Error() string {
 }
 func (e *DeploymentClosedError) ExitCode() int { return 4 }
 
+func closedErr(code, reason string) *DeploymentClosedError {
+	return &DeploymentClosedError{Code: code, Reason: reason}
+}
+
+func (s *StorePaths) all() []string {
+	return []string{s.OutboxJSON, s.OutboxLock, s.OutboxTempPrefix, s.MessagesDB, s.MessagesDBWAL, s.MessagesDBSHM, s.DaemonLock}
+}
+
 func ParseManifestJSON(data []byte) (*Manifest, error) {
 	if err := scanJSONStrict(data); err != nil {
-		return nil, &DeploymentClosedError{Code: "MALFORMED_MANIFEST", Reason: err.Error()}
+		return nil, closedErr("MALFORMED_MANIFEST", err.Error())
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	var m Manifest
 	if err := dec.Decode(&m); err != nil {
-		return nil, &DeploymentClosedError{Code: "MALFORMED_MANIFEST", Reason: err.Error()}
+		return nil, closedErr("MALFORMED_MANIFEST", err.Error())
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, closedErr("MALFORMED_MANIFEST", "unexpected trailing data")
 	}
 	if m.SchemaVersion != SupportedSchemaVersion {
-		return nil, &DeploymentClosedError{Code: "UNSUPPORTED_VERSION", Reason: fmt.Sprintf("version %q unsupported", m.SchemaVersion)}
+		return nil, closedErr("UNSUPPORTED_VERSION", fmt.Sprintf("version %q unsupported", m.SchemaVersion))
 	}
-	s := m.Stores
-	for _, req := range []string{m.State, m.CanonicalHome, m.BinaryPath, m.BinarySHA256, m.LauncherPath, m.LauncherSHA256, m.InventoryDigest, s.OutboxJSON, s.OutboxLock, s.OutboxTempPrefix, s.MessagesDB, s.MessagesDBWAL, s.MessagesDBSHM, s.DaemonLock} {
+	for _, req := range append(m.Stores.all(), m.State, m.CanonicalHome, m.BinaryPath, m.BinarySHA256, m.LauncherPath, m.LauncherSHA256, m.InventoryDigest) {
 		if req == "" {
-			return nil, &DeploymentClosedError{Code: "MALFORMED_MANIFEST", Reason: "missing required manifest/store field"}
+			return nil, closedErr("MALFORMED_MANIFEST", "missing required manifest/store field")
 		}
-	}
-	if len(m.AllowedEntries) == 0 {
-		return nil, &DeploymentClosedError{Code: "MALFORMED_MANIFEST", Reason: "allowed_entries must not be empty"}
 	}
 	return &m, nil
 }
@@ -112,12 +114,18 @@ type jsonScope struct {
 func scanJSONStrict(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	var stack []jsonScope
+	var docs int
 	for {
 		tok, err := dec.Token()
 		if err == io.EOF {
-			return nil
+			break
 		} else if err != nil {
 			return err
+		}
+		if len(stack) == 0 {
+			if docs++; docs > 1 {
+				return fmt.Errorf("unexpected trailing data after JSON document")
+			}
 		}
 		switch t := tok.(type) {
 		case json.Delim:
@@ -125,14 +133,21 @@ func scanJSONStrict(data []byte) error {
 			case '{':
 				stack = append(stack, jsonScope{isObj: true, seen: make(map[string]bool)})
 			case '[':
-				stack = append(stack, jsonScope{isObj: false})
+				stack = append(stack, jsonScope{})
 			case '}', ']':
 				if len(stack) == 0 {
 					return fmt.Errorf("unexpected delimiter %q", t)
 				}
+				top := stack[len(stack)-1]
 				stack = stack[:len(stack)-1]
-				if len(stack) > 0 && stack[len(stack)-1].isObj {
-					stack[len(stack)-1].inVal = false
+				var parent string
+				if len(stack) > 0 {
+					parent, stack[len(stack)-1].inVal = stack[len(stack)-1].key, false
+				}
+				if t == '}' {
+					if err := checkKeys(parent, top.seen); err != nil {
+						return err
+					}
 				}
 			}
 		default:
@@ -147,13 +162,42 @@ func scanJSONStrict(data []byte) error {
 						return fmt.Errorf("duplicate key: %s", k)
 					}
 					top.seen[k], top.inVal, top.key = true, true, k
-				} else {
-					if t == nil {
-						return fmt.Errorf("null value for key %q rejected", top.key)
-					}
-					top.inVal = false
+					continue
 				}
+				if t == nil {
+					return fmt.Errorf("null value for key %q rejected", top.key)
+				}
+				top.inVal = false
 			}
 		}
 	}
+	if docs != 1 || len(stack) != 0 {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+
+func checkKeys(parent string, seen map[string]bool) error {
+	if parent == "allowed_entries" && len(seen) == 0 {
+		return fmt.Errorf("allowed_entries must not be empty")
+	}
+	var req []string
+	switch parent {
+	case "":
+		req = []string{"schema_version", "state", "canonical_home", "control_owner_uid", "expected_modes", "stores", "binary_path", "binary_sha256", "launcher_path", "launcher_sha256", "allowed_entries", "inventory_digest"}
+	case "expected_modes":
+		req = []string{"dir_mode", "file_mode"}
+	case "stores":
+		req = []string{"outbox_json", "outbox_lock", "outbox_temp_prefix", "messages_db", "messages_db_wal", "messages_db_shm", "daemon_lock"}
+	case "allowed_entries":
+		req = RequiredClasses
+	default:
+		req = []string{"id", "command_class"}
+	}
+	for _, k := range req {
+		if !seen[k] {
+			return fmt.Errorf("missing required key %q", k)
+		}
+	}
+	return nil
 }

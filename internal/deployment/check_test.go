@@ -42,9 +42,10 @@ func validManifestJSON() string {
 		"launcher_path": "/canonical/bin/hyphae-managed",
 		"launcher_sha256": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
 		"allowed_entries": {
-			"cli": {"id": "cli", "command_class": "cli"},
-			"daemon": {"id": "daemon", "command_class": "daemon"},
-			"maint": {"id": "maint", "command_class": "maintenance"},
+			"dm": {"id": "dm", "command_class": "dm"},
+			"group-store": {"id": "group-store", "command_class": "group-store"},
+			"group-write": {"id": "group-write", "command_class": "group-write"},
+			"maintenance": {"id": "maintenance", "command_class": "maintenance"},
 			"probe": {"id": "probe", "command_class": "probe"}
 		},
 		"inventory_digest": "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"
@@ -61,7 +62,7 @@ func validObservation() deployment.Observation {
 		BinarySHA256:     testValidSHA256A,
 		LauncherPath:     "/canonical/bin/hyphae-managed",
 		LauncherSHA256:   testValidSHA256B,
-		EntryID:          "cli",
+		EntryID:          "dm",
 		SessionMode:      deployment.SessionModeRuntime,
 		InventoryDigest:  testValidDigest,
 	}
@@ -155,7 +156,7 @@ func TestValidate_PositiveAndClosedCases(t *testing.T) {
 
 	t.Run("complete observed positive maintenance", func(t *testing.T) {
 		obs := validObservation()
-		obs.EntryID = "maint"
+		obs.EntryID = "maintenance"
 		obs.SessionMode = deployment.SessionModeMaintenance
 		if err := deployment.Validate(manifest, &obs); err != nil {
 			t.Fatalf("expected valid maintenance validation, got: %v", err)
@@ -285,7 +286,7 @@ func TestValidate_PositiveAndClosedCases(t *testing.T) {
 
 	t.Run("runtime mode denies maintenance entry", func(t *testing.T) {
 		obs := validObservation()
-		obs.EntryID = "maint"
+		obs.EntryID = "maintenance"
 		obs.SessionMode = deployment.SessionModeRuntime
 		err := deployment.Validate(manifest, &obs)
 		assertErrorCode(t, err, "MODE_MISMATCH")
@@ -293,7 +294,7 @@ func TestValidate_PositiveAndClosedCases(t *testing.T) {
 
 	t.Run("maintenance mode denies non-maintenance entry (no blanket bypass)", func(t *testing.T) {
 		obs := validObservation()
-		obs.EntryID = "cli"
+		obs.EntryID = "dm"
 		obs.SessionMode = deployment.SessionModeMaintenance
 		err := deployment.Validate(manifest, &obs)
 		assertErrorCode(t, err, "MODE_MISMATCH")
@@ -301,19 +302,184 @@ func TestValidate_PositiveAndClosedCases(t *testing.T) {
 
 	t.Run("probe mode denies non-probe entry", func(t *testing.T) {
 		obs := validObservation()
-		obs.EntryID = "daemon"
+		obs.EntryID = "dm"
 		obs.SessionMode = deployment.SessionModeProbe
 		err := deployment.Validate(manifest, &obs)
 		assertErrorCode(t, err, "MODE_MISMATCH")
 	})
 }
 
+// TestAuthorIndependentRegressionCases tests all 6 blocker regressions
+// identified by Codex review of commit 9230cce.
+func TestAuthorIndependentRegressionCases(t *testing.T) {
+	t.Run("Blocker 1: trailing JSON rejected", func(t *testing.T) {
+		for _, trailing := range []string{" {}", " true", " 123", ` "string"`} {
+			_, err := deployment.ParseManifestJSON([]byte(validManifestJSON() + trailing))
+			if err == nil {
+				t.Fatalf("expected error on trailing data %q, got nil", trailing)
+			}
+		}
+	})
+
+	t.Run("Blocker 2: required fields presence and explicit root UID 0 allowed", func(t *testing.T) {
+		mJSON := strings.Replace(validManifestJSON(), `"control_owner_uid": 1000,`, `"control_owner_uid": 0,`, 1)
+		m, err := deployment.ParseManifestJSON([]byte(mJSON))
+		if err != nil {
+			t.Fatalf("explicit root UID 0 rejected: %v", err)
+		}
+		obs := validObservation()
+		obs.ControlOwnerUID = 0
+		if err := deployment.Validate(m, &obs); err != nil {
+			t.Fatalf("explicit root UID 0 validation rejected: %v", err)
+		}
+
+		// Missing numeric UID
+		badJSON := strings.Replace(validManifestJSON(), `"control_owner_uid": 1000,`, "", 1)
+		if _, err := deployment.ParseManifestJSON([]byte(badJSON)); err == nil {
+			t.Fatal("expected error on missing control_owner_uid")
+		}
+
+		// Missing expected modes
+		badJSON = strings.Replace(validManifestJSON(), "\"expected_modes\": {\n\t\t\t\"dir_mode\": 448,\n\t\t\t\"file_mode\": 384\n\t\t},", "", 1)
+		if _, err := deployment.ParseManifestJSON([]byte(badJSON)); err == nil {
+			t.Fatal("expected error on missing expected_modes")
+		}
+	})
+
+	t.Run("Blocker 3: complete known vocabulary and all good classes", func(t *testing.T) {
+		m, err := deployment.ParseManifestJSON([]byte(validManifestJSON()))
+		if err != nil {
+			t.Fatalf("base manifest failed: %v", err)
+		}
+		goodClasses := []struct {
+			entry string
+			mode  deployment.SessionMode
+		}{
+			{"dm", deployment.SessionModeRuntime},
+			{"group-store", deployment.SessionModeRuntime},
+			{"group-write", deployment.SessionModeRuntime},
+			{"maintenance", deployment.SessionModeMaintenance},
+			{"probe", deployment.SessionModeProbe},
+		}
+		for _, tc := range goodClasses {
+			obs := validObservation()
+			obs.EntryID = tc.entry
+			obs.SessionMode = tc.mode
+			if err := deployment.Validate(m, &obs); err != nil {
+				t.Errorf("class %s mode %s rejected: %v", tc.entry, tc.mode, err)
+			}
+		}
+
+		// Unknown class
+		mUnknown := *m
+		mUnknown.AllowedEntries = map[string]deployment.EntryDef{
+			"dm":          {ID: "dm", CommandClass: "unauthorized_class"},
+			"group-store": {ID: "group-store", CommandClass: "group-store"},
+			"group-write": {ID: "group-write", CommandClass: "group-write"},
+			"maintenance": {ID: "maintenance", CommandClass: "maintenance"},
+			"probe":       {ID: "probe", CommandClass: "probe"},
+		}
+		obs := validObservation()
+		if err := deployment.Validate(&mUnknown, &obs); err == nil {
+			t.Fatal("expected error on unknown command class")
+		}
+
+		// Mismatched embedded ID
+		mMismatch := *m
+		mMismatch.AllowedEntries = map[string]deployment.EntryDef{
+			"dm":          {ID: "other_id", CommandClass: "dm"},
+			"group-store": {ID: "group-store", CommandClass: "group-store"},
+			"group-write": {ID: "group-write", CommandClass: "group-write"},
+			"maintenance": {ID: "maintenance", CommandClass: "maintenance"},
+			"probe":       {ID: "probe", CommandClass: "probe"},
+		}
+		if err := deployment.Validate(&mMismatch, &obs); err == nil {
+			t.Fatal("expected error on mismatched entry ID")
+		}
+	})
+
+	t.Run("Blocker 4: owner-only modes non-zero", func(t *testing.T) {
+		m, _ := deployment.ParseManifestJSON([]byte(validManifestJSON()))
+		obs := validObservation()
+
+		// 0755 non-owner readable directory
+		m755 := *m
+		m755.ExpectedModes.DirMode = 0755
+		obs755 := obs
+		obs755.ObservedDirMode = 0755
+		if err := deployment.Validate(&m755, &obs755); err == nil {
+			t.Fatal("expected error on non-owner readable mode 0755")
+		}
+
+		// zero expected mode
+		mZero := *m
+		mZero.ExpectedModes = deployment.ModeConfig{}
+		if err := deployment.Validate(&mZero, &obs); err == nil {
+			t.Fatal("expected error on zero expected modes")
+		}
+
+		// legitimate restrictive owner-only mode
+		m500 := *m
+		m500.ExpectedModes.DirMode = 0500
+		obs500 := obs
+		obs500.ObservedDirMode = 0500
+		if err := deployment.Validate(&m500, &obs500); err != nil {
+			t.Fatalf("expected success on 0500 owner mode: %v", err)
+		}
+	})
+
+	t.Run("Blocker 5: canonical absolute temp prefix and legitimate dotdot filename", func(t *testing.T) {
+		m, _ := deployment.ParseManifestJSON([]byte(validManifestJSON()))
+		obs := validObservation()
+
+		// escaped temp parent
+		mEsc := *m
+		mEsc.Stores.OutboxTempPrefix = "/canonical/home/.hyphae/../escape"
+		if err := deployment.Validate(&mEsc, &obs); err == nil {
+			t.Fatal("expected error on escaped temp prefix")
+		}
+
+		// double slash
+		mDouble := *m
+		mDouble.Stores.OutboxTempPrefix = "/canonical/home/.hyphae//tmp"
+		if err := deployment.Validate(&mDouble, &obs); err == nil {
+			t.Fatal("expected error on double slash temp prefix")
+		}
+
+		// legitimate dotdot in filename
+		mDot := *m
+		mDot.BinaryPath = "/canonical/bin/hyphae..backup"
+		obsDot := obs
+		obsDot.BinaryPath = mDot.BinaryPath
+		if err := deployment.Validate(&mDot, &obsDot); err != nil {
+			t.Fatalf("legitimate dotdot filename rejected: %v", err)
+		}
+	})
+
+	t.Run("Blocker 6: direct Validate invariants", func(t *testing.T) {
+		m, _ := deployment.ParseManifestJSON([]byte(validManifestJSON()))
+		obs := validObservation()
+
+		// Unsupported schema version
+		mBadVer := *m
+		mBadVer.SchemaVersion = "2"
+		if err := deployment.Validate(&mBadVer, &obs); err == nil {
+			t.Fatal("expected error on unsupported schema version via direct Validate")
+		}
+
+		// Empty inventory digest
+		mEmptyDigest := *m
+		mEmptyDigest.InventoryDigest = ""
+		obsEmpty := obs
+		obsEmpty.InventoryDigest = ""
+		if err := deployment.Validate(&mEmptyDigest, &obsEmpty); err == nil {
+			t.Fatal("expected error on empty inventory digest via direct Validate")
+		}
+	})
+}
+
 // TestSentinelStoresBytesUnchanged_PurePredicateOnly verifies that pure validation
 // does not mutate any sentinel bytes.
-//
-// NOTE: PREDICATE ONLY — NOT PRE-ACCESS CLI PROOF:
-// This test asserts memory byte equality because Validate is a pure function.
-// It is explicitly NOT proof of OS-level pre-access enforcement or process retirement.
 func TestSentinelStoresBytesUnchanged_PurePredicateOnly(t *testing.T) {
 	sentinelOutbox := []byte(`{"version":1,"entries":[{"id":"sentinel-1"}]}`)
 	sentinelDB := []byte("SQLITE_FORMAT_3_SENTINEL_BYTES_PRESERVED")
@@ -339,20 +505,12 @@ func TestSentinelStoresBytesUnchanged_PurePredicateOnly(t *testing.T) {
 	}
 }
 
-// TestBaselineAPIUnavailableScopedNegative demonstrates that in PR1, the pure
-// predicate has NOT yet been wired into CLI composition roots or storage constructors
-// (which belongs to PR2/3). This is an actual baseline API absence, not a fabricated
-// security case.
 func TestBaselineAPIUnavailableScopedNegative(t *testing.T) {
-	// The PR1 deployment validator does not export or wire RequireAccess into
-	// existing daemon/storage startup; those remain unchanged and un-activated
-	// until PR2/PR3 and Opus review.
 	manifest, err := deployment.ParseManifestJSON([]byte(validManifestJSON()))
 	if err != nil {
 		t.Fatalf("manifest parse failed: %v", err)
 	}
 	obs := validObservation()
-	// Pure predicate confirms observation validity in memory only.
 	if err := deployment.Validate(manifest, &obs); err != nil {
 		t.Fatalf("unexpected validation error: %v", err)
 	}
