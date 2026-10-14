@@ -222,6 +222,42 @@ func setupConflictingMembersTableDB(t *testing.T, home string) {
 	require.NoError(t, err)
 }
 
+func setupMembersTableMissingInviteIDDB(t *testing.T, home string) {
+	t.Helper()
+	dbPath := filepath.Join(home, ".hyphae", "messages.db")
+	require.NoError(t, os.MkdirAll(filepath.Dir(dbPath), 0700))
+	db, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS messages (
+			id TEXT PRIMARY KEY,
+			sender_npub TEXT NOT NULL,
+			recipient_npub TEXT NOT NULL,
+			created_at INTEGER NOT NULL,
+			received_at INTEGER NOT NULL,
+			plaintext TEXT,
+			is_outgoing INTEGER DEFAULT 0,
+			is_encrypted INTEGER DEFAULT 1
+		);
+		CREATE TABLE IF NOT EXISTS contacts (
+			npub TEXT PRIMARY KEY,
+			nickname TEXT NOT NULL,
+			created_at INTEGER NOT NULL
+		);
+		CREATE TABLE groupchat_members (
+			local_npub TEXT NOT NULL,
+			group_id TEXT NOT NULL,
+			npub TEXT NOT NULL,
+			state TEXT NOT NULL,
+			is_creator INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (local_npub, group_id, npub)
+		);
+	`)
+	require.NoError(t, err)
+}
+
 func TestDaemonFailClosedOnInvalidLegacyFanoutCounters(t *testing.T) {
 	home, _ := setupTestHomeAndIdentity(t)
 	setupInvalidLegacyFanoutDB(t, home)
@@ -577,4 +613,60 @@ func TestDMCLIHealthyDespiteBrokenGroupOnlySchema(t *testing.T) {
 
 	_, err = groupchat.NewStore(db)
 	require.Error(t, err, "group storage must still refuse to initialize on the same broken file")
+}
+
+// TestDaemonFailClosedOnMembersTableMissingInviteID proves the baseline-127 gap
+// is closed: a groupchat_members table with all columns except invite_id causes
+// daemon startup to fail closed before any relay is dialed.
+func TestDaemonFailClosedOnMembersTableMissingInviteID(t *testing.T) {
+	home, id := setupTestHomeAndIdentity(t)
+	setupMembersTableMissingInviteIDDB(t, home)
+	outboxSize, outboxModTime := setupInitialOutbox(t, home)
+
+	var relayConnections atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		relayConnections.Add(1)
+	}))
+	defer server.Close()
+	relayURL := "ws" + strings.TrimPrefix(server.URL, "http")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	args := []string{"--json", "daemon", "--identity", "alice", "--relay", relayURL, "--password-stdin"}
+	command := exec.CommandContext(ctx, daemonLockCLI, args...)
+	command.Stdin = strings.NewReader("startup-secret-123\n")
+	command.Env = withoutDaemonOutputEnv(os.Environ())
+	command.Env = append(command.Env, "HOME="+home)
+
+	output, err := command.CombinedOutput()
+	require.NoError(t, ctx.Err(), "fail-closed startup must refuse well before the 15s bound")
+	require.Error(t, err, "daemon must exit nonzero on groupchat_members missing invite_id")
+	assert.Zero(t, relayConnections.Load(), "relay dial count must be 0 before any group schema is touched")
+
+	outboxPath := filepath.Join(home, ".hyphae", "outbox.json")
+	fi, statErr := os.Stat(outboxPath)
+	require.NoError(t, statErr)
+	assert.Equal(t, outboxSize, fi.Size(), "outbox bytes must remain unchanged")
+	assert.True(t, fi.ModTime().Equal(outboxModTime), "outbox mtime must remain unchanged")
+
+	lock, lockErr := acquireDaemonHomeLock()
+	require.NoError(t, lockErr, "daemon home lock must be released after fail-closed exit")
+	require.NoError(t, lock.Close())
+
+	var result common.Result
+	require.NoError(t, json.Unmarshal(output, &result), "stderr must be a valid JSON error envelope: %s", string(output))
+	assert.False(t, result.OK)
+	assert.Equal(t, common.ErrCodeOther, result.Error)
+	assert.Contains(t, result.Message, "group storage init failed")
+
+	// Control: DM messages table remains completely functional on this database.
+	db, err := storage.OpenDB()
+	require.NoError(t, err)
+	defer db.Close()
+	_, err = db.Exec(`INSERT INTO messages (id, sender_npub, recipient_npub, created_at, received_at, plaintext)
+		VALUES ('dm-msg-invite-test', ?, 'npub1recipient', 12345, 12345, 'dm content')`, id.Npub)
+	require.NoError(t, err)
+	var count int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM messages WHERE id = 'dm-msg-invite-test'`).Scan(&count))
+	assert.Equal(t, 1, count, "DM messages table must accept writes despite groupchat_members missing invite_id")
 }

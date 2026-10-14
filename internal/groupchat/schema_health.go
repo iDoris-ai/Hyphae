@@ -29,7 +29,7 @@ var requiredGroupchatShapes = []struct {
 		primaryKey: []string{"local_npub", "group_id"},
 	}},
 	{"groupchat_members", groupchatTableShape{
-		columns:    []string{"local_npub", "group_id", "npub", "state", "is_creator"},
+		columns:    []string{"local_npub", "group_id", "npub", "invite_id", "state", "is_creator"},
 		primaryKey: []string{"local_npub", "group_id", "npub"},
 	}},
 	{"groupchat_invites", groupchatTableShape{

@@ -75,6 +75,7 @@ func TestNewStoreRejectsWrongPrimaryKeyOnMembersTable(t *testing.T) {
 		local_npub TEXT NOT NULL,
 		group_id TEXT NOT NULL,
 		npub TEXT NOT NULL,
+		invite_id TEXT,
 		state TEXT NOT NULL,
 		is_creator INTEGER NOT NULL DEFAULT 0,
 		PRIMARY KEY (group_id, npub)
@@ -84,6 +85,58 @@ func TestNewStoreRejectsWrongPrimaryKeyOnMembersTable(t *testing.T) {
 	_, err = NewStore(db)
 	require.Error(t, err, "a members table missing local_npub from its primary key must fail NewStore")
 	require.Contains(t, err.Error(), "primary key")
+}
+
+func TestNewStoreRejectsMembersTableMissingInviteID(t *testing.T) {
+	db := openTestDB(t)
+	// Baseline-127 red fixture: full members shape except operational invite_id.
+	_, err := db.Exec(`CREATE TABLE groupchat_members (
+		local_npub TEXT NOT NULL,
+		group_id TEXT NOT NULL,
+		npub TEXT NOT NULL,
+		state TEXT NOT NULL,
+		is_creator INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY(local_npub, group_id, npub)
+	)`)
+	require.NoError(t, err)
+
+	_, err = NewStore(db)
+	require.Error(t, err, "a members table missing operational invite_id must fail NewStore")
+	require.Contains(t, err.Error(), "groupchat_members")
+	require.Contains(t, err.Error(), "missing required column(s) invite_id")
+
+	// Semantic negative: raw CreateGroup fails with missing column on this broken table.
+	alice := newMember(t)
+	bob := newMember(t)
+	brokenStore := &Store{db: db}
+	_, err = brokenStore.CreateGroup("test-group", alice.npub, []string{bob.npub})
+	require.Error(t, err, "CreateGroup on members table missing invite_id must fail")
+	require.Contains(t, err.Error(), "no column named invite_id")
+
+	// Healthy CreateGroup control: fresh store succeeds.
+	healthyDB := openTestDB(t)
+	healthyStore, err := NewStore(healthyDB)
+	require.NoError(t, err)
+	draft, err := healthyStore.CreateGroup("healthy-group", alice.npub, []string{bob.npub})
+	require.NoError(t, err, "CreateGroup on healthy store must succeed")
+	require.Equal(t, "healthy-group", draft.Group.Name)
+}
+
+func TestNewStoreRejectsCaseInsensitiveMembersTableMissingInviteID(t *testing.T) {
+	db := openTestDB(t)
+	_, err := db.Exec(`CREATE TABLE GroupChat_Members (
+		local_npub TEXT NOT NULL,
+		group_id TEXT NOT NULL,
+		npub TEXT NOT NULL,
+		state TEXT NOT NULL,
+		is_creator INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY(local_npub, group_id, npub)
+	)`)
+	require.NoError(t, err)
+
+	_, err = NewStore(db)
+	require.Error(t, err, "mixed-case GroupChat_Members missing invite_id must fail NewStore")
+	require.Contains(t, err.Error(), "missing required column(s) invite_id")
 }
 
 func TestNewStoreAcceptsHealthyFreshSchema(t *testing.T) {
