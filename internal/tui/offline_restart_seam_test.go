@@ -102,7 +102,7 @@ func TestTUIOfflineRestartSameSignedEventThroughSendSeam(t *testing.T) {
 	require.NotNil(t, recovered, "restore must write history before the relay ACK")
 	require.Equal(t, body, recovered.Plaintext)
 	require.True(t, recovered.IsEncrypted)
-	require.NotEqual(t, body, recovered.Content)
+	require.Equal(t, original.Content, recovered.Content, "recovered history must keep the original ciphertext")
 
 	relay.release()
 	accepted := reopenLoop.next(t)
