@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"fiatjaf.com/nostr"
+	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 )
 
@@ -92,7 +94,8 @@ func ParseRawGroupEntry(raw []byte) (*RawGroupEntry, error) {
 	default:
 		return e, fmt.Errorf("unsupported route")
 	}
-	if err := validateEvidenceEvent([]byte(e.Entry.EventJSON), e.Entry); err != nil {
+	sender, err := validateEvidenceEvent([]byte(e.Entry.EventJSON), e.Entry)
+	if err != nil {
 		return e, err
 	}
 	_, hasProtocol := fields["fanout_protocol"]
@@ -115,7 +118,7 @@ func ParseRawGroupEntry(raw []byte) (*RawGroupEntry, error) {
 		if e.FailureResult, err = ParseRawFailureResult(fields["failure_result"]); err != nil {
 			return e, fmt.Errorf("failure_result: %w", err)
 		}
-		if err := bindFailureResultToEntry(e.FailureResult, e.Entry, e.QueueID); err != nil {
+		if err := bindFailureResultToEntry(e.FailureResult, e.Entry, e.QueueID, sender); err != nil {
 			return e, fmt.Errorf("failure_result: %w", err)
 		}
 	}
@@ -123,7 +126,7 @@ func ParseRawGroupEntry(raw []byte) (*RawGroupEntry, error) {
 		if e.RecoveryWitness, err = ParseRawRecoveryWitness(fields["recovery_witness"]); err != nil {
 			return e, fmt.Errorf("recovery_witness: %w", err)
 		}
-		if err := bindRecoveryWitnessToEntry(e.RecoveryWitness, e.Entry, e.QueueID); err != nil {
+		if err := bindRecoveryWitnessToEntry(e.RecoveryWitness, e.Entry, e.QueueID, sender); err != nil {
 			return e, fmt.Errorf("recovery_witness: %w", err)
 		}
 	}
@@ -135,7 +138,7 @@ func ParseRawGroupEntry(raw []byte) (*RawGroupEntry, error) {
 // sides of. It does not check expected_row_revision/attempts/relay_count/
 // prior_retry_count, which name a SQLite snapshot this JSON file never
 // carries (left to F3/F4).
-func bindFailureResultToEntry(result *RawFailureResult, entry types.OutboxEntry, queueID string) error {
+func bindFailureResultToEntry(result *RawFailureResult, entry types.OutboxEntry, queueID string, sender nostr.PubKey) error {
 	if result.Token.EventID != entry.ID {
 		return fmt.Errorf("token event_id does not match entry id")
 	}
@@ -145,11 +148,19 @@ func bindFailureResultToEntry(result *RawFailureResult, entry types.OutboxEntry,
 	if result.Token.FanoutKey.RecipientNpub != entry.RecipientNpub {
 		return fmt.Errorf("token recipient_npub does not match entry recipient_npub")
 	}
+	if local, err := common.ParsePublicKey(result.Token.FanoutKey.LocalNpub); err != nil || local != sender {
+		return fmt.Errorf("token local_npub does not match event sender")
+	}
 	if result.RetryCount != int64(entry.RetryCount) {
 		return fmt.Errorf("entry retry_count does not match result retry_count")
 	}
 	if result.Status != entry.Status {
 		return fmt.Errorf("entry status does not match result status")
+	}
+	// P4: the entry's own retry budget decides whether a result exhausts it,
+	// independent of whatever retry_count/status the result itself carries.
+	if entry.RetryCount >= entry.MaxRetries && entry.Status != OutboxStatusGroupFailed {
+		return fmt.Errorf("entry status must be group_failed once retry_count reaches max_retries")
 	}
 	if result.LastAttemptAt != entry.LastAttempt {
 		return fmt.Errorf("entry last_attempt does not match result last_attempt_at")
@@ -165,7 +176,7 @@ func bindFailureResultToEntry(result *RawFailureResult, entry types.OutboxEntry,
 // old_retry_count, expected_row_revision, expected_attempt_generation):
 // those describe the replaced row, which this JSON snapshot no longer
 // contains.
-func bindRecoveryWitnessToEntry(witness *RawRecoveryWitness, entry types.OutboxEntry, queueID string) error {
+func bindRecoveryWitnessToEntry(witness *RawRecoveryWitness, entry types.OutboxEntry, queueID string, sender nostr.PubKey) error {
 	if witness.EventID != entry.ID {
 		return fmt.Errorf("event_id does not match entry id")
 	}
@@ -174,6 +185,9 @@ func bindRecoveryWitnessToEntry(witness *RawRecoveryWitness, entry types.OutboxE
 	}
 	if witness.RecipientNpub != entry.RecipientNpub {
 		return fmt.Errorf("recipient_npub does not match entry recipient_npub")
+	}
+	if local, err := common.ParsePublicKey(witness.FanoutKey.LocalNpub); err != nil || local != sender {
+		return fmt.Errorf("fanout_key local_npub does not match event sender")
 	}
 	if witness.MaxRetries != int64(entry.MaxRetries) {
 		return fmt.Errorf("max_retries does not match entry max_retries")
