@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -35,6 +36,8 @@ func TestProofDaemonRefusesGroupsViewBeforeRelayDial(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, raw.Close())
 	outboxSize, outboxModTime := setupInitialOutbox(t, home)
+	outboxBefore, err := os.ReadFile(filepath.Join(home, ".hyphae", "outbox.json"))
+	require.NoError(t, err)
 
 	var relayConnections atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -53,6 +56,10 @@ func TestProofDaemonRefusesGroupsViewBeforeRelayDial(t *testing.T) {
 
 	fi, statErr := os.Stat(filepath.Join(home, ".hyphae", "outbox.json"))
 	require.NoError(t, statErr)
+	outboxAfter, readErr := os.ReadFile(filepath.Join(home, ".hyphae", "outbox.json"))
+	require.NoError(t, readErr)
+	assert.True(t, bytes.Equal(outboxBefore, outboxAfter), "outbox bytes must be byte-identical (bytes.Equal)")
+	assert.Equal(t, pgSHA(outboxBefore), pgSHA(outboxAfter), "outbox sha256 must be identical")
 	t.Logf("daemon err=%v timedOut=%v relayConnections=%d outboxSizeSame=%v outboxMtimeSame=%v output=%q",
 		runErr, timedOut, relayConnections.Load(), fi.Size() == outboxSize, fi.ModTime().Equal(outboxModTime), firstN(string(output), 400))
 	assert.False(t, timedOut, "daemon must exit on its own (refuse), not run until killed")
@@ -78,6 +85,8 @@ func TestProofDaemonRefusesMembersMissingInviteIDExit4(t *testing.T) {
 	home, _ := setupTestHomeAndIdentity(t)
 	setupMembersTableMissingInviteIDDB(t, home)
 	outboxSize, outboxModTime := setupInitialOutbox(t, home)
+	outboxBefore, err := os.ReadFile(filepath.Join(home, ".hyphae", "outbox.json"))
+	require.NoError(t, err)
 
 	var relayConnections atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -96,6 +105,10 @@ func TestProofDaemonRefusesMembersMissingInviteIDExit4(t *testing.T) {
 
 	fi, statErr := os.Stat(filepath.Join(home, ".hyphae", "outbox.json"))
 	require.NoError(t, statErr)
+	outboxAfter, readErr := os.ReadFile(filepath.Join(home, ".hyphae", "outbox.json"))
+	require.NoError(t, readErr)
+	assert.True(t, bytes.Equal(outboxBefore, outboxAfter), "outbox bytes must be byte-identical (bytes.Equal)")
+	assert.Equal(t, pgSHA(outboxBefore), pgSHA(outboxAfter), "outbox sha256 must be identical")
 	t.Logf("invite_id-missing daemon err=%v timedOut=%v relay=%d outboxSame=%v output=%q",
 		runErr, timedOut, relayConnections.Load(),
 		fi.Size() == outboxSize && fi.ModTime().Equal(outboxModTime), firstN(string(output), 400))

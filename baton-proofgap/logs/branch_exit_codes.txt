@@ -1,0 +1,8 @@
+branch vet exit=0
+branch build exit=0
+branch targeted race1 exit=0
+branch targeted race2 exit=0
+branch targeted race3 exit=0
+branch full group+daemon+tui exit=0
+targeted race1..3 JSON: pass 66 (23 top-level) fail 0 skip 0 each; pkgs groupchat/daemon/tui/messaging ok
+full group+daemon+tui JSON: pass 448 (251 top-level) fail 0 skip 0
