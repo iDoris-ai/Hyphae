@@ -1,0 +1,14 @@
+{
+  "schema": "baton-result/v1",
+  "task_id": "cloud-m1-221-20261014-023744",
+  "attempt_id": "a23ace1e-33e1-4ab6-88c3-7f4d9fa3a1d6",
+  "sequence": 1,
+  "status": "started",
+  "base_sha": "6bfe844000ba3de8a8ab688089f32860aebad9eb",
+  "result_sha": null,
+  "summary": "Started bounded #221 fix: bind signed event identity to entry before Reserve",
+  "tests": [],
+  "blocker": null,
+  "next": null,
+  "updated_at": "2026-10-14T02:38:34+00:00"
+}

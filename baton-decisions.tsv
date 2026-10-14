@@ -1,0 +1,2 @@
+time	task_id	attempt_id	decision	rationale
+2026-10-14T02:38:34Z	cloud-m1-221-20261014-023744	a23ace1e-33e1-4ab6-88c3-7f4d9fa3a1d6	start	branch from exact base_sha 6bfe844 per handoff
