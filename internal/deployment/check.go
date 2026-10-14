@@ -55,17 +55,8 @@ func Validate(m *Manifest, obs *Observation) error {
 	if !isSHA256Hex(m.InventoryDigest) || obs.InventoryDigest != m.InventoryDigest {
 		return closedErr("DRIFT", "inventory digest drift detected")
 	}
-	seenClasses := map[string]bool{}
-	for k, e := range m.AllowedEntries {
-		if e.ID != k || !isKnownClass(e.CommandClass) {
-			return closedErr("UNKNOWN_ENTRY", fmt.Sprintf("invalid entry %q", k))
-		}
-		seenClasses[e.CommandClass] = true
-	}
-	for _, req := range RequiredClasses {
-		if !seenClasses[req] {
-			return closedErr("MALFORMED_MANIFEST", fmt.Sprintf("missing class %q", req))
-		}
+	if err := validateEntryInventory(m.AllowedEntries); err != nil {
+		return err
 	}
 	entry, ok := m.AllowedEntries[obs.EntryID]
 	if !ok {

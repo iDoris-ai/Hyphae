@@ -516,6 +516,71 @@ func TestBaselineAPIUnavailableScopedNegative(t *testing.T) {
 	}
 }
 
+// TestSharedEntryInventoryRegressions covers the two 79fd findings fixed by
+// the shared validateEntryInventory predicate: parser-level class-coverage
+// enforcement, and rejection of blank/whitespace-only entry IDs at both
+// ParseManifestJSON and direct Validate.
+func TestSharedEntryInventoryRegressions(t *testing.T) {
+	t.Run("parser rejects incomplete class coverage", func(t *testing.T) {
+		incomplete := strings.Replace(validManifestJSON(),
+			`"group-write": {"id": "group-write", "command_class": "group-write"},`, "", 1)
+		if _, err := deployment.ParseManifestJSON([]byte(incomplete)); err == nil {
+			t.Fatal("manifest missing group-write class parsed as complete")
+		}
+	})
+
+	t.Run("parser rejects blank and whitespace-only entry IDs", func(t *testing.T) {
+		for _, id := range []string{"", " ", "\t"} {
+			replaced := strings.Replace(validManifestJSON(),
+				`"dm": {"id": "dm", "command_class": "dm"},`,
+				`"`+id+`": {"id": "`+id+`", "command_class": "dm"},`, 1)
+			if _, err := deployment.ParseManifestJSON([]byte(replaced)); err == nil {
+				t.Errorf("blank/whitespace entry ID %q accepted by ParseManifestJSON", id)
+			}
+		}
+	})
+
+	t.Run("direct Validate rejects blank entry ID bypassing the parser", func(t *testing.T) {
+		manifest, err := deployment.ParseManifestJSON([]byte(validManifestJSON()))
+		if err != nil {
+			t.Fatalf("failed to parse base valid manifest: %v", err)
+		}
+		m := *manifest
+		m.AllowedEntries = map[string]deployment.EntryDef{
+			"":            {ID: "", CommandClass: "dm"},
+			"group-store": {ID: "group-store", CommandClass: "group-store"},
+			"group-write": {ID: "group-write", CommandClass: "group-write"},
+			"maintenance": {ID: "maintenance", CommandClass: "maintenance"},
+			"probe":       {ID: "probe", CommandClass: "probe"},
+		}
+		obs := validObservation()
+		obs.EntryID = ""
+		if err := deployment.Validate(&m, &obs); err == nil {
+			t.Fatal("blank entry ID accepted by direct Validate")
+		}
+	})
+
+	t.Run("direct Validate still accepts arbitrary non-key-matching IDs with full coverage", func(t *testing.T) {
+		manifest, err := deployment.ParseManifestJSON([]byte(validManifestJSON()))
+		if err != nil {
+			t.Fatalf("failed to parse base valid manifest: %v", err)
+		}
+		m := *manifest
+		m.AllowedEntries = map[string]deployment.EntryDef{
+			"send":   {ID: "send", CommandClass: "dm"},
+			"daemon": {ID: "daemon", CommandClass: "group-store"},
+			"tui":    {ID: "tui", CommandClass: "group-write"},
+			"owner":  {ID: "owner", CommandClass: "maintenance"},
+			"health": {ID: "health", CommandClass: "probe"},
+		}
+		obs := validObservation()
+		obs.EntryID = "send"
+		if err := deployment.Validate(&m, &obs); err != nil {
+			t.Fatalf("valid non-key-matching class coverage rejected: %v", err)
+		}
+	})
+}
+
 func assertErrorCode(t *testing.T, err error, wantCode string) {
 	t.Helper()
 	if err == nil {

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 )
 
 type SessionMode string
@@ -102,7 +103,27 @@ func ParseManifestJSON(data []byte) (*Manifest, error) {
 			return nil, closedErr("MALFORMED_MANIFEST", "missing required manifest/store field")
 		}
 	}
+	if err := validateEntryInventory(m.AllowedEntries); err != nil {
+		return nil, err
+	}
 	return &m, nil
+}
+
+// validateEntryInventory is shared by ParseManifestJSON and Validate so the two APIs cannot diverge.
+func validateEntryInventory(entries map[string]EntryDef) error {
+	seenClasses := map[string]bool{}
+	for k, e := range entries {
+		if strings.TrimSpace(e.ID) == "" || e.ID != k || !isKnownClass(e.CommandClass) {
+			return closedErr("UNKNOWN_ENTRY", fmt.Sprintf("invalid entry %q", k))
+		}
+		seenClasses[e.CommandClass] = true
+	}
+	for _, req := range RequiredClasses {
+		if !seenClasses[req] {
+			return closedErr("MALFORMED_MANIFEST", fmt.Sprintf("missing class %q", req))
+		}
+	}
+	return nil
 }
 
 type jsonScope struct {
