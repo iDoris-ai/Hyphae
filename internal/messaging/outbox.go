@@ -384,7 +384,7 @@ func attemptSendRouted(ctx context.Context, ob *types.Outbox, entry types.Outbox
 		return SendResult{}, fmt.Errorf("unsupported outbox route %q", entry.Route)
 	}
 	if opts.Handlers.Attempt != nil {
-		return attemptSendGroupAttempt(ctx, entry, defaultRelays, dialTimeout, opts.Handlers.Attempt, publish)
+		return attemptSendGroupAttempt(ctx, entry, defaultRelays, dialTimeout, opts.Handlers.Attempt, opts.KeyStore, publish)
 	}
 	if opts.Handlers.Group == nil {
 		return SendResult{Issue: AgentMessageIssueRouteHandlerMissing}, ErrGroupRouteHandlerMissing

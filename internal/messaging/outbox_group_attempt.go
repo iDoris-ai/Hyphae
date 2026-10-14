@@ -2,12 +2,11 @@ package messaging
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
-	"fiatjaf.com/nostr"
+	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 )
 
@@ -45,17 +44,26 @@ type GroupAttemptHandler interface {
 	Failed(token GroupAttemptToken) (exhausted bool, err error)
 }
 
-// attemptSendGroupAttempt drives one group publish: reserve → start → P (both
-// locks released) → accepted | failed. The caller's typed outbox snapshot is
-// not refreshed: the raw writers own the file on this route.
-func attemptSendGroupAttempt(ctx context.Context, entry types.OutboxEntry, defaultRelays []string, dialTimeout time.Duration, h GroupAttemptHandler, publish outboxPublisher) (SendResult, error) {
+// attemptSendGroupAttempt drives one group publish: bind → reserve → start →
+// P (both locks released) → accepted | failed. The caller's typed outbox
+// snapshot is not refreshed: the raw writers own the file on this route.
+//
+// The signed event is strictly decoded and bound to the entry (event ID,
+// signature, single recipient and, when ks is known, a local sender) before
+// Reserve, so entry A's metadata can never reserve while a different signed
+// event B is published. The handler then binds entry bytes to the
+// authoritative frozen event under its lock/transaction.
+func attemptSendGroupAttempt(ctx context.Context, entry types.OutboxEntry, defaultRelays []string, dialTimeout time.Duration, h GroupAttemptHandler, ks *types.KeyStore, publish outboxPublisher) (SendResult, error) {
+	event, err := DecodeVerifiedGroupEvent([]byte(entry.EventJSON), entry)
+	if err == nil && ks != nil && !keyStoreHasNpub(ks, common.EncodeNpub(event.PubKey)) {
+		err = errors.New("event sender is not a local identity")
+	}
+	if err != nil {
+		return SendResult{Issue: AgentMessageIssueOutboxBookkeepingFailed}, fmt.Errorf("parse frozen event: %w", err)
+	}
 	token, err := h.Reserve(entry)
 	if err != nil {
 		return groupAttemptRefusal(err)
-	}
-	var event nostr.Event
-	if err := json.Unmarshal([]byte(entry.EventJSON), &event); err != nil {
-		return SendResult{Issue: AgentMessageIssueOutboxBookkeepingFailed}, fmt.Errorf("parse frozen event: %w", err)
 	}
 	targets := entry.Relays
 	if len(targets) == 0 {
@@ -65,7 +73,7 @@ func attemptSendGroupAttempt(ctx context.Context, entry types.OutboxEntry, defau
 		return groupAttemptRefusal(err)
 	}
 	result := SendResult{Attempted: true}
-	if !publish(ctx, targets, event, dialTimeout) {
+	if !publish(ctx, targets, *event, dialTimeout) {
 		exhausted, err := h.Failed(token)
 		if err != nil {
 			refusal, err := groupAttemptRefusal(err)
@@ -108,4 +116,13 @@ func groupAttemptRefusal(err error) (SendResult, error) {
 	default:
 		return SendResult{Issue: AgentMessageIssueOutboxBookkeepingFailed}, err
 	}
+}
+
+func keyStoreHasNpub(ks *types.KeyStore, npub string) bool {
+	for _, identity := range ks.Identities {
+		if identity != nil && identity.Npub == npub {
+			return true
+		}
+	}
+	return false
 }

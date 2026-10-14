@@ -165,7 +165,7 @@ func TestAttemptSendRoutedPrefersAttemptHandlerAndKeepsLegacyFallback(t *testing
 	bad.EventJSON = "{"
 	h := &fakeAttemptHandler{}
 	result, err = attemptSendRouted(context.Background(), &types.Outbox{}, bad, nil, time.Second, AttemptOptions{Handlers: OutboxHandlers{Attempt: h}}, publish, store)
-	if err == nil || result.Issue != AgentMessageIssueOutboxBookkeepingFailed || len(h.calls) != 1 {
+	if err == nil || result.Issue != AgentMessageIssueOutboxBookkeepingFailed || len(h.calls) != 0 {
 		t.Fatalf("corrupt frozen event: %+v %v calls=%v", result, err, h.calls)
 	}
 }
