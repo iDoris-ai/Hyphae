@@ -2,13 +2,36 @@
   "schema": "baton-result/v1",
   "task_id": "cloud-m1-226-adoption-budget-20261014",
   "attempt_id": "f145f61c-2427-476b-a6c3-e653545eaa23",
-  "sequence": 1,
-  "status": "started",
+  "sequence": 2,
+  "status": "completed",
   "base_sha": "b4e2042ef16cf4e21897599252a7ca1249c2f60c",
-  "result_sha": null,
-  "summary": "Started #226 QueueTargetsRaw rows.Err + adoption retry budget repair on exact baseline",
-  "tests": [],
+  "result_sha": "9f6e65da53cba009eff7aa285bada7f17ee7dcb5",
+  "summary": "Fixed #226: rows.Err before O1/T2 (no partial recipient processing); T2 persists adopted outbox RetryCount so barrier accepts legacy pending retry1/max3; exhausted still conflicts without writes. Production +33/-5 lines in fanout_enqueue_raw.go.",
+  "tests": [
+    {
+      "command": "go test ./internal/groupchat -run 'TestEnqueuePreparedRawRowsErrHaltsBeforeO1T2|TestEnqueuePreparedRawAdoptsLegacyPendingRetryBudget|TestEnqueuePreparedRawRejectsExhaustedLegacyWithoutWrites' -count=1",
+      "exit_code": 1,
+      "note": "baseline before patch: RowsErr expected error got nil; AdoptsLegacy expected retry_count=1 got 0; Exhausted PASS"
+    },
+    {
+      "command": "go test ./internal/groupchat -run 'TestEnqueuePreparedRaw' -race -count=20",
+      "exit_code": 0,
+      "note": "focused race20 including new regressions"
+    },
+    {
+      "command": "go test ./internal/groupchat ./internal/messaging -race -count=1",
+      "exit_code": 0
+    },
+    {
+      "command": "go vet ./...",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
   "blocker": null,
-  "next": null,
-  "updated_at": "2026-10-14T02:12:40Z"
+  "next": "Coordinator smart independent acceptance then code-only transfer into original #226. No PR/merge by this lane.",
+  "updated_at": "2026-10-14T02:21:29Z"
 }
