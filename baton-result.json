@@ -2,13 +2,42 @@
   "schema": "baton-result/v1",
   "task_id": "cloud-m1-startup-proof-20261014-031037",
   "attempt_id": "9d5783ed-dd49-4bb6-af80-f31fb5a3d861",
-  "sequence": 1,
-  "status": "started",
+  "sequence": 2,
+  "status": "completed",
   "base_sha": "042d2794fae972afa7b07086aca486fd6b93c5cc",
-  "result_sha": null,
-  "summary": "Independent Linux verifier started at exact base 042d279; test-only/report-only scope.",
-  "tests": [],
+  "result_sha": "ab1544d7561588f45cd05c5356cd9803e1faa428",
+  "summary": "Verdict FAIL (delivered proof, not acceptance). Candidate 042d279 startup gate reports healthy when unindexed groupchat_groups/groupchat_members is a VIEW or wrong-shape table (CREATE TABLE IF NOT EXISTS no-op, no index trips): daemon starts and dials relay, NewChatModel succeeds, later group writes fail. All other startup/identity/replay requirements PASS; full race/vet/integration green. Test-only + baton-runtime-linux-proof.md; no production changes.",
+  "tests": [
+    {
+      "command": "go vet ./...",
+      "exit_code": 0
+    },
+    {
+      "command": "go vet -tags integration ./...",
+      "exit_code": 0
+    },
+    {
+      "command": "go test -race -count=1 -timeout 25m -skip TestProof|TestCloud ./... (740 pass)",
+      "exit_code": 0
+    },
+    {
+      "command": "go test -race -tags integration -count=1 ./tests/... (10 pass)",
+      "exit_code": 0
+    },
+    {
+      "command": "go test -race -count=1 -run <startup/identity/replay regex> ./internal/{daemon,tui,groupchat,messaging}/ (63 pass)",
+      "exit_code": 0
+    },
+    {
+      "command": "go test -race -count=1 -run TestCloud ./internal/{daemon,tui,groupchat,messaging}/ (10 pass)",
+      "exit_code": 0
+    },
+    {
+      "command": "go test -race -count=1 -run TestProof ./internal/{daemon,tui,groupchat}/ (3 fail, verdict evidence)",
+      "exit_code": 1
+    }
+  ],
   "blocker": null,
-  "next": "Run full race/vet/integration and focused startup/identity tests, then push verdict report.",
-  "updated_at": "2026-10-14T03:11:54+00:00"
+  "next": "Coordinator: production fix needs physical-table health check (sqlite_master type=table + required columns) for all group tables before NewStore returns; then re-run TestProof*. Gap: TUI Close timeout branch untested.",
+  "updated_at": "2026-10-14T03:18:29+00:00"
 }
