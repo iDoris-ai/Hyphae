@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -17,6 +19,117 @@ import (
 	"github.com/iDoris-ai/hyphae/internal/groupchat"
 	"github.com/iDoris-ai/hyphae/internal/messaging"
 )
+
+func TestReadyGuardDoesNotProbePartialKey(t *testing.T) {
+	if role := os.Getenv("HYPHAE_M1_ROLE"); role != "" {
+		os.Exit(runRole(role))
+	}
+	t.Setenv("HYPHAE_M1_KEY_FAULT", "hold")
+	root := t.TempDir()
+	home := filepath.Join(root, "bob")
+	pub := filepath.Join(root, "pub")
+	release := filepath.Join(root, "release")
+	settle := filepath.Join(root, "settle")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(pub, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestReadyGuardDoesNotProbePartialKey$", "-test.count=1", "-test.timeout=30s")
+	cmd.Dir = home
+	cmd.Env = []string{
+		"HOME=" + home,
+		"TMPDIR=" + os.TempDir(),
+		"PATH=" + os.Getenv("PATH"),
+		"LANG=" + os.Getenv("LANG"),
+		"HYPHAE_M1_ROLE=" + roleBob,
+		"HYPHAE_M1_RELAY=ws://127.0.0.1:1",
+		"HYPHAE_M1_PUB=" + pub,
+		"HYPHAE_M1_MODE=positive",
+		"HYPHAE_M1_KEY_FAULT=hold",
+		"HYPHAE_M1_KEY_RELEASE=" + release,
+		"HYPHAE_M1_KEY_SETTLE=" + settle,
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = os.WriteFile(release, []byte("go\n"), 0o600)
+		_ = os.WriteFile(settle, []byte("go\n"), 0o600)
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+	}()
+	holdPath := filepath.Join(home, ".hyphae", "key-hold.json")
+	if err := waitFile(holdPath, 5*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(home, ".hyphae", "role.key")
+	info, err := os.Stat(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() != 0 || info.Mode().Perm() != 0o600 {
+		t.Fatalf("held key size %d mode %o", info.Size(), info.Mode().Perm())
+	}
+	if fileExists(filepath.Join(home, ".hyphae", "key-ready.json")) {
+		t.Fatal("ready signal existed while the key file was empty")
+	}
+	if fileExists(filepath.Join(home, ".hyphae", "ps-probed.json")) {
+		t.Fatal("ps inspection ran before the key was ready")
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- assertNoKeyInProcessEnv([]scenarioChild{{
+			role: roleBob, home: home, cmd: cmd,
+		}})
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("parent probed before release: %v", err)
+	case <-time.After(400 * time.Millisecond):
+	}
+	if fileExists(filepath.Join(home, ".hyphae", "ps-probed.json")) {
+		t.Fatal("ps inspection ran while the key file was empty")
+	}
+	if err := os.WriteFile(release, []byte("go\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ready guard did not finish after the key write completed")
+	}
+	probeRaw, err := os.ReadFile(filepath.Join(home, ".hyphae", "ps-probed.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var probe struct {
+		NeedleLen int  `json:"needle_len"`
+		Leak      bool `json:"leak"`
+		PSLen     int  `json:"ps_len"`
+	}
+	if err := json.Unmarshal(probeRaw, &probe); err != nil {
+		t.Fatal(err)
+	}
+	if probe.NeedleLen != 64 || probe.Leak || probe.PSLen == 0 {
+		t.Fatalf("ready probe %+v", probe)
+	}
+	readyRaw, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readyKeyMaterial(readyRaw); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settle, []byte("go\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestEmptyKeyReadIsNotAnEnvironmentLeak(t *testing.T) {
 	ps := []byte("HOME=/tmp PATH=/usr/bin")

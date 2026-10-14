@@ -48,12 +48,15 @@ func TestThreeProcessGroupRelay(t *testing.T) {
 	defer func() { writeRelayReport(t, summaries) }()
 
 	gap := assertGroupRouteHandlerMissing(t)
-	for run := 1; run <= 3; run++ {
+	for run := 1; run <= positiveRunCount; run++ {
 		summary, err := runPositiveScenario(t, run)
 		if err != nil {
 			t.Fatalf("positive run %d: %v", run, err)
 		}
 		summaries = append(summaries, summary)
+	}
+	if len(summaries) != positiveRunCount {
+		t.Fatalf("positive cases = %d, want %d", len(summaries), positiveRunCount)
 	}
 	selftestCode := execSelftest(t)
 	if selftestCode != dropExitCode {
@@ -66,16 +69,17 @@ func TestThreeProcessGroupRelay(t *testing.T) {
 }
 
 const (
-	dropExitCode  = 3
-	bodyOne       = "relay-proof-one"
-	bodyTwo       = "relay-proof-two"
-	foreignBody   = "foreign-not-member"
-	wrongBody     = "wrong-group-body"
-	roleAlice     = "alice"
-	roleBob       = "bob"
-	roleCharlie   = "charlie"
-	snapshotScope = "groupchat_messages+dm_messages"
-	reorderNeed   = 2
+	dropExitCode     = 3
+	positiveRunCount = 5
+	bodyOne          = "relay-proof-one"
+	bodyTwo          = "relay-proof-two"
+	foreignBody      = "foreign-not-member"
+	wrongBody        = "wrong-group-body"
+	roleAlice        = "alice"
+	roleBob          = "bob"
+	roleCharlie      = "charlie"
+	snapshotScope    = "groupchat_messages+dm_messages"
+	reorderNeed      = 2
 )
 
 var (
@@ -431,6 +435,7 @@ func commandForRole(role, home, relayURL, pub, mode string) (*exec.Cmd, *bytes.B
 		"HYPHAE_M1_RELAY=" + relayURL,
 		"HYPHAE_M1_PUB=" + pub,
 		"HYPHAE_M1_MODE=" + mode,
+		"HYPHAE_M1_OBSERVE_DIR=" + pub,
 	}
 	return cmd, stdout, stderr, nil
 }
@@ -472,6 +477,21 @@ func assertNoKeyInProcessEnv(children []scenarioChild) error {
 		if err != nil {
 			return fmt.Errorf("%s process environment check failed: %w", c.role, err)
 		}
+		if os.Getenv("HYPHAE_M1_KEY_FAULT") == "hold" {
+			needleLen := 0
+			if needle, nerr := readyKeyMaterial(secret); nerr == nil {
+				needleLen = len(needle)
+			}
+			leak := false
+			if needle, nerr := readyKeyMaterial(secret); nerr == nil {
+				leak = bytes.Contains(out, []byte(needle))
+			}
+			if err := writeJSON(filepath.Join(c.home, ".hyphae", "ps-probed.json"), map[string]any{
+				"pid": c.cmd.Process.Pid, "needle_len": needleLen, "leak": leak, "ps_len": len(out),
+			}); err != nil {
+				return err
+			}
+		}
 		if err := keyAbsentFromProcessEnv(out, secret); err != nil {
 			return fmt.Errorf("%s: %w", c.role, err)
 		}
@@ -501,6 +521,71 @@ func readyKeyMaterial(fileBytes []byte) (string, error) {
 	return text, nil
 }
 
+type verifyObs struct {
+	Role    string `json:"role"`
+	Path    string `json:"path"`
+	Name    string `json:"name"`
+	EventID string `json:"event_id"`
+	PubKey  string `json:"pubkey"`
+	Refused bool   `json:"refused"`
+}
+
+func (p *roleProc) observeVerify(path, name string, event nostr.Event, cause error) {
+	dir := os.Getenv("HYPHAE_M1_OBSERVE_DIR")
+	if dir == "" {
+		return
+	}
+	rec := verifyObs{
+		Role: p.role, Path: path, Name: name, EventID: event.ID.Hex(),
+		PubKey: common.PubKeyToHex(event.PubKey), Refused: cause != nil,
+	}
+	line, err := json.Marshal(rec)
+	if err != nil {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "verify-observe-"+p.role+".jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.Write(append(line, '\n'))
+	_ = f.Sync()
+}
+
+func requireDirectVerifyObservation(pub, claimedID, copiedID string) error {
+	data, err := os.ReadFile(filepath.Join(pub, "verify-observe-bob.jsonl"))
+	if err != nil {
+		return fmt.Errorf("bob verify observation: %w", err)
+	}
+	var sawCopied, sawClaimed bool
+	var copiedPub, claimedPub string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var rec verifyObs
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			return fmt.Errorf("bob verify observation: %w", err)
+		}
+		if strings.Contains(line, bodyOne) || strings.Contains(line, bodyTwo) {
+			return errors.New("verify observation contains plaintext")
+		}
+		if rec.Path == "observeCatalog" && rec.Name == "copied-pubkey" && rec.EventID == copiedID && rec.Refused {
+			sawCopied = true
+			copiedPub = rec.PubKey
+		}
+		if rec.EventID == claimedID && rec.Refused {
+			sawClaimed = true
+			claimedPub = rec.PubKey
+		}
+	}
+	if !sawCopied || !sawClaimed || copiedID == claimedID || copiedPub == "" || copiedPub == claimedPub {
+		return errors.New("copied-pubkey direct VerifyIncoming observation was not distinct")
+	}
+	return nil
+}
+
 func keyAbsentFromProcessEnv(psOutput, keyFile []byte) error {
 	hexKey, err := readyKeyMaterial(keyFile)
 	if err != nil {
@@ -517,7 +602,42 @@ func writeRoleKeyAtomic(path string, sk nostr.SecretKey) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(path, []byte(hexKey+"\n"), 0o600)
+	payload := []byte(hexKey + "\n")
+	if os.Getenv("HYPHAE_M1_KEY_FAULT") == "hold" {
+		if err := holdEmptyKeyFile(path); err != nil {
+			return err
+		}
+	}
+	return writeFileAtomic(path, payload, 0o600)
+}
+
+// holdEmptyKeyFile is test scheduling only. It publishes an empty 0600 file,
+// then waits. The ready guard stays after the full write.
+func holdEmptyKeyFile(path string) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if info.Size() != 0 || info.Mode().Perm() != 0o600 {
+		return fmt.Errorf("held key file size %d mode %o", info.Size(), info.Mode().Perm())
+	}
+	if err := writeJSON(filepath.Join(filepath.Dir(path), "key-hold.json"), map[string]any{
+		"pid": os.Getpid(), "size": info.Size(), "mode": uint32(info.Mode().Perm()),
+	}); err != nil {
+		return err
+	}
+	release := os.Getenv("HYPHAE_M1_KEY_RELEASE")
+	if release == "" {
+		return errors.New("key hold release path is empty")
+	}
+	return waitFile(release, 20*time.Second)
 }
 
 func signalKeyReady(home, role string, pid int) error {
@@ -647,6 +767,9 @@ func validatePositive(pub string, relay *misRelay, results map[string]childResul
 		}
 		if claimedID == "" || copiedID == "" || claimedID == copiedID {
 			return errors.New("copied-pubkey event id collided with copied-claimed-sender")
+		}
+		if err := requireDirectVerifyObservation(pub, claimedID, copiedID); err != nil {
+			return err
 		}
 	}
 	if err := relay.barrierError(); err != nil {
@@ -787,6 +910,15 @@ func executeRole(role string) error {
 	}
 	if err := signalKeyReady(home, role, os.Getpid()); err != nil {
 		return err
+	}
+	if os.Getenv("HYPHAE_M1_KEY_FAULT") == "hold" {
+		settle := os.Getenv("HYPHAE_M1_KEY_SETTLE")
+		if settle == "" {
+			return errors.New("key hold settle path is empty")
+		}
+		if err := waitFile(settle, 20*time.Second); err != nil {
+			return err
+		}
 	}
 	loaded, err := os.ReadFile(keyPath)
 	if err != nil {
@@ -1294,6 +1426,7 @@ func (p *roleProc) publishEnvelope(env groupchat.Envelope, recipient nostr.PubKe
 func (p *roleProc) onEvent(event nostr.Event) error {
 	p.deliveries[event.ID.Hex()]++
 	verified, err := groupchat.VerifyIncoming(event, p.sk)
+	p.observeVerify("onEvent", p.negativeName(event.ID.Hex()), event, err)
 	if err != nil {
 		return p.noteVerifyRefusal(event, err)
 	}
@@ -1566,6 +1699,7 @@ func (p *roleProc) observeCatalog() error {
 			}
 			before := p.baseline
 			_, verr := groupchat.VerifyIncoming(event, p.sk)
+			p.observeVerify("observeCatalog", item.Name, event, verr)
 			after, err := p.rowHash()
 			if err != nil {
 				return err
@@ -1622,6 +1756,7 @@ func (p *roleProc) fetchAndRefuse(item negativeCase) error {
 	case event := <-sub.Events:
 		before := p.baseline
 		_, verr := groupchat.VerifyIncoming(event, p.sk)
+		p.observeVerify("fetchAndRefuse", item.Name, event, verr)
 		after, err := p.rowHash()
 		if err != nil {
 			return err
