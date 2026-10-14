@@ -2,13 +2,39 @@
   "schema": "baton-result/v1",
   "task_id": "cloud-m1-selectors-20261014-031037",
   "attempt_id": "aee18657-4967-446d-bcfe-0d1a00a90e3f",
-  "sequence": 1,
-  "status": "started",
+  "sequence": 2,
+  "status": "completed",
   "base_sha": "042d2794fae972afa7b07086aca486fd6b93c5cc",
-  "result_sha": null,
-  "summary": "Started M1 group retry selection handoff on isolated branch; exploring codebase for GetPendingOutbox/group outbox seams.",
-  "tests": [],
+  "result_sha": "0fc524eefb533b7155a10e99f5de38f779394b42",
+  "summary": "Wired daemon+TUI group_pending selection via GetPendingGroupOutbox and Handlers.Attempt (NewFanoutAttemptHandlerFor on owned Store+process npub). DM GetPendingOutbox loop/history/viewport unchanged; no Handlers.Group; no second watcher. Predicate met: normal group retry selection without DM leakage.",
+  "tests": [
+    {
+      "command": "go test ./internal/daemon/ -race -count=1 -run 'TestProcessOutboxGroup|TestProcessOutboxSelectsGroup' -timeout 120s",
+      "exit_code": 0,
+      "matches": "ok github.com/iDoris-ai/hyphae/internal/daemon"
+    },
+    {
+      "command": "go test ./internal/tui/ -race -count=1 -run 'TestTUIRetryPendingGroup|TestTUIRetryPendingOutboxSelectsGroup' -timeout 120s",
+      "exit_code": 0,
+      "matches": "ok github.com/iDoris-ai/hyphae/internal/tui"
+    },
+    {
+      "command": "go test ./internal/daemon/ -race -count=1 -timeout 300s",
+      "exit_code": 0,
+      "matches": "ok github.com/iDoris-ai/hyphae/internal/daemon"
+    },
+    {
+      "command": "go test ./internal/tui/ -race -count=1 -timeout 300s",
+      "exit_code": 0,
+      "matches": "ok github.com/iDoris-ai/hyphae/internal/tui"
+    },
+    {
+      "command": "go vet ./internal/daemon/ ./internal/tui/ ./internal/messaging/ ./internal/groupchat/",
+      "exit_code": 0,
+      "matches": ""
+    }
+  ],
   "blocker": null,
-  "next": "Implement GetPendingGroupOutbox + daemon/TUI routing without DM leakage",
-  "updated_at": "2026-10-14T03:12:08Z"
+  "next": null,
+  "updated_at": "2026-10-14T03:24:00Z"
 }
