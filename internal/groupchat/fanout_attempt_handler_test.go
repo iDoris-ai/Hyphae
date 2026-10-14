@@ -2,14 +2,70 @@ package groupchat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
+	"fiatjaf.com/nostr"
 	"github.com/iDoris-ai/hyphae/internal/messaging"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/stretchr/testify/require"
 )
+
+func TestFanoutAttemptHandlerRejectsForeignSignedPayload(t *testing.T) {
+	for _, pendingO3 := range []bool{false, true} {
+		for _, sameSigner := range []bool{false, true} {
+			t.Run(map[bool]string{false: "queued", true: "pending O3"}[pendingO3]+map[bool]string{false: " other signer", true: " same signer"}[sameSigner], func(t *testing.T) {
+				f := newFailureFixture(t)
+				if pendingO3 {
+					f.failO3BeforeT4(t, f.startAttempt(t, 1))
+				}
+				entry := f.typedEntry(t)
+				b := nostr.Event{Kind: 30078, CreatedAt: nostr.Now(), Content: "foreign ciphertext"}
+				signer := nostr.Generate()
+				if sameSigner {
+					signer = f.member.sk
+				}
+				require.NoError(t, b.Sign(signer))
+				require.True(t, b.CheckID())
+				require.True(t, b.VerifySignature())
+				data, err := json.Marshal(b)
+				require.NoError(t, err)
+				entry.EventJSON = string(data)
+				unchanged := f.snapshot(t)
+				h := NewFanoutAttemptHandler(f.member.store)
+				_, err = h.Reserve(entry)
+				require.ErrorIs(t, err, messaging.ErrGroupAttemptPayloadMismatch)
+				unchanged()
+			})
+		}
+	}
+}
+
+func TestFanoutAttemptHandlerRejectsDifferentBytesOfSameSignedEvent(t *testing.T) {
+	f := newFailureFixture(t)
+	entry := f.typedEntry(t)
+	entry.EventJSON = " " + entry.EventJSON
+	var event nostr.Event
+	require.NoError(t, json.Unmarshal([]byte(entry.EventJSON), &event))
+	require.Equal(t, entry.ID, event.ID.Hex())
+	require.True(t, event.CheckID())
+	require.True(t, event.VerifySignature())
+	unchanged := f.snapshot(t)
+	_, err := NewFanoutAttemptHandler(f.member.store).Reserve(entry)
+	require.ErrorIs(t, err, messaging.ErrGroupAttemptPayloadMismatch)
+	unchanged()
+}
+
+func TestFanoutAttemptHandlerReplaysPendingO3ForAuthenticPayload(t *testing.T) {
+	f := newFailureFixture(t)
+	f.failO3BeforeT4(t, f.startAttempt(t, 1))
+	token, err := NewFanoutAttemptHandler(f.member.store).Reserve(f.typedEntry(t))
+	require.NoError(t, err)
+	require.EqualValues(t, 2, token.AttemptGeneration)
+	require.EqualValues(t, 1, f.row(t).RetryCount)
+}
 
 func (f failureFixture) typedEntry(t *testing.T) types.OutboxEntry {
 	t.Helper()

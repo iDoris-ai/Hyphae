@@ -16,6 +16,8 @@ var ErrFanoutQueueConflict = errors.New("fanout queue conflict: outbox queue_id 
 // ErrFanoutQueueMissing: the outbox has no entry for the queued row's event.
 var ErrFanoutQueueMissing = errors.New("queue_missing: outbox has no entry for the queued event")
 
+var errFanoutPayloadMismatch = errors.New("fanout payload mismatch")
+
 // fanoutBarrierTx is the recovery barrier that every R and S must pass
 // (rev7 §3.3): under the outbox lock and the caller's SQLite transaction it
 // replays an unconsumed O3 record (or holds on conflict), then checks D14
@@ -37,6 +39,9 @@ func (s *Store) fanoutBarrierTx(tx queryExecer, path string, key FanoutKey, reci
 	}
 	if entry == nil {
 		return row, false, ErrFanoutQueueMissing
+	}
+	if entry.Entry.EventJSON != row.eventJSON {
+		return row, false, errFanoutPayloadMismatch
 	}
 	if entry.QueueID != row.token.queueID {
 		// A failed row whose outbox already holds the next epoch: D6 landed
@@ -79,12 +84,25 @@ func commitReplayOnRefusal(tx *immediateTx, replayed bool, err error) error {
 // reserveFanoutAttempt is R behind the barrier: it consumes one generation
 // for the row's current queue entry. Inert: no production caller.
 func (s *Store) reserveFanoutAttempt(key FanoutKey, recipient string) (token fanoutAttemptToken, err error) {
+	return s.reserveFanoutAttemptFrozen(key, recipient, "")
+}
+
+func (s *Store) reserveFanoutAttemptFrozen(key FanoutKey, recipient, wantEventJSON string) (token fanoutAttemptToken, err error) {
 	err = messaging.WithGroupOutboxLock(func(path string) error {
 		tx, err := s.beginImmediate()
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
+		if wantEventJSON != "" {
+			row, err := loadFanoutFailureRow(tx, key, recipient)
+			if err != nil {
+				return err
+			}
+			if wantEventJSON != row.eventJSON {
+				return errFanoutPayloadMismatch
+			}
+		}
 		if _, replayed, err := s.fanoutBarrierTx(tx, path, key, recipient); err != nil {
 			return commitReplayOnRefusal(tx, replayed, err)
 		}
