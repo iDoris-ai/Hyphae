@@ -1,0 +1,14 @@
+{
+  "schema": "baton-result/v1",
+  "task_id": "cloud-m1-v7-linux-kit-20261014-105349",
+  "attempt_id": "a624bb9f-a645-44c3-a3e5-e9f5a63b66d6",
+  "sequence": 1,
+  "status": "started",
+  "base_sha": "9230cce44a2486a94fab40f95de5ab3099a4dd61",
+  "result_sha": "9230cce44a2486a94fab40f95de5ab3099a4dd61",
+  "summary": "Started Linux V7 legacy artifact + strace testkit scaffold on Cloud Linux; no runtime activation.",
+  "tests": [],
+  "blocker": null,
+  "next": "Explore base tree and implement tests/scripts/docs only",
+  "updated_at": "2026-10-14T10:55:07Z"
+}
