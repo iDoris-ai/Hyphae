@@ -16,6 +16,14 @@ original event id, rendered once. A PTY reset, one existing history row, the
 same ciphertext and signature, relay ACK, and the absence of a daemon are not
 enough. `--drop-recipient` still ACKs Alice and answers Bob's REQ with EOSE
 and no EVENT, so that bounded run must exit non-zero.
+
+From the repository root, on a fresh temporary HOME only:
+
+    python3 tests/e2e/test_pty_offline_dm_restart.py
+    python3 tests/e2e/pty_offline_dm_restart.py --reps 1 --receipt <receipt.json>
+    python3 tests/e2e/pty_offline_dm_restart.py --reps 1 --drop-recipient --receipt <receipt.json>
+
+Write the receipt outside the real HOME. This does not start a daemon.
 """
 
 from __future__ import annotations
@@ -43,7 +51,12 @@ import time
 import tty
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+def repo_root() -> Path:
+    """Repository root. This harness lives at tests/e2e/, two levels down."""
+    return Path(__file__).resolve().parents[2]
+
+
+sys.path.insert(0, str(repo_root() / "scripts"))
 from tui_offline_pty_acceptance import Screen  # noqa: E402
 
 ALT_ENTER = b"\x1b[?1049h"
@@ -823,8 +836,8 @@ def run_rep(
 
 def assert_worktree_is_test_kit(root: Path) -> None:
     allowed = {
-        "scripts/pty_offline_dm_restart.py",
-        "scripts/test_pty_offline_dm_restart.py",
+        "tests/e2e/pty_offline_dm_restart.py",
+        "tests/e2e/test_pty_offline_dm_restart.py",
     }
     tracked = subprocess.check_output(["git", "diff", "--name-only", "HEAD"], cwd=root, text=True)
     for path in (line.strip() for line in tracked.splitlines()):
@@ -879,7 +892,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.reps < 1 or args.reps > 10:
         print(json.dumps({"status": "fail", "failure": "reps must be from 1 to 10"}))
         return 2
-    root = Path(__file__).resolve().parents[1]
+    root = repo_root()
     real_home = Path(os.environ.get("HOME", "")).resolve()
     real_stamp = real_home_stamp(real_home)
     forbidden = [str(real_home)]
