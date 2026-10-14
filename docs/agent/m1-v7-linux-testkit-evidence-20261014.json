@@ -1,0 +1,790 @@
+{
+ "schema": "v7-linux-kit/evidence-v1",
+ "not_v7_closure": true,
+ "runtime_activation": false,
+ "host": {
+  "uname": "Linux grok-bot-vm-307756233 6.12.94+ #1 SMP PREEMPT_DYNAMIC Mon Oct 12 19:59:53 UTC 2026 x86_64",
+  "go_build_toolchain": "go version go1.26.0 linux/amd64",
+  "go_default_outside_module": "go version go1.24.4 linux/amd64",
+  "strace": "strace -- version 6.13",
+  "hostname": "grok-bot-vm-307756233"
+ },
+ "command": "STRACE=<user-space strace 6.13> python3 scripts/v7_linux_kit.py all --repo . --work $WORK --new-sha 9230cce44a2486a94fab40f95de5ab3099a4dd61",
+ "exit_code": 3,
+ "artifacts": [
+  {
+   "sha": "699b36f74c6b3802b93768d670229d7b2d3b6cff",
+   "role": "exact-base",
+   "tree": "5e15f3cb16f76d3a1090865dda1f61c047b165d3",
+   "source_tar_sha256": "41eca0cdda29d18308e621626bfd54e75cc8586ce05a2b6b05e6d30a1b2064e9",
+   "binary_sha256": "50c07a0dca82a6d2859c855cb5565e3e1d5b72aecc934bbfa7ab17d0cca57b77",
+   "version_stamp": "legacy-699b36f74c6b3802b93768d670229d7b2d3b6cff",
+   "build_cmd": "go build -trimpath -buildvcs=false -ldflags=-buildid= -X main.version=legacy-699b36f74c6b3802b93768d670229d7b2d3b6cff -o $WORK/artifacts/699b36f74c6b/bin/hyphae ./cmd/hyphae"
+  },
+  {
+   "sha": "c0a54111f78f357c6ae2772f06f9a3cc4fe7c63b",
+   "role": "approved-165-S6",
+   "tree": "7a29378211dddc5c3b9e487b220522ae358902bb",
+   "source_tar_sha256": "d53ad2db2c83e50087bc031b6a961092e699833547a3ab92ae34af4ba3523a5c",
+   "binary_sha256": "994f484dab3020b3d1656c89de464807342f786266ad6ef2827b10b91cb528d1",
+   "version_stamp": "legacy-c0a54111f78f357c6ae2772f06f9a3cc4fe7c63b",
+   "build_cmd": "go build -trimpath -buildvcs=false -ldflags=-buildid= -X main.version=legacy-c0a54111f78f357c6ae2772f06f9a3cc4fe7c63b -o $WORK/artifacts/c0a54111f78f/bin/hyphae ./cmd/hyphae"
+  },
+  {
+   "sha": "7861d029b5ccc2959b80a184a390ec132ddd025f",
+   "role": "approved-166-S5b",
+   "tree": "5fde217fafbd97831f8a6b905b512992d895083d",
+   "source_tar_sha256": "ac637e52999a7ed62b343ca04f6758e46996bbce6e15f572f7a77fac2205933f",
+   "binary_sha256": "868a8f0c33b32d825c47d35a10ea3269df0b5fb268d00ced04fd0a040a07607a",
+   "version_stamp": "legacy-7861d029b5ccc2959b80a184a390ec132ddd025f",
+   "build_cmd": "go build -trimpath -buildvcs=false -ldflags=-buildid= -X main.version=legacy-7861d029b5ccc2959b80a184a390ec132ddd025f -o $WORK/artifacts/7861d029b5cc/bin/hyphae ./cmd/hyphae"
+  },
+  {
+   "sha": "9230cce44a2486a94fab40f95de5ab3099a4dd61",
+   "role": "forward",
+   "tree": "37ba82ed3a13ad56d3215b4eb49253e488a6bb68",
+   "source_tar_sha256": "6c82bdadc11f72673513ea4ff6ddf1a55335f72dc7127e2d03b48c76cf4da07d",
+   "binary_sha256": "8223e217adc195e75e34066daa5695ac8fd6855396deb62512c8856569318d76",
+   "version_stamp": "forward-9230cce44a2486a94fab40f95de5ab3099a4dd61",
+   "build_cmd": "go build -trimpath -buildvcs=false -ldflags=-buildid= -X main.version=forward-9230cce44a2486a94fab40f95de5ab3099a4dd61 -o $WORK/artifacts/forward/9230cce44a24/bin/hyphae ./cmd/hyphae"
+  }
+ ],
+ "probe": [
+  {
+   "sha": null,
+   "role": "tracer-selfcheck",
+   "arg": null,
+   "exit_code": 0,
+   "pass": true,
+   "exec_identity": null,
+   "version_stamp_seen": null,
+   "seen": {
+    "exec": true,
+    "open_create": true,
+    "rename": true,
+    "unlink": true,
+    "multi_process_ff": true
+   },
+   "group_id_hits": null,
+   "stdout_first_line": null,
+   "mutations_anywhere": 0,
+   "home_touches": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0,
+   "fd_samples": null
+  },
+  {
+   "sha": "699b36f74c6b3802b93768d670229d7b2d3b6cff",
+   "role": "exact-base",
+   "arg": "--version",
+   "exit_code": 0,
+   "pass": true,
+   "exec_identity": true,
+   "version_stamp_seen": true,
+   "seen": null,
+   "group_id_hits": 0,
+   "stdout_first_line": "hyphae version legacy-699b36f74c6b3802b93768d670229d7b2d3b6cff",
+   "mutations_anywhere": 0,
+   "home_touches": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0,
+   "fd_samples": 3
+  },
+  {
+   "sha": "699b36f74c6b3802b93768d670229d7b2d3b6cff",
+   "role": "exact-base",
+   "arg": "--help",
+   "exit_code": 0,
+   "pass": true,
+   "exec_identity": true,
+   "version_stamp_seen": true,
+   "seen": null,
+   "group_id_hits": 0,
+   "stdout_first_line": "NAME:",
+   "mutations_anywhere": 0,
+   "home_touches": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0,
+   "fd_samples": 3
+  },
+  {
+   "sha": "c0a54111f78f357c6ae2772f06f9a3cc4fe7c63b",
+   "role": "approved-165-S6",
+   "arg": "--version",
+   "exit_code": 0,
+   "pass": true,
+   "exec_identity": true,
+   "version_stamp_seen": true,
+   "seen": null,
+   "group_id_hits": 0,
+   "stdout_first_line": "hyphae version legacy-c0a54111f78f357c6ae2772f06f9a3cc4fe7c63b",
+   "mutations_anywhere": 0,
+   "home_touches": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0,
+   "fd_samples": 3
+  },
+  {
+   "sha": "c0a54111f78f357c6ae2772f06f9a3cc4fe7c63b",
+   "role": "approved-165-S6",
+   "arg": "--help",
+   "exit_code": 0,
+   "pass": true,
+   "exec_identity": true,
+   "version_stamp_seen": true,
+   "seen": null,
+   "group_id_hits": 0,
+   "stdout_first_line": "NAME:",
+   "mutations_anywhere": 0,
+   "home_touches": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0,
+   "fd_samples": 3
+  },
+  {
+   "sha": "7861d029b5ccc2959b80a184a390ec132ddd025f",
+   "role": "approved-166-S5b",
+   "arg": "--version",
+   "exit_code": 0,
+   "pass": true,
+   "exec_identity": true,
+   "version_stamp_seen": true,
+   "seen": null,
+   "group_id_hits": 0,
+   "stdout_first_line": "hyphae version legacy-7861d029b5ccc2959b80a184a390ec132ddd025f",
+   "mutations_anywhere": 0,
+   "home_touches": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0,
+   "fd_samples": 1
+  },
+  {
+   "sha": "7861d029b5ccc2959b80a184a390ec132ddd025f",
+   "role": "approved-166-S5b",
+   "arg": "--help",
+   "exit_code": 0,
+   "pass": true,
+   "exec_identity": true,
+   "version_stamp_seen": true,
+   "seen": null,
+   "group_id_hits": 0,
+   "stdout_first_line": "NAME:",
+   "mutations_anywhere": 0,
+   "home_touches": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0,
+   "fd_samples": 3
+  }
+ ],
+ "retire": [
+  {
+   "sha": "699b36f74c6b3802b93768d670229d7b2d3b6cff",
+   "surface": "path",
+   "phase": "pre",
+   "pass": true,
+   "inner_rc": 0,
+   "legacy_request_rc": null,
+   "resolution": [
+    "hyphae is $WORK/homes/retire-699b36f7-path-pre-ygv_kg62/legacy-bin/hyphae",
+    "$WORK/homes/retire-699b36f7-path-pre-ygv_kg62/exercise.sh: line 3: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 1,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "699b36f74c6b3802b93768d670229d7b2d3b6cff",
+   "surface": "path",
+   "phase": "post",
+   "pass": true,
+   "inner_rc": 127,
+   "legacy_request_rc": null,
+   "resolution": [
+    "$WORK/homes/retire-699b36f7-path-post-6x564dpc/exercise.sh: line 4: type: hyphae: not found",
+    "$WORK/homes/retire-699b36f7-path-post-6x564dpc/exercise.sh: line 4: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 0,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "699b36f74c6b3802b93768d670229d7b2d3b6cff",
+   "surface": "alias",
+   "phase": "pre",
+   "pass": true,
+   "inner_rc": 0,
+   "legacy_request_rc": null,
+   "resolution": [
+    "hyphae is aliased to `$WORK/homes/retire-699b36f7-alias-pre-lb7shf2h/opt/hyphae-legacy/bin/hyphae'",
+    "$WORK/homes/retire-699b36f7-alias-pre-lb7shf2h/exercise.sh: line 4: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 1,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "699b36f74c6b3802b93768d670229d7b2d3b6cff",
+   "surface": "alias",
+   "phase": "post",
+   "pass": true,
+   "inner_rc": 127,
+   "legacy_request_rc": null,
+   "resolution": [
+    "$WORK/homes/retire-699b36f7-alias-post-dkz9sr2o/exercise.sh: line 6: type: hyphae: not found",
+    "$WORK/homes/retire-699b36f7-alias-post-dkz9sr2o/exercise.sh: line 6: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 0,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "699b36f74c6b3802b93768d670229d7b2d3b6cff",
+   "surface": "function",
+   "phase": "pre",
+   "pass": true,
+   "inner_rc": 0,
+   "legacy_request_rc": null,
+   "resolution": [
+    "hyphae is a function",
+    "hyphae () ",
+    "{ ",
+    "    \"$KIT_LEGACY_ABS\" \"$@\"",
+    "}",
+    "$WORK/homes/retire-699b36f7-function-pre-2r0ysnwf/exercise.sh: line 3: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 1,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "699b36f74c6b3802b93768d670229d7b2d3b6cff",
+   "surface": "function",
+   "phase": "post",
+   "pass": true,
+   "inner_rc": 127,
+   "legacy_request_rc": null,
+   "resolution": [
+    "$WORK/homes/retire-699b36f7-function-post-m8remvc4/exercise.sh: line 5: type: hyphae: not found",
+    "$WORK/homes/retire-699b36f7-function-post-m8remvc4/exercise.sh: line 5: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 0,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "699b36f74c6b3802b93768d670229d7b2d3b6cff",
+   "surface": "cache",
+   "phase": "pre",
+   "pass": true,
+   "inner_rc": 0,
+   "legacy_request_rc": null,
+   "resolution": [
+    "hyphae is hashed ($WORK/homes/retire-699b36f7-cache-pre-pjc4efo2/opt/hyphae-legacy/bin/hyphae)",
+    "$WORK/homes/retire-699b36f7-cache-pre-pjc4efo2/opt/hyphae-legacy/bin/hyphae"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 1,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "699b36f74c6b3802b93768d670229d7b2d3b6cff",
+   "surface": "cache",
+   "phase": "post",
+   "pass": true,
+   "inner_rc": 127,
+   "legacy_request_rc": null,
+   "resolution": [
+    "$WORK/homes/retire-699b36f7-cache-post-ha580auk/exercise.sh: line 5: type: hyphae: not found",
+    "$WORK/homes/retire-699b36f7-cache-post-ha580auk/exercise.sh: line 5: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 0,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "699b36f74c6b3802b93768d670229d7b2d3b6cff",
+   "surface": "absolute",
+   "phase": "pre",
+   "pass": true,
+   "inner_rc": 0,
+   "legacy_request_rc": null,
+   "resolution": [
+    "$WORK/homes/retire-699b36f7-absolute-pre-nqbhi0qz/exercise.sh: line 3: type: hyphae: not found",
+    "$WORK/homes/retire-699b36f7-absolute-pre-nqbhi0qz/exercise.sh: line 3: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 1,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "699b36f74c6b3802b93768d670229d7b2d3b6cff",
+   "surface": "absolute",
+   "phase": "post",
+   "pass": true,
+   "inner_rc": 0,
+   "legacy_request_rc": 3,
+   "resolution": [
+    "$WORK/homes/retire-699b36f7-absolute-post-q5yvii9f/exercise.sh: line 4: type: hyphae: not found",
+    "$WORK/homes/retire-699b36f7-absolute-post-q5yvii9f/exercise.sh: line 4: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 0,
+   "new_exec_count": 1,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "c0a54111f78f357c6ae2772f06f9a3cc4fe7c63b",
+   "surface": "path",
+   "phase": "pre",
+   "pass": true,
+   "inner_rc": 0,
+   "legacy_request_rc": null,
+   "resolution": [
+    "hyphae is $WORK/homes/retire-c0a54111-path-pre-_g2ptjci/legacy-bin/hyphae",
+    "$WORK/homes/retire-c0a54111-path-pre-_g2ptjci/exercise.sh: line 3: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 1,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "c0a54111f78f357c6ae2772f06f9a3cc4fe7c63b",
+   "surface": "path",
+   "phase": "post",
+   "pass": true,
+   "inner_rc": 127,
+   "legacy_request_rc": null,
+   "resolution": [
+    "$WORK/homes/retire-c0a54111-path-post-wycbumzz/exercise.sh: line 4: type: hyphae: not found",
+    "$WORK/homes/retire-c0a54111-path-post-wycbumzz/exercise.sh: line 4: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 0,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "c0a54111f78f357c6ae2772f06f9a3cc4fe7c63b",
+   "surface": "alias",
+   "phase": "pre",
+   "pass": true,
+   "inner_rc": 0,
+   "legacy_request_rc": null,
+   "resolution": [
+    "hyphae is aliased to `$WORK/homes/retire-c0a54111-alias-pre-sr4370yp/opt/hyphae-legacy/bin/hyphae'",
+    "$WORK/homes/retire-c0a54111-alias-pre-sr4370yp/exercise.sh: line 4: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 1,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "c0a54111f78f357c6ae2772f06f9a3cc4fe7c63b",
+   "surface": "alias",
+   "phase": "post",
+   "pass": true,
+   "inner_rc": 127,
+   "legacy_request_rc": null,
+   "resolution": [
+    "$WORK/homes/retire-c0a54111-alias-post-omeqiag9/exercise.sh: line 6: type: hyphae: not found",
+    "$WORK/homes/retire-c0a54111-alias-post-omeqiag9/exercise.sh: line 6: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 0,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "c0a54111f78f357c6ae2772f06f9a3cc4fe7c63b",
+   "surface": "function",
+   "phase": "pre",
+   "pass": true,
+   "inner_rc": 0,
+   "legacy_request_rc": null,
+   "resolution": [
+    "hyphae is a function",
+    "hyphae () ",
+    "{ ",
+    "    \"$KIT_LEGACY_ABS\" \"$@\"",
+    "}",
+    "$WORK/homes/retire-c0a54111-function-pre-z2mofi6c/exercise.sh: line 3: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 1,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "c0a54111f78f357c6ae2772f06f9a3cc4fe7c63b",
+   "surface": "function",
+   "phase": "post",
+   "pass": true,
+   "inner_rc": 127,
+   "legacy_request_rc": null,
+   "resolution": [
+    "$WORK/homes/retire-c0a54111-function-post-2427in86/exercise.sh: line 5: type: hyphae: not found",
+    "$WORK/homes/retire-c0a54111-function-post-2427in86/exercise.sh: line 5: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 0,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "c0a54111f78f357c6ae2772f06f9a3cc4fe7c63b",
+   "surface": "cache",
+   "phase": "pre",
+   "pass": true,
+   "inner_rc": 0,
+   "legacy_request_rc": null,
+   "resolution": [
+    "hyphae is hashed ($WORK/homes/retire-c0a54111-cache-pre-i_wxemmm/opt/hyphae-legacy/bin/hyphae)",
+    "$WORK/homes/retire-c0a54111-cache-pre-i_wxemmm/opt/hyphae-legacy/bin/hyphae"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 1,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "c0a54111f78f357c6ae2772f06f9a3cc4fe7c63b",
+   "surface": "cache",
+   "phase": "post",
+   "pass": true,
+   "inner_rc": 127,
+   "legacy_request_rc": null,
+   "resolution": [
+    "$WORK/homes/retire-c0a54111-cache-post-mrhunoe9/exercise.sh: line 5: type: hyphae: not found",
+    "$WORK/homes/retire-c0a54111-cache-post-mrhunoe9/exercise.sh: line 5: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 0,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "c0a54111f78f357c6ae2772f06f9a3cc4fe7c63b",
+   "surface": "absolute",
+   "phase": "pre",
+   "pass": true,
+   "inner_rc": 0,
+   "legacy_request_rc": null,
+   "resolution": [
+    "$WORK/homes/retire-c0a54111-absolute-pre-mlgv3lv9/exercise.sh: line 3: type: hyphae: not found",
+    "$WORK/homes/retire-c0a54111-absolute-pre-mlgv3lv9/exercise.sh: line 3: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 1,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "c0a54111f78f357c6ae2772f06f9a3cc4fe7c63b",
+   "surface": "absolute",
+   "phase": "post",
+   "pass": true,
+   "inner_rc": 0,
+   "legacy_request_rc": 3,
+   "resolution": [
+    "$WORK/homes/retire-c0a54111-absolute-post-mqp0kh79/exercise.sh: line 4: type: hyphae: not found",
+    "$WORK/homes/retire-c0a54111-absolute-post-mqp0kh79/exercise.sh: line 4: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 0,
+   "new_exec_count": 1,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "7861d029b5ccc2959b80a184a390ec132ddd025f",
+   "surface": "path",
+   "phase": "pre",
+   "pass": true,
+   "inner_rc": 0,
+   "legacy_request_rc": null,
+   "resolution": [
+    "hyphae is $WORK/homes/retire-7861d029-path-pre-4il3ya7h/legacy-bin/hyphae",
+    "$WORK/homes/retire-7861d029-path-pre-4il3ya7h/exercise.sh: line 3: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 1,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "7861d029b5ccc2959b80a184a390ec132ddd025f",
+   "surface": "path",
+   "phase": "post",
+   "pass": true,
+   "inner_rc": 127,
+   "legacy_request_rc": null,
+   "resolution": [
+    "$WORK/homes/retire-7861d029-path-post-sl8t1bjh/exercise.sh: line 4: type: hyphae: not found",
+    "$WORK/homes/retire-7861d029-path-post-sl8t1bjh/exercise.sh: line 4: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 0,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "7861d029b5ccc2959b80a184a390ec132ddd025f",
+   "surface": "alias",
+   "phase": "pre",
+   "pass": true,
+   "inner_rc": 0,
+   "legacy_request_rc": null,
+   "resolution": [
+    "hyphae is aliased to `$WORK/homes/retire-7861d029-alias-pre-g4ycdxwv/opt/hyphae-legacy/bin/hyphae'",
+    "$WORK/homes/retire-7861d029-alias-pre-g4ycdxwv/exercise.sh: line 4: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 1,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "7861d029b5ccc2959b80a184a390ec132ddd025f",
+   "surface": "alias",
+   "phase": "post",
+   "pass": true,
+   "inner_rc": 127,
+   "legacy_request_rc": null,
+   "resolution": [
+    "$WORK/homes/retire-7861d029-alias-post-i5f1wg08/exercise.sh: line 6: type: hyphae: not found",
+    "$WORK/homes/retire-7861d029-alias-post-i5f1wg08/exercise.sh: line 6: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 0,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "7861d029b5ccc2959b80a184a390ec132ddd025f",
+   "surface": "function",
+   "phase": "pre",
+   "pass": true,
+   "inner_rc": 0,
+   "legacy_request_rc": null,
+   "resolution": [
+    "hyphae is a function",
+    "hyphae () ",
+    "{ ",
+    "    \"$KIT_LEGACY_ABS\" \"$@\"",
+    "}",
+    "$WORK/homes/retire-7861d029-function-pre-f5chi9y1/exercise.sh: line 3: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 1,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "7861d029b5ccc2959b80a184a390ec132ddd025f",
+   "surface": "function",
+   "phase": "post",
+   "pass": true,
+   "inner_rc": 127,
+   "legacy_request_rc": null,
+   "resolution": [
+    "$WORK/homes/retire-7861d029-function-post-ef6gkxvs/exercise.sh: line 5: type: hyphae: not found",
+    "$WORK/homes/retire-7861d029-function-post-ef6gkxvs/exercise.sh: line 5: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 0,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "7861d029b5ccc2959b80a184a390ec132ddd025f",
+   "surface": "cache",
+   "phase": "pre",
+   "pass": true,
+   "inner_rc": 0,
+   "legacy_request_rc": null,
+   "resolution": [
+    "hyphae is hashed ($WORK/homes/retire-7861d029-cache-pre-xswa9kq8/opt/hyphae-legacy/bin/hyphae)",
+    "$WORK/homes/retire-7861d029-cache-pre-xswa9kq8/opt/hyphae-legacy/bin/hyphae"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 1,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "7861d029b5ccc2959b80a184a390ec132ddd025f",
+   "surface": "cache",
+   "phase": "post",
+   "pass": true,
+   "inner_rc": 127,
+   "legacy_request_rc": null,
+   "resolution": [
+    "$WORK/homes/retire-7861d029-cache-post-dvzmeequ/exercise.sh: line 5: type: hyphae: not found",
+    "$WORK/homes/retire-7861d029-cache-post-dvzmeequ/exercise.sh: line 5: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 0,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "7861d029b5ccc2959b80a184a390ec132ddd025f",
+   "surface": "absolute",
+   "phase": "pre",
+   "pass": true,
+   "inner_rc": 0,
+   "legacy_request_rc": null,
+   "resolution": [
+    "$WORK/homes/retire-7861d029-absolute-pre-97_scl86/exercise.sh: line 3: type: hyphae: not found",
+    "$WORK/homes/retire-7861d029-absolute-pre-97_scl86/exercise.sh: line 3: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 1,
+   "new_exec_count": 0,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  },
+  {
+   "sha": "7861d029b5ccc2959b80a184a390ec132ddd025f",
+   "surface": "absolute",
+   "phase": "post",
+   "pass": true,
+   "inner_rc": 0,
+   "legacy_request_rc": 3,
+   "resolution": [
+    "$WORK/homes/retire-7861d029-absolute-post-p9j9hf7p/exercise.sh: line 4: type: hyphae: not found",
+    "$WORK/homes/retire-7861d029-absolute-post-p9j9hf7p/exercise.sh: line 4: hash: hyphae: not found"
+   ],
+   "group_id_hits": 0,
+   "legacy_exec_count": 0,
+   "new_exec_count": 1,
+   "store_touches": 0,
+   "snapshot_diff_entries": 0
+  }
+ ],
+ "harness": {
+  "params": {
+   "hyphae_bin": "hyphae",
+   "hyphae_bin_sha256": "8223e217adc195e75e34066daa5695ac8fd6855396deb62512c8856569318d76",
+   "hyphae_source_sha": "9230cce44a2486a94fab40f95de5ab3099a4dd61",
+   "launcher_bin": null,
+   "launcher_source_sha": null
+  },
+  "private_home_mode": "0o700",
+  "quiesce_selftest": {
+   "pass": true,
+   "children": 1,
+   "alive_after_wait": [],
+   "proc_entries_reaped": true,
+   "fd_samples": 57,
+   "exit_codes": [
+    0
+   ],
+   "fd_hit_count": 1
+  },
+  "sequence": [
+   {
+    "step": "close",
+    "status": "NOTIMPLEMENTED",
+    "reason": "no --launcher-bin given; no launcher/gate exists at base 9230cce (passive validator only)"
+   },
+   {
+    "step": "quiesce-1",
+    "status": "NOTIMPLEMENTED",
+    "reason": "blocked by close"
+   },
+   {
+    "step": "oneway-marker",
+    "status": "NOTIMPLEMENTED",
+    "reason": "blocked by close"
+   },
+   {
+    "step": "quiesce-2",
+    "status": "NOTIMPLEMENTED",
+    "reason": "blocked by close"
+   },
+   {
+    "step": "maintenance",
+    "status": "NOTIMPLEMENTED",
+    "reason": "blocked by close"
+   }
+  ],
+  "marker_semantics": "one-way managed marker is NON-activating and is NOT old-writer exclusion (rev7 3.6.1)"
+ },
+ "windows": {
+  "status": "NOTIMPLEMENTED",
+  "reason": "requires accepted F3 launcher/gate and F3/F4 O3/D6 writers; old programs are never opened against these fixtures",
+  "required_evidence_per_window": [
+   "per registered entry: old path absent / launcher refusal code / stub forwards new only",
+   "binary + source identity trace (execve path, sha256, source SHA)",
+   "strace -ff: no old process opens live stores",
+   "JSON bytes + SQLite logical snapshot diff empty before/after refusal",
+   "zero group ids in all messages"
+  ],
+  "windows": [
+   {
+    "id": "W-activation",
+    "when": "at activation",
+    "fixture": "legacy-165-group-nil-relays (impl plan section 4)"
+   },
+   {
+    "id": "W-O3-before-T4",
+    "when": "O3 JSON committed, T4 not committed (incl. after SIGKILL)",
+    "fixture": "P-O3, P-BUDGET-9/10 (witness schema section 6)"
+   },
+   {
+    "id": "W-D6-before-T2prime",
+    "when": "D6 committed, T2' not committed (incl. after SIGKILL)",
+    "fixture": "P-MISSING, P-EXHAUSTED-PENDING, P-EXHAUSTED-FAILED"
+   }
+  ]
+ },
+ "totals": {
+  "probe_pass": 7,
+  "probe_rows": 7,
+  "retire_pass": 30,
+  "retire_rows": 30,
+  "notimplemented": [
+   "harness.close..maintenance",
+   "windows.*"
+  ]
+ }
+}
