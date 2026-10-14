@@ -2,3 +2,4 @@ timestamp	decision	rationale
 2026-10-14T02:12:40Z	started	Exact baseline checkout; begin #226 QueueTargetsRaw rows.Err + adoption retry budget repair
 2026-10-14T02:21:30Z	fix-a-rows-err	Check rows.Err before O1/T2; Close alone misses Next iteration failure after first row
 2026-10-14T02:21:30Z	fix-b-adopted-retry-budget	Persist adopted outbox entry RetryCount into fanout budget snapshot; keep opaque legacy queue id; reject exhausted without writes
+2026-10-14T03:41:13Z	started	Exact baseline 9f6e65da; begin F1 MaxRetries bind + F2 fresh-native counter refuse before mutation

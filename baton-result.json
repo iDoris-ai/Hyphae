@@ -1,14 +1,14 @@
 {
   "schema": "baton-result/v1",
-  "task_id": "cloud-m1-226-adoption-budget-20261014",
-  "attempt_id": "f145f61c-2427-476b-a6c3-e653545eaa23",
+  "task_id": "cloud-m1-226-refusal-repair-20261014-034010",
+  "attempt_id": "866fd3b5-3367-4f56-a618-6eaabf682cc2",
   "sequence": 1,
   "status": "started",
-  "base_sha": "b4e2042ef16cf4e21897599252a7ca1249c2f60c",
+  "base_sha": "9f6e65da53cba009eff7aa285bada7f17ee7dcb5",
   "result_sha": null,
-  "summary": "Started #226 QueueTargetsRaw rows.Err + adoption retry budget repair on exact baseline",
+  "summary": "Started M1 #226 refusal repair: F1 MaxRetries bind on active-entry reuse; F2 refuse fresh native nonzero counters before O1",
   "tests": [],
   "blocker": null,
   "next": null,
-  "updated_at": "2026-10-14T02:12:40Z"
+  "updated_at": "2026-10-14T03:41:13Z"
 }
