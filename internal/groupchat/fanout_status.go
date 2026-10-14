@@ -50,14 +50,17 @@ func (s *Store) InspectFanoutBookkeeping(key FanoutKey) ([]FanoutBookkeepingRepo
 		if err != nil {
 			return err
 		}
+		defer rows.Close()
 		var recipients []string
 		for rows.Next() {
 			var r string
 			if err := rows.Scan(&r); err != nil {
-				rows.Close()
 				return err
 			}
 			recipients = append(recipients, r)
+		}
+		if err := rows.Err(); err != nil {
+			return err
 		}
 		if err := rows.Close(); err != nil {
 			return err
