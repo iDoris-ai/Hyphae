@@ -2,13 +2,21 @@
   "schema": "baton-result/v1",
   "task_id": "cloud-m1-linux-reliability-proof-20261014",
   "attempt_id": "2d5e2330-ee07-435a-8c02-1e59f92c5f1e",
-  "sequence": 1,
-  "status": "started",
+  "sequence": 2,
+  "status": "completed",
   "base_sha": "09ac32c048b790d2f62f6bb9b0b51bd87dfbf1ae",
-  "result_sha": null,
-  "summary": "Started independent Linux reliability proof on cloud VM",
-  "tests": [],
+  "result_sha": "227acd401fda7c42f34c2e38680f001df81e703c",
+  "summary": "Linux reliability proof PASS on pinned baseline: race/vet/integration + focused D6/O3/forgery/escaped/flock/OpenDB all green. No production changes; no test-only additions needed. Evidence in baton-linux-proof.md.",
+  "tests": [
+    {"command": "go test ./... -race -count=1", "exit_code": 0, "duration_sec": 54},
+    {"command": "go vet ./...", "exit_code": 0, "duration_sec": 1},
+    {"command": "go test -tags integration ./tests -count=1", "exit_code": 0, "duration_sec": 8},
+    {"command": "go test ./internal/groupchat -run '^(TestCrashAfterD6BeforeT2PrimeReplaysExactlyOnce|TestFanoutAttemptHandlerOldEpochSnapshotReplaysDurableOnceThenStale|TestCrashAfterO3BeforeT4ReplaysExactlyOnce|TestFanoutAttemptHandlerReplaysCrashedO3T4Once|TestFanoutAttemptHandlerForgedSnapshotNoMutation|TestFanoutAttemptHandlerRejectsStaleAndForgedSnapshotsWithoutMutation|TestFanoutAttemptHandlerLivePersistedEventMismatchIsConflictNoMutation|TestFanoutAttemptHandlerQueuedWrongEpochWithoutWitnessD14ZeroMutation|TestFanoutAttemptHandlerReservesEscapedEventMemberNames|TestFanoutAttemptReservationRacesLockedQueueRotation)$' -count=1 -v", "exit_code": 0, "duration_sec": 1, "matched_tests": 10},
+    {"command": "go test ./internal/messaging -run '^(TestAttemptSendGroupAttemptCapturesCanonicalEscapedEvent|TestReadRawOutboxEvidenceSnapshotBlocksOnSiblingLock)$' -count=1 -v", "exit_code": 0, "duration_sec": 2, "matched_tests": 2},
+    {"command": "go test ./internal/daemon -run '^TestDaemonHomeLockIsExclusivePerHome$' -count=1 -v", "exit_code": 0, "duration_sec": 1, "matched_tests": 1},
+    {"command": "go test ./internal/storage -run '^(TestOpenDBDoesNotChangeGlobalDBAndOwnsItsHandle|TestOpenDBPoolsCanUseSameFileIndependently|TestOpenDBFailurePreservesGlobalDB|TestInitDBPragmasApplyToEveryConnection|TestConnectionLocalExecPragmasOnlyAffectOneHeldConnection)$' -count=1 -v", "exit_code": 0, "duration_sec": 0, "matched_tests": 5}
+  ],
   "blocker": null,
-  "next": null,
-  "updated_at": "2026-10-14T02:13:20Z"
+  "next": "Stop and hand back Linux evidence; coordinator combines with Darwin proof and reviews any new test-only probes. Do not modify production or take next task.",
+  "updated_at": "2026-10-14T02:17:38Z"
 }
