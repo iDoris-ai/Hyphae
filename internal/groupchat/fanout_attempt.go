@@ -64,8 +64,8 @@ func (s *Store) fanoutBarrierTx(tx queryExecer, path string, key FanoutKey, reci
 		replayed = true
 	}
 	if RecipientDeliveryState(row.state) != RecipientQueued || entry.Entry.Status != messaging.OutboxStatusGroupPending ||
-		!row.retryCount.Valid || int64(entry.Entry.RetryCount) != row.retryCount.Int64 || row.retryCount.Int64 >= row.maxRetries {
-		return row, replayed, fmt.Errorf("fanout row is not an active pending queue entry (state %s, outbox %s %d/%d)", row.state, entry.Entry.Status, entry.Entry.RetryCount, row.maxRetries)
+		!row.retryCount.Valid || int64(entry.Entry.RetryCount) != row.retryCount.Int64 || row.retryCount.Int64 >= row.maxRetries || int64(entry.Entry.MaxRetries) != row.maxRetries {
+		return row, replayed, fmt.Errorf("fanout row is not an active pending queue entry (state %s, outbox %s %d/%d outbox_max=%d row_max=%d)", row.state, entry.Entry.Status, entry.Entry.RetryCount, row.maxRetries, entry.Entry.MaxRetries, row.maxRetries)
 	}
 	return row, replayed, nil
 }
