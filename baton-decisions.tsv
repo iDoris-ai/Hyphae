@@ -1,2 +1,7 @@
 timestamp	task_id	attempt_id	decision	rationale
 2026-10-14T01:53:10Z	night-m1-224-typed-diff-20261013	cab008a8-bb18-47a3-bd14-7cfbab4f9ff0	start	Branch created from exact base_sha 73e8ab0 (base_branch head matched); started receipt pushed first.
+2026-10-14T01:59:08Z	night-m1-224-typed-diff-20261013	cab008a8-bb18-47a3-bd14-7cfbab4f9ff0	tests-first	New tests in outbox_typed_diff_test.go confirmed failing on exact base implementation (exit 1, 14 FAIL lines) before the patch; control cases passed on base.
+2026-10-14T01:59:08Z	night-m1-224-typed-diff-20261013	cab008a8-bb18-47a3-bd14-7cfbab4f9ff0	deletion-runs	Collect removals and emit one patch per contiguous run; separator relative to retained neighbour; removalPatch in outbox_dm_raw.go left unchanged for single-entry raw writers.
+2026-10-14T01:59:08Z	night-m1-224-typed-diff-20261013	cab008a8-bb18-47a3-bd14-7cfbab4f9ff0	relay-exact	reflect.DeepEqual on relays (no nil/empty normalization) plus a coverage check so any typed change not expressed by patches is refused instead of silently succeeding.
+2026-10-14T01:59:08Z	night-m1-224-typed-diff-20261013	cab008a8-bb18-47a3-bd14-7cfbab4f9ff0	scope	Only outbox_typed_diff.go and its new test file changed; no typed rewrite of protocol entries; retry budgets, W1 guard, W2 runtime untouched.
+2026-10-14T01:59:08Z	night-m1-224-typed-diff-20261013	cab008a8-bb18-47a3-bd14-7cfbab4f9ff0	complete	Code SHA 3e521d3db526c4be8f2eb457bf4446e9ceb49895; focused race x20, package race, vet, diff-check exit 0; pushed baton branch only, no PR/merge/comment.

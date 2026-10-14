@@ -2,13 +2,36 @@
   "schema": "baton-result/v1",
   "task_id": "night-m1-224-typed-diff-20261013",
   "attempt_id": "cab008a8-bb18-47a3-bd14-7cfbab4f9ff0",
-  "sequence": 1,
-  "status": "started",
+  "sequence": 2,
+  "status": "completed",
   "base_sha": "73e8ab005cf961f8604a631d72a54ae3d064bb9b",
-  "result_sha": null,
-  "summary": "Lane grokbot started #224 typed-diff fixes (contiguous deletion runs; relay nil/empty difference rejection) on branch from exact base_sha.",
-  "tests": [],
+  "result_sha": "3e521d3db526c4be8f2eb457bf4446e9ceb49895",
+  "summary": "Fixed both external #224 typed-diff defects in internal/messaging/outbox_typed_diff.go only (46 insertions, 7 deletions). (1) Removals are collected and emitted as one non-overlapping patch per contiguous run, separator chosen relative to the retained neighbour (previous entry end, else next entry start, else array open); CleanupOutbox now removes two leading failed DMs in front of a retained protocol group entry. (2) Relays compared with reflect.DeepEqual (no normalization): legacy nil->[] and []->nil are refused with ErrOutboxTypedWriteHeld and zero writes (bytes and mtime unchanged); a final coverage check refuses any typed change the emitted patches do not express. New tests in outbox_typed_diff_test.go: leading/middle/trailing/adjacent+separated/all-deleted runs with retained protocol (failure_result, recovery_witness) and irregular-whitespace relays:null groups, every retained entry byte-identical; run beside a retained DM value update; CleanupOutbox end to end; relay nil/empty both directions with and without status change; unchanged nil/empty/listed relays still patch and keep their raw token. No typed rewrite of protocol entries; group retry budgets, W1 snapshot guard and W2 runtime untouched.",
+  "tests": [
+    {
+      "command": "baseline: go test ./internal/messaging -run 'TypedDiff|CleanupOutboxRemovesLeading' -count=1 -v (new tests against base outbox_typed_diff.go)",
+      "exit_code": 1,
+      "note": "expected failure: 14 FAIL lines (overlapping patch range for leading runs; nil/empty relay changes returned success or silently persisted status only); control cases passed"
+    },
+    {
+      "command": "go test ./internal/messaging -run 'TypedDiff|CleanupOutboxRemovesLeading|TypedOutbox' -race -count=20 -v",
+      "exit_code": 0,
+      "note": "560 PASS lines, 0 FAIL"
+    },
+    {
+      "command": "go test ./internal/messaging -race -count=1",
+      "exit_code": 0
+    },
+    {
+      "command": "go vet ./...",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
   "blocker": null,
-  "next": null,
-  "updated_at": "2026-10-14T01:53:10Z"
+  "next": "Coordinator independently accepts and transfers the code to the original #224 branch; this lane opened no PR and did not touch #224.",
+  "updated_at": "2026-10-14T01:59:08Z"
 }
