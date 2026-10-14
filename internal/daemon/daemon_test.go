@@ -82,7 +82,7 @@ func TestProcessOutbox_SkipsDuplicateIDEntriesWithoutMutating(t *testing.T) {
 	require.NoError(t, messaging.SaveOutbox(ob))
 
 	out := captureStdout(t, func() {
-		processOutbox(context.Background(), &types.Identity{Nickname: "test"}, []string{"ws://127.0.0.1:1"})
+		processOutbox(context.Background(), &types.Identity{Nickname: "test"}, []string{"ws://127.0.0.1:1"}, nil)
 	})
 
 	assert.Contains(t, out, "share this ID",

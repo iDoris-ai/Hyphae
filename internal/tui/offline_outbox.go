@@ -148,6 +148,32 @@ func (m *ChatModel) retryPendingOutbox(ctx context.Context) {
 			})
 		}
 	}
+	m.retryPendingGroupOutbox(ctx)
+}
+
+// retryPendingGroupOutbox selects group_pending via GetPendingGroupOutbox and
+// publishes through the bound Handlers.Attempt only. It must not restore DM
+// OutboxHistory, publish DM delivery updates, insert into messages, or leak
+// into the DM viewport.
+func (m *ChatModel) retryPendingGroupOutbox(ctx context.Context) {
+	if ctx.Err() != nil || m.groupAttempt == nil {
+		return
+	}
+	outbox, err := messaging.LoadOutbox()
+	if err != nil {
+		return
+	}
+	for _, entry := range messaging.GetPendingGroupOutbox(outbox) {
+		if ctx.Err() != nil {
+			return
+		}
+		if !outboxRetryDue(entry, time.Now()) {
+			continue
+		}
+		_, _ = messaging.AttemptSendRouted(ctx, outbox, entry, m.relays, relayDialTimeout, messaging.AttemptOptions{
+			Handlers: messaging.OutboxHandlers{Attempt: m.groupAttempt},
+		})
+	}
 }
 
 func (m *ChatModel) restoreOutboxHistory(entry types.OutboxEntry) error {

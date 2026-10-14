@@ -156,8 +156,13 @@ Run this in a separate terminal or as a system service.`,
 				_ = db.Close()
 			}
 		}()
-		if _, err := groupchat.NewStore(db); err != nil {
+		groupStore, err := groupchat.NewStore(db)
+		if err != nil {
 			return common.NewExitError(common.ErrCodeOther, fmt.Errorf("group storage init failed: %w", err))
+		}
+		groupAttempt, err := groupchat.NewFanoutAttemptHandlerFor(groupStore, myIdentity.Npub)
+		if err != nil {
+			return common.NewExitError(common.ErrCodeOther, fmt.Errorf("group attempt handler init failed: %w", err))
 		}
 
 		relays, err := common.ResolveRelays(c)
@@ -207,7 +212,7 @@ Run this in a separate terminal or as a system service.`,
 		preloadRecentSeenWithLogger(seen, myIdentity.Npub, logger)
 		work := daemonRuntimeWork{
 			processOutbox: func() error {
-				processOutbox(daemonCtx, myIdentity, relays)
+				processOutbox(daemonCtx, myIdentity, relays, groupAttempt)
 				return nil
 			},
 			scanInbox: func() error {
@@ -264,11 +269,11 @@ func validateDaemonIntervals(retrySeconds, watchSeconds int64) (time.Duration, t
 // Outbox transitions are saved as they occur. A crash after a relay ACK but
 // before the matching entry is removed can still cause a later retry; this
 // loop does not claim exactly-once delivery.
-func processOutbox(ctx context.Context, myIdentity *types.Identity, relays []string) {
-	processOutboxWithLogger(ctx, myIdentity, relays, daemonLoggerForContext(ctx))
+func processOutbox(ctx context.Context, myIdentity *types.Identity, relays []string, groupAttempt messaging.GroupAttemptHandler) {
+	processOutboxWithLogger(ctx, myIdentity, relays, groupAttempt, daemonLoggerForContext(ctx))
 }
 
-func processOutboxWithLogger(ctx context.Context, myIdentity *types.Identity, relays []string, logger *daemonLogger) {
+func processOutboxWithLogger(ctx context.Context, myIdentity *types.Identity, relays []string, groupAttempt messaging.GroupAttemptHandler, logger *daemonLogger) {
 	if ctx.Err() != nil {
 		return
 	}
@@ -279,12 +284,13 @@ func processOutboxWithLogger(ctx context.Context, myIdentity *types.Identity, re
 	}
 
 	pending := messaging.GetPendingOutbox(outbox)
-	if len(pending) == 0 {
+	groupPending := messaging.GetPendingGroupOutbox(outbox)
+	if len(pending) == 0 && len(groupPending) == 0 {
 		return
 	}
 
 	logger.printf("[%s] 📤 Processing %d pending messages...\n",
-		time.Now().Format("15:04:05"), len(pending))
+		time.Now().Format("15:04:05"), len(pending)+len(groupPending))
 
 	successCount := 0
 	failCount := 0
@@ -293,15 +299,8 @@ func processOutboxWithLogger(ctx context.Context, myIdentity *types.Identity, re
 		if ctx.Err() != nil {
 			return
 		}
-		// Check if it's time to retry (exponential backoff)
-		if entry.LastAttempt > 0 {
-			backoff := time.Duration(entry.RetryCount*entry.RetryCount) * time.Second
-			if backoff > 5*time.Minute {
-				backoff = 5 * time.Minute
-			}
-			if time.Now().Unix()-entry.LastAttempt < int64(backoff.Seconds()) {
-				continue // Skip, not time yet
-			}
+		if !daemonOutboxRetryDue(entry, time.Now()) {
+			continue
 		}
 
 		result, err := messaging.AttemptSend(ctx, outbox, entry, relays, relayDialTimeout)
@@ -330,9 +329,52 @@ func processOutboxWithLogger(ctx context.Context, myIdentity *types.Identity, re
 		}
 	}
 
+	for _, entry := range groupPending {
+		if ctx.Err() != nil {
+			return
+		}
+		if !daemonOutboxRetryDue(entry, time.Now()) {
+			continue
+		}
+		// Group route uses Handlers.Attempt only — never legacy Handlers.Group,
+		// and never coerce group status into the DM pending loop above.
+		result, err := messaging.AttemptSendRouted(ctx, outbox, entry, relays, relayDialTimeout, messaging.AttemptOptions{
+			Handlers: messaging.OutboxHandlers{Attempt: groupAttempt},
+		})
+		if !result.Attempted {
+			logger.printf("   ⚠️  group %s...: %v\n", safePrefix(entry.ID, 16), err)
+			continue
+		}
+		if err != nil {
+			logger.printf("   ⚠️  group %s...: %v\n", safePrefix(entry.ID, 16), err)
+		}
+		if result.Sent {
+			successCount++
+			logger.printf("   ✅ Sent group: %s...\n", safePrefix(entry.ID, 16))
+		} else {
+			if result.MarkedFailed {
+				logger.printf("   ❌ Failed group (max retries): %s...\n", safePrefix(entry.ID, 16))
+			}
+			failCount++
+		}
+	}
+
 	if successCount > 0 || failCount > 0 {
 		logger.printf("   Result: %d sent, %d failed\n", successCount, failCount)
 	}
+}
+
+// daemonOutboxRetryDue mirrors the TUI outbox backoff: RetryCount^2 seconds,
+// capped at 5 minutes, skipped when LastAttempt is unset.
+func daemonOutboxRetryDue(entry types.OutboxEntry, now time.Time) bool {
+	if entry.LastAttempt <= 0 {
+		return true
+	}
+	backoff := time.Duration(entry.RetryCount*entry.RetryCount) * time.Second
+	if backoff > 5*time.Minute {
+		backoff = 5 * time.Minute
+	}
+	return now.Unix()-entry.LastAttempt >= int64(backoff.Seconds())
 }
 
 // watchInbox monitors for new messages.

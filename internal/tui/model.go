@@ -88,6 +88,7 @@ type ChatModel struct {
 	store                 *storage.MessageStore
 	db                    *sql.DB
 	groupStore            *groupchat.Store
+	groupAttempt          messaging.GroupAttemptHandler
 	relays                []string
 	width                 int
 	height                int
@@ -158,6 +159,11 @@ func NewChatModel(contactName string, relays ...string) (*ChatModel, error) {
 		_ = db.Close()
 		return nil, common.NewExitError(common.ErrCodeOther, fmt.Errorf("group storage init failed: %w", err))
 	}
+	groupAttempt, err := groupchat.NewFanoutAttemptHandlerFor(groupStore, myIdentity.Npub)
+	if err != nil {
+		_ = db.Close()
+		return nil, common.NewExitError(common.ErrCodeOther, fmt.Errorf("group attempt handler init failed: %w", err))
+	}
 
 	store := storage.NewMessageStore(db)
 
@@ -185,6 +191,7 @@ func NewChatModel(contactName string, relays ...string) (*ChatModel, error) {
 		store:          store,
 		db:             db,
 		groupStore:     groupStore,
+		groupAttempt:   groupAttempt,
 		relays:         relays,
 		loading:        true,
 		inboxCtx:       inboxCtx,

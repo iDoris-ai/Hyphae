@@ -207,7 +207,7 @@ func TestProcessOutboxDoesNothingAfterCancellation(t *testing.T) {
 	}}}))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	processOutbox(ctx, &types.Identity{Nickname: "alice"}, []string{"ws://127.0.0.1:1"})
+	processOutbox(ctx, &types.Identity{Nickname: "alice"}, []string{"ws://127.0.0.1:1"}, nil)
 	outbox, err := messaging.LoadOutbox()
 	require.NoError(t, err)
 	require.Len(t, outbox.Entries, 1)
