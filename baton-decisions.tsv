@@ -1,2 +1,6 @@
 timestamp	task_id	attempt_id	sequence	decision	rationale
 2026-10-15T11:50:15Z	v2-wave2-dm-safe-fix-20261015	c468bf7b-2538-48d0-b7eb-5dfb038e3225	1	start	Cloned public repo in Grok Bot cloud VM; HEAD verified == base_sha 01294a52; branch created from base.
+2026-10-15T11:52:52Z	v2-wave2-dm-safe-fix-20261015	c468bf7b-2538-48d0-b7eb-5dfb038e3225	2	confirm-defects	New mocked tests fail on base (1 fail, 8 errors) incl. TimeoutExpired argv leak, exec-fail unwind, probe escape, no SIGTERM handler.
+2026-10-15T11:52:52Z	v2-wave2-dm-safe-fix-20261015	c468bf7b-2538-48d0-b7eb-5dfb038e3225	2	redaction-design	Publish only runner-authored HarnessError messages; never whitelist generic RuntimeError text.
+2026-10-15T11:52:52Z	v2-wave2-dm-safe-fix-20261015	c468bf7b-2538-48d0-b7eb-5dfb038e3225	2	cleanup-design	Attempt all owned stops; primary failure never masked; keep private temp root and emit residual flags when shutdown unconfirmed.
+2026-10-15T11:52:52Z	v2-wave2-dm-safe-fix-20261015	c468bf7b-2538-48d0-b7eb-5dfb038e3225	2	verify	Only python3 scripts/test_tui_offline_pty_acceptance.py run; exit 0, 15 tests. No --execute, PTY, relay or build.
