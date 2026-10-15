@@ -3,16 +3,23 @@
   "schema_version": 1,
   "task_id": "v2-wave1-dm-pty-20261015",
   "attempt_id": "a67c88e5-ecc2-4f30-8087-9e1a3a83761e",
-  "sequence": 1,
-  "status": "started",
+  "sequence": 2,
+  "status": "completed",
   "base_sha": "01294a52ec597eec1c213b97a2ca8de7fc5b9795",
   "branch": "baton/grokbot-v2-20261015-dm-pty",
-  "result_sha": null,
+  "result_sha": "50da9ed1074b5529d094a329d8937e19b48eb5a1",
   "source_base_verified": true,
   "provider_run_id": null,
-  "summary": "Started source-read-only DM PTY harness review on Grok Bot cloud VM; HEAD verified equal to base_sha (also equal to origin/main at clone time).",
+  "summary": "Source-read-only review delivered in baton-v2-dm-pty-review.md: 4 defects with file:line evidence (D1 failure-path redaction leaks raw exception argv via str(exc); D2 teardown not exception-isolated; D3 pty.fork child lacks os._exit guard; D4 no SIGTERM cleanup) plus smallest patches and mock-only regression test proposals; invariants mapped. Zero source diff. Delivery only; coordinator acceptance pending.",
+  "changed_files": ["baton-result.json", "baton-decisions.tsv", "baton-v2-dm-pty-review.md"],
+  "commands": [
+    {"command": "git clone --no-checkout https://github.com/iDoris-ai/Hyphae.git (hooks disabled)", "exit_code": 0},
+    {"command": "git checkout 01294a52ec597eec1c213b97a2ca8de7fc5b9795 && git rev-parse HEAD", "exit_code": 0},
+    {"command": "rg -n <teardown/signal patterns> scripts/tui_offline_pty_acceptance.py", "exit_code": 0},
+    {"command": "git push origin baton/grokbot-v2-20261015-dm-pty", "exit_code": 0}
+  ],
   "tests": [],
   "blocker": null,
-  "next": null,
-  "updated_at": "2026-10-15T10:48:30Z"
+  "next": "Stop. Coordinator verifies delivery independently; implementing D1-D4 requires new scoped authority.",
+  "updated_at": "2026-10-15T10:51:32Z"
 }
