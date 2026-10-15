@@ -228,7 +228,7 @@ func confirmFanoutFailureCommit(path string, row fanoutFailureRow, want messagin
 	if entry == nil || entry.QueueID != row.token.queueID {
 		return "", fmt.Errorf("%w: outbox entry missing or replaced after uncertain commit", ErrFanoutBookkeepingConflict)
 	}
-	if receipt == "" {
+	if receipt == "" || receipt == row.receipt {
 		return "", fmt.Errorf("%w: old snapshot survived; this publish outcome has no durable evidence", ErrFanoutBookkeepingPending)
 	}
 	if !matchesFailureResult(entry, want, &row) {
