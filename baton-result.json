@@ -1,0 +1,17 @@
+{
+  "schema": "baton-result/v1",
+  "schema_version": 1,
+  "task_id": "v2-wave2-dm-safe-fix-20261015",
+  "attempt_id": "c468bf7b-2538-48d0-b7eb-5dfb038e3225",
+  "sequence": 1,
+  "status": "started",
+  "base_sha": "01294a52ec597eec1c213b97a2ca8de7fc5b9795",
+  "branch": "baton/grokbot-v2-20261015-dm-safe-fix",
+  "result_sha": null,
+  "summary": "Started: cloned public repo, checked out exact base_sha and verified HEAD.",
+  "tests": [],
+  "blocker": null,
+  "next": "Confirm defects on base with mocked unit tests, then patch.",
+  "updated_at": "2026-10-15T11:50:15+00:00",
+  "source_base_verified": true
+}
