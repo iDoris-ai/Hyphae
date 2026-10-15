@@ -3,22 +3,28 @@
   "schema_version": 1,
   "task_id": "v2-wave1-group-negative-20261015",
   "attempt_id": "97167ace-9d02-40e9-b0a9-9e7fbc21821d",
-  "sequence": 1,
-  "status": "started",
+  "sequence": 2,
+  "status": "completed",
   "base_sha": "56e81b18c48650a4f425bc599e465f7bd2a353a4",
   "branch": "baton/grokbot-v2-20261015-group-negative",
   "lane": "grokbot-cloud",
   "provider_run_identity": null,
-  "result_sha": null,
+  "result_sha": "965bd8852c8ee458dc2019ff67188a9a4347995e",
   "source_base_verified": true,
-  "summary": "Started source-read-only audit of encrypted-group negative coverage at exact base.",
-  "changed_files": ["baton-result.json"],
+  "summary": "Source-read-only review delivered in baton-v2-group-negative-review.md. Real gap: a creator-signed invite with a fresh invite_id for an existing (group, invitee) has no explicit state guard or test in ReceiveInvite (store.go:419-450); refusal relies only on UNIQUE(local_npub,group_id,invitee_npub) (store.go:179), which schema_health does not verify. Proposed one test-only no-state-change test (expected PASS at base by inference) plus an optional typed-error assertion (expected FAIL at base by inference). Zero source diff. Completion means delivery only; coordinator accepts independently.",
+  "changed_files": ["baton-result.json", "baton-decisions.tsv", "baton-v2-group-negative-review.md"],
   "tests": [],
   "commands": [
     {"command": "git clone https://github.com/iDoris-ai/Hyphae.git", "exit_code": 0},
-    {"command": "git checkout 56e81b18c48650a4f425bc599e465f7bd2a353a4 && git rev-parse HEAD", "exit_code": 0}
+    {"command": "git checkout 56e81b18c48650a4f425bc599e465f7bd2a353a4 && git rev-parse HEAD", "exit_code": 0},
+    {"command": "git cat-file -t 7df20295554bf2e7087722d1d2ecd8f2de29ce4a && git show 7df20295554bf2e7087722d1d2ecd8f2de29ce4a", "exit_code": 0},
+    {"command": "git merge-base --is-ancestor 7df20295554bf2e7087722d1d2ecd8f2de29ce4a HEAD", "exit_code": 1},
+    {"command": "git merge-base --is-ancestor 56e81b18c48650a4f425bc599e465f7bd2a353a4 origin/main", "exit_code": 1},
+    {"command": "git branch -r --contains 7df20295554bf2e7087722d1d2ecd8f2de29ce4a", "exit_code": 0},
+    {"command": "rg (read-only source searches over internal/groupchat, tests/e2e, scripts)", "exit_code": 0},
+    {"command": "git push origin baton/grokbot-v2-20261015-group-negative (seq 1 receipt, then report commit)", "exit_code": 0}
   ],
   "blocker": null,
-  "next": null,
-  "updated_at": "2026-10-15T10:48:36Z"
+  "next": "Stop. Coordinator verifies delivery independently; any implementation (test file, typed-error guard, schema UNIQUE check) requires new scoped authority.",
+  "updated_at": "2026-10-15T10:51:48Z"
 }
