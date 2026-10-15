@@ -1,0 +1,2 @@
+timestamp_utc	sequence	decision	rationale
+2026-10-15T11:50:31Z	1	start	HEAD verified = base_sha 01294a52; branch created from base; started receipt first

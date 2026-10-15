@@ -1,0 +1,18 @@
+{
+  "schema": "baton-result/v1",
+  "schema_version": 1,
+  "task_id": "v2-wave2-reinvite-test-20261015",
+  "attempt_id": "90acf67b-4ca5-410f-ac79-002cf30d4f27",
+  "sequence": 1,
+  "status": "started",
+  "base_sha": "01294a52ec597eec1c213b97a2ca8de7fc5b9795",
+  "branch": "baton/grokbot-v2-20261015-reinvite-test",
+  "result_sha": null,
+  "summary": "Started: cloned public repo, checked out base_sha, verified HEAD; branch created.",
+  "tests": [],
+  "blocker": null,
+  "next": "Write reinvite negative-coverage test",
+  "updated_at": "2026-10-15T11:50:31+00:00",
+  "source_base_verified": true,
+  "changed_files": []
+}
