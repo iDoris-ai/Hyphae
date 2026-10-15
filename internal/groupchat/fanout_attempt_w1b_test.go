@@ -70,3 +70,57 @@ func TestW1bPayloadDriftStoreConflictHandlerPayload(t *testing.T) {
 	require.False(t, errors.Is(err, messaging.ErrGroupAttemptQueueConflict))
 	unchanged()
 }
+
+// Regression: the caller bind must run before ANY barrier replay, observed as
+// zero directory-confirm calls, not only an unchanged snapshot. Rollback can
+// hide a replay, so the snapshot alone is not the order proof.
+func TestW1bBindBeforeAnyReplay(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, f failureFixture)
+	}{
+		{"pending_O3", func(t *testing.T, f failureFixture) { f.failO3BeforeT4(t, f.startAttempt(t, 1)) }},
+		{"D6_before_T2prime", func(t *testing.T, f failureFixture) { f.crashD6BeforeT2(t) }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFailureFixture(t)
+			tc.setup(t, f)
+			entry := f.typedEntry(t)
+			entry.EventJSON = " " + entry.EventJSON
+			orig := confirmOutboxDurable
+			t.Cleanup(func() { confirmOutboxDurable = orig })
+			calls := 0
+			confirmOutboxDurable = func(p string) error { calls++; return orig(p) }
+			unchanged := f.snapshot(t)
+			_, err := NewFanoutAttemptHandler(f.member.store).Reserve(entry)
+			require.ErrorIs(t, err, messaging.ErrGroupAttemptPayloadMismatch)
+			require.Zero(t, calls, "directory confirm ran before the caller bind refused")
+			unchanged()
+
+			// Live-counter control: the authentic bytes reach the replay.
+			_, err = NewFanoutAttemptHandler(f.member.store).Reserve(f.typedEntry(t))
+			require.NoError(t, err)
+			require.GreaterOrEqual(t, calls, 1, "control: authentic replay must confirm")
+		})
+	}
+}
+
+// Regression: an empty handler payload is refused before Store. The pin is
+// zero directory-confirm calls and an unchanged snapshot. It is not a global
+// NoFS or lock-IO claim; lock IO and the confirm counter are distinct.
+func TestW1bEmptyHandlerPayloadRefusedBeforeStore(t *testing.T) {
+	f := newFailureFixture(t)
+	f.failO3BeforeT4(t, f.startAttempt(t, 1))
+	entry := f.typedEntry(t)
+	entry.EventJSON = ""
+	orig := confirmOutboxDurable
+	t.Cleanup(func() { confirmOutboxDurable = orig })
+	calls := 0
+	confirmOutboxDurable = func(p string) error { calls++; return orig(p) }
+	unchanged := f.snapshot(t)
+	_, err := NewFanoutAttemptHandler(f.member.store).Reserve(entry)
+	require.ErrorIs(t, err, messaging.ErrGroupAttemptPayloadMismatch)
+	require.Zero(t, calls)
+	unchanged()
+}
