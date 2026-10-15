@@ -7,6 +7,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -159,7 +160,7 @@ class AcceptanceRunnerTests(unittest.TestCase):
              mock.patch.object(runner.fcntl, "ioctl") as ioctl, \
              mock.patch.object(runner.os, "kill") as kill:
             with self.assertRaises(ChildExit):
-                runner.PtyProcess(["/nonexistent"], {"HOME": "/nonexistent-home"})
+                runner.PtyProcess(["/nonexistent"], {"HOME": "/nonexistent-home"}, [])
         self.assertEqual(os.environ.get("TEST_SENTINEL"), None)
         exit_.assert_called_once_with(127)
         ioctl.assert_not_called()
@@ -184,6 +185,110 @@ class AcceptanceRunnerTests(unittest.TestCase):
         self.assertIn("SIGTERM", json.loads(output)["failure"])
         self.assertIs(installed[signal.SIGTERM], previous)
         self.assertGreaterEqual(sig.call_count, 2)
+
+    # --- regression proofs for review blockers (fork/exec/kill/waitpid all mocked) ---
+    def _fake_bins(self):
+        bin_dir = tempfile.mkdtemp(prefix="pty-test-bins-")
+        self.addCleanup(shutil.rmtree, bin_dir, True)
+        for name in ("hyphae", "hyphae-relay"):
+            Path(bin_dir, name).write_bytes(b"")
+        args = self._args()
+        args.bin_dir = bin_dir
+        return args
+
+    def _run_setup_failure(self, stop_confirmed):
+        roots = []
+        real_mkdtemp = tempfile.mkdtemp
+
+        def record_root(*a, **k):
+            roots.append(real_mkdtemp(*a, **k))
+            return roots[-1]
+
+        args = self._fake_bins()
+        out = io.StringIO()
+        err = io.StringIO()
+        relay_stop = mock.Mock()
+        with contextlib.ExitStack() as stack:
+            enter = stack.enter_context
+            enter(mock.patch.dict(runner.os.environ, {}))
+            enter(mock.patch.object(runner.tempfile, "mkdtemp", side_effect=record_root))
+            for name, value in (("create_identity", "npub1fake"), ("set_contact", None),
+                                ("decode_npub", "a" * 64), ("contact_matches", True), ("free_port", 1)):
+                enter(mock.patch.object(runner, name, return_value=value))
+            enter(mock.patch.object(runner.Relay, "start"))
+            enter(mock.patch.object(runner.Relay, "stop", relay_stop))
+            enter(mock.patch.object(runner.signal, "pthread_sigmask", return_value=set(), create=True))
+            enter(mock.patch.object(runner.pty, "fork", return_value=(424242, 97)))
+            enter(mock.patch.object(runner.os, "execvpe", side_effect=AssertionError("no exec")))
+            enter(mock.patch.object(runner.os, "_exit", side_effect=AssertionError("no _exit")))
+            enter(mock.patch.object(runner.fcntl, "ioctl",
+                                    side_effect=OSError(5, "ioctl npub1secret", "/private/secret-tty")))
+            kill = enter(mock.patch.object(runner.os, "kill"))
+            enter(mock.patch.object(runner.os, "waitpid", return_value=(424242, 0)))
+            enter(mock.patch.object(runner.os, "close"))
+            if not stop_confirmed:
+                enter(mock.patch.object(runner.PtyProcess, "wait", return_value=False))
+            enter(contextlib.redirect_stdout(out))
+            enter(contextlib.redirect_stderr(err))
+            code = runner.run_offline_acceptance(args)
+        for root in roots:
+            self.addCleanup(shutil.rmtree, root, True)
+        self.assertEqual(code, 1)
+        payload = json.loads(out.getvalue())
+        self.assertEqual(payload["status"], "fail")
+        for leaked in ("/private", "secret", "npub1", "Traceback"):
+            self.assertNotIn(leaked, out.getvalue() + err.getvalue())
+        self.assertEqual(kill.call_args_list[0], mock.call(424242, signal.SIGTERM))
+        self.assertTrue(all(c.args[0] == 424242 for c in kill.call_args_list))
+        relay_stop.assert_called_once_with()
+        self.assertEqual(len(roots), 1)
+        return payload, Path(roots[0]), kill
+
+    def test_pty_setup_failure_after_fork_stops_exact_owned_child(self):
+        payload, root, _ = self._run_setup_failure(stop_confirmed=True)
+        self.assertNotIn("residual", payload)
+        self.assertFalse(root.exists())
+
+    def test_pty_setup_failure_unconfirmed_stop_retains_private_root(self):
+        payload, root, kill = self._run_setup_failure(stop_confirmed=False)
+        self.assertEqual(kill.call_args_list, [mock.call(424242, signal.SIGTERM),
+                                               mock.call(424242, signal.SIGKILL)])
+        self.assertTrue(payload["residual"]["private_temp_root_retained"])
+        self.assertTrue(root.exists())
+        self.assertEqual(os.stat(root).st_mode & 0o777, 0o700)
+
+    def test_evidence_write_failure_keeps_first_safe_failure(self):
+        before = signal.getsignal(signal.SIGTERM)
+        for boom in (OSError(13, "denied npub1secret", "/private/secret/evidence.json"),
+                     RuntimeError("token=abc /private/x event-content-secret")):
+            out, err = io.StringIO(), io.StringIO()
+            args = self._args()
+            args.evidence = "/nonexistent-dir/evidence.json"
+            with mock.patch.object(runner, "isolated_env",
+                                   side_effect=runner.HarnessError("local relay did not start listening")), \
+                 mock.patch.object(runner, "write_evidence", side_effect=boom), \
+                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = runner.run_offline_acceptance(args)
+            self.assertEqual(code, 1)
+            payload = json.loads(out.getvalue())
+            self.assertEqual(payload["failure"], "local relay did not start listening")
+            self.assertTrue(payload["evidence_write_failed"])
+            for leaked in ("private", "secret", "npub1", "token", "Traceback"):
+                self.assertNotIn(leaked, out.getvalue() + err.getvalue())
+            self.assertIs(signal.getsignal(signal.SIGTERM), before)
+
+    def test_evidence_write_failure_on_success_is_not_reported_as_pass(self):
+        out = io.StringIO()
+        args = self._args()
+        args.evidence = "/nonexistent-dir/evidence.json"
+        with mock.patch.object(runner, "write_evidence", side_effect=OSError(28, "full", "/private/x")), \
+             contextlib.redirect_stdout(out):
+            code = runner.emit_summary(args, {"status": "pass"}, 0)
+        self.assertEqual(code, 1)
+        payload = json.loads(out.getvalue())
+        self.assertNotEqual(payload["status"], "pass")
+        self.assertTrue(payload["evidence_write_failed"])
+        self.assertNotIn("private", out.getvalue())
 
 
 if __name__ == "__main__":
