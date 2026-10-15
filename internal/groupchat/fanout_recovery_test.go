@@ -135,6 +135,18 @@ func TestAuthorizeFanoutRecoveryRefusals(t *testing.T) {
 		require.Error(t, err)
 		unchanged()
 	})
+	for _, state := range []RecipientDeliveryState{RecipientQueued, RecipientRelayAccepted} {
+		t.Run("non-failed empty outbox "+string(state), func(t *testing.T) {
+			f := newFailureFixture(t)
+			_, err := f.member.db.Exec(`UPDATE groupchat_fanout SET state=? WHERE event_id=?`, state, f.eventID)
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(f.outboxPath, []byte(`{"entries":[]}`), 0600))
+			unchanged := f.snapshot(t)
+			_, err = f.member.store.authorizeFanoutRecovery(f.key, f.recipient, 1)
+			require.Error(t, err)
+			unchanged()
+		})
+	}
 	t.Run("unconsumed O3 on the failed row", func(t *testing.T) {
 		f := newFailureFixture(t)
 		for range 2 {
