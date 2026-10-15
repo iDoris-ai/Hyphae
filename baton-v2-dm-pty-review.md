@@ -1,41 +1,36 @@
-# Baton v2 Wave2: DM PTY harness safety patch
+# Baton v2: DM PTY harness safety patch, round 2
 
-- task_id: v2-wave2-dm-safe-fix-20261015
-- attempt_id: c468bf7b-2538-48d0-b7eb-5dfb038e3225
-- base_sha: 01294a52ec597eec1c213b97a2ca8de7fc5b9795 (git HEAD verified after checkout)
-- branch: baton/grokbot-v2-20261015-dm-safe-fix
-- commits: tests `c3bd01d79f8b4870f89b24903dd1d49791804aa1`, fix `dd64e6a2c1bed251e525e15be7043d2c306dc2e1`
-- status: candidate, pending independent review
+- task_id: dm-safe-r2-20261015
+- attempt_id: 84eace8d-5218-488c-b2b3-5d0287ad9549
+- base_sha: baa5b9753c807fb83a601478306716fcf5ec2bbb (verified as Git commit object and as HEAD after checkout)
+- branch: baton/grokbot-v2-20261015-dm-safe-r2
+- commits: tests `7130bd6d6a8756065d05527aaeca1af254361794`, fix `851cbc5df8e296cb84e90be944c2c50dad4828bc`
+- status: candidate, pending independent review. No PR, merge, release or acceptance claim.
+- Inherited round-1 commits and metadata stay in ancestry unchanged.
 
-## Defects confirmed on base (mocked unit tests only)
+## Blockers addressed
 
-Command: `python3 scripts/test_tui_offline_pty_acceptance.py` on base source + new tests, exit 1
-(15 tests, failures=1, errors=8; log sha256 `5e80d5c0536a9db20b476614ab7a7d4aac88bd8906e824e93ceead752f0e5a77`, log kept privately, not published).
+1. Post-fork ownership. `PtyProcess` now takes the caller's `owned` list and appends itself immediately after `pty.fork()` returns a positive PID, before `ioctl`/`SIGWINCH`/`setraw` can raise. `SIGTERM` is blocked with `pthread_sigmask` across fork and registration (restored in `finally`, and restored in the child before exec), so a SIGTERM unwind cannot land between acquisition and registration. All three `start_chat` calls (sender, receiver, sender restart) register into the same list and cleanup iterates `[*owned_tuis, relay]`, so a partially constructed or restarted child is still stopped. `stop()` resets `fd` to -1 so a second stop never closes a reused descriptor. `finish_owned_cleanup` marks `cleanup_incomplete` before the loop and clears it only when every stop is confirmed, so an escape during cleanup retains the 0700 private root. Signals still target only the exact owned PID; no group/global kills; deadlines unchanged.
+2. Evidence-write failure. New `emit_summary()` wraps `write_evidence`; any exception sets the fixed flag `evidence_write_failed: true`, keeps the first safe `failure` text and nonzero exit, and never emits the raw path/error or a traceback. On the success path a write failure turns `status` into `fail` with fixed text and exit 1, so it is never reported as product success. The SIGTERM handler is still restored in the outer `finally`; root retention is decided before the summary.
 
-1. Redaction: `str(exc)[:240]` published arbitrary exception text; a mocked `TimeoutExpired` leaked argv (path, npub) into failure JSON.
-2. Inbox probe: `independent_inbox_probe` only caught RuntimeError/JSON/AttributeError; a `TimeoutExpired` escaped and would replace the safe primary visibility diagnostic.
-3. Cleanup: `finally` stopped sender, receiver, relay sequentially; one failing stop skipped the rest and masked the primary failure. `Relay.stop` could raise raw `TimeoutExpired` (argv/paths) after SIGKILL.
-4. Fork child: if `execvpe` failed in the `pty.fork` child, the exception unwound into the parent's code path (cleanup, evidence write, temp removal) inside the child.
-5. SIGTERM: no handler, so SIGTERM skipped owned cleanup entirely.
-6. `TemporaryDirectory` removed private roots even when owned child shutdown was unconfirmed.
+## Regression proofs (mocked only)
 
-## Fix (production file only)
+New tests: `test_pty_setup_failure_after_fork_stops_exact_owned_child`, `test_pty_setup_failure_unconfirmed_stop_retains_private_root`, `test_evidence_write_failure_keeps_first_safe_failure`, `test_evidence_write_failure_on_success_is_not_reported_as_pass`. They mock `pty.fork` (synthetic PID 424242), `ioctl` failure with secret-shaped text, `os.kill`, `os.waitpid`, `os.close`, `os.execvpe`, `os._exit`, `pthread_sigmask`, relay start/stop and identity helpers, and protect `os.environ` with `mock.patch.dict`. No real fork, PTY, relay, build or signal to another process.
 
-- `HarnessError(RuntimeError)` for runner-authored messages; all 35 runner raises use it. `safe_failure()` publishes only HarnessError text; other exceptions become `unexpected <Type> (details redacted)` / `subprocess timed out (details redacted)`. Plain RuntimeError strings are NOT whitelisted.
-- Inbox probe catches any Exception and returns the fixed false/zero dict; receiver diagnostics are wrapped so a diagnostic failure sets `receiver_diagnostics_incomplete` and the primary safe diagnostic is still raised.
-- `finish_owned_cleanup()` attempts every owned child stop, counts failures, raises a safe HarnessError only when there was no primary failure (primary never masked). Relay post-SIGKILL timeout becomes a safe HarnessError.
-- `private_temp_root()` (mkdtemp 0700) keeps the root when cleanup is incomplete; failure evidence gets `residual` flags (no paths).
-- Forked child wraps env/exec in `try/finally: os._exit(127)`.
-- SIGTERM handler raises `HarnessTerminated` (one shot) so owned cleanup unwinds; previous handler restored in `finally`.
-- Unchanged: opt-in `--execute` gate, hash pins, exact-owned-PID-only signaling (no process-group/global kills), evidence O_EXCL/0600 and HOME refusal.
+- Base source (baa5b975) + new tests: exit 1, 19 tests, errors=5. The PTY proofs fail because the acquired PID is never signalled (`kill` has no calls) and the root is removed; the evidence proof fails because the raw `PermissionError` escapes; the success-path proof has no safe summary helper; the existing exec-failure test errors only on the new `owned` argument. Log sha256 `f5bfdfab13a5f4be292337ace302acd2a6d20e6203f492e80fee0419c331b0f5` (kept privately).
+- Fix: `python3 scripts/test_tui_offline_pty_acceptance.py` exit 0, 19 tests OK. Log sha256 `4d1c8bdc240d65726cff04ef792150b5cc71ab6aaa8c63fe2f0e34dfb400e8c7` (kept privately).
 
-Diff vs base (numstat, add/del/file):
+## Diff size
+
+Against current `origin/main` (merge base 01294a52), add/del:
 ```
-123	0	scripts/test_tui_offline_pty_acceptance.py
-136	70	scripts/tui_offline_pty_acceptance.py
+171	84	scripts/tui_offline_pty_acceptance.py   (production, 255 lines changed, within 300)
+228	0	scripts/test_tui_offline_pty_acceptance.py
 ```
+This round only, against base baa5b975: production 43/22, tests 106/1.
 
-## Verification
+## Not done / residual notes
 
-`python3 scripts/test_tui_offline_pty_acceptance.py` exit 0 (15 tests OK; log sha256 `08268afbe1aa85cc830db20686575d3968be077dd5272b5078b3b5ea7c8ce2c3`).
-All fork/exec/signal/process calls in new tests are mocked; the test-process environment is protected with `mock.patch.dict` and `os._exit` is mocked. Harness `--execute`, real PTY, relay, product build and binaries were NOT run.
+- Harness `--execute`, real PTY, relay and product build were not run.
+- A partially written evidence file may remain if writing fails after creation; it only ever contains the redacted summary.
+- A SIGTERM during cleanup can still skip later stops, but the root is then retained with `cleanup_incomplete` set (fail closed).
