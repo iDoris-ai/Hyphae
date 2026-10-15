@@ -43,6 +43,9 @@ func (s *Store) fanoutBarrierTx(tx queryExecer, path string, key FanoutKey, reci
 	if entry.Entry.EventJSON != row.eventJSON || int64(entry.Entry.MaxRetries) != row.maxRetries {
 		return row, false, ErrFanoutQueueConflict
 	}
+	if w := messaging.OutboxWitnessDigest(entry); w != "" && w != row.recoveryDigest {
+		return row, false, fmt.Errorf("%w: unconsumed recovery_witness on the queue entry", ErrFanoutRecoveryPending)
+	}
 	if receipt != "" && receipt != row.receipt {
 		if err := confirmOutboxDurable(path); err != nil {
 			return row, false, fmt.Errorf("%w: outbox directory durability unconfirmed before replay: %v", ErrFanoutBookkeepingPending, err)
