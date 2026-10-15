@@ -3,14 +3,23 @@
   "schema_version": 1,
   "task_id": "dm-safe-r2-20261015",
   "attempt_id": "84eace8d-5218-488c-b2b3-5d0287ad9549",
-  "sequence": 1,
-  "status": "started",
+  "sequence": 2,
+  "status": "completed",
   "base_sha": "baa5b9753c807fb83a601478306716fcf5ec2bbb",
   "branch": "baton/grokbot-v2-20261015-dm-safe-r2",
-  "result_sha": null,
-  "summary": "Started: branched from exact base_sha; working on PTY acquisition ownership and failure-evidence safety fixes.",
-  "tests": [],
+  "result_sha": "851cbc5df8e296cb84e90be944c2c50dad4828bc",
+  "summary": "Candidate pending independent review: PTY child registered before setup with SIGTERM blocked across fork; fail-closed cleanup/root retention; evidence-write failure keeps first safe failure and nonzero exit. Mocked regression proofs fail on base (exit 1) and pass with fix. Production diff vs main 255 lines.",
+  "tests": [
+    {
+      "command": "python3 scripts/test_tui_offline_pty_acceptance.py (base baa5b975 source + new tests)",
+      "exit_code": 1
+    },
+    {
+      "command": "python3 scripts/test_tui_offline_pty_acceptance.py",
+      "exit_code": 0
+    }
+  ],
   "blocker": null,
-  "next": null,
-  "updated_at": "2026-10-15T12:58:38+00:00"
+  "next": "Stop with candidate pending independent review; no PR, merge, release or acceptance claims.",
+  "updated_at": "2026-10-15T13:02:00+00:00"
 }
