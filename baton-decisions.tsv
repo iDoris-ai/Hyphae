@@ -1,2 +1,6 @@
 timestamp_utc	sequence	decision	rationale
 2026-10-15T11:50:31Z	1	start	HEAD verified = base_sha 01294a52; branch created from base; started receipt first
+2026-10-15T11:53:43Z	2	contract	fresh invite_id on existing invitee refused by UNIQUE(local_npub,group_id,invitee_npub) at insert; no sentinel error so test asserts refusal+no state change, not ErrInvalidTransition
+2026-10-15T11:53:43Z	2	fixtures	pending/pending, pending/accepted, active/active via existing real crypto fixtures; ordered snapshots of group/member/invite rows scoped to invitee+group
+2026-10-15T11:53:43Z	2	scope	only new test file + 3 metadata files; schema_health.go absent at base_sha, schema read from store.go migrate
+2026-10-15T11:53:43Z	2	result	baseline PASS as coverage; race count=20 exit 0; vet/build/package tests exit 0; no PR, no merge
