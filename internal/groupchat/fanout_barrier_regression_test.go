@@ -79,3 +79,37 @@ func TestCommitReplayFailurePreservesStaleRefusal(t *testing.T) {
 	require.ErrorIs(t, err, ErrFanoutBookkeepingPending)
 	require.ErrorIs(t, err, errFanoutStaleAttempt)
 }
+
+// B1 (PR244 clestons review): recoverFanoutFailure is the dedicated T4-replay
+// entry point and must confirm outbox directory durability before projecting,
+// exactly as the barrier does before its identical replay
+// (fanout_attempt.go:47). Without that confirm, an injected directory-sync
+// failure lets recover commit T4 while R/S would have refused, wedging the
+// two stores against each other with no path to repair it.
+func TestRecoverFanoutFailureHoldsBeforeUnconfirmedReplay(t *testing.T) {
+	f := newFailureFixture(t)
+	token := f.startAttempt(t, 1)
+	f.failO3BeforeT4(t, token)
+	unchanged := f.snapshot(t)
+
+	original := confirmOutboxDurable
+	t.Cleanup(func() { confirmOutboxDurable = original })
+	calls := 0
+	confirmOutboxDurable = func(path string) error {
+		calls++
+		require.Equal(t, f.outboxPath, path)
+		return errors.New("injected directory sync failure")
+	}
+	replayed, err := f.member.store.recoverFanoutFailure(f.key, f.recipient)
+	require.ErrorIs(t, err, ErrFanoutBookkeepingPending)
+	require.False(t, replayed)
+	require.Equal(t, 1, calls)
+	unchanged()
+
+	// Restore the hook: recover now replays and the row catches up.
+	confirmOutboxDurable = original
+	replayed, err = f.member.store.recoverFanoutFailure(f.key, f.recipient)
+	require.NoError(t, err)
+	require.True(t, replayed)
+	require.EqualValues(t, 1, f.row(t).RetryCount)
+}

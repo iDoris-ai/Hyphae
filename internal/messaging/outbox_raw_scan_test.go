@@ -185,6 +185,68 @@ func TestCommitRawOutboxEditZeroWrite(t *testing.T) {
 	}
 }
 
+// TestCommitRawOutboxEditInPlacePatchPersists mirrors the O3 span-patch style
+// edit: a same-length retry_count bump written directly into file.Raw instead
+// of into a fresh buffer. The expected "after" bytes are derived independently
+// of what edit returns, so this fails if commitRawOutboxEdit silently drops
+// the write because file.Raw aliases the snapshot it compares against.
+func TestCommitRawOutboxEditInPlacePatchPersists(t *testing.T) {
+	dm := legacyFixtureEntry(t, "legacy-dm-nil-relays.json")
+	before := rawOutboxDoc(dm)
+	path := writeOutboxFile(t, before)
+
+	idx := bytes.Index(before, []byte(`"retry_count": 0`))
+	if idx < 0 {
+		t.Fatal("fixture missing retry_count: 0")
+	}
+	digitIdx := idx + len(`"retry_count": `)
+	wantAfter := bytes.Clone(before)
+	wantAfter[digitIdx] = '1'
+
+	err := commitRawOutboxEdit(path, func(file *rawOutboxFile) ([]byte, error) {
+		span, ok := file.Entries[0].Values["retry_count"]
+		if !ok || span.End-span.Start != 1 || file.Raw[span.Start] != '0' {
+			t.Fatalf("retry_count span = %+v (%q)", span, file.Raw)
+		}
+		file.Raw[span.Start] = '1'
+		return file.Raw, nil
+	})
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, wantAfter) {
+		t.Fatalf("disk = %s\nwant  = %s", got, wantAfter)
+	}
+}
+
+// TestCommitRawOutboxEditInPlaceInvalidPatchRejected mirrors an in-place edit
+// that corrupts the entry without changing its length. commitRawOutboxEdit
+// must still run the post-edit rescan and refuse to write: the no-op check
+// must not short-circuit validation just because edit mutated file.Raw (and
+// therefore the snapshot it was read from) directly.
+func TestCommitRawOutboxEditInPlaceInvalidPatchRejected(t *testing.T) {
+	dm := legacyFixtureEntry(t, "legacy-dm-nil-relays.json")
+	before := rawOutboxDoc(dm)
+	path := writeOutboxFile(t, before)
+
+	err := commitRawOutboxEdit(path, func(file *rawOutboxFile) ([]byte, error) {
+		span, ok := file.Entries[0].Values["status"]
+		if !ok || !bytes.Equal(file.Raw[span.Start:span.End], []byte(`"pending"`)) {
+			t.Fatalf("status span = %+v (%q)", span, file.Raw)
+		}
+		file.Raw[span.Start+1] = 'P' // "pending" -> "Pending": same length, no longer a valid DM status
+		return file.Raw, nil
+	})
+	if err == nil {
+		t.Fatal("expected validation error for invalid in-place patch, got nil")
+	}
+	requireOutboxUnchanged(t, path, before)
+}
+
 func TestCommitRawOutboxEditRefusesInvalidSnapshot(t *testing.T) {
 	before := []byte(`{"entries":[{"id":"x"}]}`)
 	path := writeOutboxFile(t, before)
