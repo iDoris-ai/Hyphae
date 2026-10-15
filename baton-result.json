@@ -1,0 +1,24 @@
+{
+  "schema": "baton-result/v1",
+  "schema_version": 1,
+  "task_id": "v2-wave1-group-negative-20261015",
+  "attempt_id": "97167ace-9d02-40e9-b0a9-9e7fbc21821d",
+  "sequence": 1,
+  "status": "started",
+  "base_sha": "56e81b18c48650a4f425bc599e465f7bd2a353a4",
+  "branch": "baton/grokbot-v2-20261015-group-negative",
+  "lane": "grokbot-cloud",
+  "provider_run_identity": null,
+  "result_sha": null,
+  "source_base_verified": true,
+  "summary": "Started source-read-only audit of encrypted-group negative coverage at exact base.",
+  "changed_files": ["baton-result.json"],
+  "tests": [],
+  "commands": [
+    {"command": "git clone https://github.com/iDoris-ai/Hyphae.git", "exit_code": 0},
+    {"command": "git checkout 56e81b18c48650a4f425bc599e465f7bd2a353a4 && git rev-parse HEAD", "exit_code": 0}
+  ],
+  "blocker": null,
+  "next": null,
+  "updated_at": "2026-10-15T10:48:36Z"
+}
