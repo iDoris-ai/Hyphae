@@ -16,6 +16,15 @@ var ErrFanoutQueueConflict = errors.New("fanout queue conflict: outbox queue_id 
 // ErrFanoutQueueMissing: the outbox has no entry for the queued row's event.
 var ErrFanoutQueueMissing = errors.New("queue_missing: outbox has no entry for the queued event")
 
+// errFanoutPayloadMismatch: the caller's event bytes are not the row's frozen
+// event_json. Reserve returns it before the barrier, so no replay runs.
+var errFanoutPayloadMismatch = errors.New("fanout payload mismatch: caller event differs from the frozen row")
+
+// errFanoutMaxRetriesDiverged rides inside ErrFanoutQueueConflict when only
+// the outbox max_retries differs from the frozen row's; it lets the handler
+// keep the public bookkeeping_failed issue (a71) without a second check.
+var errFanoutMaxRetriesDiverged = errors.New("fanout max_retries diverged")
+
 var ErrFanoutNotActive = errors.New("fanout row is not an active pending queue entry")
 var ErrFanoutRetryExhausted = errors.New("fanout retry budget exhausted")
 var confirmOutboxDurable = messaging.ConfirmOutboxDurable
@@ -53,8 +62,11 @@ func (s *Store) fanoutBarrierTx(tx queryExecer, path string, key FanoutKey, reci
 		}
 		replayed = true
 	}
-	if entry.Entry.EventJSON != row.eventJSON || int64(entry.Entry.MaxRetries) != row.maxRetries {
+	if entry.Entry.EventJSON != row.eventJSON {
 		return row, replayed, ErrFanoutQueueConflict
+	}
+	if int64(entry.Entry.MaxRetries) != row.maxRetries {
+		return row, replayed, fmt.Errorf("%w: %w: outbox_max=%d row_max=%d", ErrFanoutQueueConflict, errFanoutMaxRetriesDiverged, entry.Entry.MaxRetries, row.maxRetries)
 	}
 	if w := messaging.OutboxWitnessDigest(entry); w != "" && w != row.recoveryDigest {
 		return row, replayed, fmt.Errorf("%w: unconsumed recovery_witness on the queue entry", ErrFanoutRecoveryPending)
@@ -95,12 +107,28 @@ func commitReplayOnRefusal(tx *immediateTx, replayed bool, err error) error {
 // reserveFanoutAttempt is R behind the barrier: it consumes one generation
 // for the row's current queue entry. Inert: no production caller.
 func (s *Store) reserveFanoutAttempt(key FanoutKey, recipient string) (token fanoutAttemptToken, err error) {
+	return s.reserveFanoutAttemptFrozen(key, recipient, "")
+}
+
+// reserveFanoutAttemptFrozen is R with the caller's event bytes bound to the
+// row's frozen event_json inside the same lock and transaction, before the
+// barrier can replay O3 or D6. An empty wantEventJSON skips the bind.
+func (s *Store) reserveFanoutAttemptFrozen(key FanoutKey, recipient, wantEventJSON string) (token fanoutAttemptToken, err error) {
 	err = messaging.WithGroupOutboxLock(func(path string) error {
 		tx, err := s.beginImmediate()
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
+		if wantEventJSON != "" {
+			row, err := loadFanoutFailureRow(tx, key, recipient)
+			if err != nil {
+				return err
+			}
+			if wantEventJSON != row.eventJSON {
+				return errFanoutPayloadMismatch
+			}
+		}
 		if _, replayed, err := s.fanoutBarrierTx(tx, path, key, recipient); err != nil {
 			return commitReplayOnRefusal(tx, replayed, err)
 		}
