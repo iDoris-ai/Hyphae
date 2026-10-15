@@ -1,0 +1,18 @@
+{
+  "schema": "baton-result/v1",
+  "schema_version": 1,
+  "task_id": "v2-wave1-dm-pty-20261015",
+  "attempt_id": "a67c88e5-ecc2-4f30-8087-9e1a3a83761e",
+  "sequence": 1,
+  "status": "started",
+  "base_sha": "01294a52ec597eec1c213b97a2ca8de7fc5b9795",
+  "branch": "baton/grokbot-v2-20261015-dm-pty",
+  "result_sha": null,
+  "source_base_verified": true,
+  "provider_run_id": null,
+  "summary": "Started source-read-only DM PTY harness review on Grok Bot cloud VM; HEAD verified equal to base_sha (also equal to origin/main at clone time).",
+  "tests": [],
+  "blocker": null,
+  "next": null,
+  "updated_at": "2026-10-15T10:48:30Z"
+}
