@@ -3,15 +3,50 @@
   "schema_version": 1,
   "task_id": "v2-wave2-dm-safe-fix-20261015",
   "attempt_id": "c468bf7b-2538-48d0-b7eb-5dfb038e3225",
-  "sequence": 1,
-  "status": "started",
+  "sequence": 2,
+  "status": "completed",
   "base_sha": "01294a52ec597eec1c213b97a2ca8de7fc5b9795",
   "branch": "baton/grokbot-v2-20261015-dm-safe-fix",
-  "result_sha": null,
-  "summary": "Started: cloned public repo, checked out exact base_sha and verified HEAD.",
-  "tests": [],
+  "result_sha": "425e52ce08691191fa7759409fe8634da6eb6d1e",
+  "summary": "DM PTY harness safety patch delivered (candidate, pending independent review): runner-authored HarnessError + redacted safe_failure (TimeoutExpired argv/path/content no longer published), inbox probe and receiver diagnostics can no longer replace the primary failure, every owned child stop attempted without masking the primary failure, private temp root retained with residual flags when shutdown unconfirmed, exec-failing fork child os._exit(127), SIGTERM unwinds owned cleanup and restores the previous handler. Production diff 136+70=206 lines; defects confirmed on base by new mocked tests (exit 1).",
+  "tests": [
+    {
+      "command": "python3 scripts/test_tui_offline_pty_acceptance.py",
+      "phase": "baseline (base source + new tests)",
+      "exit_code": 1
+    },
+    {
+      "command": "python3 scripts/test_tui_offline_pty_acceptance.py",
+      "phase": "after fix",
+      "exit_code": 0
+    }
+  ],
   "blocker": null,
-  "next": "Confirm defects on base with mocked unit tests, then patch.",
-  "updated_at": "2026-10-15T11:50:15+00:00",
-  "source_base_verified": true
+  "next": "Stop; coordinator verifies delivery independently; results are candidate pending independent review.",
+  "updated_at": "2026-10-15T11:53:04+00:00",
+  "source_base_verified": true,
+  "commits": {
+    "tests": "c3bd01d79f8b4870f89b24903dd1d49791804aa1",
+    "fix": "dd64e6a2c1bed251e525e15be7043d2c306dc2e1",
+    "report": "425e52ce08691191fa7759409fe8634da6eb6d1e"
+  },
+  "changed_files": [
+    "scripts/tui_offline_pty_acceptance.py",
+    "scripts/test_tui_offline_pty_acceptance.py",
+    "baton-v2-dm-pty-review.md",
+    "baton-decisions.tsv",
+    "baton-result.json"
+  ],
+  "production_add_del": {
+    "add": 136,
+    "del": 70,
+    "total": 206
+  },
+  "baseline_log_sha256": "5e80d5c0536a9db20b476614ab7a7d4aac88bd8906e824e93ceead752f0e5a77",
+  "fixed_log_sha256": "08268afbe1aa85cc830db20686575d3968be077dd5272b5078b3b5ea7c8ce2c3",
+  "not_run": [
+    "harness --execute",
+    "real fork/PTY/relay",
+    "product build/binaries"
+  ]
 }
