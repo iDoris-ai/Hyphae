@@ -3,16 +3,42 @@
   "schema_version": 1,
   "task_id": "v2-wave2-reinvite-test-20261015",
   "attempt_id": "90acf67b-4ca5-410f-ac79-002cf30d4f27",
-  "sequence": 1,
-  "status": "started",
+  "sequence": 2,
+  "status": "completed",
   "base_sha": "01294a52ec597eec1c213b97a2ca8de7fc5b9795",
   "branch": "baton/grokbot-v2-20261015-reinvite-test",
-  "result_sha": null,
-  "summary": "Started: cloned public repo, checked out base_sha, verified HEAD; branch created.",
-  "tests": [],
+  "result_sha": "b47342f7d447cd21b90e1c421eb231ebc43642d1",
+  "summary": "Added internal/groupchat/store_reinvite_negative_test.go: creator-signed invite with fresh invite_id for an existing invitee is refused (UNIQUE constraint at insert, no sentinel error) with zero change to the invitee's ordered group/member/invite rows, in pending/pending, pending/accepted and active/active fixtures. Baseline PASS = coverage, not a reproduced bug. No production edits. Candidate pending independent review.",
+  "tests": [
+    {
+      "command": "go test -count=1 -v ./internal/groupchat -run TestReceiveInviteFreshInviteID",
+      "exit_code": 0
+    },
+    {
+      "command": "go test -v -race -count=20 ./internal/groupchat -run TestReceiveInviteFreshInviteID",
+      "exit_code": 0
+    },
+    {
+      "command": "go vet ./internal/groupchat",
+      "exit_code": 0
+    },
+    {
+      "command": "go build ./...",
+      "exit_code": 0
+    },
+    {
+      "command": "go test -race -count=1 ./internal/groupchat",
+      "exit_code": 0
+    }
+  ],
   "blocker": null,
-  "next": "Write reinvite negative-coverage test",
-  "updated_at": "2026-10-15T11:50:31+00:00",
+  "next": "Stop; coordinator verifies delivery independently",
+  "updated_at": "2026-10-15T11:53:54+00:00",
   "source_base_verified": true,
-  "changed_files": []
+  "changed_files": [
+    "internal/groupchat/store_reinvite_negative_test.go",
+    "baton-v2-group-negative-review.md",
+    "baton-decisions.tsv",
+    "baton-result.json"
+  ]
 }
