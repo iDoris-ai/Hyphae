@@ -1,7 +1,7 @@
 package groupchat
 
 import (
-	"bytes"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -114,12 +114,11 @@ func TestAuthorizeFanoutRecoveryMissing(t *testing.T) {
 func TestAuthorizeFanoutRecoveryExhaustedPending(t *testing.T) {
 	f := newFailureFixture(t)
 	f.exhaust(t)
-	// Legacy shape: the row is failed but the entry still says group_pending at budget.
-	data, err := os.ReadFile(f.outboxPath)
-	require.NoError(t, err)
-	rewritten := bytes.Replace(data, []byte(`"status": "group_failed"`), []byte(`"status": "group_pending"`), 1)
-	require.NotEqual(t, data, rewritten, "entry status token not found")
-	require.NoError(t, os.WriteFile(f.outboxPath, rewritten, 0600))
+	// Legacy shape: the row is failed but the entry still says group_pending at budget without a modern failure_result.
+	rawEditEntryField(t, f.outboxPath, func(fields map[string]json.RawMessage) {
+		fields["status"] = json.RawMessage(`"group_pending"`)
+		delete(fields, "failure_result")
+	})
 	newQueue, err := f.member.store.authorizeFanoutRecovery(f.key, f.recipient, time.Now().Unix())
 	require.NoError(t, err)
 	w := f.entryByQueue(t, newQueue).RecoveryWitness

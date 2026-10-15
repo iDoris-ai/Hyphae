@@ -239,6 +239,26 @@ func TestBarrierRejectsFrozenIntentMismatch(t *testing.T) {
 			mutate: func(t *testing.T, f *failureFixture) {
 				rawEditEntryField(t, f.outboxPath, func(fields map[string]json.RawMessage) {
 					fields["max_retries"] = json.RawMessage("1")
+					fields["status"] = json.RawMessage(`"group_failed"`)
+					var res map[string]json.RawMessage
+					require.NoError(t, json.Unmarshal(fields["failure_result"], &res))
+					res["status"] = json.RawMessage(`"group_failed"`)
+					res["issue"] = json.RawMessage(`"retry_exhausted"`)
+					rb, err := json.Marshal(res)
+					require.NoError(t, err)
+					fields["failure_result"] = rb
+				})
+				entry := f.outboxEntry(t)
+				newReceipt := messaging.FailureReceipt(entry.FailureResult.ResultID, sha256Hex(entry.Fields["failure_result"]))
+				_, err := f.member.db.Exec(`UPDATE groupchat_fanout SET last_failure_receipt=? WHERE event_id=?`, newReceipt, f.eventID)
+				require.NoError(t, err)
+			},
+		},
+		{
+			name: "max_retries 3 to 2 in outbox entry",
+			mutate: func(t *testing.T, f *failureFixture) {
+				rawEditEntryField(t, f.outboxPath, func(fields map[string]json.RawMessage) {
+					fields["max_retries"] = json.RawMessage("2")
 				})
 			},
 		},
