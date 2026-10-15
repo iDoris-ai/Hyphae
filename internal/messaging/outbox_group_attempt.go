@@ -32,12 +32,16 @@ var (
 )
 
 // GroupAttemptHandler is the rev7 §3.3 R/S/T3+O2/O3+T4 boundary (W-1 of
-// docs/agent/m1-f3-wiring-plan-20261011.md). Every method runs under the
-// outbox lock + SQLite transaction inside the handler; the send loop never
-// writes the outbox itself on this route. Reserve passes the barrier (replay,
-// D14, active budget); Start records the publish start; Accepted/Failed are
-// the current-token result boundaries. Failed reports whether the budget is
-// now exhausted.
+// docs/agent/m1-f3-wiring-plan-20261011.md). Every write runs under the
+// outbox lock. R, S, T3 and T4 also run inside a SQLite transaction. O3
+// writes the outbox file under that lock before T4 commits; O2 writes it
+// under that lock after T3 commits. The send loop never writes the outbox
+// itself on this route. Reserve's event-id lookup and Failed's exhaustion
+// read run outside the lock and outside the transaction (pre-activation
+// debt). Failed's exhausted bool is an observation of that read, not a
+// transactional receipt. Reserve's write passes the barrier (replay, D14,
+// active budget); Start records the publish start; Accepted and Failed
+// writes are the current-token result boundaries.
 type GroupAttemptHandler interface {
 	Reserve(entry types.OutboxEntry) (GroupAttemptToken, error)
 	Start(token GroupAttemptToken, targets int, now int64) error
@@ -94,7 +98,9 @@ func attemptSendGroupAttempt(ctx context.Context, entry types.OutboxEntry, defau
 }
 
 // groupAttemptRefusal maps a handler refusal to the SendResult the daemon,
-// TUI and `outbox retry` already understand. Nothing was published.
+// TUI and `outbox retry` already understand. Attempted and Sent stay zero
+// in this mapping. Callers on the post-publish paths override those fields
+// after publish returns false, and after publish returns true.
 func groupAttemptRefusal(err error) (SendResult, error) {
 	switch {
 	case errors.Is(err, ErrGroupAttemptStale):
