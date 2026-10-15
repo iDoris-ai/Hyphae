@@ -180,17 +180,26 @@ class Screen:
 
 
 class PtyProcess:
-    def __init__(self, argv: list[str], env: dict[str, str], rows: int = 32, cols: int = 120):
-        self.pid, self.fd = pty.fork()
+    def __init__(self, argv: list[str], env: dict[str, str], owned: list,
+                 rows: int = 32, cols: int = 120):
         self.screen = Screen(rows, cols)
         self.rows, self.cols = rows, cols
-        if self.pid == 0:
-            try:  # never unwind into the parent's cleanup from the forked child
-                os.environ.clear()
-                os.environ.update(env)
-                os.execvpe(argv[0], argv, env)
-            finally:
-                os._exit(127)
+        self.pid, self.fd = 0, -1
+        # Block SIGTERM so the exact child handle is registered before any unwind.
+        blocked = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
+        try:
+            self.pid, self.fd = pty.fork()
+            if self.pid == 0:
+                try:  # never unwind into the parent's cleanup from the forked child
+                    signal.pthread_sigmask(signal.SIG_SETMASK, blocked)
+                    os.environ.clear()
+                    os.environ.update(env)
+                    os.execvpe(argv[0], argv, env)
+                finally:
+                    os._exit(127)
+            owned.append(self)  # owned before setup below can raise
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, blocked)
         fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
         os.kill(self.pid, signal.SIGWINCH)
         tty.setraw(self.fd, termios.TCSANOW)
@@ -241,6 +250,7 @@ class PtyProcess:
             os.close(self.fd)
         except OSError:
             pass
+        self.fd = -1  # idempotent: never close a reused descriptor
 
 
 class Relay:
@@ -359,9 +369,10 @@ def contact_matches(binary: Path, home: Path, cache: Path, nickname: str, npub: 
                for item in payload.get("data", []))
 
 
-def start_chat(binary: Path, home: Path, cache: Path, contact: str, relay_url: str) -> PtyProcess:
+def start_chat(binary: Path, home: Path, cache: Path, contact: str, relay_url: str,
+               owned: list) -> PtyProcess:
     return PtyProcess([str(binary), "tui", "chat", "--with", contact, "--relay", relay_url],
-                      isolated_env(home, cache))
+                      isolated_env(home, cache), owned)
 
 
 def wait_outbox(home: Path, event_prefix: str, wanted: bool, timeout: float = 5,
@@ -610,6 +621,7 @@ def _raise_on_sigterm(signum, frame) -> None:
 
 
 def finish_owned_cleanup(owned: list, state: dict[str, object], primary_ok: bool) -> None:
+    state["cleanup_incomplete"] = True  # fail closed until every stop is confirmed
     failures = 0
     for child in owned:
         if child is None:
@@ -619,8 +631,8 @@ def finish_owned_cleanup(owned: list, state: dict[str, object], primary_ok: bool
         except Exception:
             failures += 1
     state["failed_stop_count"] = failures
+    state["cleanup_incomplete"] = bool(failures)
     if failures:
-        state["cleanup_incomplete"] = True
         if primary_ok:
             raise HarnessError("owned child cleanup incomplete; private temp root retained")
 
@@ -634,6 +646,18 @@ def private_temp_root(state: dict[str, object]):
     finally:
         if not state.get("cleanup_incomplete"):
             shutil.rmtree(name, ignore_errors=True)
+
+
+def emit_summary(args: argparse.Namespace, evidence: dict[str, object], code: int) -> int:
+    try:
+        write_evidence(args.evidence, evidence)
+    except Exception:  # fixed text only; never the raw path/error, never masks a primary failure
+        evidence["evidence_write_failed"] = True
+        if evidence.get("status") == "pass":
+            evidence.update({"status": "fail", "failure": "evidence write failed after checks (details redacted)"})
+        code = code or 1
+    print(json.dumps(evidence, sort_keys=True))
+    return code
 
 
 def run_offline_acceptance(args: argparse.Namespace) -> int:
@@ -699,11 +723,12 @@ def run_offline_acceptance(args: argparse.Namespace) -> int:
             relay_data.mkdir(mode=0o700)
             relay = Relay(relay_bin, relay_data, port, sender_env)
             sender_tui = receiver_tui = None
+            owned_tuis: list[PtyProcess] = []
             primary_ok = False
             try:
                 relay.start()
-                sender_tui = start_chat(cli_bin, sender_home, cache, "receiver", relay_url)
-                receiver_tui = start_chat(cli_bin, receiver_home, cache, "sender", relay_url)
+                sender_tui = start_chat(cli_bin, sender_home, cache, "receiver", relay_url, owned_tuis)
+                receiver_tui = start_chat(cli_bin, receiver_home, cache, "sender", relay_url, owned_tuis)
                 wait_screen(sender_tui, lambda s: "Type a message" in s, 15, "sender chat open")
                 wait_screen(receiver_tui, lambda s: "Type a message" in s, 15, "receiver chat open")
                 sender_connected = wait_screen(sender_tui, lambda s: bool(INBOX_CONNECTED_RE.search(s)),
@@ -774,7 +799,7 @@ def run_offline_acceptance(args: argparse.Namespace) -> int:
                 if not sender_tui.wait(8):
                     raise HarnessError("sender TUI did not exit cleanly")
                 sender_tui.stop()
-                sender_tui = start_chat(cli_bin, sender_home, cache, "receiver", relay_url)
+                sender_tui = start_chat(cli_bin, sender_home, cache, "receiver", relay_url, owned_tuis)
                 restarted_screen = wait_screen(sender_tui, lambda s: bool(QUEUED_RE.search(s)), 15,
                                                "queued item restored after TUI restart")
                 restored = QUEUED_RE.search(restarted_screen)
@@ -864,21 +889,17 @@ def run_offline_acceptance(args: argparse.Namespace) -> int:
                 })
                 primary_ok = True
             finally:
-                finish_owned_cleanup([sender_tui, receiver_tui, relay], cleanup, primary_ok)
+                finish_owned_cleanup([*owned_tuis, relay], cleanup, primary_ok)
     except Exception as exc:  # produce a redacted failure, never the raw exception payload
         evidence.update({"status": "fail", "failure": safe_failure(exc)})
         if cleanup.get("cleanup_incomplete"):
             evidence["residual"] = {"owned_child_cleanup_incomplete": True,
                                     "failed_stop_count": cleanup.get("failed_stop_count", 0),
                                     "private_temp_root_retained": True}
-        write_evidence(args.evidence, evidence)
-        print(json.dumps(evidence, sort_keys=True))
-        return 1
+        return emit_summary(args, evidence, 1)
     finally:
         signal.signal(signal.SIGTERM, previous_term)
-    write_evidence(args.evidence, evidence)
-    print(json.dumps(evidence, sort_keys=True))
-    return 0
+    return emit_summary(args, evidence, 0)
 
 
 def main() -> int:
