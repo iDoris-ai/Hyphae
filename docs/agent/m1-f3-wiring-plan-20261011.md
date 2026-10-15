@@ -2,7 +2,7 @@
 
 - Date: 2026-10-11 (UTC+7)
 - Baseline: stacked branch `m1-f3g-wiring-plan` (main `8b0b4d3` + #178/#179/#180 + F2d-2a/b/c + F2e-1 + F3-a..f + F4-a/b). Line numbers refer to that branch.
-- Authority: [rev7 contract](m1-group-fanout-contract-20261008.md) §3.3–§3.6, [writer inventory](m1-f2e-writer-inventory-20261011.md). The outbox failure-result/recovery-witness schema supplement cited in earlier drafts (`m1-outbox-result-witness-schema.md`, intended §5/§7) was never published; it remains outside the rev7 contract's authority. Until it lands, the inert readers in [`outbox_result.go`](../../internal/messaging/outbox_result.go) and [`outbox_witness.go`](../../internal/messaging/outbox_witness.go) are cited here as the implementation-level reference for the wire shapes those sections would have covered — not as a normative supplement.
+- Authority: [rev7 contract](m1-group-fanout-contract-20261008.md) §3.3–§3.6, [writer inventory](m1-f2e-writer-inventory-20261011.md). The earlier plan also cited a schema supplement (§5/§7), which is not present in this tree; its publication history and governing authority are not re-decided here. For the record layouts implemented on this branch, see the inert readers in [`outbox_result.go`](../../internal/messaging/outbox_result.go) and [`outbox_witness.go`](../../internal/messaging/outbox_witness.go). These implementation references do not replace or weaken the governing contract.
 - Status: **plan only**. Nothing in this document is wired; every primitive below is inert (no production caller) until the slices in §4 are reviewed and merged in order.
 
 ## 1. What exists on the stack (all inert)
