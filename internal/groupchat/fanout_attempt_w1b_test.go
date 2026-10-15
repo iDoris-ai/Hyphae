@@ -73,7 +73,9 @@ func TestW1bPayloadDriftStoreConflictHandlerPayload(t *testing.T) {
 
 // Regression: the caller bind must run before ANY barrier replay, observed as
 // zero directory-confirm calls, not only an unchanged snapshot. Rollback can
-// hide a replay, so the snapshot alone is not the order proof.
+// hide a replay, so the snapshot alone is not the order proof. The unlocked
+// SQL key lookup at fanout_attempt_handler.go:26 still runs before Reserve.
+// This does not claim there were no DB reads.
 func TestW1bBindBeforeAnyReplay(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -106,9 +108,11 @@ func TestW1bBindBeforeAnyReplay(t *testing.T) {
 	}
 }
 
-// Regression: an empty handler payload is refused before Store. The pin is
-// zero directory-confirm calls and an unchanged snapshot. It is not a global
-// NoFS or lock-IO claim; lock IO and the confirm counter are distinct.
+// Regression: an empty handler payload is PayloadMismatch with zero directory
+// confirms and an unchanged snapshot. fanout_attempt_handler.go:26 still does
+// an unlocked SQL key lookup before the empty guard at :38. The pin is refusal
+// before reservation, replay, confirm, and the R mutation. It is not refusal
+// before every store read, and it does not claim there were no DB reads.
 func TestW1bEmptyHandlerPayloadRefusedBeforeStore(t *testing.T) {
 	f := newFailureFixture(t)
 	f.failO3BeforeT4(t, f.startAttempt(t, 1))
