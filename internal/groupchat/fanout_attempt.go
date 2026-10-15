@@ -13,6 +13,9 @@ import (
 // reservation, publish or deletion happens (rev7 §3.5, schema supplement §5).
 var ErrFanoutQueueConflict = errors.New("fanout queue conflict: outbox queue_id differs from the persisted queue_id")
 
+// ErrFanoutQueueMissing: the outbox has no entry for the queued row's event.
+var ErrFanoutQueueMissing = errors.New("queue_missing: outbox has no entry for the queued event")
+
 var ErrFanoutNotActive = errors.New("fanout row is not an active pending queue entry")
 var ErrFanoutRetryExhausted = errors.New("fanout retry budget exhausted")
 var confirmOutboxDurable = messaging.ConfirmOutboxDurable
@@ -35,7 +38,7 @@ func (s *Store) fanoutBarrierTx(tx queryExecer, path string, key FanoutKey, reci
 		return row, false, err
 	}
 	if entry == nil {
-		return row, false, fmt.Errorf("%s: outbox has no entry for the queued event", messaging.AgentMessageIssueQueueMissing)
+		return row, false, ErrFanoutQueueMissing
 	}
 	if entry.QueueID != row.token.queueID {
 		// Only a failed row with an exact D6 witness may adopt a new epoch.
