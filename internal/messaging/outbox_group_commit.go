@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // WithGroupOutboxLock holds the outbox sibling lock for one F3 cross-store
@@ -78,6 +79,14 @@ func IsOutboxCommitUncertain(err error) bool {
 	return errors.As(err, &uncertain)
 }
 
+// WrapOutboxCommitUncertain reports err as the same commit-uncertain class
+// IsOutboxCommitUncertain recognizes. Tests use it to simulate the
+// post-rename directory-fsync failure outbox_raw_write.go reports, without
+// touching the real writer.
+func WrapOutboxCommitUncertain(err error) error {
+	return &outboxCommitUncertainError{err}
+}
+
 // ReadGroupFailureLocked strictly scans the outbox for a caller holding
 // WithGroupOutboxLock and returns the entry with queueID plus the receipt its
 // failure_result would have once consumed ("" when it carries none).
@@ -98,4 +107,48 @@ func ReadGroupFailureLocked(path, queueID string) (*RawGroupEntry, string, error
 		return entry.Parsed, "", nil
 	}
 	return entry.Parsed, FailureReceipt(entry.Parsed.FailureResult.ResultID, sha256Hex(entry.Parsed.Fields["failure_result"])), nil
+}
+
+// ReadGroupEntryLocked strictly scans the outbox for a caller holding
+// WithGroupOutboxLock and returns the entry carrying eventID (nil when the
+// file has none) plus the receipt its failure_result would consume ("" when
+// it carries none). Uniqueness of event IDs is guaranteed by the scan.
+func ReadGroupEntryLocked(path, eventID string) (*RawGroupEntry, string, error) {
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, "", nil
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	file, err := scanRawOutboxFile(raw)
+	if err != nil {
+		return nil, "", err
+	}
+	for i := range file.Entries {
+		entry := file.Entries[i].Parsed
+		if entry.Entry.ID != eventID {
+			continue
+		}
+		if entry.FailureResult == nil {
+			return entry, "", nil
+		}
+		return entry, FailureReceipt(entry.FailureResult.ResultID, sha256Hex(entry.Fields["failure_result"])), nil
+	}
+	return nil, "", nil
+}
+
+// ConfirmOutboxDurable fsyncs the outbox directory so a rename whose
+// directory sync failed (commit-uncertain) is either confirmed durable or
+// reported as still uncertain.
+func ConfirmOutboxDurable(path string) error {
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return &outboxCommitUncertainError{err}
+	}
+	defer dir.Close()
+	if err := dir.Sync(); err != nil {
+		return &outboxCommitUncertainError{err}
+	}
+	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -90,5 +91,37 @@ func TestReadGroupFailureLocked(t *testing.T) {
 	}
 	if want := FailureReceipt(entry.FailureResult.ResultID, sha256Hex(entry.Fields["failure_result"])); receipt != want {
 		t.Fatalf("receipt = %q, want %q", receipt, want)
+	}
+}
+
+func TestReadGroupEntryLockedAndConfirmDurable(t *testing.T) {
+	group := legacyFixtureEntry(t, "legacy-165-group-nil-relays.json")
+	o3 := bytes.TrimSpace(readF2BFixture(t, "p-o3-entry.json"))
+	const eventID = "3ab652f4ab22a053e7c17b8b35ab99f903f5086a2b44c459ace8d81844662906"
+
+	missing := filepath.Join(t.TempDir(), "outbox.json")
+	if entry, receipt, err := ReadGroupEntryLocked(missing, eventID); entry != nil || receipt != "" || err != nil {
+		t.Fatalf("missing file: %v %q %v", entry, receipt, err)
+	}
+	path := writeOutboxFile(t, rawOutboxDoc(group))
+	if entry, receipt, err := ReadGroupEntryLocked(path, eventID); err != nil || receipt != "" || entry == nil || entry.QueueID != "2fc72e7f8539e9eff9120c979198790b" {
+		t.Fatalf("legacy entry: %v %q %v", entry, receipt, err)
+	}
+	if entry, _, err := ReadGroupEntryLocked(path, "0000"); entry != nil || err != nil {
+		t.Fatalf("absent event: %v %v", entry, err)
+	}
+	if _, _, err := ReadGroupEntryLocked(writeOutboxFile(t, []byte(`{"entries":[{}]}`)), eventID); err == nil {
+		t.Fatal("corrupt outbox must error")
+	}
+	path = writeOutboxFile(t, rawOutboxDoc(o3))
+	entry, receipt, err := ReadGroupEntryLocked(path, eventID)
+	if err != nil || entry.FailureResult == nil || receipt != FailureReceipt(entry.FailureResult.ResultID, sha256Hex(entry.Fields["failure_result"])) {
+		t.Fatalf("P-O3 entry: %v %q", err, receipt)
+	}
+	if err := ConfirmOutboxDurable(path); err != nil {
+		t.Fatalf("durable: %v", err)
+	}
+	if err := ConfirmOutboxDurable(filepath.Join(t.TempDir(), "nodir", "outbox.json")); !IsOutboxCommitUncertain(err) {
+		t.Fatalf("missing directory must stay uncertain: %v", err)
 	}
 }
