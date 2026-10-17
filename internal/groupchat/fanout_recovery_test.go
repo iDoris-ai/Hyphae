@@ -114,9 +114,14 @@ func TestAuthorizeFanoutRecoveryMissing(t *testing.T) {
 func TestAuthorizeFanoutRecoveryExhaustedPending(t *testing.T) {
 	f := newFailureFixture(t)
 	f.exhaust(t)
-	// Legacy shape: the row is failed but the entry still says group_pending at budget.
+	// Legacy shape: a full-budget group_pending entry with no nested failure_result.
+	result := f.outboxEntry(t).Fields["failure_result"]
+	require.NotEmpty(t, result)
 	data, err := os.ReadFile(f.outboxPath)
 	require.NoError(t, err)
+	member := append([]byte(`,"failure_result":`), result...)
+	require.Equal(t, 1, bytes.Count(data, member), "failure_result member not found")
+	data = bytes.Replace(data, member, nil, 1)
 	rewritten := bytes.Replace(data, []byte(`"status": "group_failed"`), []byte(`"status": "group_pending"`), 1)
 	require.NotEqual(t, data, rewritten, "entry status token not found")
 	require.NoError(t, os.WriteFile(f.outboxPath, rewritten, 0600))
