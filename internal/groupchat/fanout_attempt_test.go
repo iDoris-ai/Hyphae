@@ -101,6 +101,30 @@ func TestReserveRefusesReplayUntilDurable(t *testing.T) {
 	require.Equal(t, before, f.row(t))
 }
 
+func TestRecoverRefusesReplayUntilDurable(t *testing.T) {
+	f := newFailureFixture(t)
+	f.failO3BeforeT4(t, f.startAttempt(t, 1))
+	before := f.row(t)
+	orig := confirmOutboxDurable
+	confirmOutboxDurable = func(string) error { return errors.New("dir fsync failed") }
+	t.Cleanup(func() { confirmOutboxDurable = orig })
+	replayed, err := f.member.store.recoverFanoutFailure(f.key, f.recipient)
+	require.False(t, replayed)
+	require.ErrorIs(t, err, ErrFanoutBookkeepingPending)
+	require.Equal(t, before, f.row(t))
+	require.Equal(t, int64(0), before.RetryCount)
+}
+
+func TestReserveRejectsFrozenEventJSONDrift(t *testing.T) {
+	f := newFailureFixture(t)
+	_, err := f.member.db.Exec(`UPDATE groupchat_fanout SET event_json=event_json||' '`)
+	require.NoError(t, err)
+	unchanged := f.snapshot(t)
+	_, err = f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	require.ErrorIs(t, err, ErrFanoutQueueConflict)
+	unchanged()
+}
+
 func TestReserveRejectsFrozenIntentDrift(t *testing.T) {
 	f := newFailureFixture(t)
 	_, err := f.member.db.Exec(`UPDATE groupchat_fanout SET max_retries=1`)

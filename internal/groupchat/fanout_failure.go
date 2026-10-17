@@ -124,6 +124,9 @@ func (s *Store) recoverFanoutFailure(key FanoutKey, recipient string) (replayed 
 		if entry.QueueID != row.token.queueID {
 			return ErrFanoutQueueConflict
 		}
+		if err := confirmOutboxDurable(path); err != nil {
+			return fmt.Errorf("%w: outbox directory durability unconfirmed before replay: %v", ErrFanoutBookkeepingPending, err)
+		}
 		if err := replayFanoutFailureTx(tx, &row, entry, receipt); err != nil {
 			return err
 		}
