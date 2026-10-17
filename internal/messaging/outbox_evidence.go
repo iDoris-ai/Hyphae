@@ -138,42 +138,45 @@ func parseRawOutboxEntry(raw json.RawMessage) (RawOutboxEntry, error) {
 		return result, fmt.Errorf("unsupported route")
 	}
 	result.Event = []byte(e.EventJSON)
-	if err := validateEvidenceEvent(result.Event, e); err != nil {
+	if _, err := validateEvidenceEvent(result.Event, e); err != nil {
 		return result, err
 	}
 	return result, nil
 }
 
-func validateEvidenceEvent(raw []byte, entry types.OutboxEntry) error {
+// validateEvidenceEvent returns the validated event's sender pubkey so
+// callers can bind it to nested sender claims (e.g. fanout_key.local_npub)
+// without re-deriving or re-verifying the event.
+func validateEvidenceEvent(raw []byte, entry types.OutboxEntry) (nostr.PubKey, error) {
 	fields, err := evidenceObject(raw, "id pubkey created_at kind tags content sig", "")
 	if err != nil {
-		return fmt.Errorf("event: %w", err)
+		return nostr.PubKey{}, fmt.Errorf("event: %w", err)
 	}
 	for key, size := range map[string]int{"id": 64, "pubkey": 64, "sig": 128, "content": -1} {
 		var s string
 		if json.Unmarshal(fields[key], &s) != nil || (size >= 0 && (len(s) != size || !isHexString(s))) {
-			return fmt.Errorf("invalid event %s", key)
+			return nostr.PubKey{}, fmt.Errorf("invalid event %s", key)
 		}
 	}
 	if err := evidenceInteger(fields["kind"], 0, 65535); err != nil {
-		return err
+		return nostr.PubKey{}, err
 	}
 	if err := evidenceInteger(fields["created_at"], 0, math.MaxInt64); err != nil {
-		return err
+		return nostr.PubKey{}, err
 	}
 	tags, err := evidenceArray(fields["tags"])
 	if err != nil {
-		return err
+		return nostr.PubKey{}, err
 	}
 	for _, tag := range tags {
 		parts, err := evidenceArray(tag)
 		if err != nil {
-			return err
+			return nostr.PubKey{}, err
 		}
 		for _, part := range parts {
 			var s string
 			if len(part) == 0 || part[0] != '"' || json.Unmarshal(part, &s) != nil {
-				return fmt.Errorf("invalid event tag member")
+				return nostr.PubKey{}, fmt.Errorf("invalid event tag member")
 			}
 		}
 	}
@@ -184,44 +187,44 @@ func validateEvidenceEvent(raw []byte, entry types.OutboxEntry) error {
 	// with strict validation without changing the retained event_json bytes.
 	canonical, err := json.Marshal(fields)
 	if err != nil {
-		return err
+		return nostr.PubKey{}, err
 	}
 	var event nostr.Event
 	if err := json.Unmarshal(canonical, &event); err != nil {
-		return err
+		return nostr.PubKey{}, err
 	}
 	if event.ID.Hex() != entry.ID || !event.CheckID() || !event.VerifySignature() {
-		return fmt.Errorf("invalid event identity/signature")
+		return nostr.PubKey{}, fmt.Errorf("invalid event identity/signature")
 	}
 	if err := ValidateAgentMessageEvent(&event); err != nil {
-		return err
+		return nostr.PubKey{}, err
 	}
 	enc, hasEnc, err := outboxTagValue(event.Tags, "enc")
 	if err != nil || (hasEnc && enc != "nip44") {
-		return fmt.Errorf("invalid encryption tag")
+		return nostr.PubKey{}, fmt.Errorf("invalid encryption tag")
 	}
 	if entry.Route == OutboxRouteGroup {
 		if !hasEnc || enc != "nip44" {
-			return fmt.Errorf("invalid group encryption tag")
+			return nostr.PubKey{}, fmt.Errorf("invalid group encryption tag")
 		}
 	}
 	recipient, err := common.ParsePublicKey(entry.RecipientNpub)
 	if err != nil {
-		return fmt.Errorf("invalid recipient")
+		return nostr.PubKey{}, fmt.Errorf("invalid recipient")
 	}
 	count := 0
 	for _, tag := range event.Tags {
 		if len(tag) > 0 && tag[0] == "p" {
 			count++
 			if len(tag) < 2 || tag[1] != recipient.Hex() {
-				return fmt.Errorf("event recipient mismatch")
+				return nostr.PubKey{}, fmt.Errorf("event recipient mismatch")
 			}
 		}
 	}
 	if count != 1 {
-		return fmt.Errorf("event requires one recipient")
+		return nostr.PubKey{}, fmt.Errorf("event requires one recipient")
 	}
-	return nil
+	return event.PubKey, nil
 }
 
 // Decode keys before comparison so escaped-equivalent spellings collide. Read

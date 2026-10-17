@@ -44,6 +44,8 @@ func TestInitDBPragmasApplyToEveryConnection(t *testing.T) {
 	t.Cleanup(func() { _ = second.Close() })
 	assertPragmas(t, first, 5000, 1, 1)
 	assertPragmas(t, second, 5000, 1, 1)
+	assertJournalMode(t, first, "wal")
+	assertJournalMode(t, second, "wal")
 
 	// With no idle connections allowed, closing first discards its physical
 	// connection. Opening another while second remains held forces a new one.
@@ -52,6 +54,7 @@ func TestInitDBPragmasApplyToEveryConnection(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = third.Close() })
 	assertPragmas(t, third, 5000, 1, 1)
+	assertJournalMode(t, third, "wal")
 
 	_, err = third.ExecContext(ctx, `CREATE TABLE pragma_parent (id INTEGER PRIMARY KEY)`)
 	require.NoError(t, err)
@@ -68,6 +71,78 @@ func TestInitDBPragmasApplyToEveryConnection(t *testing.T) {
 
 	require.NoError(t, third.Close())
 	require.NoError(t, second.Close())
+}
+
+func TestOpenDBDoesNotChangeGlobalDBAndOwnsItsHandle(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	sentinel, err := sql.Open("sqlite", ":memory:")
+	require.NoError(t, err)
+	defer sentinel.Close()
+	previousDB := DB
+	DB = sentinel
+	t.Cleanup(func() { DB = previousDB })
+
+	owned, err := OpenDB()
+	require.NoError(t, err)
+	require.Same(t, sentinel, DB, "OpenDB must not replace the package singleton")
+	require.NoError(t, owned.Close())
+	require.Same(t, sentinel, DB, "closing the owned handle must not change the singleton")
+	require.NoError(t, sentinel.Ping(), "closing the owned handle must not close the singleton")
+}
+
+func TestOpenDBPoolsCanUseSameFileIndependently(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	first, err := OpenDB()
+	require.NoError(t, err)
+	second, err := OpenDB()
+	require.NoError(t, err)
+	require.NoError(t, first.Close())
+
+	_, err = second.Exec(`INSERT INTO messages (id, sender_npub, recipient_npub, created_at, received_at) VALUES ('still-open', 'sender', 'recipient', 1, 1)`)
+	require.NoError(t, err, "closing one pool must leave the other pool usable")
+	var count int
+	require.NoError(t, second.QueryRow(`SELECT COUNT(*) FROM messages WHERE id = 'still-open'`).Scan(&count))
+	assert.Equal(t, 1, count)
+	require.NoError(t, second.Close())
+}
+
+func TestOpenDBFailurePreservesGlobalDB(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	keystore := filepath.Join(home, ".hyphae")
+	require.NoError(t, os.MkdirAll(keystore, 0700))
+
+	// This incomplete legacy schema makes the base index migration fail.
+	path := filepath.Join(keystore, "messages.db")
+	broken, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	_, err = broken.Exec(`CREATE TABLE messages (id TEXT PRIMARY KEY)`)
+	require.NoError(t, err)
+	require.NoError(t, broken.Close())
+
+	sentinel, err := sql.Open("sqlite", ":memory:")
+	require.NoError(t, err)
+	defer sentinel.Close()
+	previousDB := DB
+	DB = sentinel
+	t.Cleanup(func() { DB = previousDB })
+
+	owned, err := OpenDB()
+	require.Error(t, err)
+	require.Nil(t, owned)
+	require.Same(t, sentinel, DB, "a failed OpenDB must not replace the package singleton")
+	require.NoError(t, sentinel.Ping(), "failure cleanup must not close the package singleton")
+
+	// The failed opener must leave the existing schema intact and usable.
+	check, err := sql.Open("sqlite", sqliteDSN(path))
+	require.NoError(t, err)
+	defer check.Close()
+	var columns int
+	err = check.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('messages')`).Scan(&columns)
+	require.NoError(t, err)
+	assert.Equal(t, 1, columns)
 }
 
 func TestConnectionLocalExecPragmasOnlyAffectOneHeldConnection(t *testing.T) {
@@ -119,6 +194,13 @@ func assertPragmas(t *testing.T, conn *sql.Conn, busyTimeout, foreignKeys, synch
 	assert.Equal(t, busyTimeout, gotBusy, "busy_timeout")
 	assert.Equal(t, foreignKeys, gotForeignKeys, "foreign_keys")
 	assert.Equal(t, synchronous, gotSynchronous, "synchronous")
+}
+
+func assertJournalMode(t *testing.T, conn *sql.Conn, want string) {
+	t.Helper()
+	var got string
+	require.NoError(t, conn.QueryRowContext(context.Background(), "PRAGMA journal_mode").Scan(&got))
+	assert.Equal(t, want, got, "journal_mode")
 }
 
 func TestInitDB(t *testing.T) {
