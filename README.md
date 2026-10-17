@@ -1,224 +1,181 @@
 # Hyphae
-- Making agent discover, communicate and cooperate in high efficiency with a compress, encrypted and decentralized protocol.
-- A speaker for agent to talk with each other, base on Nostr and [nak](https://github.com/fiatjaf/nak) repo, extend more features for agent.
-- It is a cli tool build with Golang.
 
-## 从 agent-speaker 升级
+> Decentralized, encrypted agent communication over Nostr.
 
-本项目原名 `agent-speaker`，改名为 `hyphae`（呼应 Mycelium Protocol 的网络命名）。**新版二进制会自动识别并升级旧的加密 keystore**（首次用正确密码解锁时，静默把校验 token 换成新版本，无需手动操作、私钥不受影响）。但下面几件事仓库改不到，需要手动处理：
+Hyphae is a Go CLI for agents and operators that need durable, relay-based communication without a central messaging server. It provides local identities and contacts, NIP-44 encrypted direct messages, SQLite-backed message history and outbox recovery, group-chat primitives, discoverable agent profiles, a terminal UI, and a background daemon.
 
-1. **本地数据目录**：旧版把身份和消息存在 `~/.agent-speaker/`，新版读写 `~/.hyphae/`，不会自动搬迁。手动执行一次：
-   ```bash
-   mv ~/.agent-speaker ~/.hyphae
-   ```
-   如果 `~/.hyphae` 已经存在（比如已经跑过一次新版本创建了空目录），**不要**直接覆盖——请先确认两边内容，手动合并需要的身份/消息。
-2. **macOS 后台服务（如果配置过 launchd 自启动）**：先卸载旧的 `com.agent-speaker.daemon`，再装新的 `com.hyphae.daemon`，详见 [`docs/README_DAEMON.md`](docs/README_DAEMON.md#配置自动启动macos)——旧 plist 的 `KeepAlive=true` 会在旧二进制找不到身份时无限重启循环。
-3. **旧二进制**：`install.sh` 不会自动删除 `/usr/local/bin/agent-speaker`，装完新版本后自行 `rm` 掉，避免和新版本混用（尤其是两边同时跑 daemon 会对同一身份产生重复的自动回复）。
-4. **脚本/自动化**：`AGENT_SPEAKER_OUTPUT=json` 环境变量作为兼容别名继续有效，但新脚本建议改用 `HYPHAE_OUTPUT=json`。
+**Project status:** the V1 CLI is usable for local and relay-backed messaging. M1 reliability work—durable outbox evidence, replay/recovery, and group fan-out semantics—is in progress. See the [roadmap](#roadmap-and-project-status) before treating a feature as production-ready.
 
-## 项目结构
+## Features
 
-```
-hyphae/
-├── 🌟 我们的代码
-│   ├── cmd/hyphae/    # 程序入口
-│   ├── internal/             # 内部包 (nostr, identity, messaging, group, profile, daemon...)
-│   ├── pkg/                  # 公共库 (compress, crypto, types)
-│   └── docs/                 # 研究文档
-│
-├── 📦 第三方依赖
-│   └── third_party/nak/      # nak git submodule (fiatjaf/nak)
-│
-├── 🔨 构建系统
-│   ├── Makefile              # 构建脚本
-│   ├── scripts/              # 辅助脚本
-│   ├── build/                # 构建临时目录 (gitignore)
-│   └── bin/hyphae     # 编译输出 (gitignore)
-│
-└── ⚙️ 配置
-    ├── go.mod                # Go 模块定义
-    ├── Dockerfile            # 容器配置
-    ├── LICENSE               # Apache 2.0 许可证
-    └── README.md             # 本文档
-```
+| Area | What Hyphae provides |
+| --- | --- |
+| Identity and contacts | Local secp256k1 identities, nickname-to-`npub` contacts, password-protected keystore support |
+| Direct messaging | Nostr events, optional NIP-44 end-to-end encryption, and zstd-compressed payloads |
+| Durable delivery | SQLite message history, transactional outbox, retry inspection and a background retry/watch daemon |
+| Groups | Group creation and membership management; interactive group messaging is not implemented yet |
+| Agent discovery | Publish, discover, search, and cache agent profiles with capabilities, availability, and rates |
+| Operator interfaces | Human CLI, `--json` machine-readable envelopes, and terminal chat/contact UIs |
 
-### 文件分类
+## Requirements
 
-| 类型 | 文件/目录 | 说明 |
-|------|----------|------|
-| 🌟 业务代码 | `internal/` | Agent 命令实现 (msg, group, profile, daemon, TUI) |
-| 🌟 公共库 | `pkg/` | zstd 压缩、加密、类型定义 |
-| 📦 第三方 | `third_party/nak/` | nak git submodule |
-| 🔨 构建 | `Makefile`, `scripts/` | 构建系统 |
-| 📚 文档 | `docs/` | 研究文档 |
+- Go **1.26+**
+- Git
+- Access to one or more Nostr relays for networked messaging
 
-## 快速开始
+## Build from source
 
 ```bash
-# 构建
+git clone https://github.com/iDoris-ai/Hyphae.git
+cd Hyphae
+
+# Build bin/hyphae.
 ./build.sh
 
-# 运行
+# Inspect the available commands.
 ./bin/hyphae --help
-
-# 创建身份
-./bin/hyphae identity create --nickname alice --default
-
-# 发送消息
-./bin/hyphae agent msg --from alice --to bob --content "Hello" --relay wss://relay.aastar.io
 ```
 
-## 本地可复现发布候选包
-
-从干净的固定提交生成 macOS arm64 和 Linux amd64 的 Hyphae/relay 二进制及归档：
+To install into `$(go env GOPATH)/bin`:
 
 ```bash
-SOURCE_DIR=/path/to/clean/hyphae-checkout
-python3 scripts/build_release_artifacts.py \
-  --source-dir "$SOURCE_DIR" \
-  --source-sha "$(git -C "$SOURCE_DIR" rev-parse HEAD)" \
-  --release-tag vX.Y.Z \
-  --output /tmp/hyphae-vX.Y.Z-artifacts
+go install ./cmd/hyphae
 ```
 
-工具要求本机已有 Go 1.26.4，拒绝不干净或 SHA 不匹配的源码和已存在的输出目录。它只在本地生成候选资产；metadata 中的 Release URL 是预期地址，不代表已发布。详见 [`docs/agent/reproducible-artifact-bundles.md`](docs/agent/reproducible-artifact-bundles.md)。
+The supported build path is `./build.sh` or `go build ./...`. The legacy `Makefile` build and test targets do not match the current `cmd/` + `internal/` layout.
 
-## 核心功能
+## Quick start: encrypted direct message
 
-### 1. 点对点消息 (Agent Messaging)
+Run these commands on the participating hosts (or use separate local identities for a development test). The `identity create` command prints the public `npub`; exchange **only** that public value.
 
 ```bash
-# 发送加密消息
-./bin/hyphae agent msg --from alice --to bob --content "Secret message" --encrypt=true
+# Alice: create a password-protected identity.
+./bin/hyphae identity create --nickname alice --default --password-prompt
 
-# 查看收件箱
-./bin/hyphae history inbox
+# Bob: create an identity and note Bob's printed npub.
+./bin/hyphae identity create --nickname bob --password-prompt
 
-# 查看与某人的对话
-./bin/hyphae history conversation --with bob
+# Alice: add Bob's public key as a contact.
+./bin/hyphae contact add --nickname bob --npub "npub1..." --role agent
+
+# Bob: add Alice's public key as a contact.
+./bin/hyphae contact add --nickname alice --npub "npub1..." --role agent
 ```
 
-### 2. 群聊 (Group Chat)
+Start a receiver daemon for Bob, then send from Alice. Pass relay URLs explicitly when you do not want the default relay (`wss://relay.aastar.io`).
 
 ```bash
-# 创建群组（默认包含创建者）
-./bin/hyphae group create --name "Dev Team" --members bob,jack
+# Bob: keep this process running. Read the password without echoing it,
+# then pipe it with EOF to the daemon.
+read -rs HYPHAE_KEYSTORE_PASSWORD; echo
+printf '%s\n' "$HYPHAE_KEYSTORE_PASSWORD" | \
+  ./bin/hyphae daemon --identity bob --relay wss://relay.aastar.io --password-stdin
+unset HYPHAE_KEYSTORE_PASSWORD
 
-# 列出群组
-./bin/hyphae group list
+# Alice: send an encrypted message.
+./bin/hyphae agent msg \
+  --from alice --to bob --encrypt \
+  --content "Hello from Hyphae" \
+  --relay wss://relay.aastar.io
 
-# 添加成员
-./bin/hyphae group add-member --name "Dev Team" --user charlie
-
-# 离开群组
-./bin/hyphae group leave --name "Dev Team"
+# Bob: inspect received messages.
+./bin/hyphae history inbox --as bob
+./bin/hyphae history conversation --as bob --with alice
 ```
 
-> **注意**：当前群聊 TUI 尚未完全实现。群聊消息需通过 `agent msg` 分别发送给各成员，relay 会广播给所有订阅者。
+For non-interactive use, prefer `--content-file` to keep sensitive message content out of shell history and process arguments. Prefer `--password-stdin` to passing passwords on the command line.
 
-### 3. Agent 资料 (Agent Profile) — v0.25.0+
+## Common commands
 
 ```bash
-# 发布资料到 relay
-./bin/hyphae profile publish --as alice \
-  --name "Alice the SEO Expert" \
-  --description "I help websites rank better" \
-  --capability "seo:Search engine optimization" \
-  --rate "audit:page:50" \
-  --availability available
+# Identity and contacts
+hyphae identity list
+hyphae identity use --nickname alice
+hyphae contact list
 
-# 从 relay 发现他人资料
-./bin/hyphae profile discover --npub <npub> --relay wss://relay.aastar.io
+# Message history and delivery recovery
+hyphae history stats
+hyphae history search --query "incident"
+hyphae storage outbox list
+hyphae storage outbox retry --help
 
-# 搜索本地缓存的资料
-./bin/hyphae profile search --query "seo"
+# Relay configuration and bounded connectivity test
+hyphae relay list
+hyphae relay set --help
+hyphae relay info --help
+
+# Terminal UI
+hyphae tui contacts
+hyphae tui chat --with bob --relay wss://relay.aastar.io
+
+# Groups and profiles
+hyphae group create --name "Ops" --members bob,charlie
+hyphae group chat --help
+hyphae profile publish --as alice --name "Alice" --capability "ops:incident response"
 ```
 
-### 4. 后台守护进程 & 自动回复 (Daemon & Auto-reply)
+Append `--json` to commands that support automation. In JSON mode, successful output is a JSON envelope on stdout; errors are JSON on stderr and the exit code remains meaningful.
+
+## Data and security
+
+Hyphae stores local state under `~/.hyphae/`:
+
+- `keystore.json` contains identities and contacts; create identities with a password and protect this file as a secret.
+- `messages.db` is the SQLite message-history store.
+- `outbox.json` contains pending outbound delivery records.
+
+Never share an `nsec`, an exported private key, a keystore password, or a copied keystore. An `npub` is the public value intended for contacts. Encryption is enabled per direct-message send with `--encrypt`; use it for private content.
+
+## Development and testing
 
 ```bash
-# 启动后台守护进程（重试 outbox、监听新消息）
-./bin/hyphae daemon --identity bob
+# Compile every package.
+go build ./...
 
-# 启动自动回复模式
-./bin/hyphae daemon --identity bob --auto-reply --notify=false
+# Run the full unit-test suite.
+go test ./...
+
+# Build plus repository smoke checks.
+./test.sh
+
+# Formatting and static analysis.
+gofmt -l $(find cmd internal pkg -name '*.go')
+go vet ./...
 ```
 
-开启 `--auto-reply` 后，daemon 会在收到新消息时自动回复发送者：
-
-```
-[auto-reply] bob received your message: <original>
-```
-
-自动回复消息带有 `[auto-reply]` 前缀，不会被再次自动回复，避免循环。
-
-#### 多人自动回复测试示例
+The repository also has a separate integration-test target for the maintained test package:
 
 ```bash
-# 终端 1：启动 bob 的自动回复 daemon
-./bin/hyphae daemon --identity bob --auto-reply --notify=false
-
-# 终端 2：启动 jack 的自动回复 daemon
-./bin/hyphae daemon --identity jack --auto-reply --notify=false
-
-# 终端 3（你扮演 alice）：创建群聊并发送消息
-./bin/hyphae group create --name "Test Group" --members bob,jack
-./bin/hyphae agent msg --from alice --to bob --content "Hey team!"
-./bin/hyphae agent msg --from alice --to jack --content "Hey team!"
-
-# 然后查看 alice 的收件箱
-./bin/hyphae history inbox
-# 你应该能看到 bob 和 jack 的自动回复
+go test -tags integration ./tests -count=1
 ```
 
-## 构建流程
+Live multi-identity acceptance is an operator exercise, not a substitute for the automated suite; follow [`docs/05-acceptance-test-guide.md`](docs/05-acceptance-test-guide.md) when preparing a relay and isolated Alice/Bob/Charlie identities.
 
-```bash
-./build.sh           # go build ./cmd/hyphae → bin/hyphae
-./build.sh install   # 同时 install 到 $GOPATH/bin
+## Architecture
+
+```text
+cmd/hyphae/       CLI composition root
+internal/         Nostr, identity, messaging, storage, group, profile, daemon, TUI
+pkg/              Reusable crypto, compression, and shared types
+docs/             Protocol, acceptance, operational, and design documentation
 ```
 
-> ⚠️ `Makefile` 里的 `build`/`dev-build`/`test-all` 等目标是重构前（`internal/`+`pkg/` 布局之前）的遗留脚本，依赖的根目录文件（`agent.go` 等）和 `test/` 目录早已不存在，会直接报错。不要用它们，用上面 `./build.sh` 即可。详见 `CLAUDE.md` 的 Build & Development Commands 一节。
+The direct-message send path is: load identity/contact → construct a Nostr event → optionally NIP-44 encrypt → zstd-compress → persist history/outbox state → publish to relays. The daemon watches relays for inbound events and retries pending outbound work.
 
-`third_party/nak` 是 [fiatjaf/nak](https://github.com/fiatjaf/nak) 的 git submodule，是本项目最早的基座，现在**已不再被任何代码 import**（`internal/nostr/` 是独立实现）。克隆本仓库不需要初始化这个 submodule；只有想参考/更新 vendored 副本时才需要 `git submodule update --init` + `make update-nak`。
+## Roadmap and project status
 
-## 测试
+- **Current focus — M1 reliability gate:** exactly-once delivery evidence, durable outbox/recovery semantics, group fan-out safety, and reproducible acceptance evidence.
+- **V1 capabilities:** direct messaging, local history/outbox, daemon, profiles, contacts, and group/TUI foundations.
+- **Future protocol work:** the planned V2 layering is documented in [`docs/protocol-v2.md`](docs/protocol-v2.md). It is design material, not a claim that the V2 stack is implemented.
 
-```bash
-go test ./...       # 所有单元测试（每个包自带 *_test.go）
-./test.sh            # 构建 + 跑单元测试 + CLI 冒烟检查
+Useful project documents:
 
-# E2E（需要真实 relay + Alice/Bob/Charlie 身份，见 docs/05-acceptance-test-guide.md）
-./test_e2e.sh
-./test_group_e2e.sh
-./test_storage_e2e.sh
-./test_profile_e2e.sh
-./test_tui_e2e.sh
-```
-
-## 添加新功能
-
-1. 在对应的 `internal/<pkg>/commands.go` 里添加新命令（或新建 `internal/<pkg>/`，参照现有包结构）
-2. 如需公共库，放入 `pkg/`
-3. 添加对应的测试到同目录 `*_test.go`
-4. 运行 `go test ./...` 验证
-5. 提交代码
-
-## 文档
-
-- [`CLAUDE.md`](CLAUDE.md) — 面向 Claude Code 的仓库导航（构建/测试命令、架构总览）
-- [`docs/protocol-v2.md`](docs/protocol-v2.md) — V2 架构决策（L1/L2/L3 协议栈、relay 选型、里程碑总表）
-- [`docs/milestones/roadmap-v2.md`](docs/milestones/roadmap-v2.md) — V2 详细任务清单（按里程碑拆分的子任务）
-- [`docs/TODO.md`](docs/TODO.md) — 不依赖 V2 重构、可独立推进的短期任务
-- [`docs/buzz-comparison-analysis.md`](docs/buzz-comparison-analysis.md) — 与 Buzz（block/buzz）的架构对比与借鉴分析
-- [`docs/USER_MANUAL.md`](docs/USER_MANUAL.md) — 用户手册
-- [`docs/M1.5_TEST_GUIDE.md`](docs/M1.5_TEST_GUIDE.md) — M1.5 新功能（花名册 register/discover、成员角色、审计日志、outbox 诊断、relay 自检）3 个核心场景手动测试指南
-- [`QUICK_MANUAL_TEST.md`](QUICK_MANUAL_TEST.md) — 双人/三人协作手动测试指南（含 Profile/TUI）
-- [`docs/05-acceptance-test-guide.md`](docs/05-acceptance-test-guide.md) — Alice/Bob/Charlie 验收测试约定
-- [`docs/archive/`](docs/archive/) — 已被取代的历史文档（strfry 部署方案、旧重构记录等），仅供追溯，不要按其操作
+- [`docs/05-acceptance-test-guide.md`](docs/05-acceptance-test-guide.md) — Alice/Bob/Charlie acceptance conventions
+- [`docs/agent/m1-release-plan-20261007.md`](docs/agent/m1-release-plan-20261007.md) — M1 release-gate plan
+- [`docs/agent/reproducible-artifact-bundles.md`](docs/agent/reproducible-artifact-bundles.md) — local candidate artifact generation
+- [`docs/protocol-v2.md`](docs/protocol-v2.md) — future protocol architecture
+- [`CLAUDE.md`](CLAUDE.md) — repository navigation, current build/test commands, and package map
 
 ## License
 
-This project is licensed under the [Apache License, Version 2.0](LICENSE).  
-Copyright 2024-present MushroomDAO Contributors.  
-See [NOTICE](./NOTICE) · [TRADEMARK.md](./TRADEMARK.md) · [LICENSE-zh.md](./LICENSE-zh.md) · [TRADEMARK-zh.md](./TRADEMARK-zh.md) for details.
+Apache License 2.0. See [LICENSE](LICENSE), [NOTICE](NOTICE), and [TRADEMARK.md](TRADEMARK.md).
