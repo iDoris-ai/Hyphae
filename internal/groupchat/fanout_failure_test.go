@@ -212,3 +212,99 @@ func sha256Hex(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }
+
+// failO3BeforeT4 commits O3 for a started attempt while an injected trigger
+// aborts T4, leaving the outbox record unconsumed.
+func (f failureFixture) failO3BeforeT4(t *testing.T, token fanoutAttemptToken) {
+	t.Helper()
+	_, err := f.member.db.Exec(`CREATE TRIGGER inject_t4_failure BEFORE UPDATE OF last_failure_receipt ON groupchat_fanout
+        BEGIN SELECT RAISE(ABORT, 'injected T4 failure'); END`)
+	require.NoError(t, err)
+	require.ErrorIs(t, f.member.store.commitFanoutFailure(token), ErrFanoutBookkeepingPending)
+	_, err = f.member.db.Exec(`DROP TRIGGER inject_t4_failure`)
+	require.NoError(t, err)
+}
+
+func TestRecoverFanoutFailureReplaysT4Once(t *testing.T) {
+	f := newFailureFixture(t)
+	token := f.startAttempt(t, 2)
+	before := f.row(t)
+	f.failO3BeforeT4(t, token)
+	outboxAfterO3 := f.snapshot(t)
+
+	replayed, err := f.member.store.recoverFanoutFailure(f.key, f.recipient)
+	require.NoError(t, err)
+	require.True(t, replayed)
+	outboxAfterO3Bytes := f.outboxEntry(t)
+	after := f.row(t)
+	require.EqualValues(t, 1, after.RetryCount)
+	require.Equal(t, before.Revision+1, after.Revision)
+	require.Equal(t, token.generation, after.LastResultGeneration)
+	require.Equal(t, messaging.FailureReceipt(outboxAfterO3Bytes.FailureResult.ResultID, sha256Hex(outboxAfterO3Bytes.Fields["failure_result"])), after.Receipt)
+	require.Equal(t, string(messaging.AgentMessageIssueSendFailed), after.Issue)
+
+	unchanged := f.snapshot(t)
+	replayed, err = f.member.store.recoverFanoutFailure(f.key, f.recipient)
+	require.NoError(t, err)
+	require.False(t, replayed, "a consumed receipt is a no-op")
+	unchanged()
+	_ = outboxAfterO3
+
+	// The replayed receipt authorizes the next O3 to replace the record.
+	next := f.startAttempt(t, 1)
+	require.NoError(t, f.member.store.commitFanoutFailure(next))
+	require.EqualValues(t, 2, f.row(t).RetryCount)
+}
+
+func TestRecoverFanoutFailureNoRecordIsNoop(t *testing.T) {
+	f := newFailureFixture(t)
+	unchanged := f.snapshot(t)
+	replayed, err := f.member.store.recoverFanoutFailure(f.key, f.recipient)
+	require.NoError(t, err)
+	require.False(t, replayed)
+	unchanged()
+
+	require.NoError(t, f.member.store.commitFanoutFailure(f.startAttempt(t, 1)))
+	unchanged = f.snapshot(t)
+	replayed, err = f.member.store.recoverFanoutFailure(f.key, f.recipient)
+	require.NoError(t, err)
+	require.False(t, replayed, "normal O3+T4 leaves a consumed record")
+	unchanged()
+}
+
+func TestRecoverFanoutFailureHoldsConflicts(t *testing.T) {
+	for name, tamper := range map[string]string{
+		"revision moved":     `UPDATE groupchat_fanout SET row_revision=row_revision+1`,
+		"new generation":     `UPDATE groupchat_fanout SET attempt_generation=attempt_generation+1`,
+		"attempts changed":   `UPDATE groupchat_fanout SET attempts=attempts+1`,
+		"budget changed":     `UPDATE groupchat_fanout SET retry_count=1`,
+		"not started":        `UPDATE groupchat_fanout SET attempt_phase='reserved'`,
+		"watermark advanced": `UPDATE groupchat_fanout SET last_result_generation=attempt_generation`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFailureFixture(t)
+			f.failO3BeforeT4(t, f.startAttempt(t, 1))
+			_, err := f.member.db.Exec(tamper)
+			require.NoError(t, err)
+			unchanged := f.snapshot(t)
+			replayed, err := f.member.store.recoverFanoutFailure(f.key, f.recipient)
+			require.ErrorIs(t, err, ErrFanoutBookkeepingConflict)
+			require.False(t, replayed)
+			unchanged()
+		})
+	}
+}
+
+func TestRecoverFanoutFailureReplaysOverOlderReceipt(t *testing.T) {
+	f := newFailureFixture(t)
+	f.failO3BeforeT4(t, f.startAttempt(t, 1))
+	// An earlier consumed receipt on the row does not make the current
+	// attempt's exact O3 record a conflict (rev7 §3.3).
+	_, err := f.member.db.Exec(`UPDATE groupchat_fanout SET last_failure_receipt='x:y'`)
+	require.NoError(t, err)
+	replayed, err := f.member.store.recoverFanoutFailure(f.key, f.recipient)
+	require.NoError(t, err)
+	require.True(t, replayed)
+	entry := f.outboxEntry(t)
+	require.Equal(t, messaging.FailureReceipt(entry.FailureResult.ResultID, sha256Hex(entry.Fields["failure_result"])), f.row(t).Receipt)
+}
