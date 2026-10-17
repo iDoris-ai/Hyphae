@@ -48,10 +48,22 @@ func (s *Store) authorizeFanoutRecovery(key FanoutKey, recipient string, authori
 			return fmt.Errorf("%w: unconsumed failure record on the failed row", ErrFanoutBookkeepingConflict)
 		}
 		if entry != nil && entry.QueueID != row.token.queueID {
-			if messaging.OutboxWitnessDigest(entry) != row.recoveryDigest {
-				return fmt.Errorf("%w: a previous D6 epoch awaits T2'", ErrFanoutRecoveryPending)
+			// A previous D6 landed without its T2': replay it instead of
+			// authorizing a second epoch, and report that epoch's queue.
+			if entry.RecoveryWitness == nil {
+				return ErrFanoutQueueConflict
 			}
-			return ErrFanoutQueueConflict
+			if err := confirmOutboxDurable(path); err != nil {
+				return fmt.Errorf("%w: outbox directory durability unconfirmed before replay: %v", ErrFanoutRecoveryPending, err)
+			}
+			if err := replayFanoutRecoveryTx(tx, &row, entry); err != nil {
+				return err
+			}
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			newQueueID = entry.QueueID
+			return nil
 		}
 		witness, err := row.recoveryWitness(entry, authorizedAt)
 		if err != nil {
