@@ -370,7 +370,7 @@ func TestStoreIncomingWatchEventFailsClosedForReservedGroupPayloads(t *testing.T
 		t.Run(fmt.Sprintf("reserved-%d", i), func(t *testing.T) {
 			event := makeInboxEvent(t, recipientPK, nostr.Generate(), nostr.Now(), body, nil)
 			var updates []AgentInboxWatchUpdate
-			storeIncomingWatchEvent(&event, recipient, recipientSK, recipientPK.Hex(), store, "ws://127.0.0.1:1", func(update AgentInboxWatchUpdate) { updates = append(updates, update) })
+			storeIncomingWatchEvent(&event, recipient, recipientSK, recipientPK.Hex(), store, "ws://127.0.0.1:1", func(update AgentInboxWatchUpdate) { updates = append(updates, update) }, nil)
 			require.Len(t, updates, 1)
 			assert.ErrorIs(t, updates[0].Err, ErrReservedGroupRequiresHandler)
 			assert.NotContains(t, updates[0].Err.Error(), body)
@@ -383,7 +383,7 @@ func TestStoreIncomingWatchEventFailsClosedForReservedGroupPayloads(t *testing.T
 
 	direct := makeInboxEvent(t, recipientPK, nostr.Generate(), nostr.Now(), "ordinary DM", nil)
 	var updates []AgentInboxWatchUpdate
-	storeIncomingWatchEvent(&direct, recipient, recipientSK, recipientPK.Hex(), store, "ws://127.0.0.1:1", func(update AgentInboxWatchUpdate) { updates = append(updates, update) })
+	storeIncomingWatchEvent(&direct, recipient, recipientSK, recipientPK.Hex(), store, "ws://127.0.0.1:1", func(update AgentInboxWatchUpdate) { updates = append(updates, update) }, nil)
 	require.Len(t, updates, 1)
 	assert.NoError(t, updates[0].Err)
 	require.NotNil(t, updates[0].Message)

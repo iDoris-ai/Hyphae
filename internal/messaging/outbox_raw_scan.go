@@ -188,27 +188,36 @@ func nextRawValue(raw []byte, base int, decoder *json.Decoder) (rawSpan, error) 
 // commitRawOutboxEdit reads the snapshot under the sibling outbox lock, runs
 // the strict scan, and atomically replaces the file with edit's bytes after
 // they pass the same scan. A scan or edit error, or bytes identical to the
-// snapshot, writes nothing and leaves the file's mtime untouched.
+// snapshot, writes nothing and leaves the file's mtime untouched. edit may
+// mutate file.Raw in place (e.g. a same-length span patch) and return it: the
+// no-op comparison is taken against an immutable clone of the on-disk bytes
+// made before edit runs, not against raw itself, so an in-place mutation is
+// never compared with itself.
 func commitRawOutboxEdit(path string, edit func(*rawOutboxFile) ([]byte, error)) error {
-	return withOutboxLock(path, func() error {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		file, err := scanRawOutboxFile(raw)
-		if err != nil {
-			return err
-		}
-		next, err := edit(file)
-		if err != nil {
-			return err
-		}
-		if bytes.Equal(next, raw) {
-			return nil
-		}
-		if _, err := scanRawOutboxFile(next); err != nil {
-			return fmt.Errorf("edited outbox fails strict scan: %w", err)
-		}
-		return writeRawOutboxAtomic(path, next)
-	})
+	return withOutboxLock(path, func() error { return commitRawOutboxEditLocked(path, edit) })
+}
+
+// commitRawOutboxEditLocked is commitRawOutboxEdit for a caller that already
+// holds the outbox lock (WithGroupOutboxLock).
+func commitRawOutboxEditLocked(path string, edit func(*rawOutboxFile) ([]byte, error)) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	snapshot := bytes.Clone(raw)
+	file, err := scanRawOutboxFile(raw)
+	if err != nil {
+		return err
+	}
+	next, err := edit(file)
+	if err != nil {
+		return err
+	}
+	if bytes.Equal(next, snapshot) {
+		return nil
+	}
+	if _, err := scanRawOutboxFile(next); err != nil {
+		return fmt.Errorf("edited outbox fails strict scan: %w", err)
+	}
+	return writeRawOutboxAtomic(path, next)
 }
