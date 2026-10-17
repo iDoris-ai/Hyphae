@@ -235,10 +235,10 @@ func TestBarrierRejectsFrozenIntentMismatch(t *testing.T) {
 		mutate func(t *testing.T, f *failureFixture)
 	}{
 		{
-			name: "max_retries 3 to 1 in outbox entry",
+			name: "max_retries 3 to 2 in outbox entry",
 			mutate: func(t *testing.T, f *failureFixture) {
 				rawEditEntryField(t, f.outboxPath, func(fields map[string]json.RawMessage) {
-					fields["max_retries"] = json.RawMessage("1")
+					fields["max_retries"] = json.RawMessage("2")
 				})
 			},
 		},
