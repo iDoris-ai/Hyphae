@@ -164,8 +164,10 @@ func TestCommitOutboxD6ExhaustedRefusals(t *testing.T) {
 
 func TestCommitOutboxD6DropsConsumedResult(t *testing.T) {
 	o3 := bytes.TrimSpace(readF2BFixture(t, "p-o3-entry.json"))
-	old := bytes.Replace(o3, []byte(`"retry_count": 1`), []byte(`"retry_count": 10`), 1)
-	old = bytes.Replace(old, []byte(`"group_pending"`), []byte(`"group_failed"`), 1)
+	old := bytes.Replace(o3, []byte(`"retry_count": 1`), []byte(`"retry_count": 10`), -1)
+	old = bytes.Replace(old, []byte(`"prior_retry_count": 0`), []byte(`"prior_retry_count": 9`), 1)
+	old = bytes.Replace(old, []byte(`"group_pending"`), []byte(`"group_failed"`), -1)
+	old = bytes.Replace(old, []byte(`"send_failed"`), []byte(`"retry_exhausted"`), 1)
 	parsed, err := ParseRawGroupEntry(old)
 	if err != nil {
 		t.Fatalf("exhausted P-O3 entry: %v", err)
