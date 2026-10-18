@@ -160,6 +160,9 @@ type FanoutOutboxHandler struct {
 	// beforeRelayAcceptedTx is an internal synchronization hook used to exercise
 	// the stale-read boundary in deterministic tests.
 	beforeRelayAcceptedTx func()
+	// beforeAttemptFailureTx runs where the old unlocked failure read happened.
+	// Tests commit a competing attempt here; the locked read must see it.
+	beforeAttemptFailureTx func()
 }
 
 // NewFanoutOutboxHandler builds a handler bound to the store.
@@ -273,46 +276,95 @@ func (h *FanoutOutboxHandler) MarkRelayAccepted(entry types.OutboxEntry, relayAc
 	return tx.Commit()
 }
 
-// RecordAttemptFailure updates attempt count and conditionally marks the row failed when exhausted.
-func (h *FanoutOutboxHandler) RecordAttemptFailure(entry types.OutboxEntry, exhausted bool, issue messaging.AgentMessageDeliveryIssue) error {
-	row, err := h.findRowByEventID(entry.ID)
-	if err != nil {
-		return err
-	}
-	if entry.RecipientNpub != "" && row.recipient != entry.RecipientNpub {
-		return fmt.Errorf("recipient mismatch for event %s", entry.ID)
-	}
-	if row.state == RecipientRelayAccepted || (entry.QueueID != "" && row.queueID != "" && entry.QueueID != row.queueID) {
-		return nil
-	}
+func failureReadNoop(row fanoutDBRow, entry types.OutboxEntry) bool {
+	return row.state == RecipientRelayAccepted || (entry.QueueID != "" && row.queueID != "" && entry.QueueID != row.queueID)
+}
 
-	targetState := row.state
-	if exhausted {
-		targetState = RecipientFailed
+func failureTarget(row fanoutDBRow, maxRetries int, entry types.OutboxEntry, exhausted bool) RecipientDeliveryState {
+	if row.state == RecipientFailed || row.state == RecipientRelayAccepted {
+		return row.state
 	}
+	markFailed := exhausted
+	if entry.MaxRetries > 0 && entry.RetryCount != row.attempts {
+		markFailed = maxRetries > 0 && row.attempts+1 >= maxRetries
+	}
+	if markFailed {
+		return RecipientFailed
+	}
+	return row.state
+}
+
+func (h *FanoutOutboxHandler) findFailureRowLocked(tx queryExecer, eventID string) (fanoutDBRow, int, error) {
+	var r fanoutDBRow
+	var envType string
+	var maxRetries int
+	err := tx.QueryRow(`SELECT local_npub, group_id, envelope_type, send_key, recipient_npub, event_id, queue_id, state, attempts, max_retries FROM groupchat_fanout WHERE event_id = ?`, eventID).Scan(&r.key.LocalNpub, &r.key.GroupID, &envType, &r.key.SendKey, &r.recipient, &r.eventID, &r.queueID, &r.state, &r.attempts, &maxRetries)
+	if err != nil {
+		return fanoutDBRow{}, 0, err
+	}
+	r.key.EnvelopeType = EnvelopeType(envType)
+	return r, maxRetries, nil
+}
+
+// RecordAttemptFailure updates attempt count and conditionally marks the row failed when exhausted.
+// The row read and the exhaustion decision both run inside the immediate transaction.
+func (h *FanoutOutboxHandler) RecordAttemptFailure(entry types.OutboxEntry, exhausted bool, issue messaging.AgentMessageDeliveryIssue) error {
 	if issue == "" {
 		issue = messaging.AgentMessageIssueSendFailed
 	}
-
+	if h.beforeAttemptFailureTx != nil {
+		h.beforeAttemptFailureTx()
+	}
 	tx, err := h.store.beginImmediate()
 	if err != nil {
 		return err
 	}
+	row, maxRetries, err := h.findFailureRowLocked(tx, entry.ID)
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if entry.RecipientNpub != "" && row.recipient != entry.RecipientNpub {
+		_ = tx.Rollback()
+		return fmt.Errorf("recipient mismatch for event %s", entry.ID)
+	}
+	if failureReadNoop(row, entry) {
+		_ = tx.Rollback()
+		return nil
+	}
+	targetState := failureTarget(row, maxRetries, entry, exhausted)
 	fields := map[string]any{"last_attempt_at": time.Now().Unix(), "issue": issue}
 	changed, err := transitionFanoutTx(tx, row.key, row.recipient, row.state, targetState, fields)
 	if err != nil {
 		_ = tx.Rollback()
 		return err
 	}
-	if changed {
-		// row.attempts was read before this transaction; a stale read would lose
-		// one increment when two failures race, so bump the column in place.
-		if _, err := tx.Exec(`UPDATE groupchat_fanout SET attempts = attempts + 1
-			WHERE local_npub = ? AND group_id = ? AND envelope_type = ? AND send_key = ? AND recipient_npub = ?`,
-			row.key.LocalNpub, row.key.GroupID, row.key.EnvelopeType, row.key.SendKey, row.recipient); err != nil {
+	if !changed {
+		row, maxRetries, err = h.findFailureRowLocked(tx, entry.ID)
+		if err != nil {
 			_ = tx.Rollback()
 			return err
 		}
+		if failureReadNoop(row, entry) {
+			_ = tx.Rollback()
+			return nil
+		}
+		targetState = failureTarget(row, maxRetries, entry, exhausted)
+		changed, err = transitionFanoutTx(tx, row.key, row.recipient, row.state, targetState, fields)
+		if err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if !changed {
+			_ = tx.Rollback()
+			return fmt.Errorf("fanout attempt failure was not applied for event %s (state %s)", entry.ID, row.state)
+		}
+	}
+	if _, err := tx.Exec(`UPDATE groupchat_fanout SET attempts = attempts + 1
+		WHERE local_npub = ? AND group_id = ? AND envelope_type = ? AND send_key = ? AND recipient_npub = ?`,
+		row.key.LocalNpub, row.key.GroupID, row.key.EnvelopeType, row.key.SendKey, row.recipient); err != nil {
+		_ = tx.Rollback()
+		return err
 	}
 	return tx.Commit()
 }
