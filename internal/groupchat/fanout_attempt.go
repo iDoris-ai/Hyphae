@@ -105,13 +105,25 @@ func (s *Store) reserveFanoutAttempt(key FanoutKey, recipient string) (token fan
 	return s.reserveFanoutAttemptFrozen(key, recipient, "")
 }
 
-func (s *Store) reserveFanoutAttemptFrozen(key FanoutKey, recipient, wantEventJSON string) (token fanoutAttemptToken, err error) {
+func (s *Store) reserveFanoutAttemptFrozen(key FanoutKey, recipient, wantEventJSON string) (fanoutAttemptToken, error) {
+	return s.reserveFanoutAttemptInTx(func(*immediateTx) (FanoutKey, string, string, error) {
+		return key, recipient, wantEventJSON, nil
+	})
+}
+
+// reserveFanoutAttemptInTx runs resolve inside the same BEGIN IMMEDIATE
+// transaction as the barrier and the reservation.
+func (s *Store) reserveFanoutAttemptInTx(resolve func(tx *immediateTx) (key FanoutKey, recipient, wantEventJSON string, err error)) (token fanoutAttemptToken, err error) {
 	err = messaging.WithGroupOutboxLock(func(path string) error {
 		tx, err := s.beginImmediate()
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
+		key, recipient, wantEventJSON, err := resolve(tx)
+		if err != nil {
+			return err
+		}
 		if wantEventJSON != "" {
 			row, err := loadFanoutFailureRow(tx, key, recipient)
 			if err != nil {

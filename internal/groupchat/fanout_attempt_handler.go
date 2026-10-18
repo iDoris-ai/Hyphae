@@ -19,27 +19,34 @@ func NewFanoutAttemptHandler(store *Store) *FanoutAttemptHandler {
 }
 
 // Reserve resolves the row that froze entry's event and runs R behind the
-// barrier. The entry's recipient must be the row's recipient.
+// barrier. The lookup and the reservation share one BEGIN IMMEDIATE
+// transaction. The entry's recipient must be the row's recipient.
 func (h *FanoutAttemptHandler) Reserve(entry types.OutboxEntry) (messaging.GroupAttemptToken, error) {
-	var key FanoutKey
-	var envelope, recipient string
-	err := h.store.db.QueryRow(`SELECT local_npub,group_id,envelope_type,send_key,recipient_npub FROM groupchat_fanout WHERE event_id=?`, entry.ID).
-		Scan(&key.LocalNpub, &key.GroupID, &envelope, &key.SendKey, &recipient)
-	if errors.Is(err, sql.ErrNoRows) {
-		return messaging.GroupAttemptToken{}, fmt.Errorf("%w: no fanout row froze event %s", messaging.ErrGroupAttemptConflict, entry.ID)
-	}
+	token, err := h.store.reserveFanoutAttemptInTx(func(tx *immediateTx) (FanoutKey, string, string, error) {
+		var key FanoutKey
+		var envelope, recipient string
+		err := tx.QueryRow(`SELECT local_npub,group_id,envelope_type,send_key,recipient_npub FROM groupchat_fanout WHERE event_id=?`, entry.ID).
+			Scan(&key.LocalNpub, &key.GroupID, &envelope, &key.SendKey, &recipient)
+		if errors.Is(err, sql.ErrNoRows) {
+			return FanoutKey{}, "", "", attemptReadRefusal{fmt.Errorf("%w: no fanout row froze event %s", messaging.ErrGroupAttemptConflict, entry.ID)}
+		}
+		if err != nil {
+			return FanoutKey{}, "", "", attemptReadRefusal{err}
+		}
+		key.EnvelopeType = EnvelopeType(envelope)
+		if entry.RecipientNpub != recipient {
+			return FanoutKey{}, "", "", attemptReadRefusal{fmt.Errorf("%w: outbox recipient %q is not the fanout row's %q", messaging.ErrGroupAttemptConflict, entry.RecipientNpub, recipient)}
+		}
+		if entry.EventJSON == "" {
+			return FanoutKey{}, "", "", attemptReadRefusal{messaging.ErrGroupAttemptPayloadMismatch}
+		}
+		return key, recipient, entry.EventJSON, nil
+	})
 	if err != nil {
-		return messaging.GroupAttemptToken{}, err
-	}
-	key.EnvelopeType = EnvelopeType(envelope)
-	if entry.RecipientNpub != recipient {
-		return messaging.GroupAttemptToken{}, fmt.Errorf("%w: outbox recipient %q is not the fanout row's %q", messaging.ErrGroupAttemptConflict, entry.RecipientNpub, recipient)
-	}
-	if entry.EventJSON == "" {
-		return messaging.GroupAttemptToken{}, messaging.ErrGroupAttemptPayloadMismatch
-	}
-	token, err := h.store.reserveFanoutAttemptFrozen(key, recipient, entry.EventJSON)
-	if err != nil {
+		var refusal attemptReadRefusal
+		if errors.As(err, &refusal) {
+			return messaging.GroupAttemptToken{}, refusal.err
+		}
 		return messaging.GroupAttemptToken{}, mapFanoutError(err)
 	}
 	if entry.QueueID != "" && entry.QueueID != token.queueID {
@@ -59,19 +66,21 @@ func (h *FanoutAttemptHandler) Accepted(token messaging.GroupAttemptToken, now i
 }
 
 // Failed runs O3+T4 and reports whether the row is now failed (budget exhausted).
+// The state read shares T4's BEGIN IMMEDIATE transaction.
 func (h *FanoutAttemptHandler) Failed(token messaging.GroupAttemptToken) (bool, error) {
-	t := fromGroupAttemptToken(token)
-	if err := h.store.commitFanoutFailure(t); err != nil {
+	failed, err := h.store.commitFanoutFailureState(fromGroupAttemptToken(token), true)
+	if err != nil {
 		return false, mapFanoutError(err)
 	}
-	var state string
-	err := h.store.db.QueryRow(`SELECT state FROM groupchat_fanout WHERE local_npub=? AND group_id=? AND envelope_type=? AND send_key=? AND recipient_npub=?`,
-		t.key.LocalNpub, t.key.GroupID, t.key.EnvelopeType, t.key.SendKey, t.recipient).Scan(&state)
-	if err != nil {
-		return false, fmt.Errorf("%w: read state after T4: %v", messaging.ErrGroupAttemptPending, err)
-	}
-	return RecipientDeliveryState(state) == RecipientFailed, nil
+	return failed, nil
 }
+
+// attemptReadRefusal is a handler decision made inside the reserve transaction.
+// Reserve returns it as-is so mapFanoutError does not reclassify it.
+type attemptReadRefusal struct{ err error }
+
+func (e attemptReadRefusal) Error() string { return e.err.Error() }
+func (e attemptReadRefusal) Unwrap() error { return e.err }
 
 func toGroupAttemptToken(t fanoutAttemptToken) messaging.GroupAttemptToken {
 	return messaging.GroupAttemptToken{
