@@ -47,7 +47,13 @@ func (s *Store) inspectFanoutBookkeeping(key FanoutKey, recipient string) (Fanou
 			class = BookkeepingFileCorrupt
 			return nil
 		}
-		class = classifyFanoutBookkeeping(&row, entry, receipt)
+		var relayAcks, acceptedAt int64
+		if err := s.db.QueryRow(`SELECT relay_acks, accepted_at FROM groupchat_fanout
+			WHERE local_npub=? AND group_id=? AND envelope_type=? AND send_key=? AND recipient_npub=?`,
+			local, key.GroupID, key.EnvelopeType, key.SendKey, recipient).Scan(&relayAcks, &acceptedAt); err != nil {
+			return err
+		}
+		class = classifyFanoutBookkeeping(&row, entry, receipt, relayAcks, acceptedAt)
 		return nil
 	})
 	if errors.Is(err, sql.ErrNoRows) {
@@ -56,7 +62,7 @@ func (s *Store) inspectFanoutBookkeeping(key FanoutKey, recipient string) (Fanou
 	return class, err
 }
 
-func classifyFanoutBookkeeping(row *fanoutFailureRow, entry *messaging.RawGroupEntry, receipt string) FanoutBookkeeping {
+func classifyFanoutBookkeeping(row *fanoutFailureRow, entry *messaging.RawGroupEntry, receipt string, relayAcks, acceptedAt int64) FanoutBookkeeping {
 	state := RecipientDeliveryState(row.state)
 	switch {
 	case state == RecipientPrepared:
@@ -77,6 +83,9 @@ func classifyFanoutBookkeeping(row *fanoutFailureRow, entry *messaging.RawGroupE
 		if w := messaging.OutboxWitnessDigest(entry); w != "" && w != row.recoveryDigest {
 			return BookkeepingConflict
 		}
+		if err := validateAcceptedEvidence(row.token.queueID, relayAcks, acceptedAt); err != nil {
+			return BookkeepingConflict
+		}
 		return BookkeepingCleanupPending
 	case entry == nil:
 		if state == RecipientFailed {
@@ -92,11 +101,11 @@ func classifyFanoutBookkeeping(row *fanoutFailureRow, entry *messaging.RawGroupE
 		}
 		return BookkeepingQueueConflict
 	}
-	if w := messaging.OutboxWitnessDigest(entry); w != "" && w != row.recoveryDigest {
-		return BookkeepingConflict
-	}
 	if state == RecipientQueued && (entry.Entry.EventJSON != row.eventJSON || int64(entry.Entry.MaxRetries) != row.maxRetries) {
 		return BookkeepingQueueConflict
+	}
+	if w := messaging.OutboxWitnessDigest(entry); w != "" && w != row.recoveryDigest {
+		return BookkeepingConflict
 	}
 	if receipt != "" && receipt != row.receipt {
 		if state == RecipientQueued && row.phase == "started" && row.lastResultGeneration < row.token.generation &&

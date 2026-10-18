@@ -51,6 +51,22 @@ func TestInspectFanoutBookkeepingClasses(t *testing.T) {
 			_, err := f.member.db.Exec(`UPDATE groupchat_fanout SET event_json=event_json||' '`)
 			require.NoError(t, err)
 		}, BookkeepingQueueConflict},
+		"accepted relay_acks corrupt": {func(t *testing.T, f failureFixture) {
+			before, err := os.ReadFile(f.outboxPath)
+			require.NoError(t, err)
+			require.NoError(t, f.member.store.commitFanoutAccepted(f.startAttempt(t, 1), time.Now().Unix()))
+			require.NoError(t, os.WriteFile(f.outboxPath, before, 0600))
+			_, err = f.member.db.Exec(`UPDATE groupchat_fanout SET relay_acks=0`)
+			require.NoError(t, err)
+		}, BookkeepingConflict},
+		"accepted_at corrupt": {func(t *testing.T, f failureFixture) {
+			before, err := os.ReadFile(f.outboxPath)
+			require.NoError(t, err)
+			require.NoError(t, f.member.store.commitFanoutAccepted(f.startAttempt(t, 1), time.Now().Unix()))
+			require.NoError(t, os.WriteFile(f.outboxPath, before, 0600))
+			_, err = f.member.db.Exec(`UPDATE groupchat_fanout SET accepted_at=0`)
+			require.NoError(t, err)
+		}, BookkeepingConflict},
 		"accepted and cleaned": {func(t *testing.T, f failureFixture) {
 			require.NoError(t, f.member.store.commitFanoutAccepted(f.startAttempt(t, 1), time.Now().Unix()))
 		}, BookkeepingNormal},
