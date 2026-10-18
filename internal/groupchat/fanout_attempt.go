@@ -13,6 +13,10 @@ import (
 // reservation, publish or deletion happens (rev7 §3.5, schema supplement §5).
 var ErrFanoutQueueConflict = errors.New("fanout queue conflict: outbox queue_id differs from the persisted queue_id")
 
+// ErrFanoutQueueMissing: the outbox has no entry for the queued row's event.
+var ErrFanoutQueueMissing = errors.New("queue_missing: outbox has no entry for the queued event")
+
+var errFanoutPayloadMismatch = errors.New("fanout payload mismatch")
 var ErrFanoutNotActive = errors.New("fanout row is not an active pending queue entry")
 var ErrFanoutRetryExhausted = errors.New("fanout retry budget exhausted")
 var confirmOutboxDurable = messaging.ConfirmOutboxDurable
@@ -35,7 +39,10 @@ func (s *Store) fanoutBarrierTx(tx queryExecer, path string, key FanoutKey, reci
 		return row, false, err
 	}
 	if entry == nil {
-		return row, false, fmt.Errorf("%s: outbox has no entry for the queued event", messaging.AgentMessageIssueQueueMissing)
+		return row, false, ErrFanoutQueueMissing
+	}
+	if entry.Entry.EventJSON != row.eventJSON {
+		return row, false, fmt.Errorf("%w: %w", ErrFanoutQueueConflict, errFanoutPayloadMismatch)
 	}
 	if entry.QueueID != row.token.queueID {
 		// Only a failed row with an exact D6 witness may adopt a new epoch.
@@ -50,8 +57,11 @@ func (s *Store) fanoutBarrierTx(tx queryExecer, path string, key FanoutKey, reci
 		}
 		replayed = true
 	}
-	if entry.Entry.EventJSON != row.eventJSON || int64(entry.Entry.MaxRetries) != row.maxRetries {
-		return row, replayed, ErrFanoutQueueConflict
+	if entry.Entry.EventJSON != row.eventJSON {
+		return row, replayed, fmt.Errorf("%w: %w", ErrFanoutQueueConflict, errFanoutPayloadMismatch)
+	}
+	if int64(entry.Entry.MaxRetries) != row.maxRetries {
+		return row, replayed, fmt.Errorf("%w: fanout frozen max_retries mismatch outbox_max=%d row_max=%d", ErrFanoutQueueConflict, entry.Entry.MaxRetries, row.maxRetries)
 	}
 	if w := messaging.OutboxWitnessDigest(entry); w != "" && w != row.recoveryDigest {
 		return row, replayed, fmt.Errorf("%w: unconsumed recovery_witness on the queue entry", ErrFanoutRecoveryPending)
@@ -92,12 +102,25 @@ func commitReplayOnRefusal(tx *immediateTx, replayed bool, err error) error {
 // reserveFanoutAttempt is R behind the barrier: it consumes one generation
 // for the row's current queue entry. Inert: no production caller.
 func (s *Store) reserveFanoutAttempt(key FanoutKey, recipient string) (token fanoutAttemptToken, err error) {
+	return s.reserveFanoutAttemptFrozen(key, recipient, "")
+}
+
+func (s *Store) reserveFanoutAttemptFrozen(key FanoutKey, recipient, wantEventJSON string) (token fanoutAttemptToken, err error) {
 	err = messaging.WithGroupOutboxLock(func(path string) error {
 		tx, err := s.beginImmediate()
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
+		if wantEventJSON != "" {
+			row, err := loadFanoutFailureRow(tx, key, recipient)
+			if err != nil {
+				return err
+			}
+			if wantEventJSON != row.eventJSON {
+				return errFanoutPayloadMismatch
+			}
+		}
 		if _, replayed, err := s.fanoutBarrierTx(tx, path, key, recipient); err != nil {
 			return commitReplayOnRefusal(tx, replayed, err)
 		}

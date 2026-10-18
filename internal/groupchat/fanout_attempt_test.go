@@ -11,6 +11,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestFanoutBarrierRejectsOutboxPayloadMismatch(t *testing.T) {
+	f := newFailureFixture(t)
+	_, err := f.member.db.Exec(`UPDATE groupchat_fanout SET event_json='different' WHERE event_id=?`, f.eventID)
+	require.NoError(t, err)
+	unchanged := f.snapshot(t)
+	_, err = f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	require.ErrorIs(t, err, errFanoutPayloadMismatch)
+	unchanged()
+}
+
 func TestReserveAndStartFanoutAttemptBehindBarrier(t *testing.T) {
 	f := newFailureFixture(t)
 	token, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
@@ -133,6 +143,8 @@ func TestReserveRejectsFrozenIntentDrift(t *testing.T) {
 	unchanged := f.snapshot(t)
 	_, err = f.member.store.reserveFanoutAttempt(f.key, f.recipient)
 	require.ErrorIs(t, err, ErrFanoutQueueConflict)
+	require.ErrorContains(t, err, "outbox_max=3")
+	require.ErrorContains(t, err, "row_max=1")
 	unchanged()
 }
 
