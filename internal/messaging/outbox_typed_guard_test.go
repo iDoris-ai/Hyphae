@@ -193,3 +193,43 @@ func TestTypedOutboxGuardMembers(t *testing.T) {
 	}
 	requireOutboxUnchanged(t, path, []byte(`{"entries":[`))
 }
+
+// TestUpdateOutboxHeldNoopGuard guards #224: a held file the strict scan
+// rejects (here, a duplicate queue_id) must stay refused even when the
+// transaction itself changes nothing, instead of falling through to a send
+// path that would publish a DM from it.
+func TestUpdateOutboxHeldNoopGuard(t *testing.T) {
+	dm := legacyFixtureEntry(t, "legacy-dm-nil-relays.json")
+	o3 := bytes.TrimSpace(readF2BFixture(t, "p-o3-entry.json"))
+	dupQueue := bytes.Replace(dm, []byte(`"queue_id": "219bdbf9ed70b96893cc2382f365f24c"`), []byte(`"queue_id": "2fc72e7f8539e9eff9120c979198790b"`), 1)
+	if bytes.Equal(dupQueue, dm) {
+		t.Fatal("fixture mutation did not apply")
+	}
+	raw := rawOutboxDoc(dupQueue, o3)
+	path := stageHomeOutbox(t, raw)
+
+	if _, err := UpdateOutbox(func(*types.Outbox) error { return nil }); err == nil {
+		t.Fatal("no-op UpdateOutbox on a strict-invalid held file: want error, got nil")
+	} else if !errors.Is(err, ErrOutboxTypedWriteHeld) {
+		t.Fatalf("no-op UpdateOutbox err = %v, want ErrOutboxTypedWriteHeld", err)
+	}
+	requireOutboxUnchanged(t, path, raw)
+
+	// The DM already carries a durable queue_id, so currentOutboxAttempt
+	// takes the no-op branch -- this proves the guard, not an unrelated
+	// signature/parse failure, is what stops the send.
+	ob, err := LoadOutbox()
+	if err != nil || len(ob.Entries) == 0 || ob.Entries[0].QueueID == "" {
+		t.Fatalf("LoadOutbox: %+v %v", ob, err)
+	}
+	calls := 0
+	publish := func(context.Context, []string, nostr.Event, time.Duration) bool { calls++; return true }
+	store := func(*nostr.Event, string, string, bool) error { return nil }
+	if _, err := attemptSend(context.Background(), ob, ob.Entries[0], []string{"wss://relay.invalid"}, time.Second, publish, store); err == nil {
+		t.Fatal("attemptSend on a strict-invalid held file: want error, got nil")
+	}
+	if calls != 0 {
+		t.Fatalf("publish called %d times on a strict-invalid held file", calls)
+	}
+	requireOutboxUnchanged(t, path, raw)
+}

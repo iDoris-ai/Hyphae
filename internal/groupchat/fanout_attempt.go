@@ -18,13 +18,16 @@ var ErrFanoutQueueConflict = errors.New("fanout queue conflict: outbox queue_id 
 // ErrFanoutQueueMissing: the outbox has no entry for the queued row's event.
 var ErrFanoutQueueMissing = errors.New("queue_missing: outbox has no entry for the queued event")
 
+var errFanoutPayloadMismatch = errors.New("fanout payload mismatch")
+var ErrFanoutNotActive = errors.New("fanout row is not an active pending queue entry")
+var ErrFanoutRetryExhausted = errors.New("fanout retry budget exhausted")
+var confirmOutboxDurable = messaging.ConfirmOutboxDurable
+
 // fanoutBarrierTx is the recovery barrier that every R and S must pass
 // (rev7 §3.3): under the outbox lock and the caller's SQLite transaction it
 // replays an unconsumed O3 record (or holds on conflict), then checks D14
 // and that the unique outbox entry is the row's active pending queue entry.
-// The returned row reflects any replay; replayed reports that a projection
-// was written in tx, which the caller must commit even when the eligibility
-// check that follows fails (the recovery stands on its own).
+// The returned row reflects any replay.
 func (s *Store) fanoutBarrierTx(tx queryExecer, path string, key FanoutKey, recipient string) (row fanoutFailureRow, replayed bool, err error) {
 	row, err = loadFanoutFailureRow(tx, key, recipient)
 	if err != nil {
@@ -40,29 +43,49 @@ func (s *Store) fanoutBarrierTx(tx queryExecer, path string, key FanoutKey, reci
 	if entry == nil {
 		return row, false, ErrFanoutQueueMissing
 	}
+	if entry.Entry.EventJSON != row.eventJSON {
+		return row, false, fmt.Errorf("%w: %w", ErrFanoutQueueConflict, errFanoutPayloadMismatch)
+	}
 	if entry.QueueID != row.token.queueID {
-		// A failed row whose outbox already holds the next epoch: D6 landed
-		// but T2' did not. Replay it (or hold); anything else is D14.
+		// Only a failed row with an exact D6 witness may adopt a new epoch.
 		if RecipientDeliveryState(row.state) != RecipientFailed || entry.RecoveryWitness == nil {
 			return row, false, ErrFanoutQueueConflict
+		}
+		if err := confirmOutboxDurable(path); err != nil {
+			return row, false, fmt.Errorf("%w: outbox directory durability unconfirmed before replay: %v", ErrFanoutRecoveryPending, err)
 		}
 		if err := replayFanoutRecoveryTx(tx, &row, entry); err != nil {
 			return row, false, err
 		}
 		replayed = true
 	}
+	if entry.Entry.EventJSON != row.eventJSON {
+		return row, replayed, fmt.Errorf("%w: %w", ErrFanoutQueueConflict, errFanoutPayloadMismatch)
+	}
+	if int64(entry.Entry.MaxRetries) != row.maxRetries {
+		return row, replayed, fmt.Errorf("%w: fanout frozen max_retries mismatch outbox_max=%d row_max=%d", ErrFanoutQueueConflict, entry.Entry.MaxRetries, row.maxRetries)
+	}
 	if w := messaging.OutboxWitnessDigest(entry); w != "" && w != row.recoveryDigest {
 		return row, replayed, fmt.Errorf("%w: unconsumed recovery_witness on the queue entry", ErrFanoutRecoveryPending)
 	}
 	if receipt != "" && receipt != row.receipt {
+		if err := confirmOutboxDurable(path); err != nil {
+			return row, false, fmt.Errorf("%w: outbox directory durability unconfirmed before replay: %v", ErrFanoutBookkeepingPending, err)
+		}
 		if err := replayFanoutFailureTx(tx, &row, entry, receipt); err != nil {
-			return row, replayed, err
+			return row, false, err
 		}
 		replayed = true
 	}
 	if RecipientDeliveryState(row.state) != RecipientQueued || entry.Entry.Status != messaging.OutboxStatusGroupPending ||
-		!row.retryCount.Valid || int64(entry.Entry.RetryCount) != row.retryCount.Int64 || row.retryCount.Int64 >= row.maxRetries {
-		return row, replayed, fmt.Errorf("fanout row is not an active pending queue entry (state %s, outbox %s %d/%d)", row.state, entry.Entry.Status, entry.Entry.RetryCount, row.maxRetries)
+		!row.retryCount.Valid || int64(entry.Entry.RetryCount) != row.retryCount.Int64 || row.retryCount.Int64 >= row.maxRetries ||
+		entry.Entry.RetryCount >= entry.Entry.MaxRetries {
+		baseErr := ErrFanoutNotActive
+		if (RecipientDeliveryState(row.state) == RecipientFailed || entry.Entry.Status == messaging.OutboxStatusGroupFailed) &&
+			((row.retryCount.Valid && row.retryCount.Int64 >= row.maxRetries) || entry.Entry.RetryCount >= entry.Entry.MaxRetries) {
+			baseErr = ErrFanoutRetryExhausted
+		}
+		return row, replayed, fmt.Errorf("%w: fanout row is not an active pending queue entry (state %s, outbox %s %d/%d)", baseErr, row.state, entry.Entry.Status, entry.Entry.RetryCount, row.maxRetries)
 	}
 	return row, replayed, nil
 }
@@ -72,7 +95,7 @@ func (s *Store) fanoutBarrierTx(tx queryExecer, path string, key FanoutKey, reci
 func commitReplayOnRefusal(tx *immediateTx, replayed bool, err error) error {
 	if replayed {
 		if commitErr := tx.Commit(); commitErr != nil {
-			return fmt.Errorf("%w (and committing the barrier replay failed: %v)", err, commitErr)
+			return fmt.Errorf("%w: %w (barrier replay commit: %v)", ErrFanoutBookkeepingPending, err, commitErr)
 		}
 	}
 	return err
@@ -81,12 +104,25 @@ func commitReplayOnRefusal(tx *immediateTx, replayed bool, err error) error {
 // reserveFanoutAttempt is R behind the barrier: it consumes one generation
 // for the row's current queue entry. Inert: no production caller.
 func (s *Store) reserveFanoutAttempt(key FanoutKey, recipient string) (token fanoutAttemptToken, err error) {
+	return s.reserveFanoutAttemptFrozen(key, recipient, "")
+}
+
+func (s *Store) reserveFanoutAttemptFrozen(key FanoutKey, recipient, wantEventJSON string) (token fanoutAttemptToken, err error) {
 	err = messaging.WithGroupOutboxLock(func(path string) error {
 		tx, err := s.beginImmediate()
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
+		if wantEventJSON != "" {
+			row, err := loadFanoutFailureRow(tx, key, recipient)
+			if err != nil {
+				return err
+			}
+			if wantEventJSON != row.eventJSON {
+				return errFanoutPayloadMismatch
+			}
+		}
 		if _, replayed, err := s.fanoutBarrierTx(tx, path, key, recipient); err != nil {
 			return commitReplayOnRefusal(tx, replayed, err)
 		}

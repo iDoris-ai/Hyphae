@@ -1,15 +1,79 @@
 package groupchat
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"fiatjaf.com/nostr"
+	"github.com/gorilla/websocket"
 	"github.com/iDoris-ai/hyphae/internal/messaging"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/stretchr/testify/require"
 )
+
+func TestFanoutAttemptHandlerRejectsForeignSignedPayload(t *testing.T) {
+	for _, pendingO3 := range []bool{false, true} {
+		for _, sameSigner := range []bool{false, true} {
+			t.Run(map[bool]string{false: "queued", true: "pending O3"}[pendingO3]+map[bool]string{false: " other signer", true: " same signer"}[sameSigner], func(t *testing.T) {
+				f := newFailureFixture(t)
+				if pendingO3 {
+					f.failO3BeforeT4(t, f.startAttempt(t, 1))
+				}
+				entry := f.typedEntry(t)
+				b := nostr.Event{Kind: 30078, CreatedAt: nostr.Now(), Content: "foreign ciphertext"}
+				signer := nostr.Generate()
+				if sameSigner {
+					signer = f.member.sk
+				}
+				require.NoError(t, b.Sign(signer))
+				require.True(t, b.CheckID())
+				require.True(t, b.VerifySignature())
+				data, err := json.Marshal(b)
+				require.NoError(t, err)
+				entry.EventJSON = string(data)
+				unchanged := f.snapshot(t)
+				h := NewFanoutAttemptHandler(f.member.store)
+				_, err = h.Reserve(entry)
+				require.ErrorIs(t, err, messaging.ErrGroupAttemptPayloadMismatch)
+				unchanged()
+			})
+		}
+	}
+}
+
+func TestFanoutAttemptHandlerRejectsDifferentBytesOfSameSignedEvent(t *testing.T) {
+	f := newFailureFixture(t)
+	entry := f.typedEntry(t)
+	entry.EventJSON = " " + entry.EventJSON
+	var event nostr.Event
+	require.NoError(t, json.Unmarshal([]byte(entry.EventJSON), &event))
+	require.Equal(t, entry.ID, event.ID.Hex())
+	require.True(t, event.CheckID())
+	require.True(t, event.VerifySignature())
+	unchanged := f.snapshot(t)
+	_, err := NewFanoutAttemptHandler(f.member.store).Reserve(entry)
+	require.ErrorIs(t, err, messaging.ErrGroupAttemptPayloadMismatch)
+	unchanged()
+}
+
+func TestFanoutAttemptHandlerReplaysPendingO3ForAuthenticPayload(t *testing.T) {
+	f := newFailureFixture(t)
+	f.failO3BeforeT4(t, f.startAttempt(t, 1))
+	token, err := NewFanoutAttemptHandler(f.member.store).Reserve(f.typedEntry(t))
+	require.NoError(t, err)
+	require.EqualValues(t, 2, token.AttemptGeneration)
+	require.EqualValues(t, 1, f.row(t).RetryCount)
+}
 
 func (f failureFixture) typedEntry(t *testing.T) types.OutboxEntry {
 	t.Helper()
@@ -122,4 +186,143 @@ func TestFanoutAttemptHandlerPendingAndQueueMappings(t *testing.T) {
 	require.ErrorIs(t, mapFanoutError(ErrFanoutRecoveryPending), messaging.ErrGroupAttemptPending)
 	require.ErrorIs(t, mapFanoutError(ErrFanoutCleanupPending), messaging.ErrGroupAttemptCleanupPending)
 	require.ErrorIs(t, mapFanoutError(errors.New("other")), messaging.ErrGroupAttemptConflict)
+}
+
+// publishCounter is a localhost relay that counts EVENT frames. It NACKs
+// them so a reached publisher returns without waiting out the dial timeout.
+type publishCounter struct {
+	n   atomic.Int32
+	url string
+}
+
+func startPublishCounter(t *testing.T) *publishCounter {
+	t.Helper()
+	counter := &publishCounter{}
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		for {
+			_, data, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var envelope []json.RawMessage
+			if json.Unmarshal(data, &envelope) != nil || len(envelope) < 1 {
+				continue
+			}
+			var command string
+			if json.Unmarshal(envelope[0], &command) != nil || command != "EVENT" || len(envelope) < 2 {
+				continue
+			}
+			counter.n.Add(1)
+			var event struct {
+				ID string `json:"id"`
+			}
+			if json.Unmarshal(envelope[1], &event) != nil {
+				continue
+			}
+			response, err := json.Marshal([]any{"OK", event.ID, false, "local test relay"})
+			if err != nil {
+				return
+			}
+			if err := conn.WriteMessage(websocket.TextMessage, response); err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(server.Close)
+	counter.url = "ws" + strings.TrimPrefix(server.URL, "http")
+	return counter
+}
+
+// rewriteOwnedOutboxMaxRetries changes only the temp outbox entry's max_retries.
+// created_at and the signed event bytes stay as the fixture wrote them.
+func rewriteOwnedOutboxMaxRetries(t *testing.T, path string, from, to int) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	old := []byte(fmt.Sprintf(`"max_retries": %d`, from))
+	next := []byte(fmt.Sprintf(`"max_retries": %d`, to))
+	require.Equal(t, 1, bytes.Count(data, old), "owned outbox max_retries token")
+	edited := bytes.Replace(data, old, next, 1)
+	require.Equal(t, bytes.Count(data, []byte(`"created_at"`)), bytes.Count(edited, []byte(`"created_at"`)))
+	require.NoError(t, os.WriteFile(path, edited, 0o600))
+}
+
+// TestFanoutAttemptHandlerRefusesOutboxMaxRetriesMismatch is the out-of-band
+// outbox.json fault: frozen row max_retries stays 3 while the owned temp
+// outbox says 1 or 5. Five scheduler picks must refuse before P.
+func TestFanoutAttemptHandlerRefusesOutboxMaxRetriesMismatch(t *testing.T) {
+	for _, outboxMax := range []int{1, 5} {
+		t.Run(fmt.Sprintf("outbox_%d", outboxMax), func(t *testing.T) {
+			f := newFailureFixture(t)
+			entry := f.outboxEntry(t)
+			require.Equal(t, 3, entry.Entry.MaxRetries)
+			createdAt := entry.Entry.CreatedAt
+			rewriteOwnedOutboxMaxRetries(t, f.outboxPath, 3, outboxMax)
+			require.Equal(t, outboxMax, f.outboxEntry(t).Entry.MaxRetries)
+			require.Equal(t, createdAt, f.outboxEntry(t).Entry.CreatedAt)
+			var rowMax int64
+			require.NoError(t, f.member.db.QueryRow(`SELECT max_retries FROM groupchat_fanout WHERE event_id=?`, f.eventID).Scan(&rowMax))
+			require.EqualValues(t, 3, rowMax)
+
+			counter := startPublishCounter(t)
+			before := f.recovery(t)
+			unchanged := f.snapshot(t)
+			handler := NewFanoutAttemptHandler(f.member.store)
+			opts := messaging.AttemptOptions{Handlers: messaging.OutboxHandlers{Attempt: handler}}
+			type pickResult struct {
+				attempted, sent bool
+				issue           messaging.AgentMessageDeliveryIssue
+				err             error
+				pubs            int32
+			}
+			picks := make([]pickResult, 0, 5)
+			for pick := 1; pick <= 5; pick++ {
+				result, err := messaging.AttemptSendRouted(context.Background(), nil, f.typedEntry(t), []string{counter.url}, 200*time.Millisecond, opts)
+				picks = append(picks, pickResult{result.Attempted, result.Sent, result.Issue, err, counter.n.Load()})
+			}
+			after := f.recovery(t)
+			var detail strings.Builder
+			for i, pick := range picks {
+				fmt.Fprintf(&detail, "pick %d attempted=%v sent=%v issue=%s pubs=%d err=%v\n", i+1, pick.attempted, pick.sent, pick.issue, pick.pubs, pick.err)
+			}
+			fmt.Fprintf(&detail, "before attempts=%d gen=%d retry=%d state=%s\nafter attempts=%d gen=%d retry=%d state=%s\n",
+				before.Attempts, before.Generation, before.RetryCount, before.State,
+				after.Attempts, after.Generation, after.RetryCount, after.State)
+			require.EqualValues(t, 0, counter.n.Load(), "publisher EVENT count\n%s", detail.String())
+			for i, pick := range picks {
+				require.Falsef(t, pick.attempted, "pick %d\n%s", i+1, detail.String())
+				require.False(t, pick.sent)
+				require.Equal(t, messaging.AgentMessageIssueQueueConflict, pick.issue)
+				require.ErrorContains(t, pick.err, fmt.Sprintf("outbox_max=%d", outboxMax))
+				require.ErrorContains(t, pick.err, "row_max=3")
+				require.NotContains(t, pick.err.Error(), f.typedEntry(t).EventJSON)
+				require.NotContains(t, pick.err.Error(), "nsec")
+			}
+			t.Logf("refusal=%v", picks[0].err)
+			unchanged()
+			require.Equal(t, before.Attempts, after.Attempts)
+			require.Equal(t, before.Generation, after.Generation)
+			require.Equal(t, before.RetryCount, after.RetryCount)
+			require.Equal(t, before.State, after.State)
+			require.Equal(t, createdAt, f.outboxEntry(t).Entry.CreatedAt)
+		})
+	}
+}
+
+func TestStartEventJSONDriftIsQueueConflict(t *testing.T) {
+	f := newFailureFixture(t)
+	handler := NewFanoutAttemptHandler(f.member.store)
+	token, err := handler.Reserve(f.typedEntry(t))
+	require.NoError(t, err)
+	_, err = f.member.db.Exec(`UPDATE groupchat_fanout SET event_json=event_json||' '`)
+	require.NoError(t, err)
+	err = handler.Start(token, 1, time.Now().Unix())
+	require.ErrorIs(t, err, messaging.ErrGroupAttemptQueueConflict)
+	require.NotContains(t, err.Error(), "caller payload differs")
 }

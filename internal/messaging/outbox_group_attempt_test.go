@@ -2,6 +2,7 @@ package messaging
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -10,6 +11,79 @@ import (
 	"fiatjaf.com/nostr"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 )
+
+func TestGroupAttemptRejectsForeignSignedPayloadBeforeReserve(t *testing.T) {
+	entry := groupAttemptEntry(t)
+	var a nostr.Event
+	if err := json.Unmarshal([]byte(entry.EventJSON), &a); err != nil {
+		t.Fatal(err)
+	}
+	if !a.CheckID() || !a.VerifySignature() {
+		t.Fatal("A must be signed")
+	}
+	b := nostr.Event{Kind: a.Kind, CreatedAt: a.CreatedAt, Content: a.Content + " foreign"}
+	if err := b.Sign(nostr.Generate()); err != nil {
+		t.Fatal(err)
+	}
+	if !b.CheckID() || !b.VerifySignature() {
+		t.Fatal("B must be signed")
+	}
+	data, err := json.Marshal(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry.EventJSON = string(data)
+	h := &fakeAttemptHandler{}
+	published := 0
+	result, err := attemptSendGroupAttempt(context.Background(), entry, nil, time.Second, h,
+		func(context.Context, []string, nostr.Event, time.Duration) bool { published++; return true })
+	if !errors.Is(err, ErrGroupAttemptPayloadMismatch) || result.Issue != AgentMessageIssueOutboxBookkeepingFailed || len(h.calls) != 0 || published != 0 {
+		t.Fatalf("result=%+v err=%v calls=%v published=%d", result, err, h.calls, published)
+	}
+}
+
+func TestGroupAttemptRejectsInvalidSignatureBeforeReserve(t *testing.T) {
+	entry := groupAttemptEntry(t)
+	var event nostr.Event
+	if err := json.Unmarshal([]byte(entry.EventJSON), &event); err != nil {
+		t.Fatal(err)
+	}
+	event.Sig[0] ^= 1
+	if !event.CheckID() || event.VerifySignature() {
+		t.Fatal("fixture must isolate signature")
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry.EventJSON = string(data)
+	h := &fakeAttemptHandler{}
+	result, err := attemptSendGroupAttempt(context.Background(), entry, nil, time.Second, h,
+		func(context.Context, []string, nostr.Event, time.Duration) bool {
+			t.Fatal("published invalid signature")
+			return true
+		})
+	if !errors.Is(err, ErrGroupAttemptPayloadMismatch) || result.Issue != AgentMessageIssueOutboxBookkeepingFailed || len(h.calls) != 0 {
+		t.Fatalf("result=%+v err=%v calls=%v", result, err, h.calls)
+	}
+}
+
+func TestGroupAttemptAuthenticPayloadPublishesA(t *testing.T) {
+	entry := groupAttemptEntry(t)
+	h := &fakeAttemptHandler{}
+	published := 0
+	result, err := attemptSendGroupAttempt(context.Background(), entry, nil, time.Second, h,
+		func(_ context.Context, _ []string, event nostr.Event, _ time.Duration) bool {
+			published++
+			if event.ID.Hex() != entry.ID || !event.CheckID() || !event.VerifySignature() {
+				t.Fatal("published event differs from A")
+			}
+			return true
+		})
+	if err != nil || !result.Sent || published != 1 || fmt.Sprint(h.calls) != "[reserve start:7:0 accepted:7]" {
+		t.Fatalf("result=%+v err=%v calls=%v published=%d", result, err, h.calls, published)
+	}
+}
 
 type fakeAttemptHandler struct {
 	reserveErr, startErr, acceptedErr, failedErr error
@@ -165,7 +239,7 @@ func TestAttemptSendRoutedPrefersAttemptHandlerAndKeepsLegacyFallback(t *testing
 	bad.EventJSON = "{"
 	h := &fakeAttemptHandler{}
 	result, err = attemptSendRouted(context.Background(), &types.Outbox{}, bad, nil, time.Second, AttemptOptions{Handlers: OutboxHandlers{Attempt: h}}, publish, store)
-	if err == nil || result.Issue != AgentMessageIssueOutboxBookkeepingFailed || len(h.calls) != 1 {
+	if err == nil || result.Issue != AgentMessageIssueOutboxBookkeepingFailed || len(h.calls) != 0 {
 		t.Fatalf("corrupt frozen event: %+v %v calls=%v", result, err, h.calls)
 	}
 }
