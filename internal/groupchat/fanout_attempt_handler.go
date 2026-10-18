@@ -35,7 +35,10 @@ func (h *FanoutAttemptHandler) Reserve(entry types.OutboxEntry) (messaging.Group
 	if entry.RecipientNpub != recipient {
 		return messaging.GroupAttemptToken{}, fmt.Errorf("%w: outbox recipient %q is not the fanout row's %q", messaging.ErrGroupAttemptConflict, entry.RecipientNpub, recipient)
 	}
-	token, err := h.store.reserveFanoutAttempt(key, recipient)
+	if entry.EventJSON == "" {
+		return messaging.GroupAttemptToken{}, messaging.ErrGroupAttemptPayloadMismatch
+	}
+	token, err := h.store.reserveFanoutAttemptFrozen(key, recipient, entry.EventJSON)
 	if err != nil {
 		return messaging.GroupAttemptToken{}, mapFanoutError(err)
 	}
@@ -102,6 +105,7 @@ func mapFanoutError(err error) error {
 		{ErrFanoutCleanupPending, messaging.ErrGroupAttemptCleanupPending},
 		{ErrFanoutBookkeepingConflict, messaging.ErrGroupAttemptConflict},
 		{ErrFanoutQueueConflict, messaging.ErrGroupAttemptQueueConflict},
+		{errFanoutPayloadMismatch, messaging.ErrGroupAttemptPayloadMismatch},
 		{ErrFanoutQueueMissing, messaging.ErrGroupAttemptQueueMissing},
 	} {
 		if errors.Is(err, m.from) {

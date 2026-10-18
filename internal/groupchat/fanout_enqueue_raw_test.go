@@ -2,6 +2,7 @@ package groupchat
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -140,4 +141,167 @@ func TestEnqueuePreparedRawRefusals(t *testing.T) {
 	after, err := os.ReadFile(f.outboxPath)
 	require.NoError(t, err)
 	require.Equal(t, string(before), string(after))
+}
+
+func TestEnqueuePreparedRawRowsErrHaltsBeforeO1T2(t *testing.T) {
+	f, npubs := newPreparedFixture(t, 2)
+	require.Len(t, npubs, 2)
+	_, err := os.Stat(f.outboxPath)
+	require.True(t, os.IsNotExist(err), "no outbox before enqueue")
+
+	beforeRows := map[string][]any{}
+	for _, recipient := range npubs {
+		beforeRows[recipient] = fanoutRowSnapshotByRecipient(t, f.member, f.key, recipient)
+	}
+
+	orig := openPreparedFanoutRows
+	defer func() { openPreparedFanoutRows = orig }()
+	openPreparedFanoutRows = func(tx *immediateTx, query string, args ...any) (preparedRowIter, error) {
+		rows, err := tx.Query(query, args...)
+		if err != nil {
+			return nil, err
+		}
+		return &failAfterFirstPreparedRow{rows: rows}, nil
+	}
+
+	_, err = f.member.store.enqueuePreparedRaw(f.key, 1_800_000_000)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "injected rows.Next failure")
+
+	_, err = os.Stat(f.outboxPath)
+	require.True(t, os.IsNotExist(err), "outbox must stay absent: no O1 after rows.Err")
+	for _, recipient := range npubs {
+		require.Equal(t, beforeRows[recipient], fanoutRowSnapshotByRecipient(t, f.member, f.key, recipient),
+			"SQLite row for %s must stay prepared with no queue mutation", recipient)
+	}
+}
+
+// failAfterFirstPreparedRow returns one real database/sql row, then a Next
+// failure whose Err is set while Close remains nil — the contract rows.Err
+// must detect before O1/T2.
+type failAfterFirstPreparedRow struct {
+	rows     preparedRowIter
+	seen     int
+	injected error
+}
+
+func (r *failAfterFirstPreparedRow) Next() bool {
+	if r.seen >= 1 {
+		r.injected = errInjectedPreparedRowsNext
+		return false
+	}
+	if !r.rows.Next() {
+		return false
+	}
+	r.seen++
+	return true
+}
+
+func (r *failAfterFirstPreparedRow) Scan(dest ...any) error { return r.rows.Scan(dest...) }
+
+func (r *failAfterFirstPreparedRow) Err() error {
+	if r.injected != nil {
+		return r.injected
+	}
+	return r.rows.Err()
+}
+
+func (r *failAfterFirstPreparedRow) Close() error { return r.rows.Close() }
+
+var errInjectedPreparedRowsNext = errors.New("injected rows.Next failure after first row")
+
+func fanoutRowSnapshotByRecipient(t *testing.T, member testMember, key FanoutKey, recipient string) []any {
+	t.Helper()
+	rows, err := member.db.Query(`SELECT * FROM groupchat_fanout WHERE local_npub=? AND group_id=? AND envelope_type=? AND send_key=? AND recipient_npub=?`,
+		key.LocalNpub, key.GroupID, key.EnvelopeType, key.SendKey, recipient)
+	require.NoError(t, err)
+	defer rows.Close()
+	cols, err := rows.Columns()
+	require.NoError(t, err)
+	require.True(t, rows.Next())
+	vals := make([]any, len(cols))
+	ptrs := make([]any, len(cols))
+	for i := range vals {
+		ptrs[i] = &vals[i]
+	}
+	require.NoError(t, rows.Scan(ptrs...))
+	require.False(t, rows.Next())
+	require.NoError(t, rows.Err())
+	return vals
+}
+
+func TestEnqueuePreparedRawAdoptsLegacyPendingRetryBudget(t *testing.T) {
+	f, _ := newPreparedFixture(t, 1)
+	var eventJSON string
+	require.NoError(t, f.member.db.QueryRow(`SELECT event_json FROM groupchat_fanout WHERE event_id=?`, f.eventID).Scan(&eventJSON))
+
+	const legacyQueueID = "cafebabecafebabecafebabecafebabe"
+	// Legacy pending at retry 1/max 3 with an opaque queue id (no fanout_protocol).
+	legacyEntry := []byte(`{"queue_id":"` + legacyQueueID + `","route":"group","id":"` + f.eventID + `","event_json":` + marshalJSONString(t, eventJSON) + `,"recipient_npub":"` + f.recipient + `","relays":null,"retry_count":1,"max_retries":3,"last_attempt":0,"created_at":7,"status":"group_pending"}`)
+	doc := []byte("{\n  \"entries\": [" + string(legacyEntry) + "]\n}\n")
+	require.NoError(t, os.WriteFile(f.outboxPath, doc, 0600))
+	infoBefore, err := os.Stat(f.outboxPath)
+	require.NoError(t, err)
+	bytesBefore, err := os.ReadFile(f.outboxPath)
+	require.NoError(t, err)
+
+	report, err := f.member.store.enqueuePreparedRaw(f.key, 8)
+	require.NoError(t, err)
+	require.Equal(t, 1, report.Queued)
+	require.Equal(t, legacyQueueID, report.Recipients[0].QueueID, "opaque legacy queue id must be adopted")
+
+	bytesAfter, err := os.ReadFile(f.outboxPath)
+	require.NoError(t, err)
+	require.Equal(t, string(bytesBefore), string(bytesAfter), "adoption must not rewrite outbox")
+	infoAfter, err := os.Stat(f.outboxPath)
+	require.NoError(t, err)
+	require.Equal(t, infoBefore.ModTime(), infoAfter.ModTime(), "adoption must not touch outbox mtime")
+
+	row := f.recovery(t)
+	require.Equal(t, string(RecipientQueued), row.State)
+	require.Equal(t, legacyQueueID, row.QueueID)
+	require.Equal(t, legacyQueueID, row.RetryQueueID)
+	require.EqualValues(t, 1, row.RetryCount, "adopted retry budget must be the entry's retry_count, not zero")
+
+	entry, _, err := messaging.ReadGroupEntryLocked(f.outboxPath, f.eventID)
+	require.NoError(t, err)
+	require.NotNil(t, entry)
+	require.Equal(t, legacyQueueID, entry.QueueID)
+	require.Equal(t, f.eventID, entry.Entry.ID)
+	require.Equal(t, f.recipient, entry.Entry.RecipientNpub)
+	require.Equal(t, eventJSON, entry.Entry.EventJSON)
+	require.Equal(t, 1, entry.Entry.RetryCount)
+	require.Equal(t, 3, entry.Entry.MaxRetries)
+
+	// Barrier must accept the adopted budget and allow another attempt within max.
+	token, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	require.NoError(t, err)
+	require.Equal(t, legacyQueueID, token.queueID)
+	require.NoError(t, f.member.store.startFanoutAttempt(token, 1, time.Now().Unix()))
+	require.NoError(t, f.member.store.commitFanoutFailure(token))
+	require.EqualValues(t, 2, f.recovery(t).RetryCount)
+}
+
+func TestEnqueuePreparedRawRejectsExhaustedLegacyWithoutWrites(t *testing.T) {
+	f, _ := newPreparedFixture(t, 1)
+	var eventJSON string
+	require.NoError(t, f.member.db.QueryRow(`SELECT event_json FROM groupchat_fanout WHERE event_id=?`, f.eventID).Scan(&eventJSON))
+
+	const legacyQueueID = "deadbeefdeadbeefdeadbeefdeadbeef"
+	legacyEntry := []byte(`{"queue_id":"` + legacyQueueID + `","route":"group","id":"` + f.eventID + `","event_json":` + marshalJSONString(t, eventJSON) + `,"recipient_npub":"` + f.recipient + `","relays":null,"retry_count":3,"max_retries":3,"last_attempt":0,"created_at":7,"status":"group_pending"}`)
+	doc := []byte("{\n  \"entries\": [" + string(legacyEntry) + "]\n}\n")
+	require.NoError(t, os.WriteFile(f.outboxPath, doc, 0600))
+	assertUnchanged := f.snapshot(t)
+
+	_, err := f.member.store.enqueuePreparedRaw(f.key, 8)
+	require.ErrorIs(t, err, messaging.ErrOutboxEnqueueConflict)
+	assertUnchanged()
+	require.Equal(t, string(RecipientPrepared), f.recovery(t).State)
+}
+
+func marshalJSONString(t *testing.T, s string) string {
+	t.Helper()
+	b, err := json.Marshal(s)
+	require.NoError(t, err)
+	return string(b)
 }
