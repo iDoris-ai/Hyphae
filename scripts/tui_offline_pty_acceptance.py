@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import fcntl
 import hashlib
 import json
@@ -18,6 +19,7 @@ import pty
 import re
 import secrets
 import select
+import shutil
 import signal
 import socket
 import sqlite3
@@ -34,6 +36,10 @@ from pathlib import Path
 
 
 EXIT_GAP = 77
+
+
+class HarnessError(RuntimeError):
+    """Failure whose message is authored by this runner and safe to publish."""
 QUEUED_RE = re.compile(
     r"Outbox:\s*queued for retry\s*[•|]\s*([0-9a-f]{12})"
     r"\s*\(not delivered; awaiting relay ACK\)", re.I
@@ -174,14 +180,26 @@ class Screen:
 
 
 class PtyProcess:
-    def __init__(self, argv: list[str], env: dict[str, str], rows: int = 32, cols: int = 120):
-        self.pid, self.fd = pty.fork()
+    def __init__(self, argv: list[str], env: dict[str, str], owned: list,
+                 rows: int = 32, cols: int = 120):
         self.screen = Screen(rows, cols)
         self.rows, self.cols = rows, cols
-        if self.pid == 0:
-            os.environ.clear()
-            os.environ.update(env)
-            os.execvpe(argv[0], argv, env)
+        self.pid, self.fd = 0, -1
+        # Block SIGTERM so the exact child handle is registered before any unwind.
+        blocked = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
+        try:
+            self.pid, self.fd = pty.fork()
+            if self.pid == 0:
+                try:  # never unwind into the parent's cleanup from the forked child
+                    signal.pthread_sigmask(signal.SIG_SETMASK, blocked)
+                    os.environ.clear()
+                    os.environ.update(env)
+                    os.execvpe(argv[0], argv, env)
+                finally:
+                    os._exit(127)
+            owned.append(self)  # owned before setup below can raise
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, blocked)
         fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
         os.kill(self.pid, signal.SIGWINCH)
         tty.setraw(self.fd, termios.TCSANOW)
@@ -226,12 +244,13 @@ class PtyProcess:
                 except ProcessLookupError:
                     pass
                 if not self.wait(2):
-                    raise RuntimeError("owned TUI child did not stop after SIGKILL")
+                    raise HarnessError("owned TUI child did not stop after SIGKILL")
             self.pid = 0
         try:
             os.close(self.fd)
         except OSError:
             pass
+        self.fd = -1  # idempotent: never close a reused descriptor
 
 
 class Relay:
@@ -251,13 +270,13 @@ class Relay:
         deadline = time.monotonic() + 8
         while time.monotonic() < deadline:
             if self.proc.poll() is not None:
-                raise RuntimeError("local relay exited before listening")
+                raise HarnessError("local relay exited before listening")
             with socket.socket() as conn:
                 conn.settimeout(0.15)
                 if conn.connect_ex(("127.0.0.1", self.port)) == 0:
                     return
             time.sleep(0.05)
-        raise RuntimeError("local relay did not start listening")
+        raise HarnessError("local relay did not start listening")
 
     def stop(self) -> None:
         if self.proc is None or self.proc.poll() is not None:
@@ -268,7 +287,10 @@ class Relay:
         except subprocess.TimeoutExpired:
             # Only signal the exact child PID created by this runner.
             self.proc.kill()
-            self.proc.wait(timeout=2)
+            try:
+                self.proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                raise HarnessError("owned relay child did not stop after SIGKILL") from None
 
 
 def isolated_env(home: Path, cache: Path) -> dict[str, str]:
@@ -295,7 +317,7 @@ def run_cli(binary: Path, home: Path, cache: Path, *args: str, timeout: int = 20
                             env=env, timeout=timeout, check=False)
     if result.returncode:
         # Intentionally never forward command output: it may contain identity data.
-        raise RuntimeError(f"isolated CLI setup command failed: {args[0]} (exit {result.returncode})")
+        raise HarnessError(f"isolated CLI setup command failed: {args[0]} (exit {result.returncode})")
     return result.stdout
 
 
@@ -313,8 +335,8 @@ def wait_screen(proc: PtyProcess, condition, timeout: float, label: str) -> str:
         if condition(current):
             return current
         if proc.pid == 0:
-            raise RuntimeError(f"TUI exited while waiting for {label}")
-    raise RuntimeError(f"timed out waiting for UI state: {label}")
+            raise HarnessError(f"TUI exited while waiting for {label}")
+    raise HarnessError(f"timed out waiting for UI state: {label}")
 
 
 def create_identity(binary: Path, home: Path, cache: Path, nickname: str) -> str:
@@ -326,7 +348,7 @@ def create_identity(binary: Path, home: Path, cache: Path, nickname: str) -> str
             npub = item.get("npub", "")
             if npub.startswith("npub1") and item.get("default") is True:
                 return npub
-    raise RuntimeError("isolated identity setup failed to expose one public identity")
+    raise HarnessError("isolated identity setup failed to expose one public identity")
 
 
 def set_contact(binary: Path, home: Path, cache: Path, nickname: str, npub: str) -> None:
@@ -337,7 +359,7 @@ def decode_npub(binary: Path, home: Path, cache: Path, npub: str) -> str:
     output = run_cli(binary, home, cache, "decode", "--input", npub).decode("utf-8", "replace")
     match = re.search(r"^Hex:\s*([0-9a-f]{64})$", output, re.I | re.M)
     if not match:
-        raise RuntimeError("isolated identity public key did not decode to 32 bytes")
+        raise HarnessError("isolated identity public key did not decode to 32 bytes")
     return match.group(1).lower()
 
 
@@ -347,9 +369,10 @@ def contact_matches(binary: Path, home: Path, cache: Path, nickname: str, npub: 
                for item in payload.get("data", []))
 
 
-def start_chat(binary: Path, home: Path, cache: Path, contact: str, relay_url: str) -> PtyProcess:
+def start_chat(binary: Path, home: Path, cache: Path, contact: str, relay_url: str,
+               owned: list) -> PtyProcess:
     return PtyProcess([str(binary), "tui", "chat", "--with", contact, "--relay", relay_url],
-                      isolated_env(home, cache))
+                      isolated_env(home, cache), owned)
 
 
 def wait_outbox(home: Path, event_prefix: str, wanted: bool, timeout: float = 5,
@@ -366,12 +389,12 @@ def wait_outbox(home: Path, event_prefix: str, wanted: bool, timeout: float = 5,
             present = bool(matching)
             if present == wanted:
                 if wanted and forbidden_body and any(forbidden_body in json.dumps(entry) for entry in matching):
-                    raise RuntimeError("outbox stored the unique message body in plaintext")
+                    raise HarnessError("outbox stored the unique message body in plaintext")
                 return
         except (OSError, json.JSONDecodeError):
             pass
         time.sleep(0.1)
-    raise RuntimeError("durable outbox state did not reach expected state")
+    raise HarnessError("durable outbox state did not reach expected state")
 
 
 def load_outbox_event(home: Path, event_prefix: str, body: str) -> tuple[dict[str, object], dict[str, object]]:
@@ -379,18 +402,18 @@ def load_outbox_event(home: Path, event_prefix: str, body: str) -> tuple[dict[st
     try:
         payload = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError("durable outbox snapshot could not be read") from exc
+        raise HarnessError("durable outbox snapshot could not be read") from exc
     matches = [entry for entry in payload.get("entries", [])
                if str(entry.get("id", "")).startswith(event_prefix)]
     if len(matches) != 1:
-        raise RuntimeError("durable outbox did not contain exactly one matching event")
+        raise HarnessError("durable outbox did not contain exactly one matching event")
     entry = matches[0]
     if body in json.dumps(entry):
-        raise RuntimeError("outbox stored the unique message body in plaintext")
+        raise HarnessError("outbox stored the unique message body in plaintext")
     try:
         event = json.loads(entry["event_json"])
     except (KeyError, TypeError, json.JSONDecodeError) as exc:
-        raise RuntimeError("durable outbox event could not be decoded") from exc
+        raise HarnessError("durable outbox event could not be decoded") from exc
     return entry, event
 
 
@@ -422,7 +445,7 @@ def _read_exact(sock: socket.socket, count: int) -> bytes:
     while len(data) < count:
         chunk = sock.recv(count - len(data))
         if not chunk:
-            raise RuntimeError("relay diagnostic socket closed")
+            raise HarnessError("relay diagnostic socket closed")
         data.extend(chunk)
     return bytes(data)
 
@@ -459,7 +482,7 @@ def _ws_read_frame(sock: socket.socket) -> tuple[int, bytes]:
 def query_relay_events(relay_url: str, event_id: str) -> list[dict[str, object]]:
     parsed = urllib.parse.urlsplit(relay_url)
     if parsed.scheme != "ws" or parsed.hostname not in ("127.0.0.1", "localhost"):
-        raise RuntimeError("diagnostic relay query is restricted to local ws:// relay")
+        raise HarnessError("diagnostic relay query is restricted to local ws:// relay")
     port = parsed.port or 80
     path = parsed.path or "/"
     if parsed.query:
@@ -480,7 +503,7 @@ def query_relay_events(relay_url: str, event_id: str) -> list[dict[str, object]]
             headers.extend(_read_exact(conn, 1))
         header_text = headers.decode("ascii", "replace")
         if " 101 " not in header_text or f"Sec-WebSocket-Accept: {expected}" not in header_text:
-            raise RuntimeError("local relay diagnostic websocket handshake failed")
+            raise HarnessError("local relay diagnostic websocket handshake failed")
         query = json.dumps(["REQ", sub_id, {"ids": [event_id]}], separators=(",", ":")).encode()
         _ws_send_text(conn, query)
         saw_eose = False
@@ -507,9 +530,9 @@ def query_relay_events(relay_url: str, event_id: str) -> list[dict[str, object]]
                 saw_eose = True
                 break
             elif message[0] == "CLOSED" and message[1] == sub_id:
-                raise RuntimeError("local relay rejected exact-event history query")
+                raise HarnessError("local relay rejected exact-event history query")
         if not saw_eose:
-            raise RuntimeError("local relay exact-event query did not reach EOSE")
+            raise HarnessError("local relay exact-event query did not reach EOSE")
     return events
 
 
@@ -537,7 +560,7 @@ def independent_inbox_probe(binary: Path, home: Path, cache: Path,
             "decrypted": bool(entries and entries[0].get("decrypted")),
             "body_matches_unique_probe": bool(entries and entries[0].get("content") == body),
         }
-    except (RuntimeError, json.JSONDecodeError, AttributeError):
+    except Exception:  # diagnostic only; must never replace the primary failure
         return {
             "command_succeeded": False,
             "exact_event_count": 0,
@@ -580,6 +603,63 @@ def write_evidence(path: str | None, data: dict[str, object]) -> None:
         stream.write(json.dumps(data, indent=2, sort_keys=True) + "\n")
 
 
+def safe_failure(exc: BaseException) -> str:
+    if isinstance(exc, HarnessError):
+        return str(exc)[:240]
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return "subprocess timed out (details redacted)"
+    return f"unexpected {type(exc).__name__} (details redacted)"
+
+
+class HarnessTerminated(HarnessError):
+    pass
+
+
+def _raise_on_sigterm(signum, frame) -> None:
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)  # one unwind; restored after cleanup
+    raise HarnessTerminated("harness interrupted by SIGTERM; owned cleanup attempted")
+
+
+def finish_owned_cleanup(owned: list, state: dict[str, object], primary_ok: bool) -> None:
+    state["cleanup_incomplete"] = True  # fail closed until every stop is confirmed
+    failures = 0
+    for child in owned:
+        if child is None:
+            continue
+        try:
+            child.stop()
+        except Exception:
+            failures += 1
+    state["failed_stop_count"] = failures
+    state["cleanup_incomplete"] = bool(failures)
+    if failures:
+        if primary_ok:
+            raise HarnessError("owned child cleanup incomplete; private temp root retained")
+
+
+@contextlib.contextmanager
+def private_temp_root(state: dict[str, object]):
+    name = tempfile.mkdtemp(prefix="hyphae-tui-offline-")
+    os.chmod(name, 0o700)
+    try:
+        yield name
+    finally:
+        if not state.get("cleanup_incomplete"):
+            shutil.rmtree(name, ignore_errors=True)
+
+
+def emit_summary(args: argparse.Namespace, evidence: dict[str, object], code: int) -> int:
+    try:
+        write_evidence(args.evidence, evidence)
+    except Exception:  # fixed text only; never the raw path/error, never masks a primary failure
+        evidence["evidence_write_failed"] = True
+        if evidence.get("status") == "pass":
+            evidence.update({"status": "fail", "failure": "evidence write failed after checks (details redacted)"})
+        code = code or 1
+    print(json.dumps(evidence, sort_keys=True))
+    return code
+
+
 def run_offline_acceptance(args: argparse.Namespace) -> int:
     root = Path(__file__).resolve().parents[1]
     evidence: dict[str, object] = {
@@ -588,8 +668,10 @@ def run_offline_acceptance(args: argparse.Namespace) -> int:
         "scope": "local isolated homes and local relay only",
         "source_commit": args.source_commit,
     }
+    cleanup: dict[str, object] = {}
+    previous_term = signal.signal(signal.SIGTERM, _raise_on_sigterm)
     try:
-        with tempfile.TemporaryDirectory(prefix="hyphae-tui-offline-") as temp_name:
+        with private_temp_root(cleanup) as temp_name:
             root_temp = Path(temp_name)
             root_temp.chmod(0o700)
             cache = root_temp / "go-cache"
@@ -604,7 +686,7 @@ def run_offline_acceptance(args: argparse.Namespace) -> int:
                 bin_dir = Path(args.bin_dir).resolve()
                 cli_bin, relay_bin = bin_dir / "hyphae", bin_dir / "hyphae-relay"
                 if not cli_bin.is_file() or not relay_bin.is_file():
-                    raise RuntimeError("--bin-dir must contain hyphae and hyphae-relay")
+                    raise HarnessError("--bin-dir must contain hyphae and hyphae-relay")
             else:
                 cli_bin, relay_bin = root_temp / "hyphae", root_temp / "hyphae-relay"
                 for package, output in (("./cmd/hyphae", cli_bin), ("./cmd/hyphae-relay", relay_bin)):
@@ -612,14 +694,14 @@ def run_offline_acceptance(args: argparse.Namespace) -> int:
                                             env=sender_env, stdout=subprocess.DEVNULL,
                                             stderr=subprocess.DEVNULL, check=False, timeout=180)
                     if built.returncode:
-                        raise RuntimeError(f"local build failed for {package}; output suppressed")
+                        raise HarnessError(f"local build failed for {package}; output suppressed")
 
             cli_sha = file_sha256(cli_bin)
             relay_sha = file_sha256(relay_bin)
             if args.expected_cli_sha256 and cli_sha != args.expected_cli_sha256.lower():
-                raise RuntimeError("candidate CLI SHA-256 differs from expected value")
+                raise HarnessError("candidate CLI SHA-256 differs from expected value")
             if args.expected_relay_sha256 and relay_sha != args.expected_relay_sha256.lower():
-                raise RuntimeError("candidate relay SHA-256 differs from expected value")
+                raise HarnessError("candidate relay SHA-256 differs from expected value")
             evidence["binary_sha256"] = {"hyphae": cli_sha, "hyphae_relay": relay_sha}
 
             sender_npub = create_identity(cli_bin, sender_home, cache, "sender")
@@ -633,7 +715,7 @@ def run_offline_acceptance(args: argparse.Namespace) -> int:
                 and contact_matches(cli_bin, receiver_home, cache, "sender", sender_npub)
             )
             if not contacts_match:
-                raise RuntimeError("isolated current identity/contact mapping did not match")
+                raise HarnessError("isolated current identity/contact mapping did not match")
 
             port = free_port()
             relay_url = f"ws://127.0.0.1:{port}"
@@ -641,10 +723,12 @@ def run_offline_acceptance(args: argparse.Namespace) -> int:
             relay_data.mkdir(mode=0o700)
             relay = Relay(relay_bin, relay_data, port, sender_env)
             sender_tui = receiver_tui = None
+            owned_tuis: list[PtyProcess] = []
+            primary_ok = False
             try:
                 relay.start()
-                sender_tui = start_chat(cli_bin, sender_home, cache, "receiver", relay_url)
-                receiver_tui = start_chat(cli_bin, receiver_home, cache, "sender", relay_url)
+                sender_tui = start_chat(cli_bin, sender_home, cache, "receiver", relay_url, owned_tuis)
+                receiver_tui = start_chat(cli_bin, receiver_home, cache, "sender", relay_url, owned_tuis)
                 wait_screen(sender_tui, lambda s: "Type a message" in s, 15, "sender chat open")
                 wait_screen(receiver_tui, lambda s: "Type a message" in s, 15, "receiver chat open")
                 sender_connected = wait_screen(sender_tui, lambda s: bool(INBOX_CONNECTED_RE.search(s)),
@@ -678,7 +762,7 @@ def run_offline_acceptance(args: argparse.Namespace) -> int:
                 queued_screen = wait_screen(sender_tui, lambda s: bool(QUEUED_RE.search(s)), 15,
                                             "durably queued (not accepted by relay)")
                 if FAILED_RE.search(queued_screen) or ACCEPTED_RE.search(queued_screen) or DELIVERED_RE.search(queued_screen):
-                    raise RuntimeError("offline send was not shown as queued")
+                    raise HarnessError("offline send was not shown as queued")
                 id_match = QUEUED_RE.search(queued_screen)
                 assert id_match is not None
                 event_prefix = id_match.group(1).lower()
@@ -709,18 +793,18 @@ def run_offline_acceptance(args: argparse.Namespace) -> int:
                 if not (sender_matches_event and recipient_matches_event and signature_valid
                         and entry_matches_send and queued_event.get("id") == event_id
                         and body not in str(queued_event.get("content", ""))):
-                    raise RuntimeError("queued event signature/routing did not match isolated identities")
+                    raise HarnessError("queued event signature/routing did not match isolated identities")
 
                 sender_tui.send(b"\x1b")
                 if not sender_tui.wait(8):
-                    raise RuntimeError("sender TUI did not exit cleanly")
+                    raise HarnessError("sender TUI did not exit cleanly")
                 sender_tui.stop()
-                sender_tui = start_chat(cli_bin, sender_home, cache, "receiver", relay_url)
+                sender_tui = start_chat(cli_bin, sender_home, cache, "receiver", relay_url, owned_tuis)
                 restarted_screen = wait_screen(sender_tui, lambda s: bool(QUEUED_RE.search(s)), 15,
                                                "queued item restored after TUI restart")
                 restored = QUEUED_RE.search(restarted_screen)
                 if not restored or restored.group(1).lower() != event_prefix:
-                    raise RuntimeError("restored queue entry changed event ID")
+                    raise HarnessError("restored queue entry changed event ID")
 
                 relay.start()
                 receiver_reconnected = wait_screen(receiver_tui, lambda s: bool(INBOX_CONNECTED_RE.search(s)),
@@ -733,7 +817,7 @@ def run_offline_acceptance(args: argparse.Namespace) -> int:
                                               "automatic retry accepted by relay")
                 accepted = ACCEPTED_RE.search(accepted_screen)
                 if not accepted or accepted.group(1).lower() != event_prefix:
-                    raise RuntimeError("retry changed the queued event ID")
+                    raise HarnessError("retry changed the queued event ID")
                 wait_outbox(sender_home, event_prefix, False, timeout=8)
                 relay_events = query_relay_events(relay_url, event_id)
                 relay_event_matches = len(relay_events) == 1 and all(
@@ -745,47 +829,51 @@ def run_offline_acceptance(args: argparse.Namespace) -> int:
                     "stored_event_matches_signed_queued_event": relay_event_matches,
                 }
                 if not relay_event_matches:
-                    raise RuntimeError("relay exact-ID history did not contain exactly the signed queued event")
+                    raise HarnessError("relay exact-ID history did not contain exactly the signed queued event")
 
                 try:
                     receiver_screen = wait_screen(receiver_tui, lambda s: body in s, 35,
                                                   "receiver TUI displays the unique message")
                 except RuntimeError as exc:
-                    receiver_rows = event_rows(receiver_home, body)
-                    current = receiver_tui.screen.text()
-                    safe_diag = (
-                        f"receiver TUI visibility timeout (history_rows={len(receiver_rows)}, "
-                        f"chat_prompt={'Type a message' in current}, "
-                        f"inbox_connected={bool(INBOX_CONNECTED_RE.search(current))}, "
-                        f"inbox_reconnecting={bool(INBOX_RECONNECTING_RE.search(current))}, "
-                        f"inbox_status={'Inbox:' in current}, "
-                        f"outbox_status={'Outbox:' in current})"
-                    )
-                    evidence["receiver_after_retry"] = {
-                        "history_rows_for_event": len(receiver_rows),
-                        "chat_prompt_visible": "Type a message" in current,
-                        "inbox_connected": bool(INBOX_CONNECTED_RE.search(current)),
-                        "inbox_reconnecting": bool(INBOX_RECONNECTING_RE.search(current)),
-                        "inbox_history_sync_warning": bool(INBOX_HISTORY_WARNING_RE.search(current)),
-                        "inbox_reject_event_cue": "reject event" in current.lower(),
-                        "inbox_decode_error_cue": "decode incoming" in current.lower(),
-                        "inbox_store_error_cue": "store incoming" in current.lower(),
-                        "message_visible": body in current,
-                    }
-                    evidence["receiver_independent_inbox_probe"] = independent_inbox_probe(
-                        cli_bin, receiver_home, cache, relay_url, event_id, body)
-                    raise RuntimeError(safe_diag) from exc
+                    safe_diag = "receiver TUI visibility timeout (diagnostics incomplete)"
+                    try:
+                        receiver_rows = event_rows(receiver_home, body)
+                        current = receiver_tui.screen.text()
+                        safe_diag = (
+                            f"receiver TUI visibility timeout (history_rows={len(receiver_rows)}, "
+                            f"chat_prompt={'Type a message' in current}, "
+                            f"inbox_connected={bool(INBOX_CONNECTED_RE.search(current))}, "
+                            f"inbox_reconnecting={bool(INBOX_RECONNECTING_RE.search(current))}, "
+                            f"inbox_status={'Inbox:' in current}, "
+                            f"outbox_status={'Outbox:' in current})"
+                        )
+                        evidence["receiver_after_retry"] = {
+                            "history_rows_for_event": len(receiver_rows),
+                            "chat_prompt_visible": "Type a message" in current,
+                            "inbox_connected": bool(INBOX_CONNECTED_RE.search(current)),
+                            "inbox_reconnecting": bool(INBOX_RECONNECTING_RE.search(current)),
+                            "inbox_history_sync_warning": bool(INBOX_HISTORY_WARNING_RE.search(current)),
+                            "inbox_reject_event_cue": "reject event" in current.lower(),
+                            "inbox_decode_error_cue": "decode incoming" in current.lower(),
+                            "inbox_store_error_cue": "store incoming" in current.lower(),
+                            "message_visible": body in current,
+                        }
+                        evidence["receiver_independent_inbox_probe"] = independent_inbox_probe(
+                            cli_bin, receiver_home, cache, relay_url, event_id, body)
+                    except Exception:
+                        evidence["receiver_diagnostics_incomplete"] = True
+                    raise HarnessError(safe_diag) from exc
                 sender_rows = event_rows(sender_home, body)
                 receiver_rows = event_rows(receiver_home, body)
                 if len(sender_rows) != 1 or len(receiver_rows) != 1:
-                    raise RuntimeError("sender/receiver history did not contain exactly one message row")
+                    raise HarnessError("sender/receiver history did not contain exactly one message row")
                 event_id = sender_rows[0]
                 if not event_id.startswith(event_prefix) or receiver_rows[0] != event_id:
-                    raise RuntimeError("stored/received event ID differed from the queued event ID")
+                    raise HarnessError("stored/received event ID differed from the queued event ID")
                 if receiver_screen.count(body) != 1:
-                    raise RuntimeError("receiver current UI did not display the message exactly once")
+                    raise HarnessError("receiver current UI did not display the message exactly once")
                 if tree_contains(relay_data, body.encode("ascii")):
-                    raise RuntimeError("local relay persistence contained the message body in plaintext")
+                    raise HarnessError("local relay persistence contained the message body in plaintext")
 
                 evidence.update({
                     "status": "pass",
@@ -799,20 +887,19 @@ def run_offline_acceptance(args: argparse.Namespace) -> int:
                     "receiver_visible_count": 1,
                     "sensitive_data": "message body, public/private keys, raw PTY and relay output not written",
                 })
+                primary_ok = True
             finally:
-                if sender_tui:
-                    sender_tui.stop()
-                if receiver_tui:
-                    receiver_tui.stop()
-                relay.stop()
+                finish_owned_cleanup([*owned_tuis, relay], cleanup, primary_ok)
     except Exception as exc:  # produce a redacted failure, never the raw exception payload
-        evidence.update({"status": "fail", "failure": str(exc)[:240]})
-        write_evidence(args.evidence, evidence)
-        print(json.dumps(evidence, sort_keys=True))
-        return 1
-    write_evidence(args.evidence, evidence)
-    print(json.dumps(evidence, sort_keys=True))
-    return 0
+        evidence.update({"status": "fail", "failure": safe_failure(exc)})
+        if cleanup.get("cleanup_incomplete"):
+            evidence["residual"] = {"owned_child_cleanup_incomplete": True,
+                                    "failed_stop_count": cleanup.get("failed_stop_count", 0),
+                                    "private_temp_root_retained": True}
+        return emit_summary(args, evidence, 1)
+    finally:
+        signal.signal(signal.SIGTERM, previous_term)
+    return emit_summary(args, evidence, 0)
 
 
 def main() -> int:
