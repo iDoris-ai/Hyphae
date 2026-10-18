@@ -26,10 +26,7 @@ var (
 
 // Raw-writer seams: tests wrap them to return commit-uncertain errors with
 // or without a durable write, exercising confirmFanout*Commit end to end.
-var (
-	commitGroupFailureLocked  = messaging.CommitGroupFailureLocked
-	commitGroupRecoveryLocked = messaging.CommitGroupRecoveryLocked
-)
+var commitGroupRecoveryLocked = messaging.CommitGroupRecoveryLocked
 
 // fanoutCrashGate is called between a durable JSON commit (O3, D6) and its
 // SQLite projection (T4, T2') while both locks are held. Production is a
