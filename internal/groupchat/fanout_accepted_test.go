@@ -65,7 +65,7 @@ func TestCommitFanoutAcceptedStaleAndConflicts(t *testing.T) {
 	})
 	t.Run("reserved not started", func(t *testing.T) {
 		f := newFailureFixture(t)
-		token, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+		token, err := f.reserveBound()
 		require.NoError(t, err)
 		unchanged := f.snapshot(t)
 		require.ErrorIs(t, f.member.store.commitFanoutAccepted(token, time.Now().Unix()), errFanoutStaleAttempt)

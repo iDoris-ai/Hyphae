@@ -56,7 +56,7 @@ func TestRecoverFanoutRecoveryReplaysT2PrimeOnce(t *testing.T) {
 	require.False(t, replayed, "consumed witness is a no-op")
 	unchanged()
 
-	token, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	token, err := f.reserveBound()
 	require.NoError(t, err)
 	require.Equal(t, newQueue, token.queueID)
 }
@@ -65,7 +65,7 @@ func TestFanoutBarrierReplaysCrashedD6(t *testing.T) {
 	f := newFailureFixture(t)
 	newQueue := f.crashD6BeforeT2(t)
 	// R behind the barrier replays T2' and reserves in the same locked pass.
-	token, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	token, err := f.reserveBound()
 	require.NoError(t, err)
 	require.Equal(t, newQueue, token.queueID)
 	row := f.recovery(t)
@@ -138,7 +138,7 @@ func TestRecoverFanoutRecoveryHoldsConflicts(t *testing.T) {
 			replayed, err := f.member.store.recoverFanoutRecovery(f.key, f.recipient)
 			require.ErrorIs(t, err, ErrFanoutBookkeepingConflict)
 			require.False(t, replayed)
-			_, err = f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+			_, err = f.reserveBound()
 			require.ErrorIs(t, err, ErrFanoutBookkeepingConflict, "R holds on the same conflict")
 			unchanged()
 		})

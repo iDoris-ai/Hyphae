@@ -108,7 +108,7 @@ func TestEnqueuePreparedRawO1ThenT2(t *testing.T) {
 	require.Equal(t, string(before), string(after))
 
 	// The queued epoch is immediately usable by the F3 boundaries.
-	token, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	token, err := f.reserveBound()
 	require.NoError(t, err)
 	require.Equal(t, row.QueueID, token.queueID)
 	require.NoError(t, f.member.store.startFanoutAttempt(token, 1, time.Now().Unix()))
@@ -304,7 +304,7 @@ func TestEnqueuePreparedRawAdoptsLegacyPendingRetryBudget(t *testing.T) {
 	require.Equal(t, 3, entry.Entry.MaxRetries)
 
 	// Barrier must accept the adopted budget and allow another attempt within max.
-	token, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	token, err := f.reserveBound()
 	require.NoError(t, err)
 	require.Equal(t, legacyQueueID, token.queueID)
 	require.NoError(t, f.member.store.startFanoutAttempt(token, 1, time.Now().Unix()))

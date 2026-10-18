@@ -87,7 +87,7 @@ func TestAuthorizeFanoutRecoveryExhaustedFailed(t *testing.T) {
 	require.Equal(t, before.Receipt, after.Receipt, "consumed failure receipt is preserved")
 
 	// The new epoch is immediately reservable and the next failure counts from 0.
-	token, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	token, err := f.reserveBound()
 	require.NoError(t, err)
 	require.Equal(t, newQueue, token.queueID)
 	require.Equal(t, before.Generation+1, token.generation)
@@ -209,7 +209,7 @@ func TestFanoutBarrierHoldsUnconsumedWitness(t *testing.T) {
 	_, err = f.member.db.Exec(`UPDATE groupchat_fanout SET last_recovery_digest='stale'`)
 	require.NoError(t, err)
 	unchanged := f.snapshot(t)
-	_, err = f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	_, err = f.reserveBound()
 	require.ErrorIs(t, err, ErrFanoutRecoveryPending)
 	unchanged()
 }

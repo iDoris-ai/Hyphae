@@ -49,7 +49,10 @@ func TestFanoutCrashHelper(t *testing.T) {
 	}
 	switch stage {
 	case "o3":
-		token, err := store.reserveFanoutAttempt(k.Key, k.Recipient)
+		var eventJSON string
+		require.NoError(t, db.QueryRow(`SELECT event_json FROM groupchat_fanout WHERE local_npub=? AND group_id=? AND envelope_type=? AND send_key=? AND recipient_npub=?`,
+			k.Key.LocalNpub, k.Key.GroupID, k.Key.EnvelopeType, k.Key.SendKey, k.Recipient).Scan(&eventJSON))
+		token, err := store.reserveFanoutAttemptFrozen(k.Key, k.Recipient, eventJSON)
 		require.NoError(t, err)
 		require.NoError(t, store.startFanoutAttempt(token, 1, time.Now().Unix()))
 		err = store.commitFanoutFailure(token)
@@ -130,7 +133,7 @@ func TestCrashAfterO3BeforeT4ReplaysExactlyOnce(t *testing.T) {
 	replayed, err = f.member.store.recoverFanoutFailure(f.key, f.recipient)
 	require.NoError(t, err)
 	require.False(t, replayed, "second recovery is a no-op")
-	token, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	token, err := f.reserveBound()
 	require.NoError(t, err)
 	require.EqualValues(t, 2, token.generation)
 	require.Equal(t, after.Attempts, f.recovery(t).Attempts, "replay never adds a publish start")
@@ -164,7 +167,7 @@ func TestCrashAfterD6BeforeT2PrimeReplaysExactlyOnce(t *testing.T) {
 	replayed, err = f.member.store.recoverFanoutRecovery(f.key, f.recipient)
 	require.NoError(t, err)
 	require.False(t, replayed)
-	token, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	token, err := f.reserveBound()
 	require.NoError(t, err)
 	require.Equal(t, entry.QueueID, token.queueID)
 	require.Equal(t, before.Generation+1, token.generation)

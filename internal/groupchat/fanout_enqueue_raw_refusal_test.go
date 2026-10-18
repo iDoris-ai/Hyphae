@@ -115,7 +115,7 @@ func TestEnqueuePreparedRawAdoptsCompatibleLegacyForSeededRows(t *testing.T) {
 			require.Equal(t, tc.origin, origin)
 			require.Equal(t, tc.base, base)
 
-			token, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+			token, err := f.reserveBound()
 			require.NoError(t, err)
 			require.NoError(t, f.member.store.startFanoutAttempt(token, 1, time.Now().Unix()))
 			require.NoError(t, f.member.store.commitFanoutFailure(token))

@@ -51,7 +51,7 @@ func TestReservationReplaysCrashedO3AndRefusesWhenExhausted(t *testing.T) {
 	f.failO3BeforeT4(t, a) // third failure: O3 durable (exhausting), T4 lost
 	require.Equal(t, string(RecipientQueued), f.row(t).State)
 
-	_, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	_, err := f.reserveBound()
 	require.Error(t, err, "B must not reserve on an exhausted budget")
 	require.NotErrorIs(t, err, ErrFanoutBookkeepingConflict, "A's exact record is replayed, not held as a conflict")
 	row := f.row(t)
