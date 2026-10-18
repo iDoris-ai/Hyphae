@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -185,6 +187,68 @@ func TestCommitRawOutboxEditZeroWrite(t *testing.T) {
 	}
 }
 
+// TestCommitRawOutboxEditInPlacePatchPersists mirrors the O3 span-patch style
+// edit: a same-length retry_count bump written directly into file.Raw instead
+// of into a fresh buffer. The expected "after" bytes are derived independently
+// of what edit returns, so this fails if commitRawOutboxEdit silently drops
+// the write because file.Raw aliases the snapshot it compares against.
+func TestCommitRawOutboxEditInPlacePatchPersists(t *testing.T) {
+	dm := legacyFixtureEntry(t, "legacy-dm-nil-relays.json")
+	before := rawOutboxDoc(dm)
+	path := writeOutboxFile(t, before)
+
+	idx := bytes.Index(before, []byte(`"retry_count": 0`))
+	if idx < 0 {
+		t.Fatal("fixture missing retry_count: 0")
+	}
+	digitIdx := idx + len(`"retry_count": `)
+	wantAfter := bytes.Clone(before)
+	wantAfter[digitIdx] = '1'
+
+	err := commitRawOutboxEdit(path, func(file *rawOutboxFile) ([]byte, error) {
+		span, ok := file.Entries[0].Values["retry_count"]
+		if !ok || span.End-span.Start != 1 || file.Raw[span.Start] != '0' {
+			t.Fatalf("retry_count span = %+v (%q)", span, file.Raw)
+		}
+		file.Raw[span.Start] = '1'
+		return file.Raw, nil
+	})
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, wantAfter) {
+		t.Fatalf("disk = %s\nwant  = %s", got, wantAfter)
+	}
+}
+
+// TestCommitRawOutboxEditInPlaceInvalidPatchRejected mirrors an in-place edit
+// that corrupts the entry without changing its length. commitRawOutboxEdit
+// must still run the post-edit rescan and refuse to write: the no-op check
+// must not short-circuit validation just because edit mutated file.Raw (and
+// therefore the snapshot it was read from) directly.
+func TestCommitRawOutboxEditInPlaceInvalidPatchRejected(t *testing.T) {
+	dm := legacyFixtureEntry(t, "legacy-dm-nil-relays.json")
+	before := rawOutboxDoc(dm)
+	path := writeOutboxFile(t, before)
+
+	err := commitRawOutboxEdit(path, func(file *rawOutboxFile) ([]byte, error) {
+		span, ok := file.Entries[0].Values["status"]
+		if !ok || !bytes.Equal(file.Raw[span.Start:span.End], []byte(`"pending"`)) {
+			t.Fatalf("status span = %+v (%q)", span, file.Raw)
+		}
+		file.Raw[span.Start+1] = 'P' // "pending" -> "Pending": same length, no longer a valid DM status
+		return file.Raw, nil
+	})
+	if err == nil {
+		t.Fatal("expected validation error for invalid in-place patch, got nil")
+	}
+	requireOutboxUnchanged(t, path, before)
+}
+
 func TestCommitRawOutboxEditRefusesInvalidSnapshot(t *testing.T) {
 	before := []byte(`{"entries":[{"id":"x"}]}`)
 	path := writeOutboxFile(t, before)
@@ -216,5 +280,198 @@ func TestWalkRawObjectRejectsNonObject(t *testing.T) {
 	}
 	if _, err := rawArraySpans([]byte(`{}`), rawSpan{0, 2}); err == nil {
 		t.Fatal("expected array error")
+	}
+}
+
+// holdOutboxLock takes the sibling outbox lock in a goroutine and returns a
+// func that releases it. It skips the test where process locking is
+// unsupported.
+func holdOutboxLock(t *testing.T, path string) func() {
+	t.Helper()
+	release := make(chan struct{})
+	held := make(chan struct{})
+	locked := make(chan error, 1)
+	go func() {
+		locked <- withOutboxLock(path, func() error {
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	select {
+	case err := <-locked:
+		if errors.Is(err, errors.ErrUnsupported) {
+			t.Skip("process locking is unsupported on this platform")
+		}
+		t.Fatalf("sibling lock returned before the callback ran: %v", err)
+	case <-held:
+	}
+	var once sync.Once
+	stop := func() {
+		once.Do(func() {
+			close(release)
+			if err := <-locked; err != nil {
+				t.Errorf("sibling lock: %v", err)
+			}
+		})
+	}
+	t.Cleanup(stop)
+	return stop
+}
+
+// runLockedRawEdit calls commitRawOutboxEditLocked while another holder owns
+// the sibling lock, as a WithGroupOutboxLock caller would. The helper must
+// not take the lock itself, so it has to finish while the lock is held.
+func runLockedRawEdit(t *testing.T, path string, edit func(*rawOutboxFile) ([]byte, error)) error {
+	t.Helper()
+	release := holdOutboxLock(t, path)
+	defer release()
+	done := make(chan error, 1)
+	go func() { done <- commitRawOutboxEditLocked(path, edit) }()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatal("commitRawOutboxEditLocked blocked on the outbox lock its caller holds")
+		return nil
+	}
+}
+
+// TestCommitRawOutboxEditLockedInPlacePatchPersists is the locked-helper twin
+// of TestCommitRawOutboxEditInPlacePatchPersists: the expected bytes are
+// derived independently of what edit returns.
+func TestCommitRawOutboxEditLockedInPlacePatchPersists(t *testing.T) {
+	dm := legacyFixtureEntry(t, "legacy-dm-nil-relays.json")
+	before := rawOutboxDoc(dm)
+	path := writeOutboxFile(t, before)
+
+	idx := bytes.Index(before, []byte(`"retry_count": 0`))
+	if idx < 0 {
+		t.Fatal("fixture missing retry_count: 0")
+	}
+	wantAfter := bytes.Clone(before)
+	wantAfter[idx+len(`"retry_count": `)] = '1'
+
+	err := runLockedRawEdit(t, path, func(file *rawOutboxFile) ([]byte, error) {
+		span, ok := file.Entries[0].Values["retry_count"]
+		if !ok || span.End-span.Start != 1 || file.Raw[span.Start] != '0' {
+			return nil, fmt.Errorf("retry_count span = %+v (%q)", span, file.Raw)
+		}
+		file.Raw[span.Start] = '1'
+		return file.Raw, nil
+	})
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, wantAfter) {
+		t.Fatalf("disk = %s\nwant  = %s", got, wantAfter)
+	}
+}
+
+// TestCommitRawOutboxEditLockedInPlaceInvalidPatchRejected is the locked-helper
+// twin of TestCommitRawOutboxEditInPlaceInvalidPatchRejected.
+func TestCommitRawOutboxEditLockedInPlaceInvalidPatchRejected(t *testing.T) {
+	dm := legacyFixtureEntry(t, "legacy-dm-nil-relays.json")
+	before := rawOutboxDoc(dm)
+	path := writeOutboxFile(t, before)
+
+	err := runLockedRawEdit(t, path, func(file *rawOutboxFile) ([]byte, error) {
+		span, ok := file.Entries[0].Values["status"]
+		if !ok || !bytes.Equal(file.Raw[span.Start:span.End], []byte(`"pending"`)) {
+			return nil, fmt.Errorf("status span = %+v (%q)", span, file.Raw)
+		}
+		file.Raw[span.Start+1] = 'P' // same length, no longer a valid DM status
+		return file.Raw, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "edited outbox fails strict scan") {
+		t.Fatalf("err = %v, want strict post-edit scan refusal", err)
+	}
+	requireOutboxUnchanged(t, path, before)
+}
+
+func TestCommitRawOutboxEditLockedZeroWrite(t *testing.T) {
+	dm := legacyFixtureEntry(t, "legacy-dm-nil-relays.json")
+	before := rawOutboxDoc(dm)
+	editErr := errors.New("refused")
+	for name, edit := range map[string]func(*rawOutboxFile) ([]byte, error){
+		"edit error":       func(*rawOutboxFile) ([]byte, error) { return nil, editErr },
+		"no-op":            func(file *rawOutboxFile) ([]byte, error) { return bytes.Clone(file.Raw), nil },
+		"invalid result":   func(*rawOutboxFile) ([]byte, error) { return []byte(`{"entries":[{}]}`), nil },
+		"duplicate result": func(*rawOutboxFile) ([]byte, error) { return rawOutboxDoc(dm, dm), nil },
+	} {
+		path := writeOutboxFile(t, before)
+		err := runLockedRawEdit(t, path, edit)
+		if (name == "no-op") != (err == nil) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+		if name == "edit error" && !errors.Is(err, editErr) {
+			t.Errorf("%s: err = %v, want edit's error", name, err)
+		}
+		requireOutboxUnchanged(t, path, before)
+	}
+}
+
+func TestCommitRawOutboxEditLockedRefusesInvalidSnapshot(t *testing.T) {
+	before := []byte(`{"entries":[{"id":"x"}]}`)
+	path := writeOutboxFile(t, before)
+	called := false
+	err := runLockedRawEdit(t, path, func(*rawOutboxFile) ([]byte, error) {
+		called = true
+		return []byte(`{"entries":[]}`), nil
+	})
+	if err == nil || called {
+		t.Fatalf("err=%v called=%v", err, called)
+	}
+	requireOutboxUnchanged(t, path, before)
+}
+
+func TestCommitRawOutboxEditLockedMissingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "outbox.json")
+	err := runLockedRawEdit(t, path, func(*rawOutboxFile) ([]byte, error) { return []byte(`{"entries":[]}`), nil })
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("err = %v", err)
+	}
+	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("missing outbox was created: %v", statErr)
+	}
+}
+
+// TestCommitRawOutboxEditBlocksOnSiblingLock checks that the wrapper, unlike
+// the locked helper, takes the sibling lock before it reads the snapshot.
+func TestCommitRawOutboxEditBlocksOnSiblingLock(t *testing.T) {
+	dm := legacyFixtureEntry(t, "legacy-dm-nil-relays.json")
+	group := legacyFixtureEntry(t, "legacy-165-group-nil-relays.json")
+	path := writeOutboxFile(t, rawOutboxDoc(dm, group))
+	after := rawOutboxDoc(dm)
+	release := holdOutboxLock(t, path)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- commitRawOutboxEdit(path, func(*rawOutboxFile) ([]byte, error) { return after, nil })
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("commitRawOutboxEdit did not block while the sibling lock was held: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	release()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("commit after lock release: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("commitRawOutboxEdit did not proceed after the lock was released")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, after) {
+		t.Fatalf("file = %s", got)
 	}
 }
