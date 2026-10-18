@@ -74,7 +74,7 @@ func TestBarrierClassificationOrder(t *testing.T) {
 			f.failO3BeforeT4(t, f.startAttempt(t, 1))
 			sc.arrange(t, f)
 			unchanged := f.snapshot(t)
-			_, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+			_, err := f.reserveBound()
 			sc.check(t, err)
 			unchanged()
 			replayed, rerr := f.member.store.recoverFanoutFailure(f.key, f.recipient)
@@ -91,7 +91,7 @@ func TestBarrierClassificationOrder(t *testing.T) {
 	t.Run("5 projection then normal", func(t *testing.T) {
 		f := newFailureFixture(t)
 		f.failO3BeforeT4(t, f.startAttempt(t, 1))
-		token, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+		token, err := f.reserveBound()
 		require.NoError(t, err)
 		require.EqualValues(t, 2, token.generation)
 		require.EqualValues(t, 1, f.row(t).RetryCount, "the unconsumed record was projected before the reservation")

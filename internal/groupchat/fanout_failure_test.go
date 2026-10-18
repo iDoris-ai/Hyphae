@@ -48,6 +48,19 @@ func newFailureFixture(t *testing.T) failureFixture {
 	return failureFixture{member: member, key: key, recipient: recipient, eventID: entry.ID, queueID: entry.QueueID, outboxPath: path}
 }
 
+// reserveBound presents the row's current frozen event JSON. Callers that
+// need the barrier must bind those bytes. reserveFanoutAttempt passes none.
+func (f failureFixture) reserveBound() (fanoutAttemptToken, error) {
+	var eventJSON string
+	err := f.member.db.QueryRow(`SELECT event_json FROM groupchat_fanout
+		WHERE local_npub=? AND group_id=? AND envelope_type=? AND send_key=? AND recipient_npub=?`,
+		f.key.LocalNpub, f.key.GroupID, f.key.EnvelopeType, f.key.SendKey, f.recipient).Scan(&eventJSON)
+	if err != nil {
+		return fanoutAttemptToken{}, err
+	}
+	return f.member.store.reserveFanoutAttemptFrozen(f.key, f.recipient, eventJSON)
+}
+
 // startAttempt runs R and S for the row and returns the started token.
 func (f failureFixture) startAttempt(t *testing.T, targets int) fanoutAttemptToken {
 	t.Helper()

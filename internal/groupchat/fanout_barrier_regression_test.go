@@ -17,7 +17,7 @@ func TestBarrierRegressionExhaustingReplaySurvivesRefusal(t *testing.T) {
 	}
 	token := f.startAttempt(t, 1)
 	f.failO3BeforeT4(t, token)
-	_, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	_, err := f.reserveBound()
 	require.Error(t, err)
 	row := f.row(t)
 	require.EqualValues(t, 3, row.RetryCount, "exhausting replay must persist even when R is refused")
@@ -27,7 +27,7 @@ func TestBarrierRegressionExhaustingReplaySurvivesRefusal(t *testing.T) {
 
 func TestBarrierRegressionStaleStartKeepsReplay(t *testing.T) {
 	f := newFailureFixture(t)
-	token, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	token, err := f.reserveBound()
 	require.NoError(t, err)
 	require.NoError(t, f.member.store.startFanoutAttempt(token, 1, time.Now().Unix()))
 	f.failO3BeforeT4(t, token)
@@ -63,7 +63,7 @@ func TestBarrierInactiveRefusalIsTypedAndUnchanged(t *testing.T) {
 	_, err := f.member.db.Exec(`UPDATE groupchat_fanout SET state='relay_accepted' WHERE event_id=?`, f.eventID)
 	require.NoError(t, err)
 	unchanged := f.snapshot(t)
-	_, err = f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	_, err = f.reserveBound()
 	require.ErrorIs(t, err, ErrFanoutNotActive)
 	require.NotErrorIs(t, err, ErrFanoutRetryExhausted)
 	require.ErrorIs(t, f.member.store.startFanoutAttempt(token, 1, time.Now().Unix()), ErrFanoutNotActive)

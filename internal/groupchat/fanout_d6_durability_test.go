@@ -28,7 +28,7 @@ func TestD6ReplayRequiresDirectoryDurability(t *testing.T) {
 		{
 			name: "barrier R",
 			op: func(f failureFixture, newQueue string) error {
-				token, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+				token, err := f.reserveBound()
 				if err != nil {
 					return err
 				}
@@ -84,7 +84,7 @@ func TestD6ReplayRequiresDirectoryDurability(t *testing.T) {
 				require.False(t, replayed)
 				unchanged3()
 
-				token, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+				token, err := f.reserveBound()
 				require.NoError(t, err)
 				require.Equal(t, newQueue, token.queueID)
 			},
@@ -119,7 +119,7 @@ func TestD6ReplayRequiresDirectoryDurability(t *testing.T) {
 				require.Error(t, err)
 				unchanged3()
 
-				token, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+				token, err := f.reserveBound()
 				require.NoError(t, err)
 				require.Equal(t, newQueue, token.queueID)
 			},
@@ -228,7 +228,7 @@ func TestFanoutBarrierStaleStartKeepsD6Replay(t *testing.T) {
 	unchanged := f.snapshot(t)
 	require.ErrorIs(t, f.member.store.startFanoutAttempt(old, 2, time.Now().Unix()), errFanoutStaleAttempt)
 	unchanged()
-	token, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	token, err := f.reserveBound()
 	require.NoError(t, err)
 	require.Equal(t, newQueue, token.queueID)
 }
@@ -241,7 +241,7 @@ func TestFanoutBarrierD6WitnessCannotReplaceNonFailedEpoch(t *testing.T) {
 			_, err := f.member.db.Exec(`UPDATE groupchat_fanout SET state=? WHERE event_id=?`, state, f.eventID)
 			require.NoError(t, err)
 			unchanged := f.snapshot(t)
-			_, err = f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+			_, err = f.reserveBound()
 			require.ErrorIs(t, err, ErrFanoutQueueConflict)
 			unchanged()
 		})

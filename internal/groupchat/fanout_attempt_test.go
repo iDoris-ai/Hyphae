@@ -16,14 +16,14 @@ func TestFanoutBarrierRejectsOutboxPayloadMismatch(t *testing.T) {
 	_, err := f.member.db.Exec(`UPDATE groupchat_fanout SET event_json='different' WHERE event_id=?`, f.eventID)
 	require.NoError(t, err)
 	unchanged := f.snapshot(t)
-	_, err = f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	_, err = f.reserveBound()
 	require.ErrorIs(t, err, errFanoutPayloadMismatch)
 	unchanged()
 }
 
 func TestReserveAndStartFanoutAttemptBehindBarrier(t *testing.T) {
 	f := newFailureFixture(t)
-	token, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	token, err := f.reserveBound()
 	require.NoError(t, err)
 	require.EqualValues(t, 1, token.generation)
 	require.Equal(t, f.queueID, token.queueID)
@@ -38,7 +38,7 @@ func TestReserveAndStartFanoutAttemptBehindBarrier(t *testing.T) {
 
 	// A failed P round-trips through O3/T4 and the next R succeeds.
 	require.NoError(t, f.member.store.commitFanoutFailure(token))
-	next, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	next, err := f.reserveBound()
 	require.NoError(t, err)
 	require.EqualValues(t, 2, next.generation)
 }
@@ -49,7 +49,7 @@ func TestReserveFanoutAttemptReplaysPendingO3First(t *testing.T) {
 	f.failO3BeforeT4(t, token)
 	require.EqualValues(t, 0, f.row(t).RetryCount, "T4 was aborted")
 
-	next, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	next, err := f.reserveBound()
 	require.NoError(t, err)
 	require.EqualValues(t, 2, next.generation)
 	row := f.row(t)
@@ -66,7 +66,7 @@ func TestReserveFanoutAttemptHoldsOnConflictAndExhaustion(t *testing.T) {
 		_, err := f.member.db.Exec(`UPDATE groupchat_fanout SET attempts=attempts+1`)
 		require.NoError(t, err)
 		unchanged := f.snapshot(t)
-		_, err = f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+		_, err = f.reserveBound()
 		require.ErrorIs(t, err, ErrFanoutBookkeepingConflict)
 		unchanged()
 	})
@@ -77,14 +77,15 @@ func TestReserveFanoutAttemptHoldsOnConflictAndExhaustion(t *testing.T) {
 		}
 		require.Equal(t, string(RecipientFailed), f.row(t).State)
 		unchanged := f.snapshot(t)
-		_, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+		_, err := f.reserveBound()
 		require.ErrorIs(t, err, ErrFanoutRetryExhausted)
 		unchanged()
 	})
 	t.Run("missing row", func(t *testing.T) {
 		f := newFailureFixture(t)
-		_, err := f.member.store.reserveFanoutAttempt(f.key, "npub1nobody")
+		_, err := f.member.store.reserveFanoutAttemptFrozen(f.key, "npub1nobody", "bound-bytes")
 		require.Error(t, err)
+		require.NotErrorIs(t, err, errFanoutPayloadMismatch)
 	})
 }
 
@@ -93,7 +94,7 @@ func TestReserveCommitsExhaustingReplay(t *testing.T) {
 	require.NoError(t, f.member.store.commitFanoutFailure(f.startAttempt(t, 1)))
 	require.NoError(t, f.member.store.commitFanoutFailure(f.startAttempt(t, 1)))
 	f.failO3BeforeT4(t, f.startAttempt(t, 1))
-	_, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	_, err := f.reserveBound()
 	require.ErrorIs(t, err, ErrFanoutRetryExhausted)
 	row := f.row(t)
 	require.Equal(t, string(RecipientFailed), row.State)
@@ -107,7 +108,7 @@ func TestReserveRefusesReplayUntilDurable(t *testing.T) {
 	orig := confirmOutboxDurable
 	confirmOutboxDurable = func(string) error { return errors.New("dir fsync failed") }
 	t.Cleanup(func() { confirmOutboxDurable = orig })
-	_, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	_, err := f.reserveBound()
 	require.ErrorIs(t, err, ErrFanoutBookkeepingPending)
 	require.Equal(t, before, f.row(t))
 }
@@ -131,7 +132,7 @@ func TestReserveRejectsFrozenEventJSONDrift(t *testing.T) {
 	_, err := f.member.db.Exec(`UPDATE groupchat_fanout SET event_json=event_json||' '`)
 	require.NoError(t, err)
 	unchanged := f.snapshot(t)
-	_, err = f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	_, err = f.reserveBound()
 	require.ErrorIs(t, err, ErrFanoutQueueConflict)
 	unchanged()
 }
@@ -141,7 +142,7 @@ func TestReserveRejectsFrozenIntentDrift(t *testing.T) {
 	_, err := f.member.db.Exec(`UPDATE groupchat_fanout SET max_retries=1`)
 	require.NoError(t, err)
 	unchanged := f.snapshot(t)
-	_, err = f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	_, err = f.reserveBound()
 	require.ErrorIs(t, err, ErrFanoutQueueConflict)
 	require.ErrorContains(t, err, "outbox_max=3")
 	require.ErrorContains(t, err, "row_max=1")
@@ -153,7 +154,7 @@ func TestFanoutBarrierD14QueueConflict(t *testing.T) {
 	_, err := f.member.db.Exec(`UPDATE groupchat_fanout SET queue_id='ffffffffffffffffffffffffffffffff'`)
 	require.NoError(t, err)
 	unchanged := f.snapshot(t)
-	_, err = f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	_, err = f.reserveBound()
 	require.ErrorIs(t, err, ErrFanoutQueueConflict)
 	replayed, err := f.member.store.recoverFanoutFailure(f.key, f.recipient)
 	require.False(t, replayed)
@@ -162,7 +163,7 @@ func TestFanoutBarrierD14QueueConflict(t *testing.T) {
 
 	// The entry vanished (relays:null legacy or cleared): queue_missing, no write.
 	require.NoError(t, os.WriteFile(f.outboxPath, []byte(`{"entries":[]}`), 0600))
-	_, err = f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	_, err = f.reserveBound()
 	require.ErrorContains(t, err, string(messaging.AgentMessageIssueQueueMissing))
 }
 
@@ -237,7 +238,7 @@ func TestReserveCommitsExhaustingReplayBeforeRefusal(t *testing.T) {
 	f.failO3BeforeT4(t, token3)
 
 	// Barrier must replay the exhausting failure, persist it, and refuse R.
-	_, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	_, err := f.reserveBound()
 	require.ErrorIs(t, err, ErrFanoutRetryExhausted)
 
 	row := f.row(t)
@@ -249,14 +250,14 @@ func TestReserveCommitsExhaustingReplayBeforeRefusal(t *testing.T) {
 
 	// A second reserve attempt fails identically with stores unchanged (no new R).
 	unchanged := f.snapshot(t)
-	_, err = f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	_, err = f.reserveBound()
 	require.ErrorIs(t, err, ErrFanoutRetryExhausted)
 	unchanged()
 }
 
 func TestStartCommitsReplayOnStaleToken(t *testing.T) {
 	f := newFailureFixture(t)
-	tokenA, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	tokenA, err := f.reserveBound()
 	require.NoError(t, err)
 	require.NoError(t, f.member.store.startFanoutAttempt(tokenA, 1, time.Now().Unix()))
 
@@ -287,13 +288,13 @@ func TestBarrierConfirmsO3DurabilityBeforeReplay(t *testing.T) {
 	t.Cleanup(func() { confirmOutboxDurable = origHook })
 
 	unchanged := f.snapshot(t)
-	_, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	_, err := f.reserveBound()
 	require.ErrorIs(t, err, ErrFanoutBookkeepingPending)
 	unchanged()
 
 	// Restore hook: reserve succeeds with gen 2 and replay applied.
 	confirmOutboxDurable = origHook
-	next, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	next, err := f.reserveBound()
 	require.NoError(t, err)
 	require.EqualValues(t, 2, next.generation)
 	require.EqualValues(t, 1, f.row(t).RetryCount)
@@ -343,7 +344,7 @@ func TestBarrierRejectsFrozenIntentMismatch(t *testing.T) {
 			tc.mutate(t, &f)
 
 			unchanged := f.snapshot(t)
-			_, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+			_, err := f.reserveBound()
 			require.ErrorIs(t, err, ErrFanoutQueueConflict)
 			err = f.member.store.startFanoutAttempt(token, 1, time.Now().Unix())
 			require.ErrorIs(t, err, ErrFanoutQueueConflict)

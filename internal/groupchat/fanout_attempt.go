@@ -21,12 +21,19 @@ var ErrFanoutNotActive = errors.New("fanout row is not an active pending queue e
 var ErrFanoutRetryExhausted = errors.New("fanout retry budget exhausted")
 var confirmOutboxDurable = messaging.ConfirmOutboxDurable
 
+// observeFanoutBarrier is nil in production. Tests set it to fail if a
+// reserve reaches the barrier before caller bytes are bound.
+var observeFanoutBarrier func()
+
 // fanoutBarrierTx is the recovery barrier that every R and S must pass
 // (rev7 §3.3): under the outbox lock and the caller's SQLite transaction it
 // replays an unconsumed O3 record (or holds on conflict), then checks D14
 // and that the unique outbox entry is the row's active pending queue entry.
 // The returned row reflects any replay.
 func (s *Store) fanoutBarrierTx(tx queryExecer, path string, key FanoutKey, recipient string) (row fanoutFailureRow, replayed bool, err error) {
+	if observeFanoutBarrier != nil {
+		observeFanoutBarrier()
+	}
 	row, err = loadFanoutFailureRow(tx, key, recipient)
 	if err != nil {
 		return row, false, err
@@ -99,8 +106,8 @@ func commitReplayOnRefusal(tx *immediateTx, replayed bool, err error) error {
 	return err
 }
 
-// reserveFanoutAttempt is R behind the barrier: it consumes one generation
-// for the row's current queue entry. Inert: no production caller.
+// reserveFanoutAttempt has no caller bytes. It refuses before the barrier so
+// an unbound call cannot replay. Inert: no production caller.
 func (s *Store) reserveFanoutAttempt(key FanoutKey, recipient string) (token fanoutAttemptToken, err error) {
 	return s.reserveFanoutAttemptFrozen(key, recipient, "")
 }
@@ -124,14 +131,17 @@ func (s *Store) reserveFanoutAttemptInTx(resolve func(tx *immediateTx) (key Fano
 		if err != nil {
 			return err
 		}
-		if wantEventJSON != "" {
-			row, err := loadFanoutFailureRow(tx, key, recipient)
-			if err != nil {
-				return err
-			}
-			if wantEventJSON != row.eventJSON {
-				return errFanoutPayloadMismatch
-			}
+		// Unbound or divergent caller bytes must not reach the barrier.
+		// An empty payload used to skip this compare and replay first.
+		if wantEventJSON == "" {
+			return errFanoutPayloadMismatch
+		}
+		row, err := loadFanoutFailureRow(tx, key, recipient)
+		if err != nil {
+			return err
+		}
+		if wantEventJSON != row.eventJSON {
+			return errFanoutPayloadMismatch
 		}
 		if _, replayed, err := s.fanoutBarrierTx(tx, path, key, recipient); err != nil {
 			return commitReplayOnRefusal(tx, replayed, err)
