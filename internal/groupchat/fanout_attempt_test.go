@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -143,9 +142,9 @@ func TestReserveRejectsFrozenIntentDrift(t *testing.T) {
 	require.NoError(t, err)
 	unchanged := f.snapshot(t)
 	_, err = f.member.store.reserveFanoutAttempt(f.key, f.recipient)
+	require.ErrorIs(t, err, ErrFanoutQueueConflict)
 	require.ErrorContains(t, err, "outbox_max=3")
 	require.ErrorContains(t, err, "row_max=1")
-	require.NotErrorIs(t, err, ErrFanoutQueueConflict)
 	unchanged()
 }
 
@@ -345,18 +344,9 @@ func TestBarrierRejectsFrozenIntentMismatch(t *testing.T) {
 
 			unchanged := f.snapshot(t)
 			_, err := f.member.store.reserveFanoutAttempt(f.key, f.recipient)
-			if strings.Contains(tc.name, "max_retries") {
-				require.ErrorContains(t, err, "outbox_max=")
-				require.ErrorContains(t, err, "row_max=")
-			} else {
-				require.ErrorIs(t, err, ErrFanoutQueueConflict)
-			}
+			require.ErrorIs(t, err, ErrFanoutQueueConflict)
 			err = f.member.store.startFanoutAttempt(token, 1, time.Now().Unix())
-			if strings.Contains(tc.name, "max_retries") {
-				require.ErrorContains(t, err, "outbox_max=")
-			} else {
-				require.ErrorIs(t, err, ErrFanoutQueueConflict)
-			}
+			require.ErrorIs(t, err, ErrFanoutQueueConflict)
 			unchanged()
 		})
 	}

@@ -104,8 +104,8 @@ func mapFanoutError(err error) error {
 		{ErrFanoutRecoveryPending, messaging.ErrGroupAttemptPending},
 		{ErrFanoutCleanupPending, messaging.ErrGroupAttemptCleanupPending},
 		{ErrFanoutBookkeepingConflict, messaging.ErrGroupAttemptConflict},
-		{errFanoutPayloadMismatch, messaging.ErrGroupAttemptPayloadMismatch},
 		{ErrFanoutQueueConflict, messaging.ErrGroupAttemptQueueConflict},
+		{errFanoutPayloadMismatch, messaging.ErrGroupAttemptPayloadMismatch},
 		{ErrFanoutQueueMissing, messaging.ErrGroupAttemptQueueMissing},
 	} {
 		if errors.Is(err, m.from) {

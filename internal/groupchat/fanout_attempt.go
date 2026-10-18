@@ -61,7 +61,7 @@ func (s *Store) fanoutBarrierTx(tx queryExecer, path string, key FanoutKey, reci
 		return row, replayed, fmt.Errorf("%w: %w", ErrFanoutQueueConflict, errFanoutPayloadMismatch)
 	}
 	if int64(entry.Entry.MaxRetries) != row.maxRetries {
-		return row, replayed, fmt.Errorf("fanout frozen max_retries mismatch outbox_max=%d row_max=%d", entry.Entry.MaxRetries, row.maxRetries)
+		return row, replayed, fmt.Errorf("%w: fanout frozen max_retries mismatch outbox_max=%d row_max=%d", ErrFanoutQueueConflict, entry.Entry.MaxRetries, row.maxRetries)
 	}
 	if w := messaging.OutboxWitnessDigest(entry); w != "" && w != row.recoveryDigest {
 		return row, replayed, fmt.Errorf("%w: unconsumed recovery_witness on the queue entry", ErrFanoutRecoveryPending)

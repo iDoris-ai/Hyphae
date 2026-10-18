@@ -298,7 +298,7 @@ func TestFanoutAttemptHandlerRefusesOutboxMaxRetriesMismatch(t *testing.T) {
 			for i, pick := range picks {
 				require.Falsef(t, pick.attempted, "pick %d\n%s", i+1, detail.String())
 				require.False(t, pick.sent)
-				require.Equal(t, messaging.AgentMessageIssueOutboxBookkeepingFailed, pick.issue)
+				require.Equal(t, messaging.AgentMessageIssueQueueConflict, pick.issue)
 				require.ErrorContains(t, pick.err, fmt.Sprintf("outbox_max=%d", outboxMax))
 				require.ErrorContains(t, pick.err, "row_max=3")
 				require.NotContains(t, pick.err.Error(), f.typedEntry(t).EventJSON)
@@ -313,4 +313,16 @@ func TestFanoutAttemptHandlerRefusesOutboxMaxRetriesMismatch(t *testing.T) {
 			require.Equal(t, createdAt, f.outboxEntry(t).Entry.CreatedAt)
 		})
 	}
+}
+
+func TestStartEventJSONDriftIsQueueConflict(t *testing.T) {
+	f := newFailureFixture(t)
+	handler := NewFanoutAttemptHandler(f.member.store)
+	token, err := handler.Reserve(f.typedEntry(t))
+	require.NoError(t, err)
+	_, err = f.member.db.Exec(`UPDATE groupchat_fanout SET event_json=event_json||' '`)
+	require.NoError(t, err)
+	err = handler.Start(token, 1, time.Now().Unix())
+	require.ErrorIs(t, err, messaging.ErrGroupAttemptQueueConflict)
+	require.NotContains(t, err.Error(), "caller payload differs")
 }
