@@ -161,7 +161,7 @@ type FanoutOutboxHandler struct {
 	// the stale-read boundary in deterministic tests.
 	beforeRelayAcceptedTx func()
 	// beforeAttemptFailureTx runs where the old unlocked failure read happened.
-	// Tests commit a competing attempt here; the locked read must see it.
+	// Tests commit a competing update here so the in-transaction read observes it.
 	beforeAttemptFailureTx func()
 }
 
@@ -280,30 +280,25 @@ func failureReadNoop(row fanoutDBRow, entry types.OutboxEntry) bool {
 	return row.state == RecipientRelayAccepted || (entry.QueueID != "" && row.queueID != "" && entry.QueueID != row.queueID)
 }
 
-func failureTarget(row fanoutDBRow, maxRetries int, entry types.OutboxEntry, exhausted bool) RecipientDeliveryState {
-	if row.state == RecipientFailed || row.state == RecipientRelayAccepted {
-		return row.state
+func failureTarget(state RecipientDeliveryState, exhausted bool) RecipientDeliveryState {
+	if state == RecipientFailed || state == RecipientRelayAccepted {
+		return state
 	}
-	markFailed := exhausted
-	if entry.MaxRetries > 0 && entry.RetryCount != row.attempts {
-		markFailed = maxRetries > 0 && row.attempts+1 >= maxRetries
-	}
-	if markFailed {
+	if exhausted {
 		return RecipientFailed
 	}
-	return row.state
+	return state
 }
 
-func (h *FanoutOutboxHandler) findFailureRowLocked(tx queryExecer, eventID string) (fanoutDBRow, int, error) {
+func (h *FanoutOutboxHandler) findFailureRowLocked(tx queryExecer, eventID string) (fanoutDBRow, error) {
 	var r fanoutDBRow
 	var envType string
-	var maxRetries int
-	err := tx.QueryRow(`SELECT local_npub, group_id, envelope_type, send_key, recipient_npub, event_id, queue_id, state, attempts, max_retries FROM groupchat_fanout WHERE event_id = ?`, eventID).Scan(&r.key.LocalNpub, &r.key.GroupID, &envType, &r.key.SendKey, &r.recipient, &r.eventID, &r.queueID, &r.state, &r.attempts, &maxRetries)
+	err := tx.QueryRow(`SELECT local_npub, group_id, envelope_type, send_key, recipient_npub, event_id, queue_id, state, attempts FROM groupchat_fanout WHERE event_id = ?`, eventID).Scan(&r.key.LocalNpub, &r.key.GroupID, &envType, &r.key.SendKey, &r.recipient, &r.eventID, &r.queueID, &r.state, &r.attempts)
 	if err != nil {
-		return fanoutDBRow{}, 0, err
+		return fanoutDBRow{}, err
 	}
 	r.key.EnvelopeType = EnvelopeType(envType)
-	return r, maxRetries, nil
+	return r, nil
 }
 
 // RecordAttemptFailure updates attempt count and conditionally marks the row failed when exhausted.
@@ -319,7 +314,7 @@ func (h *FanoutOutboxHandler) RecordAttemptFailure(entry types.OutboxEntry, exha
 	if err != nil {
 		return err
 	}
-	row, maxRetries, err := h.findFailureRowLocked(tx, entry.ID)
+	row, err := h.findFailureRowLocked(tx, entry.ID)
 	if err != nil {
 		_ = tx.Rollback()
 		return err
@@ -332,7 +327,7 @@ func (h *FanoutOutboxHandler) RecordAttemptFailure(entry types.OutboxEntry, exha
 		_ = tx.Rollback()
 		return nil
 	}
-	targetState := failureTarget(row, maxRetries, entry, exhausted)
+	targetState := failureTarget(row.state, exhausted)
 	fields := map[string]any{"last_attempt_at": time.Now().Unix(), "issue": issue}
 	changed, err := transitionFanoutTx(tx, row.key, row.recipient, row.state, targetState, fields)
 	if err != nil {
@@ -340,25 +335,8 @@ func (h *FanoutOutboxHandler) RecordAttemptFailure(entry types.OutboxEntry, exha
 		return err
 	}
 	if !changed {
-		row, maxRetries, err = h.findFailureRowLocked(tx, entry.ID)
-		if err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-		if failureReadNoop(row, entry) {
-			_ = tx.Rollback()
-			return nil
-		}
-		targetState = failureTarget(row, maxRetries, entry, exhausted)
-		changed, err = transitionFanoutTx(tx, row.key, row.recipient, row.state, targetState, fields)
-		if err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-		if !changed {
-			_ = tx.Rollback()
-			return fmt.Errorf("fanout attempt failure was not applied for event %s (state %s)", entry.ID, row.state)
-		}
+		_ = tx.Rollback()
+		return fmt.Errorf("fanout attempt failure was not applied for event %s (state %s)", entry.ID, row.state)
 	}
 	if _, err := tx.Exec(`UPDATE groupchat_fanout SET attempts = attempts + 1
 		WHERE local_npub = ? AND group_id = ? AND envelope_type = ? AND send_key = ? AND recipient_npub = ?`,
