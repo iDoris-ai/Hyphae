@@ -101,6 +101,19 @@ func UpdateOutbox(update func(*types.Outbox) error) (*types.Outbox, error) {
 		if held != nil && !errors.Is(held, ErrOutboxTypedWriteHeld) {
 			return held
 		}
+		if held != nil {
+			// Run the strict scan before the callback and before the no-op
+			// DeepEqual return below: a held file the scan rejects must stay
+			// refused even when the transaction changes nothing, instead of
+			// falling through to a send path that publishes from it (#224).
+			raw, err := os.ReadFile(file)
+			if err != nil {
+				return err
+			}
+			if _, err := scanRawOutboxFile(raw); err != nil {
+				return fmt.Errorf("%w: %w", held, err)
+			}
+		}
 		ob, err := readOutbox(file)
 		if err != nil {
 			return err

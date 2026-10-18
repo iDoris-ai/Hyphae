@@ -22,6 +22,7 @@ func persistOutboxDiffLocked(file string, before, after *types.Outbox) error {
 			return nil, fmt.Errorf("typed snapshot has %d entries but the file has %d", len(before.Entries), len(f.Entries))
 		}
 		var patches []RawOutboxPatch
+		removed := make([]bool, len(f.Entries))
 		i, j := 0, 0
 		for j < len(after.Entries) {
 			next := after.Entries[j]
@@ -38,7 +39,7 @@ func persistOutboxDiffLocked(file string, before, after *types.Outbox) error {
 				if f.Entries[i].Parsed.Route != "" {
 					return nil, fmt.Errorf("%w: typed removal of %s", errOutboxGroupEntryViaRawDM, before.Entries[i].ID)
 				}
-				patches = append(patches, removalPatch(f, &f.Entries[i]))
+				removed[i] = true
 				i++
 				continue
 			}
@@ -58,8 +59,9 @@ func persistOutboxDiffLocked(file string, before, after *types.Outbox) error {
 			if f.Entries[i].Parsed.Route != "" {
 				return nil, fmt.Errorf("%w: typed removal of %s", errOutboxGroupEntryViaRawDM, before.Entries[i].ID)
 			}
-			patches = append(patches, removalPatch(f, &f.Entries[i]))
+			removed[i] = true
 		}
+		patches = append(patches, removalRunPatches(f, removed)...)
 		return ApplyRawOutboxPatches(f.Raw, patches)
 	})
 }
@@ -89,13 +91,13 @@ func diffOutboxEntryPatches(raw *rawOutboxEntry, before, after types.OutboxEntry
 		return nil, fmt.Errorf("%w: typed change to %s", errOutboxGroupEntryViaRawDM, before.ID)
 	}
 	if before.RecipientNpub != after.RecipientNpub || before.MaxRetries != after.MaxRetries || before.CreatedAt != after.CreatedAt ||
-		len(before.Relays) != len(after.Relays) || (before.QueueID != "" && before.QueueID != after.QueueID) {
+		(before.QueueID != "" && before.QueueID != after.QueueID) {
 		return nil, fmt.Errorf("typed update changed an immutable field of %s", before.ID)
 	}
-	for k := range before.Relays {
-		if before.Relays[k] != after.Relays[k] {
-			return nil, fmt.Errorf("typed update changed relays of %s", before.ID)
-		}
+	// No raw patch expresses a relay change, including nil versus empty
+	// (relays:null versus []); compare exactly instead of normalizing (#224).
+	if !reflect.DeepEqual(before.Relays, after.Relays) {
+		return nil, fmt.Errorf("typed update changed relays of %s", before.ID)
 	}
 	var patches []RawOutboxPatch
 	if before.Status != after.Status {
@@ -116,5 +118,42 @@ func diffOutboxEntryPatches(raw *rawOutboxEntry, before, after types.OutboxEntry
 		at := raw.Span.End - 1
 		patches = append(patches, RawOutboxPatch{Start: at, End: at, Replacement: b.Bytes()})
 	}
+	// The patches must express the whole typed change; a difference they do
+	// not cover would otherwise report success without being persisted.
+	covered := before
+	covered.Status, covered.RetryCount, covered.LastAttempt, covered.QueueID = after.Status, after.RetryCount, after.LastAttempt, after.QueueID
+	if !reflect.DeepEqual(covered, after) {
+		return nil, fmt.Errorf("typed update changed an unsupported field of %s", before.ID)
+	}
 	return patches, nil
+}
+
+// removalRunPatches removes each contiguous run of removed entries with one
+// patch, so runs never overlap (#224). A run after a retained entry takes the
+// separator in front of it; a leading run takes the separator up to the next
+// retained entry; a run covering every entry empties the array. Retained
+// entries' bytes are never inside a removal range.
+func removalRunPatches(f *rawOutboxFile, removed []bool) []RawOutboxPatch {
+	var patches []RawOutboxPatch
+	for first := 0; first < len(removed); first++ {
+		if !removed[first] {
+			continue
+		}
+		last := first
+		for last+1 < len(removed) && removed[last+1] {
+			last++
+		}
+		patch := RawOutboxPatch{Start: f.Entries[first].Span.Start, End: f.Entries[last].Span.End}
+		switch {
+		case first > 0:
+			patch.Start = f.Entries[first-1].Span.End
+		case last+1 < len(removed):
+			patch.End = f.Entries[last+1].Span.Start
+		default:
+			patch.Start = f.ArrayOpen
+		}
+		patches = append(patches, patch)
+		first = last
+	}
+	return patches
 }

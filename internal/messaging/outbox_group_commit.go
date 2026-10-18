@@ -79,6 +79,14 @@ func IsOutboxCommitUncertain(err error) bool {
 	return errors.As(err, &uncertain)
 }
 
+// WrapOutboxCommitUncertain reports err as the same commit-uncertain class
+// IsOutboxCommitUncertain recognizes. Tests use it to simulate the
+// post-rename directory-fsync failure outbox_raw_write.go reports, without
+// touching the real writer.
+func WrapOutboxCommitUncertain(err error) error {
+	return &outboxCommitUncertainError{err}
+}
+
 // ReadGroupFailureLocked strictly scans the outbox for a caller holding
 // WithGroupOutboxLock and returns the entry with queueID plus the receipt its
 // failure_result would have once consumed ("" when it carries none).
