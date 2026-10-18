@@ -8,8 +8,6 @@ import (
 	"github.com/iDoris-ai/hyphae/internal/messaging"
 )
 
-var confirmOutboxDurable = messaging.ConfirmOutboxDurable
-
 // ErrFanoutQueueConflict is D14: the queued row's persisted queue_id is not
 // the unique outbox entry's queue_id. Both stores are held unchanged; no
 // reservation, publish or deletion happens (rev7 §3.5, schema supplement §5).
