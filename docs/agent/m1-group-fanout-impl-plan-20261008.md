@@ -2,6 +2,8 @@
 
 状态：**rev7 设计评审 PASS（2026-10-09；仅文档/设计层）**。依据[rev7 契约](m1-group-fanout-contract-20261008.md)；本文不是已实现能力声明。S7 与受影响的 S8/S9 接线仍 **BLOCKED，直到 F1–F4 分别评审/合入并通过其验收门槛**。本计划只拆分后续工作，不修改 Go、测试或已批准的 #165/#166。
 
+F2b 字段级补充提案：[outbox result/witness schema](m1-outbox-result-witness-schema.md)（审计 main `1df9c6707c4df956bfc8868509bf33c1925bac2d`；F1 #169/F2a #170 已合入但不代表 F1–F4 验收；新增政策等待独立评审）。
+
 ## 0. 精确基线与已实现范围
 
 - 工作树 HEAD / PR base：`699b36f74c6b3802b93768d670229d7b2d3b6cff`，包含 S2（#156）、S3（#159）、S5a（#160）、S10a（#157），以及 #145 verified 路由、#151 keystore API；不再沿用旧计划的 `6c5e751` 状态。
