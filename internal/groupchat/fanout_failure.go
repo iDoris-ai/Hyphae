@@ -41,6 +41,11 @@ func (r *fanoutFailureRow) scan(row *sql.Row) error {
 		&r.revision, &r.attempts, &r.lastAttemptAt, &r.relayCount, &r.maxRetries, &r.lastResultGeneration, &r.retryCount)
 }
 
+// commitGroupFailureLocked is O3; tests override it to simulate a write that
+// lands commit-uncertain, so commitFanoutFailure's confirm+reread resolution
+// is exercised without touching the real writer (outbox_raw_write.go).
+var commitGroupFailureLocked = messaging.CommitGroupFailureLocked
+
 // commitFanoutFailure is the F3 failure boundary for the current started
 // token (rev7 §3.3, schema supplement §3): outbox lock → SQLite BEGIN
 // IMMEDIATE → read-only token check → O3 JSON commit → T4 CAS → commit. Inert:
@@ -70,7 +75,7 @@ func (s *Store) commitFanoutFailure(token fanoutAttemptToken) error {
 		}
 		result := row.failureResult()
 		_, lastDigest, _ := strings.Cut(row.receipt, ":")
-		receipt, err := messaging.CommitGroupFailureLocked(path, messaging.GroupFailureRecord{
+		receipt, err := commitGroupFailureLocked(path, messaging.GroupFailureRecord{
 			Result: result, LastResultDigest: lastDigest, LastRecoveryDigest: row.recoveryDigest,
 			FrozenEventJSON: row.eventJSON, MaxRetries: row.maxRetries,
 		})
@@ -221,7 +226,7 @@ func projectFanoutFailureTx(tx queryExecer, row fanoutFailureRow, result messagi
 // confirmFanoutFailureCommit resolves a commit-uncertain O3 write while the
 // locks are still held and returns the receipt to project.
 func confirmFanoutFailureCommit(path string, row fanoutFailureRow, want messaging.RawFailureResult) (string, error) {
-	if err := messaging.ConfirmOutboxDurable(path); err != nil {
+	if err := confirmOutboxDurable(path); err != nil {
 		return "", fmt.Errorf("%w: outbox directory durability unconfirmed: %v", ErrFanoutBookkeepingPending, err)
 	}
 	entry, receipt, err := messaging.ReadGroupEntryLocked(path, row.token.eventID)
@@ -231,7 +236,7 @@ func confirmFanoutFailureCommit(path string, row fanoutFailureRow, want messagin
 	if entry == nil || entry.QueueID != row.token.queueID {
 		return "", fmt.Errorf("%w: outbox entry missing or replaced after uncertain commit", ErrFanoutBookkeepingConflict)
 	}
-	if receipt == "" {
+	if receipt == "" || receipt == row.receipt {
 		return "", fmt.Errorf("%w: old snapshot survived; this publish outcome has no durable evidence", ErrFanoutBookkeepingPending)
 	}
 	if !matchesFailureResult(entry, want, &row) {
