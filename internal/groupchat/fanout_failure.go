@@ -24,6 +24,10 @@ var (
 	ErrFanoutBookkeepingConflict = errors.New("fanout failure bookkeeping conflict")
 )
 
+// Raw-writer seams: tests wrap them to return commit-uncertain errors with
+// or without a durable write, exercising confirmFanout*Commit end to end.
+var commitGroupRecoveryLocked = messaging.CommitGroupRecoveryLocked
+
 // fanoutCrashGate is called between a durable JSON commit (O3, D6) and its
 // SQLite projection (T4, T2') while both locks are held. Production is a
 // no-op; crash tests replace it to stop the process at that exact boundary.
