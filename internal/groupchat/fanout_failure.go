@@ -60,7 +60,15 @@ var commitGroupFailureLocked = messaging.CommitGroupFailureLocked
 // IMMEDIATE → read-only token check → O3 JSON commit → T4 CAS → commit. Inert:
 // no production caller until F3 wiring is reviewed.
 func (s *Store) commitFanoutFailure(token fanoutAttemptToken) error {
-	return messaging.WithGroupOutboxLock(func(path string) error {
+	_, err := s.commitFanoutFailureState(token, false)
+	return err
+}
+
+// commitFanoutFailureState is commitFanoutFailure. When readState is set, the
+// post-image state is read in that same BEGIN IMMEDIATE transaction, before
+// commit, and returned as failed.
+func (s *Store) commitFanoutFailureState(token fanoutAttemptToken, readState bool) (failed bool, err error) {
+	err = messaging.WithGroupOutboxLock(func(path string) error {
 		tx, err := s.beginImmediate()
 		if err != nil {
 			return err
@@ -104,11 +112,23 @@ func (s *Store) commitFanoutFailure(token fanoutAttemptToken) error {
 		if err := projectFanoutFailureTx(tx, row, result, receipt); err != nil {
 			return fmt.Errorf("%w: %v", ErrFanoutBookkeepingPending, err)
 		}
+		if readState {
+			var state string
+			if err := tx.QueryRow(`SELECT state FROM groupchat_fanout WHERE local_npub=? AND group_id=? AND envelope_type=? AND send_key=? AND recipient_npub=?`,
+				token.key.LocalNpub, token.key.GroupID, token.key.EnvelopeType, token.key.SendKey, token.recipient).Scan(&state); err != nil {
+				return fmt.Errorf("%w: read state after T4: %v", ErrFanoutBookkeepingPending, err)
+			}
+			failed = RecipientDeliveryState(state) == RecipientFailed
+		}
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("%w: T4 commit: %v", ErrFanoutBookkeepingPending, err)
 		}
 		return nil
 	})
+	if err != nil {
+		return false, err
+	}
+	return failed, nil
 }
 
 // recoverFanoutFailure is the failure half of the recovery barrier (rev7
