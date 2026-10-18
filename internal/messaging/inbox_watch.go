@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -97,6 +98,9 @@ func WatchAgentInboxWithStore(ctx context.Context, nickname string, relays []str
 	recipientPK := recipientSK.Public()
 	recipientHex := common.PubKeyToHex(recipientPK)
 	filter := BuildAgentMessageFilter(recipientHex)
+	// One cache per watch call. Relay workers share it. Return discards it,
+	// so a restarted watch replays persisted rows through the full path.
+	cache := newWatchValidatedCache(store, recipient.Npub)
 
 	var workers sync.WaitGroup
 	for _, relayURL := range relays {
@@ -106,7 +110,7 @@ func WatchAgentInboxWithStore(ctx context.Context, nickname string, relays []str
 		workers.Add(1)
 		go func(url string) {
 			defer workers.Done()
-			watchAgentInboxRelay(ctx, url, filter, recipient, recipientSK, recipientHex, store, emit)
+			watchAgentInboxRelay(ctx, url, filter, recipient, recipientSK, recipientHex, store, emit, cache)
 		}(relayURL)
 	}
 	workers.Wait()
@@ -125,6 +129,7 @@ func watchAgentInboxRelay(
 	recipientHex string,
 	store *storage.MessageStore,
 	emit func(AgentInboxWatchUpdate),
+	cache *watchValidatedCache,
 ) {
 	backoff := inboxRetryMin
 	for ctx.Err() == nil {
@@ -148,7 +153,7 @@ func watchAgentInboxRelay(
 		// StoreIncomingMessageOnce makes the overlap with this full walk
 		// idempotent.
 		_, walkErr := relayquery.Walk(ctx, url, filter, func(event nostr.Event) error {
-			storeIncomingWatchEvent(&event, recipient, recipientSK, recipientHex, store, url, emit)
+			storeIncomingWatchEvent(&event, recipient, recipientSK, recipientHex, store, url, emit, cache)
 			return nil // Invalid events are reported but must not block later events.
 		})
 		if ctx.Err() != nil {
@@ -160,7 +165,15 @@ func watchAgentInboxRelay(
 			walkErr = fmt.Errorf("recover inbox history: %w", walkErr)
 		}
 
-		sub, err := relay.Subscribe(connCtx, filter, nostr.SubscriptionOptions{Label: "hyphae-tui-inbox"})
+		// The watcher never reads EndOfStoredEvents. nostr's default 7s fake
+		// EOSE drops pre-EOSE events the synchronous consumer has not taken,
+		// including after a real EOSE. time.Duration(math.MaxInt64) is the
+		// library's documented disabled value and starts no timer goroutine.
+		// Cancelling connCtx still releases every dispatch goroutine.
+		sub, err := relay.Subscribe(connCtx, filter, nostr.SubscriptionOptions{
+			Label:          "hyphae-tui-inbox",
+			MaxWaitForEOSE: time.Duration(math.MaxInt64),
+		})
 		if err != nil {
 			relay.Close()
 			cancelConn()
@@ -182,7 +195,7 @@ func watchAgentInboxRelay(
 					reconnect = true
 					continue
 				}
-				storeIncomingWatchEvent(&event, recipient, recipientSK, recipientHex, store, url, emit)
+				storeIncomingWatchEvent(&event, recipient, recipientSK, recipientHex, store, url, emit, cache)
 			case reason := <-sub.ClosedReason:
 				emit(AgentInboxWatchUpdate{RelayURL: url, Err: fmt.Errorf("relay closed inbox subscription: %s", reason)})
 				reconnect = true
@@ -217,9 +230,16 @@ func storeIncomingWatchEvent(
 	store *storage.MessageStore,
 	relayURL string,
 	emit func(AgentInboxWatchUpdate),
+	cache *watchValidatedCache,
 ) {
-	if err := validateInboxEvent(*event, recipientHex); err != nil {
+	err := validateInboxEvent(*event, recipientHex)
+	if err != nil {
 		emit(AgentInboxWatchUpdate{RelayURL: relayURL, Err: fmt.Errorf("reject incoming event %s: %w", event.ID.Hex(), err)})
+		return
+	}
+	// Signature, kind, classifier, and the exact p tag already matched.
+	// A hit still re-reads the current row. The row is not the proof.
+	if cache.duplicateHit(store, recipient.Npub, event) {
 		return
 	}
 	content, encrypted, decrypted, err := decodeInboxContent(event, recipientSK, true)
@@ -236,6 +256,7 @@ func storeIncomingWatchEvent(
 		emit(AgentInboxWatchUpdate{RelayURL: relayURL, Err: fmt.Errorf("store incoming event %s: %w", event.ID.Hex(), err)})
 		return
 	}
+	cache.remember(store, recipient.Npub, event, encrypted)
 	if !first {
 		return
 	}
@@ -264,4 +285,180 @@ func nextInboxBackoff(current time.Duration) time.Duration {
 		return inboxRetryMax
 	}
 	return current * 2
+}
+
+// 2MiB max content × 256 entries would be 512MiB. The 4MiB cap counts raw
+// event.Content only. 256 × (64-byte id + two ~63-byte npubs) is ~48KB of
+// bookkeeping and stays outside that cap. Map membership means this watch
+// already passed decode and the reserved-group guard. Kind is not stored:
+// CheckID binds kind 30078, and StoredMessage has no kind field to fence.
+const (
+	watchCacheMaxEntries = 256
+	watchCacheMaxBytes   = 4 << 20
+)
+
+type watchCacheEntry struct {
+	sender, recipient, content string
+	encrypted                  bool
+	generation                 uint64
+}
+
+type watchCacheSlot struct {
+	id         string
+	generation uint64
+}
+
+// Per-watch successes only. Discarded when the watch returns. Not global.
+type watchValidatedCache struct {
+	mu                   sync.Mutex
+	store                *storage.MessageStore
+	recipient            string
+	byID                 map[string]*watchCacheEntry
+	ring                 [watchCacheMaxEntries]watchCacheSlot
+	head, tail, occupied int
+	live, bytes          int
+	nextGen              uint64
+}
+
+func newWatchValidatedCache(store *storage.MessageStore, recipientNpub string) *watchValidatedCache {
+	return &watchValidatedCache{
+		store: store, recipient: recipientNpub,
+		byID: make(map[string]*watchCacheEntry, watchCacheMaxEntries),
+	}
+}
+
+func (c *watchValidatedCache) duplicateHit(store *storage.MessageStore, recipientNpub string, event *nostr.Event) bool {
+	if c == nil || event == nil || store == nil || recipientNpub == "" {
+		return false
+	}
+	c.mu.Lock()
+	sameCall := c.store == store && c.recipient == recipientNpub
+	c.mu.Unlock()
+	if !sameCall {
+		return false
+	}
+	encrypted, err := watchEncryptionClass(event)
+	if err != nil {
+		return false
+	}
+	id := event.ID.Hex()
+	sender := common.EncodeNpub(event.PubKey)
+	c.mu.Lock()
+	ent, ok := c.byID[id]
+	match := ok && ent.generation != 0 && ent.sender == sender && ent.recipient == recipientNpub &&
+		ent.content == event.Content && ent.encrypted == encrypted
+	c.mu.Unlock()
+	if !match {
+		return false
+	}
+	return watchRowFence(store, event, recipientNpub, encrypted)
+}
+
+func (c *watchValidatedCache) remember(store *storage.MessageStore, recipientNpub string, event *nostr.Event, encrypted bool) {
+	if c == nil || event == nil || store == nil || recipientNpub == "" {
+		return
+	}
+	c.mu.Lock()
+	sameCall := c.store == store && c.recipient == recipientNpub
+	c.mu.Unlock()
+	if !sameCall || !watchRowFence(store, event, recipientNpub, encrypted) {
+		return
+	}
+	c.mu.Lock()
+	if c.store != store || c.recipient != recipientNpub {
+		c.mu.Unlock()
+		return
+	}
+	c.insertLocked(event.ID.Hex(), common.EncodeNpub(event.PubKey), event.Content, encrypted)
+	c.mu.Unlock()
+}
+
+func (c *watchValidatedCache) insertLocked(id, sender, content string, encrypted bool) {
+	if len(content) > watchCacheMaxBytes {
+		return
+	}
+	if old, ok := c.byID[id]; ok {
+		c.bytes -= len(old.content)
+		c.live--
+		delete(c.byID, id)
+	}
+	for c.occupied >= watchCacheMaxEntries || (c.bytes+len(content) > watchCacheMaxBytes && c.occupied > 0) {
+		if !c.evictOldestLocked() {
+			break
+		}
+	}
+	if c.occupied >= watchCacheMaxEntries || c.bytes+len(content) > watchCacheMaxBytes || c.bytes < 0 || c.live < 0 {
+		if c.bytes < 0 {
+			c.bytes = 0
+		}
+		if c.live < 0 {
+			c.live = 0
+		}
+		return
+	}
+	c.nextGen++
+	c.byID[id] = &watchCacheEntry{
+		sender: sender, recipient: c.recipient, content: content,
+		encrypted: encrypted, generation: c.nextGen,
+	}
+	c.ring[c.tail] = watchCacheSlot{id: id, generation: c.nextGen}
+	c.tail = (c.tail + 1) % watchCacheMaxEntries
+	c.occupied++
+	c.live++
+	c.bytes += len(content)
+}
+
+// A stale generation must not delete a refreshed same-id entry.
+func (c *watchValidatedCache) evictOldestLocked() bool {
+	if c.occupied == 0 {
+		return false
+	}
+	slot := c.ring[c.head]
+	c.ring[c.head] = watchCacheSlot{}
+	c.head = (c.head + 1) % watchCacheMaxEntries
+	c.occupied--
+	if ent, ok := c.byID[slot.id]; ok && ent.generation == slot.generation {
+		c.bytes -= len(ent.content)
+		c.live--
+		delete(c.byID, slot.id)
+	}
+	if c.bytes < 0 {
+		c.bytes = 0
+	}
+	if c.live < 0 {
+		c.live = 0
+	}
+	return true
+}
+
+func watchEncryptionClass(event *nostr.Event) (bool, error) {
+	if event == nil {
+		return false, fmt.Errorf("event is required")
+	}
+	encryption, has, err := outboxTagValue(event.Tags, "enc")
+	if err != nil {
+		return false, err
+	}
+	if has && encryption != "nip44" {
+		return false, fmt.Errorf("unsupported encryption tag")
+	}
+	return has, nil
+}
+
+// Read-only GetMessage fence. Plaintext is ignored and must not be logged.
+// Kind and event_id columns are not read.
+func watchRowFence(store *storage.MessageStore, event *nostr.Event, recipient string, encrypted bool) bool {
+	if store == nil || event == nil || recipient == "" {
+		return false
+	}
+	msg, err := store.GetMessage(event.ID.Hex())
+	if err != nil || msg == nil {
+		return false
+	}
+	return msg.ID == event.ID.Hex() &&
+		msg.SenderNpub == common.EncodeNpub(event.PubKey) &&
+		msg.RecipientNpub == recipient &&
+		msg.Content == event.Content &&
+		msg.IsEncrypted == encrypted &&
+		msg.IsIncoming
 }

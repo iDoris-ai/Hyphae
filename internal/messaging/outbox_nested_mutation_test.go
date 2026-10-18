@@ -2,6 +2,7 @@ package messaging
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 )
 
@@ -30,14 +31,15 @@ func TestNestedResultWitnessMutationSweep(t *testing.T) {
 			t.Fatalf("%s: nested fragment is not unique in the entry", fixture.file)
 		}
 		members := nestedMemberFragments(t, nested)
-		if len(members) < 10 {
-			t.Fatalf("%s: expected the full member set, found %d", fixture.file, len(members))
+		if len(members) != 18 {
+			t.Fatalf("%s: expected 18 leaf paths, found %d", fixture.file, len(members))
 		}
 		cases := 0
-		for key, value := range members {
-			needle := []byte(`"` + key + `":` + string(value))
-			if !bytes.Contains(nested, needle) {
-				t.Fatalf("%s: member %q fragment not found verbatim", fixture.file, key)
+		for _, frag := range members {
+			key, value := frag.key, frag.value
+			needle := frag.parent[frag.at:frag.end]
+			if frag.at < 0 || bytes.Count(nested, frag.parent) != 1 {
+				t.Fatalf("%s: parent of %q is not unique", fixture.file, frag.path)
 			}
 			trimmed := bytes.TrimSpace(value)
 			wrongType := "true"
@@ -56,21 +58,22 @@ func TestNestedResultWitnessMutationSweep(t *testing.T) {
 				mutations["exponent"] = []byte(`"` + key + `": ` + string(trimmed) + `e0` + trailingSpace(value))
 			}
 			for name, replacement := range mutations {
-				mutatedNested := bytes.Replace(nested, needle, replacement, 1)
+				mutatedParent := append(append(append([]byte{}, frag.parent[:frag.at]...), replacement...), frag.parent[frag.end:]...)
+				mutatedNested := bytes.Replace(nested, frag.parent, mutatedParent, 1)
 				mutated := bytes.Replace(entryRaw, nested, mutatedNested, 1)
 				if bytes.Equal(mutated, entryRaw) {
-					t.Fatalf("%s %s/%s: mutation did not apply", fixture.file, key, name)
+					t.Fatalf("%s %s/%s: mutation did not apply", fixture.file, frag.path, name)
 				}
 				input := bytes.Clone(mutated)
 				got, err := ParseRawGroupEntry(mutated)
 				if err == nil {
-					t.Errorf("%s %s/%s: accepted:\n%s", fixture.file, key, name, mutatedNested)
+					t.Errorf("%s %s/%s: accepted:\n%s", fixture.file, frag.path, name, mutatedNested)
 				}
 				if !bytes.Equal(mutated, input) || (got != nil && !bytes.Equal(got.Raw, input)) {
-					t.Errorf("%s %s/%s: parser altered the input bytes", fixture.file, key, name)
+					t.Errorf("%s %s/%s: parser altered the input bytes", fixture.file, frag.path, name)
 				}
 				if _, err := scanRawOutboxFile(rawOutboxDoc(mutated)); err == nil {
-					t.Errorf("%s %s/%s: whole-file scan accepted the mutation", fixture.file, key, name)
+					t.Errorf("%s %s/%s: whole-file scan accepted the mutation", fixture.file, frag.path, name)
 				}
 				cases++
 			}
@@ -79,25 +82,67 @@ func TestNestedResultWitnessMutationSweep(t *testing.T) {
 	}
 }
 
-// nestedMemberFragments returns every member value fragment of a nested
-// object, descending into token and fanout_key, keyed by member name.
-func nestedMemberFragments(t *testing.T, object []byte) map[string][]byte {
+type nestedFrag struct {
+	path, key string
+	parent    []byte
+	value     []byte
+	at, end   int
+}
+
+// nestedMemberFragments returns every leaf member of a nested object,
+// descending into token and fanout_key. Offsets keep same-named members apart.
+func nestedMemberFragments(t *testing.T, object []byte) []nestedFrag {
 	t.Helper()
-	out := map[string][]byte{}
-	var walk func(raw []byte)
-	walk = func(raw []byte) {
-		fields, _ := evidenceObject(raw, "", knownNestedMembers)
-		for key, value := range fields {
-			if key == "token" || key == "fanout_key" {
-				walk(value)
+	var out []nestedFrag
+	var walk func(path string, raw []byte)
+	walk = func(path string, raw []byte) {
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		token, err := decoder.Token()
+		if err != nil || token != json.Delim('{') {
+			t.Fatalf("expected object at %s: %v", path, err)
+		}
+		for decoder.More() {
+			beforeKey := int(decoder.InputOffset())
+			keyToken, err := decoder.Token()
+			if err != nil {
+				t.Fatal(err)
+			}
+			name, ok := keyToken.(string)
+			if !ok {
+				t.Fatalf("expected key at %s", path)
+			}
+			afterKey := int(decoder.InputOffset())
+			keyAt := bytes.Index(raw[beforeKey:afterKey], []byte(`"`+name+`"`))
+			if keyAt < 0 {
+				t.Fatalf("%s: key %q not found at %d:%d", path, name, beforeKey, afterKey)
+			}
+			keyAt += beforeKey
+			var decoded json.RawMessage
+			if err := decoder.Decode(&decoded); err != nil {
+				t.Fatal(err)
+			}
+			colon := bytes.IndexByte(raw[afterKey:], ':')
+			if colon < 0 {
+				t.Fatalf("%s: colon missing after %q", path, name)
+			}
+			valueStart := afterKey + colon + 1
+			end := int(decoder.InputOffset())
+			for end < len(raw) && (raw[end] == ' ' || raw[end] == '\t' || raw[end] == '\r' || raw[end] == '\n') {
+				end++
+			}
+			value := raw[valueStart:end]
+			child := name
+			if path != "" {
+				child = path + "." + name
+			}
+			if name == "token" || name == "fanout_key" {
+				walk(child, bytes.TrimSpace(value))
 				continue
 			}
-			if _, dup := out[key]; !dup {
-				out[key] = value
-			}
+			out = append(out, nestedFrag{path: child, key: name, parent: raw, value: value, at: keyAt, end: end})
 		}
 	}
-	walk(object)
+	walk("", object)
 	return out
 }
 

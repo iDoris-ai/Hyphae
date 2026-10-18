@@ -26,8 +26,9 @@ func GetDBPath() (string, error) {
 	return filepath.Join(path, "messages.db"), nil
 }
 
-// InitDB initializes the SQLite database
-func InitDB() (*sql.DB, error) {
+// OpenDB opens and initializes a newly owned SQLite database handle.
+// The returned handle is independent of the package-level DB singleton.
+func OpenDB() (*sql.DB, error) {
 	dbPath, err := GetDBPath()
 	if err != nil {
 		return nil, err
@@ -56,6 +57,15 @@ func InitDB() (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
 
+	return db, nil
+}
+
+// InitDB initializes the SQLite database and assigns it to the legacy singleton.
+func InitDB() (*sql.DB, error) {
+	db, err := OpenDB()
+	if err != nil {
+		return nil, err
+	}
 	DB = db
 	return db, nil
 }

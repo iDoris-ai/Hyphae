@@ -27,6 +27,9 @@ func (s *Store) recoverFanoutRecovery(key FanoutKey, recipient string) (replayed
 		if err != nil || entry == nil || entry.QueueID == row.token.queueID || entry.RecoveryWitness == nil {
 			return err
 		}
+		if err := confirmOutboxDurable(path); err != nil {
+			return fmt.Errorf("%w: outbox directory durability unconfirmed before replay: %v", ErrFanoutRecoveryPending, err)
+		}
 		if err := replayFanoutRecoveryTx(tx, &row, entry); err != nil {
 			return err
 		}
