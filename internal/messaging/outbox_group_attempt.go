@@ -23,12 +23,13 @@ type GroupAttemptToken struct {
 // Sentinel classes a GroupAttemptHandler wraps its errors with so the send
 // loop can map them to SendResult without importing the store package.
 var (
-	ErrGroupAttemptStale          = errors.New("group attempt is stale")
-	ErrGroupAttemptPending        = errors.New("group attempt bookkeeping is pending recovery")
-	ErrGroupAttemptConflict       = errors.New("group attempt bookkeeping conflict")
-	ErrGroupAttemptQueueConflict  = errors.New("group attempt queue conflict")
-	ErrGroupAttemptQueueMissing   = errors.New("group attempt queue entry missing")
-	ErrGroupAttemptCleanupPending = errors.New("group relay acceptance is durable; outbox cleanup pending")
+	ErrGroupAttemptStale           = errors.New("group attempt is stale")
+	ErrGroupAttemptPending         = errors.New("group attempt bookkeeping is pending recovery")
+	ErrGroupAttemptConflict        = errors.New("group attempt bookkeeping conflict")
+	ErrGroupAttemptPayloadMismatch = fmt.Errorf("%w: caller payload differs from frozen event", ErrGroupAttemptConflict)
+	ErrGroupAttemptQueueConflict   = errors.New("group attempt queue conflict")
+	ErrGroupAttemptQueueMissing    = errors.New("group attempt queue entry missing")
+	ErrGroupAttemptCleanupPending  = errors.New("group relay acceptance is durable; outbox cleanup pending")
 )
 
 // GroupAttemptHandler is the rev7 §3.3 R/S/T3+O2/O3+T4 boundary (W-1 of
@@ -49,13 +50,16 @@ type GroupAttemptHandler interface {
 // locks released) → accepted | failed. The caller's typed outbox snapshot is
 // not refreshed: the raw writers own the file on this route.
 func attemptSendGroupAttempt(ctx context.Context, entry types.OutboxEntry, defaultRelays []string, dialTimeout time.Duration, h GroupAttemptHandler, publish outboxPublisher) (SendResult, error) {
+	var event nostr.Event
+	if err := json.Unmarshal([]byte(entry.EventJSON), &event); err != nil {
+		return groupAttemptRefusal(fmt.Errorf("%w: parse caller event: %v", ErrGroupAttemptPayloadMismatch, err))
+	}
+	if event.ID.Hex() != entry.ID || !event.CheckID() || !event.VerifySignature() {
+		return groupAttemptRefusal(ErrGroupAttemptPayloadMismatch)
+	}
 	token, err := h.Reserve(entry)
 	if err != nil {
 		return groupAttemptRefusal(err)
-	}
-	var event nostr.Event
-	if err := json.Unmarshal([]byte(entry.EventJSON), &event); err != nil {
-		return SendResult{Issue: AgentMessageIssueOutboxBookkeepingFailed}, fmt.Errorf("parse frozen event: %w", err)
 	}
 	targets := entry.Relays
 	if len(targets) == 0 {

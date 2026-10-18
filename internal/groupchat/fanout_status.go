@@ -8,15 +8,16 @@ import (
 	"github.com/iDoris-ai/hyphae/internal/messaging"
 )
 
-// FanoutBookkeeping is the read-only classification of one recipient's two
-// durable records for `groupchat status` (wiring plan W-5). It mirrors the
-// barrier's first-match order without performing any of its writes.
+// FanoutBookkeeping classifies one recipient's visible SQLite row and outbox
+// entry for `groupchat status` (wiring plan W-5). It does not replay, and it
+// does not confirm directory fsync. It is not a complete mirror of every
+// barrier refusal.
 type FanoutBookkeeping string
 
 const (
 	BookkeepingNormal          FanoutBookkeeping = "normal"
-	BookkeepingPendingFailure  FanoutBookkeeping = "pending_failure"  // O3 durable, T4 not yet projected; the barrier will replay it
-	BookkeepingPendingRecovery FanoutBookkeeping = "pending_recovery" // D6 durable, T2' not yet projected; the barrier will replay it
+	BookkeepingPendingFailure  FanoutBookkeeping = "pending_failure"  // visible unprojected O3 evidence; the barrier will replay it
+	BookkeepingPendingRecovery FanoutBookkeeping = "pending_recovery" // visible unprojected D6 evidence; the barrier will replay it
 	BookkeepingCleanupPending  FanoutBookkeeping = "cleanup_pending"  // relay accepted; the precise O2 has not removed the entry
 	BookkeepingQueueMissing    FanoutBookkeeping = "queue_missing"
 	BookkeepingQueueConflict   FanoutBookkeeping = "queue_conflict" // D14
@@ -25,8 +26,8 @@ const (
 )
 
 // inspectFanoutBookkeeping reads both stores under the outbox lock and
-// classifies them. It never writes: no replay, no mtime change, no SQLite
-// transaction. A missing row is sql.ErrNoRows.
+// classifies them. It does not write the outbox or SQLite. Taking the lock
+// may create the lock file. A missing row is sql.ErrNoRows.
 func (s *Store) inspectFanoutBookkeeping(key FanoutKey, recipient string) (FanoutBookkeeping, error) {
 	local, err := canonicalNpub(key.LocalNpub)
 	if err != nil {
@@ -46,7 +47,13 @@ func (s *Store) inspectFanoutBookkeeping(key FanoutKey, recipient string) (Fanou
 			class = BookkeepingFileCorrupt
 			return nil
 		}
-		class = classifyFanoutBookkeeping(&row, entry, receipt)
+		var relayAcks, acceptedAt int64
+		if err := s.db.QueryRow(`SELECT relay_acks, accepted_at FROM groupchat_fanout
+			WHERE local_npub=? AND group_id=? AND envelope_type=? AND send_key=? AND recipient_npub=?`,
+			local, key.GroupID, key.EnvelopeType, key.SendKey, recipient).Scan(&relayAcks, &acceptedAt); err != nil {
+			return err
+		}
+		class = classifyFanoutBookkeeping(&row, entry, receipt, relayAcks, acceptedAt)
 		return nil
 	})
 	if errors.Is(err, sql.ErrNoRows) {
@@ -55,7 +62,7 @@ func (s *Store) inspectFanoutBookkeeping(key FanoutKey, recipient string) (Fanou
 	return class, err
 }
 
-func classifyFanoutBookkeeping(row *fanoutFailureRow, entry *messaging.RawGroupEntry, receipt string) FanoutBookkeeping {
+func classifyFanoutBookkeeping(row *fanoutFailureRow, entry *messaging.RawGroupEntry, receipt string, relayAcks, acceptedAt int64) FanoutBookkeeping {
 	state := RecipientDeliveryState(row.state)
 	switch {
 	case state == RecipientPrepared:
@@ -64,10 +71,22 @@ func classifyFanoutBookkeeping(row *fanoutFailureRow, entry *messaging.RawGroupE
 		}
 		return BookkeepingNormal
 	case state == RecipientRelayAccepted:
-		if entry != nil {
-			return BookkeepingCleanupPending
+		if entry == nil {
+			return BookkeepingNormal
 		}
-		return BookkeepingNormal
+		if entry.QueueID != row.token.queueID || entry.Entry.EventJSON != row.eventJSON || int64(entry.Entry.MaxRetries) != row.maxRetries {
+			return BookkeepingQueueConflict
+		}
+		if receipt != "" && receipt != row.receipt {
+			return BookkeepingConflict
+		}
+		if w := messaging.OutboxWitnessDigest(entry); w != "" && w != row.recoveryDigest {
+			return BookkeepingConflict
+		}
+		if err := validateAcceptedEvidence(row.token.queueID, relayAcks, acceptedAt); err != nil {
+			return BookkeepingConflict
+		}
+		return BookkeepingCleanupPending
 	case entry == nil:
 		if state == RecipientFailed {
 			return BookkeepingNormal // the old epoch may have been cleaned; D6 reason=missing applies
@@ -80,6 +99,9 @@ func classifyFanoutBookkeeping(row *fanoutFailureRow, entry *messaging.RawGroupE
 			}
 			return BookkeepingConflict
 		}
+		return BookkeepingQueueConflict
+	}
+	if state == RecipientQueued && (entry.Entry.EventJSON != row.eventJSON || int64(entry.Entry.MaxRetries) != row.maxRetries) {
 		return BookkeepingQueueConflict
 	}
 	if w := messaging.OutboxWitnessDigest(entry); w != "" && w != row.recoveryDigest {

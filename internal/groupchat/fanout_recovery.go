@@ -53,6 +53,9 @@ func (s *Store) authorizeFanoutRecovery(key FanoutKey, recipient string, authori
 			if entry.RecoveryWitness == nil {
 				return ErrFanoutQueueConflict
 			}
+			if err := confirmOutboxDurable(path); err != nil {
+				return fmt.Errorf("%w: outbox directory durability unconfirmed before replay: %v", ErrFanoutRecoveryPending, err)
+			}
 			if err := replayFanoutRecoveryTx(tx, &row, entry); err != nil {
 				return err
 			}
@@ -160,7 +163,7 @@ func projectFanoutRecoveryTx(tx queryExecer, row fanoutFailureRow, w messaging.R
 // confirmFanoutRecoveryCommit resolves a commit-uncertain D6 write while the
 // locks are held and returns the witness digest to project.
 func confirmFanoutRecoveryCommit(path string, row fanoutFailureRow, w messaging.RawRecoveryWitness) (string, error) {
-	if err := messaging.ConfirmOutboxDurable(path); err != nil {
+	if err := confirmOutboxDurable(path); err != nil {
 		return "", fmt.Errorf("%w: outbox directory durability unconfirmed: %v", ErrFanoutRecoveryPending, err)
 	}
 	entry, _, err := messaging.ReadGroupEntryLocked(path, row.token.eventID)

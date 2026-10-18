@@ -217,14 +217,14 @@ func TestStoreIncomingWatchEventRejectsBadEventAndContinues(t *testing.T) {
 		makeInboxEvent(t, recipientPK, nostr.Generate(), nostr.Now()+2, "invalid ciphertext", nostr.Tags{{"enc", "nip44"}}),
 	}
 	for _, bad := range badEvents {
-		storeIncomingWatchEvent(&bad, recipient, recipientSK, recipientPK.Hex(), store, "ws://127.0.0.1:1", emit)
+		storeIncomingWatchEvent(&bad, recipient, recipientSK, recipientPK.Hex(), store, "ws://127.0.0.1:1", emit, nil)
 		stored, err := mustGetStoredMessage(t, bad.ID.Hex())
 		require.NoError(t, err)
 		assert.Nil(t, stored, "rejected event must never create a placeholder row")
 	}
 
 	valid := makeInboxEvent(t, recipientPK, nostr.Generate(), nostr.Now(), "later valid event", nil)
-	storeIncomingWatchEvent(&valid, recipient, recipientSK, recipientPK.Hex(), store, "ws://127.0.0.1:1", emit)
+	storeIncomingWatchEvent(&valid, recipient, recipientSK, recipientPK.Hex(), store, "ws://127.0.0.1:1", emit, nil)
 	require.Len(t, updates, 4)
 	for _, update := range updates[:3] {
 		assert.Error(t, update.Err)
