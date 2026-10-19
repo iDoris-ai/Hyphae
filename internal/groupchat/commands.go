@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"time"
 
 	"fiatjaf.com/nostr"
+	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/internal/storage"
 	"github.com/urfave/cli/v3"
@@ -31,21 +33,29 @@ var sendCmd = &cli.Command{
 		&cli.StringFlag{Name: "logical-id", Usage: "Stable send key; generated when empty"},
 		&cli.IntFlag{Name: "max-retries", Value: 10, Usage: "Retry budget stored with the fanout"},
 		&cli.StringFlag{Name: "identity", Usage: "Sender nickname; default identity when empty"},
+		&cli.BoolFlag{Name: "password-stdin", Usage: "Read an encrypted keystore password from stdin"},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
-		report, err := sendMessage(c.String("identity"), c.String("group-id"), c.String("logical-id"), c.String("body"), c.Int("max-retries"))
+		report, err := sendMessage(c)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("queued %d logical %s\n", len(report.Recipients), report.LogicalID)
-		for _, recipient := range report.Recipients {
-			fmt.Printf("%s %s %s\n", recipient.RecipientNpub, recipient.QueueID, recipient.EventID)
-		}
+		common.Emit(common.JSONMode(c), report, func() {
+			fmt.Printf("queued %d logical %s\n", len(report.Recipients), report.LogicalID)
+			for _, recipient := range report.Recipients {
+				fmt.Printf("%s %s %s\n", recipient.RecipientNpub, recipient.QueueID, recipient.EventID)
+			}
+		})
 		return nil
 	},
 }
 
-func sendMessage(nickname, groupID, logicalID, body string, maxRetries int) (FanoutReport, error) {
+func sendMessage(c *cli.Command) (FanoutReport, error) {
+	nickname := c.String("identity")
+	groupID := c.String("group-id")
+	logicalID := c.String("logical-id")
+	body := c.String("body")
+	maxRetries := c.Int("max-retries")
 	if logicalID == "" {
 		id, err := NewOpaqueID()
 		if err != nil {
@@ -53,7 +63,12 @@ func sendMessage(nickname, groupID, logicalID, body string, maxRetries int) (Fan
 		}
 		logicalID = id
 	}
-	ks, err := identity.LoadKeyStore()
+	ks, err := identity.LoadKeyStoreForCommand(identity.KeyStoreCommandOptions{
+		JSONMode:      common.JSONMode(c),
+		RequireSecret: true,
+		PasswordStdin: c.Bool("password-stdin"),
+		Stdin:         os.Stdin,
+	})
 	if err != nil {
 		return FanoutReport{}, err
 	}
@@ -66,7 +81,11 @@ func sendMessage(nickname, groupID, logicalID, body string, maxRetries int) (Fan
 		return FanoutReport{}, err
 	}
 	defer db.Close()
-	return enqueueOwned(db, sk, groupID, logicalID, body, maxRetries)
+	report, err := enqueueOwned(db, sk, groupID, logicalID, body, maxRetries)
+	if err != nil {
+		return FanoutReport{}, fmt.Errorf("logical %s: %w", logicalID, err)
+	}
+	return report, nil
 }
 
 func enqueueOwned(db *sql.DB, sk nostr.SecretKey, groupID, logicalID, body string, maxRetries int) (FanoutReport, error) {
