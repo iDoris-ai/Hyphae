@@ -96,7 +96,8 @@ func (s *Store) EnqueuePrepared(key FanoutKey) (FanoutReport, error) {
 	return s.LoadFanoutReport(key)
 }
 
-// RequeueFailed moves failed recipients back to queued using fresh QueueIDs for identical events.
+// RequeueFailed moves failed recipients back to queued. Each recipient gets a
+// fresh QueueID through authorizeFanoutRecovery; the frozen event stays.
 func (s *Store) RequeueFailed(key FanoutKey, recipient string) (FanoutReport, error) {
 	local, err := canonicalNpub(key.LocalNpub)
 	if err != nil {
@@ -108,50 +109,68 @@ func (s *Store) RequeueFailed(key FanoutKey, recipient string) (FanoutReport, er
 			recipient = c
 		}
 	}
+	failed, err := s.selectFailedRecipients(key, recipient)
+	if err != nil {
+		return FanoutReport{}, err
+	}
+	authorizedAt := time.Now().Unix()
+	if authorizedAt < 0 {
+		authorizedAt = 0
+	}
+	for _, npub := range failed {
+		if _, err := s.authorizeFanoutRecovery(key, npub, authorizedAt); err != nil {
+			return FanoutReport{}, err
+		}
+	}
+	return s.LoadFanoutReport(key)
+}
 
-	query := `SELECT recipient_npub, event_id, event_json, state, max_retries FROM groupchat_fanout
+// selectFailedRecipients reads the selection and closes the rows before the
+// caller takes the outbox lock.
+func (s *Store) selectFailedRecipients(key FanoutKey, recipient string) ([]string, error) {
+	query := `SELECT recipient_npub, state FROM groupchat_fanout
 		WHERE local_npub = ? AND group_id = ? AND envelope_type = ? AND send_key = ?`
-	args := []any{local, key.GroupID, key.EnvelopeType, key.SendKey}
+	args := []any{key.LocalNpub, key.GroupID, key.EnvelopeType, key.SendKey}
 	if recipient != "" {
 		query += " AND recipient_npub = ?"
 		args = append(args, recipient)
 	}
 	rows, err := s.db.Query(query+" ORDER BY recipient_npub", args...)
 	if err != nil {
-		return FanoutReport{}, err
+		return nil, err
 	}
 	defer rows.Close()
 
-	var targets []fanoutQueueTarget
+	var failed []string
 	matched := 0
 	for rows.Next() {
 		matched++
-		var r fanoutQueueTarget
+		var npub string
 		var state RecipientDeliveryState
-		if err := rows.Scan(&r.recipient, &r.eventID, &r.eventJSON, &state, &r.maxRetries); err != nil {
-			return FanoutReport{}, err
+		if err := rows.Scan(&npub, &state); err != nil {
+			return nil, err
 		}
 		if state != RecipientFailed {
 			if recipient != "" {
-				return FanoutReport{}, fmt.Errorf("cannot requeue recipient in %s state: only failed recipients can be requeued", state)
+				return nil, fmt.Errorf("cannot requeue recipient in %s state: only failed recipients can be requeued", state)
 			}
 			continue
 		}
-		targets = append(targets, r)
+		failed = append(failed, npub)
 	}
 	if err := rows.Err(); err != nil {
-		return FanoutReport{}, err
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if matched == 0 {
-		return FanoutReport{}, sql.ErrNoRows
+		return nil, sql.ErrNoRows
 	}
-	if len(targets) == 0 {
-		return FanoutReport{}, fmt.Errorf("no failed recipients to requeue")
+	if len(failed) == 0 {
+		return nil, fmt.Errorf("no failed recipients to requeue")
 	}
-	if err := s.queueTargets(key, targets, RecipientFailed, true); err != nil {
-		return FanoutReport{}, err
-	}
-	return s.LoadFanoutReport(key)
+	return failed, nil
 }
 
 // FanoutOutboxHandler coordinates fanout intent updates with outbox lifecycle events.

@@ -256,58 +256,45 @@ func TestFanoutOutboxHandler(t *testing.T) {
 }
 
 func TestRequeueFailed(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	member := newMemberWithSecret(t, fixedQueueTestSecret(13))
-	key := FanoutKey{LocalNpub: member.npub, GroupID: mustOpaque(t), EnvelopeType: EnvelopeMessage, SendKey: mustOpaque(t)}
-	eID1, eJSON1, bobNpub := signedGroupEvent(t, member.sk, fixedQueueTestSecret(10), key)
-	eID2, eJSON2, carolNpub := signedGroupEvent(t, member.sk, fixedQueueTestSecret(11), key)
+	g, key, report := enqueueRawPair(t, 3)
+	bob := report.Recipients[0]
+	carol := report.Recipients[1]
+	if bob.RecipientNpub != g.bob.npub {
+		bob, carol = carol, bob
+	}
+	require.Equal(t, g.bob.npub, bob.RecipientNpub)
+	require.Equal(t, g.carol.npub, carol.RecipientNpub)
+	exhaustRecipient(t, g.alice, key, bob.RecipientNpub, 3)
 
-	// Bob is failed with prior outbox entry
-	insertTestFanout(t, member, key, bobNpub, RecipientFailed, eID1, eJSON1, "old_q_bob", 2)
-	// Carol is relay_accepted
-	insertTestFanout(t, member, key, carolNpub, RecipientRelayAccepted, eID2, eJSON2, "q_carol", 1)
-
-	// Seed outbox with group_failed for Bob
-	_, _, err := messaging.EnqueueGroupOutboxEntry(eJSON1, bobNpub, nil, 1)
-	require.NoError(t, err)
-	ob, err := messaging.LoadOutbox()
-	require.NoError(t, err)
-	require.NoError(t, messaging.UpdateOutboxStatus(ob, eID1, messaging.OutboxStatusGroupFailed))
-
-	t.Run("guard_relay_accepted_cannot_requeue", func(t *testing.T) {
-		_, err := member.store.RequeueFailed(key, carolNpub)
+	t.Run("guard_queued_cannot_requeue", func(t *testing.T) {
+		_, err := g.alice.store.RequeueFailed(key, carol.RecipientNpub)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "only failed recipients can be requeued")
 	})
 
 	t.Run("requeue_failed_preserves_event_with_new_queue_id", func(t *testing.T) {
-		report, err := member.store.RequeueFailed(key, bobNpub)
+		got, err := g.alice.store.RequeueFailed(key, bob.RecipientNpub)
 		require.NoError(t, err)
-		require.Equal(t, 1, report.Queued)
-		require.Equal(t, 1, report.Accepted)
-		require.Equal(t, 0, report.Failed)
+		require.Equal(t, 2, got.Queued)
+		require.Equal(t, 0, got.Failed)
 
-		bob := report.Recipients[0]
-		require.Equal(t, bobNpub, bob.RecipientNpub)
-		require.Equal(t, RecipientQueued, bob.State)
-		require.Equal(t, eID1, bob.EventID)
-		require.NotEmpty(t, bob.QueueID)
-		require.NotEqual(t, "old_q_bob", bob.QueueID)
-		require.Equal(t, messaging.AgentMessageIssueNone, bob.Issue)
+		again := recipientByNpub(t, got, bob.RecipientNpub)
+		require.Equal(t, RecipientQueued, again.State)
+		require.Equal(t, bob.EventID, again.EventID)
+		require.NotEqual(t, bob.QueueID, again.QueueID)
+		require.Equal(t, messaging.AgentMessageIssueNone, again.Issue)
 
-		// Outbox contains new queue_id and group_pending
-		latestOB, err := messaging.LoadOutbox()
+		latest, err := messaging.LoadOutbox()
 		require.NoError(t, err)
-		entries := messaging.GroupOutboxEntriesByEventID(latestOB, eID1)
+		entries := messaging.GroupOutboxEntriesByEventID(latest, bob.EventID)
 		require.Len(t, entries, 1)
-		require.Equal(t, bob.QueueID, entries[0].QueueID)
+		require.Equal(t, again.QueueID, entries[0].QueueID)
 		require.Equal(t, messaging.OutboxStatusGroupPending, entries[0].Status)
-		require.Equal(t, eJSON1, entries[0].EventJSON)
+		require.Equal(t, bob.EventID, entries[0].ID)
 	})
 
 	t.Run("no_failed_recipients_error", func(t *testing.T) {
-		// All rows are now queued or accepted
-		_, err := member.store.RequeueFailed(key, "")
+		_, err := g.alice.store.RequeueFailed(key, "")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "no failed recipients to requeue")
 	})
