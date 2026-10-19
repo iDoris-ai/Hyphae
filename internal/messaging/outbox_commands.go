@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -174,8 +175,15 @@ var outboxClearCmd = &cli.Command{
 		if err != nil {
 			return fmt.Errorf("failed to load outbox: %w", err)
 		}
+		retainGroup, err := outboxRetainsGroupEvidence()
+		if err != nil {
+			return fmt.Errorf("failed to load outbox: %w", err)
+		}
 		needsQueueIDs := false
 		for _, entry := range ob.Entries {
+			if clearSkipsGroupEvidence(entry, retainGroup) {
+				continue
+			}
 			if isOutboxClearable(entry, minFailures) && entry.QueueID == "" {
 				needsQueueIDs = true
 				break
@@ -185,6 +193,9 @@ var outboxClearCmd = &cli.Command{
 			ob, err = UpdateOutbox(func(latest *types.Outbox) error {
 				for i := range latest.Entries {
 					entry := &latest.Entries[i]
+					if clearSkipsGroupEvidence(*entry, retainGroup) {
+						continue
+					}
 					if isOutboxClearable(*entry, minFailures) && entry.QueueID == "" {
 						queueID, err := newOutboxQueueID()
 						if err != nil {
@@ -201,15 +212,25 @@ var outboxClearCmd = &cli.Command{
 		}
 
 		toClear := make([]types.OutboxEntry, 0)
+		var retainedGroup []types.OutboxEntry
 		for _, e := range ob.Entries {
-			if isOutboxClearable(e, minFailures) {
-				toClear = append(toClear, e)
+			if !isOutboxClearable(e, minFailures) {
+				continue
 			}
+			if clearSkipsGroupEvidence(e, retainGroup) {
+				retainedGroup = append(retainedGroup, e)
+				continue
+			}
+			toClear = append(toClear, e)
 		}
 
 		if len(toClear) == 0 {
 			if jsonMode {
-				common.Emit(true, map[string]int{"removed": 0, "remaining": len(ob.Entries)}, nil)
+				common.Emit(true, clearResult(0, len(ob.Entries), len(retainedGroup)), nil)
+				return nil
+			}
+			if len(retainedGroup) > 0 {
+				fmt.Printf("Kept %d group entr%s; removed 0 DM entries\n", len(retainedGroup), plural(len(retainedGroup)))
 				return nil
 			}
 			fmt.Printf("Nothing to clear (no entries with status=failed or retry_count >= %d)\n", minFailures)
@@ -231,9 +252,14 @@ var outboxClearCmd = &cli.Command{
 		if err != nil {
 			return fmt.Errorf("failed to save outbox: %w", err)
 		}
+		retained := countMatchingGroup(updated, retainedGroup)
 
 		if jsonMode {
-			common.Emit(true, map[string]int{"removed": removed, "remaining": len(updated.Entries)}, nil)
+			common.Emit(true, clearResult(removed, len(updated.Entries), retained), nil)
+			return nil
+		}
+		if retained > 0 {
+			fmt.Printf("Removed %d entr%s; %d remain; kept %d group entr%s\n", removed, plural(removed), len(updated.Entries), retained, plural(retained))
 			return nil
 		}
 		fmt.Printf("✅ Removed %d entr%s; %d remain\n", removed, plural(removed), len(updated.Entries))
@@ -263,10 +289,75 @@ func isOutboxClearable(entry types.OutboxEntry, minFailures int) bool {
 func clearConfirmedOutboxEntries(confirmed []types.OutboxEntry) (*types.Outbox, int, error) {
 	removed := 0
 	updated, err := UpdateOutbox(func(latest *types.Outbox) error {
-		removed = removeConfirmedOutboxEntries(latest, confirmed)
+		targets := confirmed
+		file, err := GetOutboxPath()
+		if err != nil {
+			return err
+		}
+		hold := requireTypedOutboxRoundTrip(file)
+		if hold != nil && !errors.Is(hold, ErrOutboxTypedWriteHeld) {
+			return hold
+		}
+		if errors.Is(hold, ErrOutboxTypedWriteHeld) {
+			targets = dropGroupOutboxEntries(confirmed)
+		}
+		removed = removeConfirmedOutboxEntries(latest, targets)
 		return nil
 	})
 	return updated, removed, err
+}
+
+// outboxRetainsGroupEvidence reports a file whose protocol records a typed
+// rewrite would drop. Clear keeps those group entries and deletes DM snapshots.
+func outboxRetainsGroupEvidence() (bool, error) {
+	file, err := GetOutboxPath()
+	if err != nil {
+		return false, err
+	}
+	err = requireTypedOutboxRoundTrip(file)
+	if errors.Is(err, ErrOutboxTypedWriteHeld) {
+		return true, nil
+	}
+	return false, err
+}
+
+func clearSkipsGroupEvidence(entry types.OutboxEntry, retainGroup bool) bool {
+	return retainGroup && entry.Route == OutboxRouteGroup
+}
+
+func dropGroupOutboxEntries(entries []types.OutboxEntry) []types.OutboxEntry {
+	kept := make([]types.OutboxEntry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Route == OutboxRouteGroup {
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	return kept
+}
+
+func countMatchingGroup(latest *types.Outbox, want []types.OutboxEntry) int {
+	if latest == nil {
+		return 0
+	}
+	n := 0
+	for _, snap := range want {
+		for _, entry := range latest.Entries {
+			if entry.Route == OutboxRouteGroup && entry.ID == snap.ID && entry.QueueID == snap.QueueID {
+				n++
+				break
+			}
+		}
+	}
+	return n
+}
+
+func clearResult(removed, remaining, retained int) map[string]int {
+	out := map[string]int{"removed": removed, "remaining": remaining}
+	if retained > 0 {
+		out["retained_group"] = retained
+	}
+	return out
 }
 
 var outboxRetryCmd = &cli.Command{
