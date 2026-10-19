@@ -32,6 +32,20 @@ func (s *Store) PrepareMessageFanout(senderSK nostr.SecretKey, groupID, logicalI
 	return s.LoadFanoutReport(FanoutKey{LocalNpub: common.EncodeNpub(senderSK.Public()), GroupID: groupID, EnvelopeType: EnvelopeMessage, SendKey: logicalID})
 }
 
+// EnqueueMessageFanout freezes the signed fanout, then writes one group outbox
+// entry per recipient. Publishing and attempt recording stay with the caller.
+func (s *Store) EnqueueMessageFanout(senderSK nostr.SecretKey, groupID, logicalID, body string, createdAt nostr.Timestamp, maxRetries int) (FanoutReport, error) {
+	if _, err := s.PrepareMessageFanout(senderSK, groupID, logicalID, body, createdAt, maxRetries); err != nil {
+		return FanoutReport{}, err
+	}
+	return s.EnqueuePrepared(FanoutKey{
+		LocalNpub:    common.EncodeNpub(senderSK.Public()),
+		GroupID:      groupID,
+		EnvelopeType: EnvelopeMessage,
+		SendKey:      logicalID,
+	})
+}
+
 type fanoutEventBuilder func(nostr.SecretKey, nostr.PubKey, string, nostr.Timestamp) (*nostr.Event, error)
 
 // prepareFanoutTx is T1's message-only boundary. The caller must hold a write
