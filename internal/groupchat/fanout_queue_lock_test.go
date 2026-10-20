@@ -2,6 +2,7 @@ package groupchat
 
 import (
 	"database/sql"
+	"os"
 	"testing"
 
 	"github.com/iDoris-ai/hyphae/internal/messaging"
@@ -39,8 +40,11 @@ func TestRecordAttemptFailureLocksExhaustionDecision(t *testing.T) {
 		key := FanoutKey{LocalNpub: member.npub, GroupID: mustOpaque(t), EnvelopeType: EnvelopeMessage, SendKey: mustOpaque(t)}
 		eventID, eventJSON, recipient := signedGroupEvent(t, member.sk, fixedQueueTestSecret(4), key)
 		insertTestFanout(t, member, key, recipient, RecipientFailed, eventID, eventJSON, "old-q", 10)
+		path, err := messaging.GetOutboxPath()
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(path, []byte(`{"entries":[]}`), 0o600))
 
-		_, err := member.store.RequeueFailed(key, recipient)
+		_, err = member.store.RequeueFailed(key, recipient)
 		require.NoError(t, err)
 		ob, err := messaging.LoadOutbox()
 		require.NoError(t, err)

@@ -22,7 +22,7 @@ var ErrFanoutRecoveryPending = errors.New("fanout recovery bookkeeping is pendin
 // outbox observation) → D6 JSON commit → T2' CAS (queued, new queue_id,
 // retry 0, issue cleared, phase idle, recovery id/digest) with the
 // activation hook in the same transaction → commit. Returns the new QueueID.
-// Inert: no production caller.
+// RequeueFailed calls this after its selection query is closed.
 func (s *Store) authorizeFanoutRecovery(key FanoutKey, recipient string, authorizedAt int64) (newQueueID string, err error) {
 	if authorizedAt < 0 {
 		return "", fmt.Errorf("fanout recovery authorization time must be non-negative")
