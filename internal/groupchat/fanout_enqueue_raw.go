@@ -32,7 +32,7 @@ var errFanoutEnqueuePending = errors.New("fanout enqueue durability pending")
 // enqueuePreparedRaw is O1 + T2 for every prepared recipient of key under
 // the rev7 lock order (outbox lock → BEGIN IMMEDIATE → O1 raw append → T2 CAS
 // → commit). EnqueueMessageFanout uses this path so the queued row stores
-// retry_count. EnqueuePrepared remains the typed queueTargets path.
+// retry_count. EnqueuePrepared calls this path.
 //
 // Refusals follow semantics (a): any deterministic O1 refusal holds the
 // whole key with zero outbox writes and zero SQLite writes. The durability

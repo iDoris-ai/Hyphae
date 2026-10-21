@@ -2,6 +2,8 @@ package groupchat
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"fiatjaf.com/nostr"
@@ -101,6 +103,9 @@ func TestEnqueuePrepared(t *testing.T) {
 		require.NoError(t, err)
 		pending := messaging.GetPendingGroupOutbox(ob)
 		require.Len(t, pending, 2)
+		raw, err := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".hyphae", "outbox.json"))
+		require.NoError(t, err)
+		require.Contains(t, string(raw), `"fanout_protocol":1`)
 	})
 
 	t.Run("crash_idempotence_O1_to_T2", func(t *testing.T) {
