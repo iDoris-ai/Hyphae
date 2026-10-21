@@ -123,13 +123,9 @@ func TestVerifiedGroupDispatch(t *testing.T) {
 
 	t.Run("other type", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
-		alice, bob, carol := newMember(t), newMember(t), newMember(t)
-		draft, err := alice.store.CreateGroup("planning", alice.npub, []string{bob.npub, carol.npub})
-		require.NoError(t, err)
-		invite := draft.Invitations[0]
-		decline := Envelope{Type: EnvelopeDecline, Version: Version, GroupID: invite.GroupID, CreatorNpub: invite.CreatorNpub, InviteID: invite.InviteID, RosterHash: invite.RosterHash, InviteeNpub: invite.InviteeNpub}
+		alice, bob := newMember(t), newMember(t)
 		calls := &dispatchCalls{}
-		err = messaging.DispatchVerifiedGroup(dispatchMachines(bob.store, calls), verifiedEnvelope(t, alice, bob, decline))
+		err := messaging.DispatchVerifiedGroup(dispatchMachines(bob.store, calls), verifiedPlain(t, alice, bob, MagicV1+`{"type":"nope"}`))
 		require.ErrorContains(t, err, "unsupported group dispatch type")
 		require.Equal(t, dispatchCalls{}, *calls)
 		require.Zero(t, groupTableRows(t, bob.db))
@@ -217,7 +213,7 @@ func TestVerifiedGroupDispatch(t *testing.T) {
 }
 
 type dispatchCalls struct {
-	invite, accept, activate, message int
+	invite, accept, activate, message, decline, cancel int
 }
 
 func dispatchMachines(store *Store, calls *dispatchCalls) messaging.GroupMachines {
@@ -236,6 +232,8 @@ func dispatchMachines(store *Store, calls *dispatchCalls) messaging.GroupMachine
 		Accept:   apply(&calls.accept, func(v VerifiedIncoming) error { _, err := store.ReceiveAcceptance(v); return err }),
 		Activate: apply(&calls.activate, func(v VerifiedIncoming) error { _, err := store.ReceiveActivation(v); return err }),
 		Message:  apply(&calls.message, func(v VerifiedIncoming) error { _, err := store.ReceiveMessage(v); return err }),
+		Decline:  apply(&calls.decline, func(v VerifiedIncoming) error { _, err := store.ReceiveDecline(v); return err }),
+		Cancel:   apply(&calls.cancel, func(v VerifiedIncoming) error { return store.ReceiveCancel(v) }),
 	}
 }
 

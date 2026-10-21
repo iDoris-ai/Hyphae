@@ -17,10 +17,13 @@ type GroupMachines struct {
 	Accept   func(VerifiedAgentMessage) error
 	Activate func(VerifiedAgentMessage) error
 	Message  func(VerifiedAgentMessage) error
+	Decline  func(VerifiedAgentMessage) error
+	Cancel   func(VerifiedAgentMessage) error
 }
 
 // DispatchVerifiedGroup hands a verified reserved payload to the invite,
-// accept, activation, or message function. A non-v1 version returns first.
+// accept, activation, message, decline, or cancel function.
+// A non-v1 version returns first.
 func DispatchVerifiedGroup(machines GroupMachines, message VerifiedAgentMessage) error {
 	if !message.Valid() || message.Route() != AgentRouteReservedGroup {
 		return errors.New("reserved group Agent message is required")
@@ -48,6 +51,10 @@ func DispatchVerifiedGroup(machines GroupMachines, message VerifiedAgentMessage)
 		call = machines.Activate
 	case "message":
 		call = machines.Message
+	case "decline":
+		call = machines.Decline
+	case "cancel":
+		call = machines.Cancel
 	default:
 		return errors.New("unsupported group dispatch type")
 	}
