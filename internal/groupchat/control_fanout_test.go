@@ -68,6 +68,20 @@ func TestPrepareControlFanout(t *testing.T) {
 		require.Equal(t, 1, bytes.Count(after, []byte(`"fanout_protocol"`)))
 	})
 
+	t.Run("negative time", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		g := newThreeMemberGroup(t)
+		invite := g.invites[g.bob.npub]
+		_, err := g.alice.store.PrepareControlFanout(g.alice.sk, invite, -1, 7)
+		require.Error(t, err)
+		var rows int
+		require.NoError(t, g.alice.db.QueryRow(`SELECT COUNT(*) FROM groupchat_fanout`).Scan(&rows))
+		require.Zero(t, rows)
+		ob, err := messaging.LoadOutbox()
+		require.NoError(t, err)
+		require.Empty(t, ob.Entries)
+	})
+
 	t.Run("bad version", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		g := newThreeMemberGroup(t)
