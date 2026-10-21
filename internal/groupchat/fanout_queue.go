@@ -31,69 +31,14 @@ type fanoutQueueTarget struct {
 	maxRetries int
 }
 
-func (s *Store) queueTargets(key FanoutKey, targets []fanoutQueueTarget, from RecipientDeliveryState, requeue bool) error {
-	enqueue := messaging.EnqueueGroupOutboxEntry
-	if requeue {
-		enqueue = messaging.RequeueGroupOutboxEntry
-	}
-	for _, target := range targets {
-		entry, _, err := enqueue(target.eventJSON, target.recipient, nil, target.maxRetries)
-		if err != nil {
-			return err
-		}
-		tx, err := s.beginImmediate()
-		if err != nil {
-			return err
-		}
-		changed, err := transitionFanoutTx(tx, key, target.recipient, from, RecipientQueued, map[string]any{"queue_id": entry.QueueID})
-		if err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-		if changed {
-			if err := onFanoutQueuedTx(tx, key, fanoutQueuedRow{RecipientNpub: target.recipient, EventID: target.eventID, QueueID: entry.QueueID}); err != nil {
-				_ = tx.Rollback()
-				return err
-			}
-		}
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// EnqueuePrepared pushes prepared fanout rows to the group outbox and advances them to queued.
+// EnqueuePrepared moves prepared rows to queued through the raw O1/T2 writer.
+// The frozen event stays. A negative clock is treated as zero.
 func (s *Store) EnqueuePrepared(key FanoutKey) (FanoutReport, error) {
-	local, err := canonicalNpub(key.LocalNpub)
-	if err != nil {
-		return FanoutReport{}, err
+	now := time.Now().Unix()
+	if now < 0 {
+		now = 0
 	}
-	key.LocalNpub = local
-
-	rows, err := s.db.Query(`SELECT recipient_npub, event_id, event_json, max_retries
-		FROM groupchat_fanout WHERE local_npub = ? AND group_id = ? AND envelope_type = ? AND send_key = ? AND state = ?
-		ORDER BY recipient_npub`, local, key.GroupID, key.EnvelopeType, key.SendKey, RecipientPrepared)
-	if err != nil {
-		return FanoutReport{}, err
-	}
-	defer rows.Close()
-
-	var targets []fanoutQueueTarget
-	for rows.Next() {
-		var r fanoutQueueTarget
-		if err := rows.Scan(&r.recipient, &r.eventID, &r.eventJSON, &r.maxRetries); err != nil {
-			return FanoutReport{}, err
-		}
-		targets = append(targets, r)
-	}
-	if err := rows.Err(); err != nil {
-		return FanoutReport{}, err
-	}
-	if err := s.queueTargets(key, targets, RecipientPrepared, false); err != nil {
-		return FanoutReport{}, err
-	}
-	return s.LoadFanoutReport(key)
+	return s.enqueuePreparedRaw(key, now)
 }
 
 // RequeueFailed moves failed recipients back to queued. Each recipient gets a
