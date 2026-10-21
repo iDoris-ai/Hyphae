@@ -1,14 +1,18 @@
 package daemon
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,6 +31,77 @@ type recordingGroupProvider struct {
 func (p *recordingGroupProvider) Send(call groupchat.GroupSendCall) error {
 	p.calls = append(p.calls, call)
 	return nil
+}
+
+type relockGroupProvider struct {
+	calls []groupchat.GroupSendCall
+	err   error
+}
+
+func (p *relockGroupProvider) Send(call groupchat.GroupSendCall) error {
+	p.calls = append(p.calls, call)
+	p.err = messaging.WithGroupOutboxLock(func(string) error { return nil })
+	return p.err
+}
+
+type failGroupProvider struct{}
+
+func (failGroupProvider) Send(groupchat.GroupSendCall) error {
+	return errors.New("relay down")
+}
+
+type stdoutResult struct {
+	out string
+	err error
+}
+
+func readStdout(fn func()) (string, error) {
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		return "", err
+	}
+	os.Stdout = w
+	fn()
+	closeErr := w.Close()
+	os.Stdout = orig
+	out, readErr := io.ReadAll(r)
+	if closeErr != nil {
+		return string(out), closeErr
+	}
+	return string(out), readErr
+}
+
+func holdOutboxLock(t *testing.T) (<-chan struct{}, func()) {
+	t.Helper()
+	started := make(chan struct{})
+	unlock := make(chan struct{})
+	var once sync.Once
+	release := func() { once.Do(func() { close(unlock) }) }
+	done := make(chan error, 1)
+	go func() {
+		done <- messaging.WithGroupOutboxLock(func(string) error {
+			close(started)
+			<-unlock
+			return nil
+		})
+	}()
+	t.Cleanup(func() {
+		release()
+		if err := <-done; err != nil {
+			t.Errorf("outbox lock holder: %v", err)
+		}
+	})
+	return started, release
+}
+
+func waitForLock(t *testing.T, started <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("lock holder did not start")
+	}
 }
 
 func useDaemonGroupProviders(t *testing.T) {
@@ -88,6 +163,8 @@ func TestDaemonGroupRetryUsesProvider(t *testing.T) {
 		require.Contains(t, out, "group provider group: called")
 		require.Len(t, provider.calls, 1)
 		require.Equal(t, "evt-live", provider.calls[0].Token.ID)
+		require.Equal(t, daemonGroupRetryDecision, provider.calls[0].Decision)
+		require.NotEqual(t, groupchat.ReconcileAccepted, provider.calls[0].Decision)
 		require.Greater(t, provider.calls[0].Token.ExpiresAt, time.Now().Unix())
 	})
 
@@ -105,6 +182,154 @@ func TestDaemonGroupRetryUsesProvider(t *testing.T) {
 		require.Equal(t, string(before), string(after))
 		require.Contains(t, out, "group provider group: held")
 		require.Empty(t, provider.calls)
+	})
+
+	t.Run("missing provider skips the lock", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		useDaemonGroupProviders(t)
+		path, before := saveGroupOutbox(t,
+			groupOutboxEntry("evt-a", messaging.OutboxStatusGroupPending, 10, 0, 3),
+			groupOutboxEntry("evt-b", messaging.OutboxStatusGroupPending, 10, 0, 3),
+		)
+		started, release := holdOutboxLock(t)
+		waitForLock(t, started)
+		done := make(chan stdoutResult, 1)
+		go func() {
+			out, err := readStdout(func() {
+				processOutbox(context.Background(), &types.Identity{Nickname: "alice"}, nil)
+			})
+			done <- stdoutResult{out: out, err: err}
+		}()
+		select {
+		case got := <-done:
+			release()
+			require.NoError(t, got.err)
+			require.Equal(t, 1, strings.Count(got.out, "group provider group: not_registered"))
+		case <-time.After(300 * time.Millisecond):
+			release()
+			<-done
+			t.Fatal("missing provider waited on the outbox lock")
+		}
+		after, err := os.ReadFile(path)
+		require.NoError(t, err)
+		require.Equal(t, string(before), string(after))
+	})
+
+	t.Run("lock blocks dispatch", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		useDaemonGroupProviders(t)
+		provider := &recordingGroupProvider{}
+		require.NoError(t, daemonGroupProviders.Register(daemonGroupProviderName, provider))
+		now := time.Now().Unix()
+		entry := groupOutboxEntry("evt-live", messaging.OutboxStatusGroupPending, now+120, 0, 3)
+		_, _ = saveGroupOutbox(t, entry)
+		started, release := holdOutboxLock(t)
+		waitForLock(t, started)
+		updated := make(chan error, 1)
+		go func() {
+			_, err := messaging.UpdateOutbox(func(*types.Outbox) error { return nil })
+			updated <- err
+		}()
+		returned := make(chan string, 1)
+		go func() {
+			returned <- dispatchDaemonGroupEntry(entry, now)
+		}()
+		select {
+		case outcome := <-returned:
+			release()
+			t.Fatalf("dispatch returned %q while the lock was held", outcome)
+		case err := <-updated:
+			release()
+			t.Fatalf("UpdateOutbox returned while the lock was held: %v", err)
+		case <-time.After(300 * time.Millisecond):
+		}
+		release()
+		select {
+		case outcome := <-returned:
+			require.Equal(t, "called", outcome)
+		case <-time.After(2 * time.Second):
+			t.Fatal("dispatch stayed blocked after the lock was released")
+		}
+		select {
+		case err := <-updated:
+			require.NoError(t, err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("UpdateOutbox stayed blocked after the lock was released")
+		}
+		require.Len(t, provider.calls, 1)
+		require.Equal(t, daemonGroupRetryDecision, provider.calls[0].Decision)
+	})
+
+	t.Run("stale snapshot", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		useDaemonGroupProviders(t)
+		provider := &recordingGroupProvider{}
+		require.NoError(t, daemonGroupProviders.Register(daemonGroupProviderName, provider))
+		path, before := saveGroupOutbox(t, groupOutboxEntry("evt-stale", messaging.OutboxStatusGroupPending, 10, 2, 3))
+		outcome := dispatchDaemonGroupEntry(groupOutboxEntry("evt-stale", messaging.OutboxStatusGroupPending, 10, 0, 3), time.Now().Unix())
+		require.Equal(t, "changed", outcome)
+		require.Empty(t, provider.calls)
+		after, err := os.ReadFile(path)
+		require.NoError(t, err)
+		require.Equal(t, string(before), string(after))
+	})
+
+	t.Run("exhausted pending", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		useDaemonGroupProviders(t)
+		provider := &recordingGroupProvider{}
+		require.NoError(t, daemonGroupProviders.Register(daemonGroupProviderName, provider))
+		now := time.Now().Unix()
+		path, before := saveGroupOutbox(t, groupOutboxEntry("evt-exhausted", messaging.OutboxStatusGroupPending, now+120, 3, 3))
+		out := captureStdout(t, func() {
+			processOutbox(t.Context(), &types.Identity{Nickname: "alice"}, nil)
+		})
+		require.Contains(t, out, "group provider group: held")
+		require.Empty(t, provider.calls)
+		after, err := os.ReadFile(path)
+		require.NoError(t, err)
+		require.Equal(t, string(before), string(after))
+	})
+
+	t.Run("send after unlock", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		useDaemonGroupProviders(t)
+		provider := &relockGroupProvider{}
+		require.NoError(t, daemonGroupProviders.Register(daemonGroupProviderName, provider))
+		now := time.Now().Unix()
+		entry := groupOutboxEntry("evt-live", messaging.OutboxStatusGroupPending, now+120, 0, 3)
+		path, before := saveGroupOutbox(t, entry)
+		done := make(chan string, 1)
+		go func() {
+			done <- dispatchDaemonGroupEntry(entry, now)
+		}()
+		select {
+		case outcome := <-done:
+			require.Equal(t, "called", outcome)
+		case <-time.After(2 * time.Second):
+			t.Fatal("send blocked on the outbox lock")
+		}
+		require.NoError(t, provider.err)
+		require.Len(t, provider.calls, 1)
+		require.Equal(t, daemonGroupRetryDecision, provider.calls[0].Decision)
+		after, err := os.ReadFile(path)
+		require.NoError(t, err)
+		require.Equal(t, string(before), string(after))
+	})
+
+	t.Run("send error keeps the file", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		useDaemonGroupProviders(t)
+		require.NoError(t, daemonGroupProviders.Register(daemonGroupProviderName, failGroupProvider{}))
+		now := time.Now().Unix()
+		path, before := saveGroupOutbox(t, groupOutboxEntry("evt-live", messaging.OutboxStatusGroupPending, now+120, 0, 3))
+		out := captureStdout(t, func() {
+			processOutbox(t.Context(), &types.Identity{Nickname: "alice"}, nil)
+		})
+		require.Contains(t, out, "group provider group: error: relay down")
+		after, err := os.ReadFile(path)
+		require.NoError(t, err)
+		require.Equal(t, string(before), string(after))
 	})
 
 	t.Run("dm retry", func(t *testing.T) {

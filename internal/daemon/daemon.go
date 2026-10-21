@@ -36,6 +36,10 @@ const (
 	daemonGroupProviderName = "group"
 )
 
+// daemonGroupRetryDecision is the live handoff label.
+// ReconcileAccepted names a cleanup-pending group route, so this handoff uses another value.
+const daemonGroupRetryDecision groupchat.ReconcileDecision = "retry"
+
 // daemonGroupProviders is the registry processOutbox consults for group rows.
 // Tests replace the pointer. Production starts empty.
 var daemonGroupProviders = groupchat.NewGroupProviderRegistry()
@@ -330,17 +334,32 @@ func processOutboxWithLogger(ctx context.Context, myIdentity *types.Identity, re
 }
 
 // retryDaemonGroupOutbox hands each group row to the registered provider.
-// The decision and the handoff run while the outbox lock is held.
+// Lookup runs before the outbox lock. A missing name logs one line and returns.
+// The snapshot compare, the held check, and the expiry check run under the lock.
+// Send runs after that lock returns.
 // A missing provider, a held row, and an expired token leave the file as it was.
-// A Send that calls WithGroupOutboxLock deadlocks this tick.
 func retryDaemonGroupOutbox(ctx context.Context, logger *daemonLogger, outbox *types.Outbox, now int64) {
 	if ctx.Err() != nil || outbox == nil {
 		return
 	}
+	rows := make([]types.OutboxEntry, 0)
 	for _, entry := range outbox.Entries {
-		if entry.Route != messaging.OutboxRouteGroup {
-			continue
+		if entry.Route == messaging.OutboxRouteGroup {
+			rows = append(rows, entry)
 		}
+	}
+	if len(rows) == 0 {
+		return
+	}
+	if _, err := daemonGroupProviders.Lookup(daemonGroupProviderName); err != nil {
+		if errors.Is(err, groupchat.ErrGroupProviderNotRegistered) {
+			logger.printf("   group provider %s: not_registered\n", daemonGroupProviderName)
+			return
+		}
+		logger.printf("   group provider %s: error: %v\n", daemonGroupProviderName, err)
+		return
+	}
+	for _, entry := range rows {
 		if ctx.Err() != nil {
 			return
 		}
@@ -349,42 +368,66 @@ func retryDaemonGroupOutbox(ctx context.Context, logger *daemonLogger, outbox *t
 }
 
 func dispatchDaemonGroupEntry(entry types.OutboxEntry, now int64) string {
-	outcome := "error"
+	token, decision, outcome, send, err := planDaemonGroupRetry(entry, now)
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	if !send {
+		return outcome
+	}
+	ran, err := daemonGroupProviders.Dispatch(daemonGroupProviderName, token, now, decision)
+	if err != nil {
+		if errors.Is(err, groupchat.ErrGroupProviderNotRegistered) {
+			return "not_registered"
+		}
+		return "error: " + err.Error()
+	}
+	if ran {
+		return "called"
+	}
+	if decision == groupchat.ReconcileHold {
+		return "held"
+	}
+	return "expired"
+}
+
+func planDaemonGroupRetry(entry types.OutboxEntry, now int64) (groupchat.GroupSendToken, groupchat.ReconcileDecision, string, bool, error) {
+	var (
+		token    groupchat.GroupSendToken
+		decision groupchat.ReconcileDecision
+		outcome  = "error"
+		send     bool
+	)
 	err := messaging.WithGroupOutboxLock(func(path string) error {
 		current, ok, err := readDaemonGroupEntry(path, entry.ID)
 		if err != nil {
 			return err
 		}
-		if !ok || current.Status != entry.Status || current.CreatedAt != entry.CreatedAt || current.RetryCount != entry.RetryCount || current.MaxRetries != entry.MaxRetries {
+		if !ok || !groupRetryUnchanged(current, entry) {
 			outcome = "changed"
 			return nil
 		}
-		decision := groupchat.ReconcileAccepted
+		token = groupRetryToken(current, now)
 		if groupRetryHeld(current) {
-			decision = groupchat.ReconcileHold
-		}
-		ran, err := daemonGroupProviders.Dispatch(daemonGroupProviderName, groupRetryToken(current, now), now, decision)
-		if err != nil {
-			if errors.Is(err, groupchat.ErrGroupProviderNotRegistered) {
-				outcome = "not_registered"
-				return nil
-			}
-			return err
-		}
-		switch {
-		case ran:
-			outcome = "called"
-		case decision == groupchat.ReconcileHold:
 			outcome = "held"
-		default:
-			outcome = "expired"
+			return nil
 		}
+		if now < 0 || now >= token.ExpiresAt {
+			outcome = "expired"
+			return nil
+		}
+		decision = daemonGroupRetryDecision
+		send = true
 		return nil
 	})
-	if err != nil {
-		return "error"
-	}
-	return outcome
+	return token, decision, outcome, send, err
+}
+
+func groupRetryUnchanged(current, snapshot types.OutboxEntry) bool {
+	return current.Status == snapshot.Status &&
+		current.CreatedAt == snapshot.CreatedAt &&
+		current.RetryCount == snapshot.RetryCount &&
+		current.MaxRetries == snapshot.MaxRetries
 }
 
 func groupRetryHeld(entry types.OutboxEntry) bool {
