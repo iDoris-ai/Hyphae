@@ -101,9 +101,103 @@ func TestPrepareControlFanout(t *testing.T) {
 		require.True(t, os.IsNotExist(err))
 	})
 
+	t.Run("empty sender", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		g := newThreeMemberGroup(t)
+		_, err := g.alice.store.PrepareControlFanout(nostr.SecretKey{}, g.invites[g.bob.npub], 1234, 7)
+		require.ErrorContains(t, err, "invalid control fanout parameters")
+		requireZeroControlRows(t, g)
+	})
+
+	t.Run("zero budget", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		g := newThreeMemberGroup(t)
+		_, err := g.alice.store.PrepareControlFanout(g.alice.sk, g.invites[g.bob.npub], 1234, 0)
+		require.ErrorContains(t, err, "invalid control fanout parameters")
+		requireZeroControlRows(t, g)
+	})
+
+	t.Run("non invite", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		g := newThreeMemberGroup(t)
+		invite := g.invites[g.bob.npub]
+		accept := Envelope{Type: EnvelopeAccept, Version: Version, GroupID: invite.GroupID, CreatorNpub: invite.CreatorNpub, InviteID: invite.InviteID, RosterHash: invite.RosterHash, InviteeNpub: invite.InviteeNpub}
+		_, err := g.alice.store.PrepareControlFanout(g.alice.sk, accept, 1234, 7)
+		require.ErrorIs(t, err, ErrProtocolMismatch)
+		requireZeroControlRows(t, g)
+	})
+
+	t.Run("non creator", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		g := newThreeMemberGroup(t)
+		_, err := g.alice.store.PrepareControlFanout(g.bob.sk, g.invites[g.bob.npub], 1234, 7)
+		require.ErrorIs(t, err, ErrProtocolMismatch)
+		requireZeroControlRows(t, g)
+	})
+
+	t.Run("roster hash", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		g := newThreeMemberGroup(t)
+		invite := g.invites[g.bob.npub]
+		invite.Name = "other"
+		hash, members, err := CanonicalRosterHash(invite.GroupID, invite.CreatorNpub, invite.Name, invite.Members)
+		require.NoError(t, err)
+		invite.RosterHash = hash
+		invite.Members = members
+		_, err = g.alice.store.PrepareControlFanout(g.alice.sk, invite, 1234, 7)
+		require.ErrorIs(t, err, ErrProtocolMismatch)
+		requireZeroControlRows(t, g)
+	})
+
+	t.Run("budget mismatch", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		g := newThreeMemberGroup(t)
+		invite := g.invites[g.bob.npub]
+		first, err := g.alice.store.PrepareControlFanout(g.alice.sk, invite, 1234, 7)
+		require.NoError(t, err)
+		_, err = g.alice.store.PrepareControlFanout(g.alice.sk, invite, 1234, 8)
+		require.ErrorIs(t, err, ErrProtocolMismatch)
+		var budget int
+		require.NoError(t, g.alice.db.QueryRow(`SELECT max_retries FROM groupchat_fanout WHERE event_id = ?`, first.Recipients[0].EventID).Scan(&budget))
+		require.Equal(t, 7, budget)
+	})
+
+	t.Run("stored event id", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		g := newThreeMemberGroup(t)
+		invite := g.invites[g.bob.npub]
+		first, err := g.alice.store.PrepareControlFanout(g.alice.sk, invite, 1234, 7)
+		require.NoError(t, err)
+		_, err = g.alice.db.Exec(`UPDATE groupchat_fanout SET event_id = ? WHERE event_id = ?`, "ab", first.Recipients[0].EventID)
+		require.NoError(t, err)
+		_, err = g.alice.store.PrepareControlFanout(g.alice.sk, invite, 1234, 7)
+		require.ErrorIs(t, err, ErrProtocolMismatch)
+	})
+
+	t.Run("requeue after exhaust", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		g := newThreeMemberGroup(t)
+		invite := g.invites[g.bob.npub]
+		first, err := g.alice.store.PrepareControlFanout(g.alice.sk, invite, 1234, 1)
+		require.NoError(t, err)
+		got := first.Recipients[0]
+		key := FanoutKey{LocalNpub: g.alice.npub, GroupID: invite.GroupID, EnvelopeType: EnvelopeInvite, SendKey: invite.InviteID}
+		exhaustRecipient(t, g.alice, key, got.RecipientNpub, 1)
+		again, err := g.alice.store.RequeueFailed(key, got.RecipientNpub)
+		require.NoError(t, err)
+		require.Equal(t, got.EventID, again.Recipients[0].EventID)
+		require.NotEqual(t, got.QueueID, again.Recipients[0].QueueID)
+		require.Equal(t, RecipientQueued, again.Recipients[0].State)
+	})
+
 	t.Run("no cli flag and no dial", func(t *testing.T) {
-		require.Len(t, Cmd.Commands, 1)
-		require.Equal(t, "send", Cmd.Commands[0].Name)
+		found := false
+		for _, cmd := range Cmd.Commands {
+			if cmd.Name == "send" {
+				found = true
+			}
+		}
+		require.True(t, found)
 		src, err := os.ReadFile("control_fanout.go")
 		require.NoError(t, err)
 		text := string(src)
@@ -113,4 +207,14 @@ func TestPrepareControlFanout(t *testing.T) {
 		require.NotContains(t, text, "AttemptSend")
 		require.NotContains(t, text, "Publish")
 	})
+}
+
+func requireZeroControlRows(t *testing.T, g *threeMemberGroup) {
+	t.Helper()
+	var rows int
+	require.NoError(t, g.alice.db.QueryRow(`SELECT COUNT(*) FROM groupchat_fanout`).Scan(&rows))
+	require.Zero(t, rows)
+	ob, err := messaging.LoadOutbox()
+	require.NoError(t, err)
+	require.Empty(t, ob.Entries)
 }

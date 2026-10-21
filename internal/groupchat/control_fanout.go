@@ -37,7 +37,11 @@ func (s *Store) PrepareControlFanout(senderSK nostr.SecretKey, e Envelope, creat
 	if err = s.freezeControlInvite(senderSK, key, e, recipient, plaintext, createdAt, maxRetries); err != nil {
 		return FanoutReport{}, err
 	}
-	return s.enqueueControlPrepared(key)
+	now := time.Now().Unix()
+	if now < 0 {
+		now = 0
+	}
+	return s.enqueuePreparedRaw(key, now)
 }
 
 func (s *Store) freezeControlInvite(senderSK nostr.SecretKey, key FanoutKey, e Envelope, recipient, plaintext string, createdAt nostr.Timestamp, maxRetries int) error {
@@ -110,110 +114,4 @@ func (s *Store) freezeControlInvite(senderSK nostr.SecretKey, key FanoutKey, e E
 		return fmt.Errorf("store prepared control fanout: %w", err)
 	}
 	return tx.Commit()
-}
-
-func (s *Store) enqueueControlPrepared(key FanoutKey) (FanoutReport, error) {
-	now := time.Now().Unix()
-	if now < 0 {
-		now = 0
-	}
-	local, err := canonicalNpub(key.LocalNpub)
-	if err != nil {
-		return FanoutReport{}, err
-	}
-	key.LocalNpub = local
-	err = messaging.WithGroupOutboxLock(func(path string) error {
-		tx, err := s.beginImmediate()
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-		rows, err := tx.Query(`SELECT recipient_npub, event_id, event_json, max_retries,
-			accounting_origin = 'native' AND (attempts <> 0 OR COALESCE(retry_count, 0) <> 0)
-			FROM groupchat_fanout
-			WHERE local_npub = ? AND group_id = ? AND envelope_type = ? AND send_key = ? AND state = ?
-			ORDER BY recipient_npub`,
-			local, key.GroupID, key.EnvelopeType, key.SendKey, RecipientPrepared)
-		if err != nil {
-			return err
-		}
-		type preparedTarget struct {
-			recipient, eventID, eventJSON string
-			maxRetries                    int
-			seeded                        bool
-		}
-		var targets []preparedTarget
-		for rows.Next() {
-			var item preparedTarget
-			if err = rows.Scan(&item.recipient, &item.eventID, &item.eventJSON, &item.maxRetries, &item.seeded); err != nil {
-				rows.Close()
-				return err
-			}
-			targets = append(targets, item)
-		}
-		if err = rows.Err(); err != nil {
-			rows.Close()
-			return err
-		}
-		if err = rows.Close(); err != nil {
-			return err
-		}
-		queues := make([]string, len(targets))
-		for i, item := range targets {
-			rec := messaging.GroupEnqueueRecord{
-				EventJSON: item.eventJSON, RecipientNpub: item.recipient, MaxRetries: int64(item.maxRetries), CreatedAt: now,
-			}
-			queueID, existed, checkErr := messaging.CheckGroupEnqueueLocked(path, rec)
-			if checkErr != nil {
-				return fmt.Errorf("O1 precheck for %s: %w", item.recipient, checkErr)
-			}
-			if item.seeded && !existed {
-				return fmt.Errorf("%w: %s", errPreparedCountersWithoutEpoch, item.recipient)
-			}
-			if existed {
-				queues[i] = queueID
-			}
-		}
-		for i, item := range targets {
-			rec := messaging.GroupEnqueueRecord{
-				EventJSON: item.eventJSON, RecipientNpub: item.recipient, MaxRetries: int64(item.maxRetries), CreatedAt: now,
-			}
-			queueID, existed, commitErr := messaging.CommitGroupEnqueueLocked(path, rec)
-			if commitErr != nil {
-				return fmt.Errorf("O1 for %s: %w", item.recipient, commitErr)
-			}
-			if queues[i] != "" && (!existed || queueID != queues[i]) {
-				return fmt.Errorf("O1 adoption queue_id mismatch for %s: expected %s, got %s (existed=%v)", item.recipient, queues[i], queueID, existed)
-			}
-			entry, _, readErr := messaging.ReadGroupEntryLocked(path, item.eventID)
-			if readErr != nil {
-				return fmt.Errorf("read O1 entry for %s: %w", item.recipient, readErr)
-			}
-			if entry == nil || entry.QueueID != queueID {
-				return fmt.Errorf("O1 entry missing or queue_id mismatch for %s", item.recipient)
-			}
-			changed, transErr := transitionFanoutTx(tx, key, item.recipient, RecipientPrepared, RecipientQueued, map[string]any{"queue_id": queueID})
-			if transErr != nil {
-				return transErr
-			}
-			if !changed {
-				return fmt.Errorf("T2 did not apply for %s", item.recipient)
-			}
-			if _, err = tx.Exec(`UPDATE groupchat_fanout SET retry_count = ?, retry_queue_id = queue_id
-				WHERE local_npub = ? AND group_id = ? AND envelope_type = ? AND send_key = ? AND recipient_npub = ? AND state = ? AND queue_id = ?`,
-				int64(entry.Entry.RetryCount), local, key.GroupID, key.EnvelopeType, key.SendKey, item.recipient, RecipientQueued, queueID); err != nil {
-				return err
-			}
-		}
-		if len(targets) > 0 {
-			if err = confirmOutboxDurable(path); err != nil {
-				return fmt.Errorf("%w: O1 durability unconfirmed before T2: %w", errFanoutEnqueuePending, err)
-			}
-		}
-		return tx.Commit()
-	})
-	if err != nil {
-		return FanoutReport{}, err
-	}
-	return s.LoadFanoutReport(key)
 }
