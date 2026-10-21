@@ -110,6 +110,50 @@ func TestVerifiedGroupDispatch(t *testing.T) {
 		requireNoDMHistory(t)
 	})
 
+	t.Run("not reserved", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		bob := newMember(t)
+		calls := &dispatchCalls{}
+		err := messaging.DispatchVerifiedGroup(dispatchMachines(bob.store, calls), messaging.VerifiedAgentMessage{})
+		require.ErrorContains(t, err, "reserved group Agent message is required")
+		require.Equal(t, dispatchCalls{}, *calls)
+		require.Zero(t, groupTableRows(t, bob.db))
+	})
+
+	t.Run("other type", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		alice, bob, carol := newMember(t), newMember(t), newMember(t)
+		draft, err := alice.store.CreateGroup("planning", alice.npub, []string{bob.npub, carol.npub})
+		require.NoError(t, err)
+		invite := draft.Invitations[0]
+		decline := Envelope{Type: EnvelopeDecline, Version: Version, GroupID: invite.GroupID, CreatorNpub: invite.CreatorNpub, InviteID: invite.InviteID, RosterHash: invite.RosterHash, InviteeNpub: invite.InviteeNpub}
+		calls := &dispatchCalls{}
+		err = messaging.DispatchVerifiedGroup(dispatchMachines(bob.store, calls), verifiedEnvelope(t, alice, bob, decline))
+		require.ErrorContains(t, err, "unsupported group dispatch type")
+		require.Equal(t, dispatchCalls{}, *calls)
+		require.Zero(t, groupTableRows(t, bob.db))
+	})
+
+	t.Run("missing handler", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		alice, bob, carol := newMember(t), newMember(t), newMember(t)
+		draft, err := alice.store.CreateGroup("planning", alice.npub, []string{bob.npub, carol.npub})
+		require.NoError(t, err)
+		var invite Envelope
+		for _, item := range draft.Invitations {
+			if item.InviteeNpub == bob.npub {
+				invite = item
+			}
+		}
+		calls := &dispatchCalls{}
+		machines := dispatchMachines(bob.store, calls)
+		machines.Invite = nil
+		err = messaging.DispatchVerifiedGroup(machines, verifiedEnvelope(t, alice, bob, invite))
+		require.ErrorContains(t, err, "group dispatch handler is missing")
+		require.Equal(t, dispatchCalls{}, *calls)
+		require.Zero(t, groupTableRows(t, bob.db))
+	})
+
 	t.Run("no daemon", func(t *testing.T) {
 		src, err := os.ReadFile("../messaging/group_dispatch.go")
 		require.NoError(t, err)
