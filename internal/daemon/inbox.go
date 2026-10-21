@@ -44,9 +44,6 @@ func groupInboxStore() (*groupchat.Store, error) {
 	if err := messaging.InitStorage(); err != nil {
 		return nil, err
 	}
-	if storage.DB == nil {
-		return nil, errors.New("group inbox database is required")
-	}
 	return groupchat.NewStore(storage.DB)
 }
 
@@ -109,9 +106,6 @@ func groupInboxMachines(store *groupchat.Store, inserted *bool) messaging.GroupM
 }
 
 func groupInboxStamp() (string, error) {
-	if storage.DB == nil {
-		return "", errors.New("group inbox database is required")
-	}
 	const query = `SELECT
 		(SELECT COUNT(*) FROM groupchat_groups),
 		(SELECT COALESCE(SUM(CASE state WHEN 'pending' THEN 1 WHEN 'activating' THEN 2 WHEN 'active' THEN 4 WHEN 'left' THEN 8 WHEN 'cancelled' THEN 16 ELSE 32 END), 0) FROM groupchat_groups),
