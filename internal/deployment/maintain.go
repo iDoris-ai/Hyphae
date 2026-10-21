@@ -10,34 +10,25 @@ import (
 )
 
 const (
-	phaseClosed, phaseBackedUp, phaseMigrating = "closed", "backed-up", "migrating"
-	phaseMigrated, phaseActive                 = "migrated", "active"
-	opClose, opBackup, opStage, opCommit       = "close", "backup", "stage", "commit"
+	phaseClosed, phaseBackedUp, phaseMigrating   = "closed", "backed-up", "migrating"
+	phaseMigrated, phaseActive, phaseRolling     = "migrated", "active", "rolling-back"
+	opClose, opBackup, opStage, opCommit, absent = "close", "backup", "stage", "commit", "-"
 )
 
 type RunningWriter struct {
 	EntryID string
 	Alive   bool
 }
-
 type upgradeJournal struct {
 	Phase, PreviousBinary, PreviousSHA256, NextBinary, NextSHA256, BackupDir string
 	StoreSHA256                                                              map[string]string
 }
 
-func CloseEntries(manifestPath string, writers []RunningWriter) error {
-	return upkeep(manifestPath, writers, opClose, "", "", "")
-}
-func BackupInstall(manifestPath, backupDir string, writers []RunningWriter) error {
-	return upkeep(manifestPath, writers, opBackup, backupDir, "", "")
-}
-func StageMigrate(manifestPath, nextBinary, nextSHA string) error {
-	return upkeep(manifestPath, nil, opStage, "", nextBinary, nextSHA)
-}
-func CommitMigrate(manifestPath string) error { return upkeep(manifestPath, nil, opCommit, "", "", "") }
-func RollbackInstall(manifestPath string) error {
-	return upkeep(manifestPath, nil, "rollback", "", "", "")
-}
+func CloseEntries(p string, w []RunningWriter) error     { return run(p, w, opClose, "", "", "") }
+func BackupInstall(p, d string, w []RunningWriter) error { return run(p, w, opBackup, d, "", "") }
+func StageMigrate(p, b, h string) error                  { return run(p, nil, opStage, "", b, h) }
+func CommitMigrate(p string) error                       { return run(p, nil, opCommit, "", "", "") }
+func RollbackInstall(p string) error                     { return run(p, nil, "rollback", "", "", "") }
 func ColdStart(manifestPath string) (string, error) {
 	m, path, err := loadManifest(manifestPath)
 	if err != nil {
@@ -51,15 +42,8 @@ func ColdStart(manifestPath string) (string, error) {
 		return "", err
 	}
 	if j.Phase == phaseMigrated {
-		if m.State != "active" {
-			m.State = "active"
-			err = saveJSON(path, m)
-		}
-		if err == nil {
-			j.Phase = phaseActive
-			err = saveJSON(journalPath(path), j)
-		}
-		if err != nil {
+		m.State, j.Phase = "active", phaseActive
+		if err = writeBoth(path, m, j); err != nil {
 			return "", err
 		}
 		return m.BinaryPath, nil
@@ -69,8 +53,7 @@ func ColdStart(manifestPath string) (string, error) {
 	}
 	return "", deny("restart refused")
 }
-
-func upkeep(manifestPath string, writers []RunningWriter, op, dir, next, sha string) error {
+func run(manifestPath string, writers []RunningWriter, op, dir, next, sha string) error {
 	for _, w := range writers {
 		if w.Alive {
 			return deny("writer still running")
@@ -95,8 +78,15 @@ func upkeep(manifestPath string, writers []RunningWriter, op, dir, next, sha str
 }
 func markClosed(m *Manifest, path string) error {
 	if m.State == "closed" {
-		if j, err := loadJournal(path); err == nil && j.Phase != "" {
+		j, err := loadJournal(path)
+		if err != nil {
+			return err
+		}
+		if j.Phase == phaseClosed {
 			return nil
+		}
+		if j.Phase != phaseActive {
+			return deny("state refuses maintenance")
 		}
 	} else if m.State != "active" {
 		return deny("state refuses maintenance")
@@ -120,14 +110,10 @@ func copyBackup(m *Manifest, path, backupDir string) error {
 		return err
 	}
 	j.Phase, j.BackupDir, j.StoreSHA256 = phaseBackedUp, backupDir, sums
-	return saveJSON(journalPath(path), j)
+	return saveJSON(path+".maintain.json", j, 0600)
 }
 func noteNext(m *Manifest, path, next, sha string, stage bool) error {
-	phases := []string{phaseMigrating}
-	if stage {
-		phases = []string{phaseBackedUp, phaseMigrating}
-	}
-	j, err := need(m, path, phases...)
+	j, err := need(m, path, map[bool][]string{true: {phaseBackedUp, phaseMigrating}, false: {phaseMigrating}}[stage]...)
 	if err != nil {
 		return err
 	}
@@ -146,7 +132,7 @@ func noteNext(m *Manifest, path, next, sha string, stage bool) error {
 	}
 	if stage {
 		j.Phase, j.NextBinary, j.NextSHA256 = phaseMigrating, next, sha
-		return saveJSON(journalPath(path), j)
+		return saveJSON(path+".maintain.json", j, 0600)
 	}
 	m.BinaryPath, m.BinarySHA256, m.State = next, sha, "closed"
 	j.Phase = phaseMigrated
@@ -154,7 +140,7 @@ func noteNext(m *Manifest, path, next, sha string, stage bool) error {
 }
 func restoreBackup(m *Manifest, path string) error {
 	j, err := loadJournal(path)
-	if err != nil {
+	if err != nil || (j.Phase != phaseBackedUp && j.Phase != phaseMigrating && j.Phase != phaseMigrated && j.Phase != phaseRolling) {
 		return deny("backup missing")
 	}
 	if err = verifyBackup(j); err != nil {
@@ -162,6 +148,13 @@ func restoreBackup(m *Manifest, path string) error {
 	}
 	if m.State == "active" {
 		return deny("rollback after activation refused")
+	}
+	if err = hashMatches(j.PreviousBinary, j.PreviousSHA256); err != nil {
+		return err
+	}
+	j.Phase = phaseRolling
+	if err = saveJSON(path+".maintain.json", j, 0600); err != nil {
+		return err
 	}
 	if _, err = copyRoles(m.Stores, j.BackupDir, false); err != nil {
 		return err
@@ -189,11 +182,15 @@ func verifyBackup(j *upgradeJournal) error {
 		return deny("backup missing")
 	}
 	for _, role := range storeRoles {
+		want := j.StoreSHA256[role]
+		if want == absent {
+			continue
+		}
 		_, got, err := readSum(filepath.Join(j.BackupDir, role))
-		if err != nil || j.StoreSHA256[role] == "" {
+		if err != nil || want == "" {
 			return deny("backup missing")
 		}
-		if got != j.StoreSHA256[role] {
+		if got != want {
 			return closedErr("HASH_MISMATCH", "backup hash mismatch")
 		}
 	}
@@ -210,8 +207,22 @@ func copyRoles(stores StorePaths, dir string, intoBackup bool) (map[string]strin
 		if !intoBackup {
 			src, dst = dst, live
 		}
-		sum, err := copyRegular(src, dst)
+		info, statErr := os.Lstat(src)
+		if statErr != nil || !info.Mode().IsRegular() {
+			if role == "outbox_json" || role == "messages_db" {
+				return nil, deny("path unavailable")
+			}
+			if !intoBackup {
+				_ = os.Remove(dst)
+			}
+			sums[role] = absent
+			continue
+		}
+		body, sum, err := readSum(src)
 		if err != nil {
+			return nil, err
+		}
+		if err = writeExclusive(dst, body, 0600, "backup unavailable"); err != nil {
 			return nil, err
 		}
 		sums[role] = sum
@@ -241,38 +252,29 @@ func loadManifest(manifestPath string) (*Manifest, string, error) {
 	return m, path, err
 }
 func loadJournal(manifestPath string) (*upgradeJournal, error) {
-	raw, err := (launchEnv{open: openNoFollowOS}).readManifest(journalPath(manifestPath))
+	raw, err := (launchEnv{open: openNoFollowOS}).readManifest(manifestPath + ".maintain.json")
 	if err != nil {
 		return nil, err
 	}
 	var j upgradeJournal
-	err = json.Unmarshal(raw, &j)
-	if err != nil {
-		err = deny("upgrade record refused")
+	if json.Unmarshal(raw, &j) != nil {
+		return nil, deny("upgrade record refused")
 	}
-	return &j, err
+	return &j, nil
 }
-func journalPath(manifestPath string) string { return manifestPath + ".maintain.json" }
-func deny(reason string) error               { return closedErr("DEPLOYMENT_CLOSED", reason) }
+func deny(reason string) error { return closedErr("DEPLOYMENT_CLOSED", reason) }
 func writeBoth(path string, m *Manifest, j *upgradeJournal) error {
-	if err := saveJSON(path, m); err != nil {
+	if err := saveJSON(path, m, os.FileMode(m.ExpectedModes.FileMode)); err != nil {
 		return err
 	}
-	return saveJSON(journalPath(path), j)
+	return saveJSON(path+".maintain.json", j, 0600)
 }
-func saveJSON(path string, v any) error {
+func saveJSON(path string, v any, mode os.FileMode) error {
 	body, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return deny("upgrade record refused")
 	}
-	return writeExclusive(path, append(body, '\n'), "upgrade record refused")
-}
-func copyRegular(src, dst string) (string, error) {
-	body, sum, err := readSum(src)
-	if err != nil {
-		return "", err
-	}
-	return sum, writeExclusive(dst, body, "backup unavailable")
+	return writeExclusive(path, append(body, '\n'), mode, "upgrade record refused")
 }
 func readSum(path string) ([]byte, string, error) {
 	body, err := (launchEnv{open: openNoFollowOS}).readManifest(path)
@@ -282,18 +284,16 @@ func readSum(path string) ([]byte, string, error) {
 	sum := sha256.Sum256(body)
 	return body, hex.EncodeToString(sum[:]), nil
 }
-func writeExclusive(path string, body []byte, fail string) error {
+func writeExclusive(path string, body []byte, mode os.FileMode, fail string) error {
 	tmp := path + ".tmp"
 	_ = os.Remove(tmp)
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, 0600)
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, mode)
 	if err != nil {
 		return deny(fail)
 	}
 	_, werr := f.Write(body)
-	if serr, cerr := f.Sync(), f.Close(); werr != nil || serr != nil || cerr != nil {
-		return deny(fail)
-	}
-	if err = os.Rename(tmp, path); err != nil {
+	serr, cerr := f.Sync(), f.Close()
+	if werr != nil || serr != nil || cerr != nil || os.Rename(tmp, path) != nil {
 		return deny(fail)
 	}
 	return nil
