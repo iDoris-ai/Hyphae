@@ -78,6 +78,65 @@ func TestApplyReconcile(t *testing.T) {
 		unchanged()
 	})
 
+	t.Run("stale recovery does not open an epoch", func(t *testing.T) {
+		f := newFailureFixture(t)
+		newQueue := f.crashD6BeforeT2(t)
+		require.NoError(t, f.member.store.applyReconcile(f.key, f.recipient, 1_800_000_000))
+		require.Equal(t, newQueue, f.recovery(t).QueueID)
+		f.exhaust(t)
+		require.Equal(t, string(RecipientFailed), f.row(t).State)
+		unchanged := f.snapshot(t)
+		require.NoError(t, f.member.store.applyReconcile(f.key, f.recipient, 1_800_000_000))
+		unchanged()
+		require.Equal(t, newQueue, f.recovery(t).QueueID)
+		require.Equal(t, newQueue, f.outboxEntry(t).QueueID)
+	})
+
+	t.Run("concurrent witness replay", func(t *testing.T) {
+		f := newFailureFixture(t)
+		newQueue := f.crashD6BeforeT2(t)
+		errCh := make(chan error, 4)
+		for range 4 {
+			go func() {
+				errCh <- f.member.store.applyReconcile(f.key, f.recipient, 1_800_000_000)
+			}()
+		}
+		for range 4 {
+			require.NoError(t, <-errCh)
+		}
+		after := f.recovery(t)
+		require.Equal(t, string(RecipientQueued), after.State)
+		require.Equal(t, newQueue, after.QueueID)
+		require.Equal(t, newQueue, f.outboxEntry(t).QueueID)
+	})
+
+	t.Run("replay error is returned", func(t *testing.T) {
+		f := newFailureFixture(t)
+		newQueue := f.crashD6BeforeT2(t)
+		_, err := f.member.db.Exec(`CREATE TRIGGER inject_t2_failure BEFORE UPDATE OF last_recovery_id ON groupchat_fanout
+			BEGIN SELECT RAISE(ABORT, 'injected T2 prime failure'); END`)
+		require.NoError(t, err)
+		require.Error(t, f.member.store.applyReconcile(f.key, f.recipient, 1_800_000_000))
+		require.Equal(t, string(RecipientFailed), f.row(t).State)
+		require.NotEqual(t, newQueue, f.recovery(t).QueueID)
+		require.Equal(t, newQueue, f.outboxEntry(t).QueueID)
+	})
+
+	t.Run("load error is returned", func(t *testing.T) {
+		f := newFailureFixture(t)
+		require.NoError(t, f.member.db.Close())
+		require.Error(t, f.member.store.applyReconcile(f.key, f.recipient, 1_800_000_000))
+	})
+
+	t.Run("negative recovery clock", func(t *testing.T) {
+		f := newFailureFixture(t)
+		_ = f.crashD6BeforeT2(t)
+		unchanged := f.snapshot(t)
+		require.Error(t, f.member.store.applyReconcile(f.key, f.recipient, -1))
+		unchanged()
+		require.Equal(t, string(RecipientFailed), f.row(t).State)
+	})
+
 	t.Run("witnessed recovery", func(t *testing.T) {
 		f := newFailureFixture(t)
 		newQueue := f.crashD6BeforeT2(t)
@@ -96,13 +155,20 @@ func TestApplyReconcile(t *testing.T) {
 		require.NoError(t, err)
 		var callsRecovery bool
 		ast.Inspect(parsed, func(n ast.Node) bool {
-			sel, ok := n.(*ast.SelectorExpr)
-			if !ok {
+			var name string
+			switch node := n.(type) {
+			case *ast.Ident:
+				name = node.Name
+			case *ast.SelectorExpr:
+				name = node.Sel.Name
+			default:
 				return true
 			}
-			name := sel.Sel.Name
-			if name == "authorizeFanoutRecovery" {
+			if name == "replayFanoutRecoveryTx" {
 				callsRecovery = true
+			}
+			if name == "authorizeFanoutRecovery" {
+				t.Fatal("authorizeFanoutRecovery")
 			}
 			if strings.Contains(strings.ToLower(name), "publish") {
 				t.Fatalf("selector %s", name)
