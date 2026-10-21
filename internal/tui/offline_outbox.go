@@ -9,6 +9,7 @@ import (
 	"fiatjaf.com/nostr"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/iDoris-ai/hyphae/internal/common"
+	"github.com/iDoris-ai/hyphae/internal/daemon"
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/internal/messaging"
 	"github.com/iDoris-ai/hyphae/pkg/types"
@@ -26,6 +27,7 @@ type outboxDeliveryUpdate struct {
 	eventID   string
 	state     messaging.AgentMessageDeliveryState
 	issue     messaging.AgentMessageDeliveryIssue
+	detail    string
 }
 
 type outboxWorkerStartedMsg struct{}
@@ -120,6 +122,7 @@ func (m *ChatModel) retryPendingOutbox(ctx context.Context) {
 		m.publishOutboxUpdate(ctx, outboxDeliveryUpdate{state: messaging.AgentMessageFailed, issue: messaging.AgentMessageIssueSendFailed})
 		return
 	}
+	m.retryGroupOutbox(ctx, outbox, time.Now().Unix())
 	for _, entry := range messaging.GetPendingOutbox(outbox) {
 		if ctx.Err() != nil {
 			return
@@ -147,6 +150,30 @@ func (m *ChatModel) retryPendingOutbox(ctx context.Context) {
 				issue:   retryDeliveryIssue(result, sendErr),
 			})
 		}
+	}
+}
+
+func (m *ChatModel) retryGroupOutbox(ctx context.Context, outbox *types.Outbox, now int64) {
+	if ctx.Err() != nil || outbox == nil {
+		return
+	}
+	reportedMissing := false
+	for _, entry := range outbox.Entries {
+		if entry.Route != messaging.OutboxRouteGroup {
+			continue
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		outcome := daemon.GroupRetryOutcome(entry, now)
+		if outcome == "not_registered" {
+			if !reportedMissing {
+				m.publishOutboxUpdate(ctx, outboxDeliveryUpdate{detail: outcome})
+				reportedMissing = true
+			}
+			continue
+		}
+		m.publishOutboxUpdate(ctx, outboxDeliveryUpdate{eventID: entry.ID, detail: outcome})
 	}
 }
 
@@ -287,6 +314,9 @@ func formatOutboxStatus(update outboxDeliveryUpdate) string {
 	}
 	if id != "" {
 		id = " • " + id
+	}
+	if update.detail != "" {
+		return "Outbox: group provider " + update.detail + id
 	}
 	switch update.state {
 	case messaging.AgentMessageQueued:

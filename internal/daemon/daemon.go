@@ -430,6 +430,31 @@ func groupRetryUnchanged(current, snapshot types.OutboxEntry) bool {
 		current.MaxRetries == snapshot.MaxRetries
 }
 
+// SetGroupProviders replaces the registry shared by the daemon and the TUI.
+// A nil argument leaves the current registry in place. The previous registry is returned.
+func SetGroupProviders(next *groupchat.GroupProviderRegistry) *groupchat.GroupProviderRegistry {
+	previous := daemonGroupProviders
+	if next != nil {
+		daemonGroupProviders = next
+	}
+	return previous
+}
+
+// GroupRetryOutcome hands one group row to the registry processOutbox uses.
+// Lookup runs before the outbox lock. The result word matches the daemon log.
+func GroupRetryOutcome(entry types.OutboxEntry, now int64) string {
+	if entry.Route != messaging.OutboxRouteGroup {
+		return "skipped"
+	}
+	if _, err := daemonGroupProviders.Lookup(daemonGroupProviderName); err != nil {
+		if errors.Is(err, groupchat.ErrGroupProviderNotRegistered) {
+			return "not_registered"
+		}
+		return "error: " + err.Error()
+	}
+	return dispatchDaemonGroupEntry(entry, now)
+}
+
 func groupRetryHeld(entry types.OutboxEntry) bool {
 	if entry.Status != messaging.OutboxStatusGroupPending {
 		return true
