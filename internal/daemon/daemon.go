@@ -4,6 +4,7 @@ import (
 	"context"
 	cryptorand "crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"fiatjaf.com/nostr"
 	"github.com/iDoris-ai/hyphae/internal/audit"
 	"github.com/iDoris-ai/hyphae/internal/common"
+	"github.com/iDoris-ai/hyphae/internal/groupchat"
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/internal/messaging"
 	"github.com/iDoris-ai/hyphae/internal/notify"
@@ -29,9 +31,18 @@ import (
 )
 
 const (
-	maxSeenMessages  = 10000
-	relayDialTimeout = 5 * time.Second
+	maxSeenMessages         = 10000
+	relayDialTimeout        = 5 * time.Second
+	daemonGroupProviderName = "group"
 )
+
+// daemonGroupRetryDecision is the live handoff label.
+// ReconcileAccepted names a cleanup-pending group route, so this handoff uses another value.
+const daemonGroupRetryDecision groupchat.ReconcileDecision = "retry"
+
+// daemonGroupProviders is the registry processOutbox consults for group rows.
+// Tests replace the pointer. Production starts empty.
+var daemonGroupProviders = groupchat.NewGroupProviderRegistry()
 
 // seenSet is a bounded set of recently-seen event IDs with FIFO eviction.
 // When the underlying map exceeds maxSeenMessages, the oldest 10% are evicted.
@@ -263,6 +274,8 @@ func processOutboxWithLogger(ctx context.Context, myIdentity *types.Identity, re
 		return
 	}
 
+	retryDaemonGroupOutbox(ctx, logger, outbox, time.Now().Unix())
+
 	pending := messaging.GetPendingOutbox(outbox)
 	if len(pending) == 0 {
 		return
@@ -318,6 +331,144 @@ func processOutboxWithLogger(ctx context.Context, myIdentity *types.Identity, re
 	if successCount > 0 || failCount > 0 {
 		logger.printf("   Result: %d sent, %d failed\n", successCount, failCount)
 	}
+}
+
+// retryDaemonGroupOutbox hands each group row to the registered provider.
+// Lookup runs before the outbox lock. A missing name logs one line and returns.
+// The snapshot compare, the held check, and the expiry check run under the lock.
+// Send runs after that lock returns.
+// A missing provider, a held row, and an expired token leave the file as it was.
+func retryDaemonGroupOutbox(ctx context.Context, logger *daemonLogger, outbox *types.Outbox, now int64) {
+	if ctx.Err() != nil || outbox == nil {
+		return
+	}
+	rows := make([]types.OutboxEntry, 0)
+	for _, entry := range outbox.Entries {
+		if entry.Route == messaging.OutboxRouteGroup {
+			rows = append(rows, entry)
+		}
+	}
+	if len(rows) == 0 {
+		return
+	}
+	if _, err := daemonGroupProviders.Lookup(daemonGroupProviderName); err != nil {
+		if errors.Is(err, groupchat.ErrGroupProviderNotRegistered) {
+			logger.printf("   group provider %s: not_registered\n", daemonGroupProviderName)
+			return
+		}
+		logger.printf("   group provider %s: error: %v\n", daemonGroupProviderName, err)
+		return
+	}
+	for _, entry := range rows {
+		if ctx.Err() != nil {
+			return
+		}
+		logger.printf("   group provider %s: %s\n", daemonGroupProviderName, dispatchDaemonGroupEntry(entry, now))
+	}
+}
+
+func dispatchDaemonGroupEntry(entry types.OutboxEntry, now int64) string {
+	token, decision, outcome, send, err := planDaemonGroupRetry(entry, now)
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	if !send {
+		return outcome
+	}
+	ran, err := daemonGroupProviders.Dispatch(daemonGroupProviderName, token, now, decision)
+	if err != nil {
+		if errors.Is(err, groupchat.ErrGroupProviderNotRegistered) {
+			return "not_registered"
+		}
+		return "error: " + err.Error()
+	}
+	if ran {
+		return "called"
+	}
+	if decision == groupchat.ReconcileHold {
+		return "held"
+	}
+	return "expired"
+}
+
+func planDaemonGroupRetry(entry types.OutboxEntry, now int64) (groupchat.GroupSendToken, groupchat.ReconcileDecision, string, bool, error) {
+	var (
+		token    groupchat.GroupSendToken
+		decision groupchat.ReconcileDecision
+		outcome  = "error"
+		send     bool
+	)
+	err := messaging.WithGroupOutboxLock(func(path string) error {
+		current, ok, err := readDaemonGroupEntry(path, entry.ID)
+		if err != nil {
+			return err
+		}
+		if !ok || !groupRetryUnchanged(current, entry) {
+			outcome = "changed"
+			return nil
+		}
+		token = groupRetryToken(current, now)
+		if groupRetryHeld(current) {
+			outcome = "held"
+			return nil
+		}
+		if now < 0 || now >= token.ExpiresAt {
+			outcome = "expired"
+			return nil
+		}
+		decision = daemonGroupRetryDecision
+		send = true
+		return nil
+	})
+	return token, decision, outcome, send, err
+}
+
+func groupRetryUnchanged(current, snapshot types.OutboxEntry) bool {
+	return current.Status == snapshot.Status &&
+		current.CreatedAt == snapshot.CreatedAt &&
+		current.RetryCount == snapshot.RetryCount &&
+		current.MaxRetries == snapshot.MaxRetries
+}
+
+func groupRetryHeld(entry types.OutboxEntry) bool {
+	if entry.Status != messaging.OutboxStatusGroupPending {
+		return true
+	}
+	return entry.MaxRetries > 0 && entry.RetryCount >= entry.MaxRetries
+}
+
+func groupRetryToken(entry types.OutboxEntry, now int64) groupchat.GroupSendToken {
+	expires := now + 1
+	if entry.CreatedAt > now || entry.CreatedAt < 0 {
+		expires = entry.CreatedAt
+	}
+	return groupchat.GroupSendToken{ID: entry.ID, ExpiresAt: expires}
+}
+
+func readDaemonGroupEntry(path, id string) (types.OutboxEntry, bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return types.OutboxEntry{}, false, nil
+		}
+		return types.OutboxEntry{}, false, err
+	}
+	var decoded types.Outbox
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return types.OutboxEntry{}, false, err
+	}
+	var found types.OutboxEntry
+	seen := 0
+	for _, entry := range decoded.Entries {
+		if entry.ID == id && entry.Route == messaging.OutboxRouteGroup {
+			found = entry
+			seen++
+		}
+	}
+	if seen != 1 {
+		return types.OutboxEntry{}, false, nil
+	}
+	return found, true, nil
 }
 
 // watchInbox monitors for new messages.
