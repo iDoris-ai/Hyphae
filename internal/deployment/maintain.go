@@ -46,12 +46,10 @@ func ColdStart(manifestPath string) (string, error) {
 		if err = writeBoth(path, m, j); err != nil {
 			return "", err
 		}
-		return m.BinaryPath, nil
+	} else if j.Phase != phaseActive || m.State != "active" {
+		return "", deny("restart refused")
 	}
-	if j.Phase == phaseActive && m.State == "active" {
-		return m.BinaryPath, nil
-	}
-	return "", deny("restart refused")
+	return m.BinaryPath, nil
 }
 func run(manifestPath string, writers []RunningWriter, op, dir, next, sha string) error {
 	for _, w := range writers {
@@ -77,22 +75,19 @@ func run(manifestPath string, writers []RunningWriter, op, dir, next, sha string
 	}
 }
 func markClosed(m *Manifest, path string) error {
-	if m.State == "closed" {
-		j, err := loadJournal(path)
-		if err != nil {
-			return err
-		}
-		if j.Phase == phaseClosed {
-			return nil
-		}
-		if j.Phase != phaseActive {
-			return deny("state refuses maintenance")
-		}
-	} else if m.State != "active" {
-		return deny("state refuses maintenance")
+	j, err := loadJournal(path)
+	_, statErr := os.Lstat(path + ".maintain.json")
+	if m.State == "active" || (m.State == "closed" && os.IsNotExist(statErr)) || (m.State == "closed" && err == nil && j.Phase == phaseActive) {
+		m.State = "closed"
+		return writeBoth(path, m, &upgradeJournal{Phase: phaseClosed, PreviousBinary: m.BinaryPath, PreviousSHA256: m.BinarySHA256})
 	}
-	m.State = "closed"
-	return writeBoth(path, m, &upgradeJournal{Phase: phaseClosed, PreviousBinary: m.BinaryPath, PreviousSHA256: m.BinarySHA256})
+	if m.State == "closed" && err == nil && j.Phase == phaseClosed {
+		return nil
+	}
+	if m.State == "closed" && err != nil && !os.IsNotExist(statErr) {
+		return err
+	}
+	return deny("state refuses maintenance")
 }
 func copyBackup(m *Manifest, path, backupDir string) error {
 	j, err := need(m, path, phaseClosed, phaseBackedUp)
@@ -105,7 +100,7 @@ func copyBackup(m *Manifest, path, backupDir string) error {
 	if err = os.MkdirAll(backupDir, 0700); err != nil {
 		return deny("backup unavailable")
 	}
-	sums, err := copyRoles(m.Stores, backupDir, true)
+	sums, err := copyRoles(m.Stores, backupDir, true, nil)
 	if err != nil {
 		return err
 	}
@@ -120,23 +115,21 @@ func noteNext(m *Manifest, path, next, sha string, stage bool) error {
 	if err = verifyBackup(j); err != nil {
 		return err
 	}
-	if stage {
-		if err = refuseStore(m, next); err != nil {
-			return err
-		}
-	} else {
+	if !stage {
 		next, sha = j.NextBinary, j.NextSHA256
+	} else if err = refuseStore(m, next); err != nil {
+		return err
 	}
 	if err = hashMatches(next, sha); err != nil {
 		return err
 	}
-	if stage {
-		j.Phase, j.NextBinary, j.NextSHA256 = phaseMigrating, next, sha
-		return saveJSON(path+".maintain.json", j, 0600)
+	j.NextBinary, j.NextSHA256 = next, sha
+	if !stage {
+		m.BinaryPath, m.BinarySHA256, m.State, j.Phase = next, sha, "closed", phaseMigrated
+		return writeBoth(path, m, j)
 	}
-	m.BinaryPath, m.BinarySHA256, m.State = next, sha, "closed"
-	j.Phase = phaseMigrated
-	return writeBoth(path, m, j)
+	j.Phase = phaseMigrating
+	return saveJSON(path+".maintain.json", j, 0600)
 }
 func restoreBackup(m *Manifest, path string) error {
 	j, err := loadJournal(path)
@@ -156,7 +149,7 @@ func restoreBackup(m *Manifest, path string) error {
 	if err = saveJSON(path+".maintain.json", j, 0600); err != nil {
 		return err
 	}
-	if _, err = copyRoles(m.Stores, j.BackupDir, false); err != nil {
+	if _, err = copyRoles(m.Stores, j.BackupDir, false, j.StoreSHA256); err != nil {
 		return err
 	}
 	m.BinaryPath, m.BinarySHA256, m.State = j.PreviousBinary, j.PreviousSHA256, "closed"
@@ -196,7 +189,7 @@ func verifyBackup(j *upgradeJournal) error {
 	}
 	return nil
 }
-func copyRoles(stores StorePaths, dir string, intoBackup bool) (map[string]string, error) {
+func copyRoles(stores StorePaths, dir string, intoBackup bool, pinned map[string]string) (map[string]string, error) {
 	sums := make(map[string]string, len(storeRoles))
 	for _, role := range storeRoles {
 		live, ok := storeByRole(stores, role)
@@ -207,20 +200,27 @@ func copyRoles(stores StorePaths, dir string, intoBackup bool) (map[string]strin
 		if !intoBackup {
 			src, dst = dst, live
 		}
-		info, statErr := os.Lstat(src)
-		if statErr != nil || !info.Mode().IsRegular() {
-			if role == "outbox_json" || role == "messages_db" {
-				return nil, deny("path unavailable")
-			}
-			if !intoBackup {
-				_ = os.Remove(dst)
+		var info os.FileInfo
+		statErr := os.ErrInvalid
+		if intoBackup || pinned[role] != absent {
+			info, statErr = os.Lstat(src)
+		}
+		if (!intoBackup && pinned[role] == absent) || (os.IsNotExist(statErr) && intoBackup && role != "outbox_json" && role != "messages_db") {
+			if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+				return nil, deny("backup unavailable")
 			}
 			sums[role] = absent
 			continue
 		}
+		if statErr != nil || !info.Mode().IsRegular() {
+			return nil, deny("path unavailable")
+		}
 		body, sum, err := readSum(src)
 		if err != nil {
 			return nil, err
+		}
+		if !intoBackup && sum != pinned[role] {
+			return nil, closedErr("HASH_MISMATCH", "backup hash mismatch")
 		}
 		if err = writeExclusive(dst, body, 0600, "backup unavailable"); err != nil {
 			return nil, err

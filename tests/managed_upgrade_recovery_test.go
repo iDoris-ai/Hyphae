@@ -354,6 +354,152 @@ func TestManagedUpgradeRecovery(t *testing.T) {
 			t.Fatalf("after %s", got)
 		}
 	})
+
+	t.Run("reused backup leaves an older wal behind", func(t *testing.T) {
+		w := newInstall(t)
+		wal := w.m.Stores.MessagesDBWAL
+		writeMode(t, wal, []byte("ROUND1-WAL"), 0600)
+		w.upgrade(t)
+		if _, err := deployment.ColdStart(w.manifest); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(wal); err != nil {
+			t.Fatal(err)
+		}
+		writeMode(t, w.m.Stores.MessagesDB, []byte("ROUND2-DB"), 0600)
+		if err := deployment.CloseEntries(w.manifest, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := deployment.BackupInstall(w.manifest, w.backup, nil); err != nil {
+			t.Fatal(err)
+		}
+		sums, _ := w.journal(t)["StoreSHA256"].(map[string]any)
+		if sums["messages_db_wal"] != "-" {
+			t.Fatalf("wal sum %#v", sums["messages_db_wal"])
+		}
+		backed := filepath.Join(w.backup, "messages_db_wal")
+		if _, err := os.Lstat(backed); !os.IsNotExist(err) {
+			t.Fatalf("stale backup wal %v", err)
+		}
+		writeMode(t, backed, []byte("ROUND1-WAL"), 0600)
+		if err := deployment.RollbackInstall(w.manifest); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Lstat(wal); !os.IsNotExist(err) {
+			t.Fatalf("live wal %v", err)
+		}
+		if got := readBytes(t, w.m.Stores.MessagesDB); string(got) != "ROUND2-DB" {
+			t.Fatalf("db %s", got)
+		}
+	})
+
+	t.Run("a blocked journal write can be retried", func(t *testing.T) {
+		w := newInstall(t)
+		before := w.snap(t)
+		block := w.manifest + ".maintain.json.tmp"
+		if err := os.Mkdir(block, 0700); err != nil {
+			t.Fatal(err)
+		}
+		writeMode(t, filepath.Join(block, "held"), []byte("x"), 0600)
+		err := deployment.CloseEntries(w.manifest, nil)
+		requireClosed(t, err, "DEPLOYMENT_CLOSED")
+		if _, statErr := os.Lstat(w.manifest + ".maintain.json"); !os.IsNotExist(statErr) {
+			t.Fatalf("journal %v", statErr)
+		}
+		if w.parse(t).State != "closed" {
+			t.Fatalf("state %s", w.parse(t).State)
+		}
+		w.same(t, before)
+		if err = os.RemoveAll(block); err != nil {
+			t.Fatal(err)
+		}
+		if err = deployment.CloseEntries(w.manifest, nil); err != nil {
+			t.Fatal(err)
+		}
+		j := w.journal(t)
+		if j["Phase"] != "closed" || j["PreviousSHA256"] != w.oldSHA || j["BackupDir"] != "" {
+			t.Fatalf("journal %#v", j)
+		}
+		_, err = deployment.ColdStart(w.manifest)
+		requireClosed(t, err, "DEPLOYMENT_CLOSED")
+		if err = deployment.CloseEntries(w.manifest, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("close leaves a migrated journal in place", func(t *testing.T) {
+		w := newInstall(t)
+		w.upgrade(t)
+		before := readBytes(t, w.manifest+".maintain.json")
+		err := deployment.CloseEntries(w.manifest, nil)
+		requireClosed(t, err, "DEPLOYMENT_CLOSED")
+		if got := readBytes(t, w.manifest+".maintain.json"); string(got) != string(before) {
+			t.Fatal("journal rewritten")
+		}
+	})
+
+	t.Run("backup refuses a missing messages database", func(t *testing.T) {
+		w := newInstall(t)
+		if err := deployment.CloseEntries(w.manifest, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(w.m.Stores.MessagesDB); err != nil {
+			t.Fatal(err)
+		}
+		err := deployment.BackupInstall(w.manifest, w.backup, nil)
+		requireClosed(t, err, "DEPLOYMENT_CLOSED")
+		if _, statErr := os.Lstat(w.m.Stores.MessagesDB); !os.IsNotExist(statErr) {
+			t.Fatalf("db %v", statErr)
+		}
+		sums, _ := w.journal(t)["StoreSHA256"].(map[string]any)
+		if sums["messages_db"] == "-" {
+			t.Fatalf("db recorded absent %#v", sums)
+		}
+	})
+
+	t.Run("rollback reports a directory left in place of an absent file", func(t *testing.T) {
+		w := newInstall(t)
+		if err := os.Remove(w.m.Stores.MessagesDBWAL); err != nil {
+			t.Fatal(err)
+		}
+		w.closeAndBackup(t)
+		block := w.m.Stores.MessagesDBWAL
+		if err := os.Mkdir(block, 0700); err != nil {
+			t.Fatal(err)
+		}
+		writeMode(t, filepath.Join(block, "held"), []byte("x"), 0600)
+		err := deployment.RollbackInstall(w.manifest)
+		requireClosed(t, err, "DEPLOYMENT_CLOSED")
+		if _, statErr := os.Lstat(filepath.Join(block, "held")); statErr != nil {
+			t.Fatal(statErr)
+		}
+		if w.journal(t)["Phase"] != "rolling-back" {
+			t.Fatalf("phase %v", w.journal(t)["Phase"])
+		}
+	})
+
+	t.Run("backup refuses a symlink where a store file belongs", func(t *testing.T) {
+		w := newInstall(t)
+		lock := w.m.Stores.DaemonLock
+		if err := os.Remove(lock); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(w.binary, lock); err != nil {
+			t.Fatal(err)
+		}
+		if err := deployment.CloseEntries(w.manifest, nil); err != nil {
+			t.Fatal(err)
+		}
+		err := deployment.BackupInstall(w.manifest, w.backup, nil)
+		requireClosed(t, err, "DEPLOYMENT_CLOSED")
+		got, statErr := os.Lstat(lock)
+		if statErr != nil || got.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("symlink %v", statErr)
+		}
+		if w.journal(t)["Phase"] != "closed" {
+			t.Fatalf("phase %v", w.journal(t)["Phase"])
+		}
+	})
 }
 
 type install struct {
@@ -522,7 +668,7 @@ func (w *install) plan(t *testing.T) string {
 		"HYPHAE_V7B_ENTRY=cli",
 		"HYPHAE_V7B_SESSION=runtime",
 	)
-	cmd := exec.Command(w.m.LauncherPath, os.Args[1:]...)
+	cmd := exec.Command(w.m.LauncherPath, "-test.run=^TestManagedUpgradeRecovery$")
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {
