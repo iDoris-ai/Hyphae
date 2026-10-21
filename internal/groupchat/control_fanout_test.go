@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+	"time"
 
 	"fiatjaf.com/nostr"
 	"github.com/iDoris-ai/hyphae/internal/messaging"
@@ -188,6 +189,67 @@ func TestPrepareControlFanout(t *testing.T) {
 		require.Equal(t, got.EventID, again.Recipients[0].EventID)
 		require.NotEqual(t, got.QueueID, again.Recipients[0].QueueID)
 		require.Equal(t, RecipientQueued, again.Recipients[0].State)
+	})
+
+	t.Run("accepted invite", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		g := newThreeMemberGroup(t)
+		invite := g.invites[g.bob.npub]
+		accept, err := g.bob.store.AcceptInvite(invite.InviteID, g.bob.npub)
+		require.NoError(t, err)
+		_, err = g.alice.store.ReceiveAcceptance(buildIncoming(t, g.bob, g.alice, accept))
+		require.NoError(t, err)
+		_, err = g.alice.store.PrepareControlFanout(g.alice.sk, invite, 1234, 7)
+		require.ErrorIs(t, err, ErrProtocolMismatch)
+		requireZeroControlRows(t, g)
+	})
+
+	t.Run("other invitee", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		g := newThreeMemberGroup(t)
+		invite := g.invites[g.bob.npub]
+		invite.InviteeNpub = g.carol.npub
+		_, err := g.alice.store.PrepareControlFanout(g.alice.sk, invite, 1234, 7)
+		require.ErrorIs(t, err, ErrProtocolMismatch)
+		requireZeroControlRows(t, g)
+	})
+
+	t.Run("zero time", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		g := newThreeMemberGroup(t)
+		invite := g.invites[g.bob.npub]
+		before := time.Now().Unix()
+		report, err := g.alice.store.PrepareControlFanout(g.alice.sk, invite, 0, 7)
+		after := time.Now().Unix()
+		require.NoError(t, err)
+		var created int64
+		var raw string
+		require.NoError(t, g.alice.db.QueryRow(
+			`SELECT created_at, event_json FROM groupchat_fanout WHERE event_id = ?`,
+			report.Recipients[0].EventID).Scan(&created, &raw))
+		require.GreaterOrEqual(t, created, before)
+		require.LessOrEqual(t, created, after)
+		var event nostr.Event
+		require.NoError(t, json.Unmarshal([]byte(raw), &event))
+		require.EqualValues(t, created, event.CreatedAt)
+	})
+
+	t.Run("third party", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		g := newThreeMemberGroup(t)
+		_, err := g.alice.store.PrepareControlFanout(g.carol.sk, g.invites[g.bob.npub], 1234, 7)
+		require.ErrorIs(t, err, ErrProtocolMismatch)
+		requireZeroControlRows(t, g)
+	})
+
+	t.Run("missing invite", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		g := newThreeMemberGroup(t)
+		invite := g.invites[g.bob.npub]
+		invite.InviteID = mustOpaque(t)
+		_, err := g.alice.store.PrepareControlFanout(g.alice.sk, invite, 1234, 7)
+		require.ErrorIs(t, err, ErrInviteNotFound)
+		requireZeroControlRows(t, g)
 	})
 
 	t.Run("no cli flag and no dial", func(t *testing.T) {
