@@ -197,6 +197,18 @@ func TestTUIGroupRetryUsesProvider(t *testing.T) {
 		require.Equal(t, []string{"Outbox: group provider not_registered"}, groupStatusText(model))
 	})
 
+	t.Run("dm row stays out of group status", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		useTUIGroupProviders(t)
+		saveGroupOutbox(t, types.OutboxEntry{
+			ID: "evt-dm", EventJSON: "not-json", RecipientNpub: "npub1bob",
+			Status: "pending", RetryCount: 0, MaxRetries: 3, CreatedAt: 10,
+		})
+		model := groupRetryModel()
+		model.retryPendingOutbox(context.Background())
+		require.Empty(t, groupStatusText(model))
+	})
+
 	t.Run("dm retry stays on attempt send", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		registry := useTUIGroupProviders(t)
