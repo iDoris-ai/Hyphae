@@ -29,6 +29,8 @@ func DispatchVerifiedGroup(machines GroupMachines, message VerifiedAgentMessage)
 	if !ok || version != "v1" {
 		return ErrUnsupportedGroupVersion
 	}
+	// This decode selects a callback. Duplicate keys, letter case, and
+	// trailing values are checked again by that callback.
 	decoder := json.NewDecoder(bytes.NewBufferString(payload))
 	var head struct {
 		Type string `json:"type"`

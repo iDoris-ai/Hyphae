@@ -2,6 +2,7 @@ package groupchat
 
 import (
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -150,6 +151,58 @@ func TestVerifiedGroupDispatch(t *testing.T) {
 		machines.Invite = nil
 		err = messaging.DispatchVerifiedGroup(machines, verifiedEnvelope(t, alice, bob, invite))
 		require.ErrorContains(t, err, "group dispatch handler is missing")
+		require.Equal(t, dispatchCalls{}, *calls)
+		require.Zero(t, groupTableRows(t, bob.db))
+	})
+
+	t.Run("direct message", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		alice, bob := newMember(t), newMember(t)
+		calls := &dispatchCalls{}
+		err := messaging.DispatchVerifiedGroup(dispatchMachines(bob.store, calls), verifiedPlain(t, alice, bob, "v1\n{\"type\":\"message\"}"))
+		require.Error(t, err)
+		require.Equal(t, dispatchCalls{}, *calls)
+		require.Zero(t, groupTableRows(t, bob.db))
+	})
+
+	t.Run("bad json", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		alice, bob := newMember(t), newMember(t)
+		calls := &dispatchCalls{}
+		machines := dispatchMachines(bob.store, calls)
+		err := messaging.DispatchVerifiedGroup(machines, verifiedPlain(t, alice, bob, MagicV1+"{not json"))
+		require.Error(t, err)
+		err = messaging.DispatchVerifiedGroup(machines, verifiedPlain(t, alice, bob, MagicV1))
+		require.Error(t, err)
+		require.Equal(t, dispatchCalls{}, *calls)
+		require.Zero(t, groupTableRows(t, bob.db))
+	})
+
+	t.Run("callback error", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		alice, bob := newMember(t), newMember(t)
+		sentinel := errors.New("dispatch callback failed")
+		calls := &dispatchCalls{}
+		machines := dispatchMachines(bob.store, calls)
+		machines.Message = func(messaging.VerifiedAgentMessage) error {
+			calls.message++
+			return sentinel
+		}
+		envelope := Envelope{Type: EnvelopeMessage, Version: Version, GroupID: mustOpaque(t), LogicalID: mustOpaque(t), Body: "hello"}
+		err := messaging.DispatchVerifiedGroup(machines, verifiedEnvelope(t, alice, bob, envelope))
+		require.ErrorIs(t, err, sentinel)
+		require.Equal(t, 1, calls.message)
+	})
+
+	t.Run("version prefix", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		alice, bob, carol := newMember(t), newMember(t), newMember(t)
+		draft, err := alice.store.CreateGroup("planning", alice.npub, []string{bob.npub, carol.npub})
+		require.NoError(t, err)
+		plain := strings.Replace(mustEncode(t, draft.Invitations[0]), MagicV1, ReservedPrefix+"v10\n", 1)
+		calls := &dispatchCalls{}
+		err = messaging.DispatchVerifiedGroup(dispatchMachines(bob.store, calls), verifiedPlain(t, alice, bob, plain))
+		require.ErrorIs(t, err, messaging.ErrUnsupportedGroupVersion)
 		require.Equal(t, dispatchCalls{}, *calls)
 		require.Zero(t, groupTableRows(t, bob.db))
 	})
