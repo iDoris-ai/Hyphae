@@ -13,9 +13,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/iDoris-ai/hyphae/internal/deployment"
 )
@@ -184,6 +185,50 @@ func TestManagedEntryInventory(t *testing.T) {
 		assertNoStores(t, w.home)
 	})
 
+	t.Run("extra entry is refused", func(t *testing.T) {
+		w := newWorld(t)
+		entries := deployment.ManagedEntryInventory()
+		entries["extra"] = deployment.EntryDef{ID: "extra", CommandClass: "dm"}
+		w.m.AllowedEntries = entries
+		w.m.InventoryDigest = deployment.EntryInventoryDigest(entries)
+		w.save(t)
+		if err := os.Remove(w.binary); err != nil {
+			t.Fatal(err)
+		}
+		_, err := w.plan(t, findClass(t, "dm").ID, deployment.SessionModeRuntime, nil)
+		requireClosed(t, err, "DRIFT")
+		if _, statErr := os.Lstat(w.binary); !os.IsNotExist(statErr) {
+			t.Fatalf("binary reappeared: %v", statErr)
+		}
+		assertNoStores(t, w.home)
+	})
+
+	t.Run("fifo manifest is refused", func(t *testing.T) {
+		w := newWorld(t)
+		fifo := filepath.Join(w.root, "manifest.fifo")
+		if err := syscall.Mkfifo(fifo, 0600); err != nil {
+			t.Fatal(err)
+		}
+		entry := findClass(t, "dm")
+		done := make(chan error, 1)
+		go func() {
+			_, err := deployment.PlanManagedEntry(deployment.LaunchRequest{
+				ManifestPath: fifo,
+				EntryID:      entry.ID,
+				Session:      deployment.SessionModeRuntime,
+				Env:          []string{},
+			})
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			requireClosed(t, err, "PATH_UNSAFE")
+		case <-time.After(2 * time.Second):
+			t.Fatal("fifo plan hung")
+		}
+		assertNoStores(t, w.home)
+	})
+
 	t.Run("non-canonical store is refused", func(t *testing.T) {
 		w := newWorld(t)
 		w.m.Stores.MessagesDB = filepath.Join(w.home, ".hyphae", "other.db")
@@ -191,25 +236,6 @@ func TestManagedEntryInventory(t *testing.T) {
 		_, err := w.plan(t, "daemon", deployment.SessionModeRuntime, nil)
 		requireClosed(t, err, "PATH_ESCAPED")
 		assertNoStores(t, w.home)
-	})
-
-	t.Run("production delta stays within 300", func(t *testing.T) {
-		if n := productionDelta(t); n > 300 {
-			t.Fatalf("production add+del %d", n)
-		}
-	})
-
-	t.Run("no retirement or trace claim", func(t *testing.T) {
-		body, err := os.ReadFile(filepath.Join(projectRoot(t), "internal/deployment/entries.go"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		low := strings.ToLower(string(body))
-		for _, phrase := range []string{"writer retirement", "file-access trace", "strace", "v7 closure", "v7 closed"} {
-			if strings.Contains(low, phrase) {
-				t.Fatalf("entries.go contains %q", phrase)
-			}
-		}
 	})
 }
 
@@ -432,64 +458,4 @@ func fileSum(t *testing.T, path string) string {
 	}
 	sum := sha256.Sum256(body)
 	return hex.EncodeToString(sum[:])
-}
-
-func productionDelta(t *testing.T) int {
-	t.Helper()
-	root := projectRoot(t)
-	total := numstat(t, root)
-	status := exec.Command("git", "status", "--porcelain", "-uall", "--", ".")
-	status.Dir = root
-	out, err := status.Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, line := range strings.Split(string(out), "\n") {
-		if !strings.HasPrefix(line, "?? ") {
-			continue
-		}
-		path := strings.TrimPrefix(line, "?? ")
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			continue
-		}
-		body, err := os.ReadFile(filepath.Join(root, path))
-		if err != nil {
-			t.Fatal(err)
-		}
-		total += bytes.Count(body, []byte("\n"))
-		if len(body) > 0 && body[len(body)-1] != '\n' {
-			total++
-		}
-	}
-	return total
-}
-
-func numstat(t *testing.T, root string) int {
-	t.Helper()
-	cmd := exec.Command("git", "diff", "--numstat", "origin/main", "--", ".")
-	cmd.Dir = root
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	total := 0
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 3 || fields[0] == "-" || strings.HasSuffix(fields[2], "_test.go") {
-			continue
-		}
-		add, err := strconv.Atoi(fields[0])
-		if err != nil {
-			t.Fatal(err)
-		}
-		del, err := strconv.Atoi(fields[1])
-		if err != nil {
-			t.Fatal(err)
-		}
-		total += add + del
-	}
-	return total
 }

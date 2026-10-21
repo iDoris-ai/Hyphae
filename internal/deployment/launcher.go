@@ -22,6 +22,7 @@ type launchEnv struct {
 	executable func() (string, error)
 	execFn     func(string, []string, []string) error
 	open       func(string) (*os.File, error)
+	onManifest func(*Manifest) error
 }
 
 type pathFact struct {
@@ -77,6 +78,11 @@ func launch(req LaunchRequest, env launchEnv) error {
 	}
 	if err := refuseStore(m, manifestPath); err != nil {
 		return err
+	}
+	if env.onManifest != nil {
+		if err := env.onManifest(m); err != nil {
+			return err
+		}
 	}
 	child, err := childEnv(base, m.CanonicalHome, req.EntryID, string(req.Session))
 	if err != nil {

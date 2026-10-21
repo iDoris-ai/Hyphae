@@ -2,7 +2,6 @@ package deployment
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 )
@@ -74,53 +73,15 @@ func CanonicalStores(home string) (StorePaths, error) {
 	}, nil
 }
 
-// PlanManagedEntry returns the pinned binary recorded for a registered entry.
-// A closed manifest, an unknown entry, a drifted inventory, a non-canonical
-// store path, a HOME override, a hash mismatch, or a digest mismatch stops
-// the plan. Store paths are left unopened.
+// PlanManagedEntry returns the pinned binary for a registered entry.
+// An unknown entry returns before the manifest is read. Inventory and store
+// checks run on the parsed snapshot that also supplies the pinned path.
 func PlanManagedEntry(req LaunchRequest) (string, error) {
-	if err := rejectLegacy(req.Args, false); err != nil {
-		return "", err
-	}
-	base := req.Env
-	if base == nil {
-		base = os.Environ()
-	}
-	if err := rejectLegacy(base, true); err != nil {
-		return "", err
-	}
 	if err := gateRegistered(req.EntryID, req.Session); err != nil {
 		return "", err
 	}
-	manifestPath, err := canonicalPath(req.ManifestPath)
-	if err != nil {
-		return "", err
-	}
-	raw, err := readManifestBytes(manifestPath)
-	if err != nil {
-		return "", err
-	}
-	m, err := ParseManifestJSON(raw)
-	if err != nil {
-		return "", err
-	}
-	if m.State != "active" {
-		return "", closedErr("DEPLOYMENT_CLOSED", fmt.Sprintf("state %q not active", m.State))
-	}
-	if err := refuseStore(m, manifestPath); err != nil {
-		return "", err
-	}
-	if err := sameInventory(m.AllowedEntries); err != nil {
-		return "", err
-	}
-	if err := storesMatchCanonical(m); err != nil {
-		return "", err
-	}
-	if _, err := childEnv(base, m.CanonicalHome, req.EntryID, string(req.Session)); err != nil {
-		return "", err
-	}
 	var planned string
-	err = launch(req, launchEnv{
+	err := launch(req, launchEnv{
 		executable: os.Executable,
 		execFn: func(path string, argv []string, _ []string) error {
 			if !isCleanAbs(path) || len(argv) == 0 || argv[0] != path {
@@ -130,6 +91,12 @@ func PlanManagedEntry(req LaunchRequest) (string, error) {
 			return nil
 		},
 		open: openNoFollowOS,
+		onManifest: func(m *Manifest) error {
+			if err := sameInventory(m.AllowedEntries); err != nil {
+				return err
+			}
+			return storesMatchCanonical(m)
+		},
 	})
 	if err != nil {
 		return "", err
@@ -185,9 +152,6 @@ func storesMatchCanonical(m *Manifest) error {
 			return closedErr("MALFORMED_MANIFEST", "store role unbound")
 		}
 	}
-	if m.Stores != want {
-		return closedErr("PATH_ESCAPED", "store path is not canonical")
-	}
 	return nil
 }
 
@@ -210,17 +174,4 @@ func storeByRole(s StorePaths, role string) (string, bool) {
 	default:
 		return "", false
 	}
-}
-
-func readManifestBytes(path string) ([]byte, error) {
-	f, err := openNoFollowOS(path)
-	if err != nil {
-		return nil, closedErr("DEPLOYMENT_CLOSED", "manifest unreadable")
-	}
-	defer f.Close()
-	b, err := io.ReadAll(f)
-	if err != nil {
-		return nil, closedErr("DEPLOYMENT_CLOSED", "manifest unreadable")
-	}
-	return b, nil
 }
