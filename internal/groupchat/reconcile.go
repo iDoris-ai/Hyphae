@@ -12,7 +12,8 @@ const (
 )
 
 // reconcileEvidence is the raw classification, receipt, and witness snapshot.
-// A nil row is an orphan. The snapshot is not a store path.
+// Orphan is a nil row beside a present entry. A nil row with no entry is hold.
+// The snapshot is not a store path.
 type reconcileEvidence struct {
 	row        *fanoutFailureRow
 	entry      *messaging.RawGroupEntry
@@ -22,15 +23,18 @@ type reconcileEvidence struct {
 }
 
 // decideReconcile maps one snapshot through classifyFanoutBookkeeping.
+// Accepted also requires a group route, matching the O2 premise.
 // The same snapshot returns the same decision. It writes nothing.
 func decideReconcile(ev reconcileEvidence) ReconcileDecision {
 	if ev.row == nil {
-		return ReconcileOrphan
-	}
-	switch classifyFanoutBookkeeping(ev.row, ev.entry, ev.receipt, ev.relayAcks, ev.acceptedAt) {
-	case BookkeepingCleanupPending:
-		return ReconcileAccepted
-	default:
+		if ev.entry != nil {
+			return ReconcileOrphan
+		}
 		return ReconcileHold
 	}
+	class := classifyFanoutBookkeeping(ev.row, ev.entry, ev.receipt, ev.relayAcks, ev.acceptedAt)
+	if class == BookkeepingCleanupPending && ev.entry != nil && ev.entry.Route == messaging.OutboxRouteGroup {
+		return ReconcileAccepted
+	}
+	return ReconcileHold
 }
