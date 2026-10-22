@@ -665,17 +665,21 @@ func (s *Store) MarkActivationQueued(localNpub, groupID, inviteID, eventID strin
 	if inviteState != string(InviteAccepted) && inviteState != string(InviteActive) {
 		return ErrInvalidTransition
 	}
+	storedID := eventID
+	if eventID == unqueuedLocalActivation {
+		storedID = ""
+	}
 	if inviteState == string(InviteActive) {
 		if err := tx.QueryRow(`SELECT activation_event_id FROM groupchat_invites WHERE local_npub = ? AND invite_id = ?`,
 			localNpub, inviteID).Scan(&oldActivationEventID); err != nil {
 			return err
 		}
-		if oldActivationEventID != eventID {
+		if oldActivationEventID != eventID && oldActivationEventID != storedID {
 			return ErrProtocolMismatch
 		}
 	}
 	if _, err := tx.Exec(`UPDATE groupchat_invites SET state = ?, activation_event_id = ?, updated_at = ?
-		WHERE local_npub = ? AND invite_id = ?`, InviteActive, eventID, time.Now().Unix(), localNpub, inviteID); err != nil {
+		WHERE local_npub = ? AND invite_id = ?`, InviteActive, storedID, time.Now().Unix(), localNpub, inviteID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`UPDATE groupchat_members SET state = ? WHERE local_npub = ? AND group_id = ? AND npub = ?`,
@@ -698,6 +702,31 @@ func (s *Store) MarkActivationQueued(localNpub, groupID, inviteID, eventID strin
 		}
 	}
 	return tx.Commit()
+}
+
+const unqueuedLocalActivation = "0000000000000000000000000000000000000000000000000000000000000000"
+
+// MarkLocalActivationDelivered records an in-process activation for co-resident keys.
+// An active invite with an empty activation event id is that local simulation.
+// The empty id is not an outbox credential, and the invitee group can still be pending.
+func (s *Store) MarkLocalActivationDelivered(localNpub, groupID, inviteID string) error {
+	return s.MarkActivationQueued(localNpub, groupID, inviteID, unqueuedLocalActivation, true)
+}
+
+func (s *Store) localActivations(creator, groupID string) ([]Envelope, error) {
+	group, err := s.GetGroup(creator, groupID)
+	if err != nil {
+		return nil, err
+	}
+	if group.State != StateActive && group.State != StateActivating {
+		return nil, nil
+	}
+	tx, err := s.beginImmediate()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	return activationEnvelopes(tx, creator, group)
 }
 
 // ReceiveActivation activates only the invitation and immutable roster the
