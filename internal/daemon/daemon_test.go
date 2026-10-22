@@ -807,8 +807,8 @@ func TestProcessIncomingEventFailsClosedForReservedGroupPayloads(t *testing.T) {
 	require.NoError(t, err)
 	mySK, err := identity.GetSecretKey(ks, "alice")
 	require.NoError(t, err)
-	for i, body := range []string{"hyphae.group/v1\n{}", "hyphae.group/v99\n{}", "hyphae.group/not-a-version"} {
-		t.Run(fmt.Sprintf("reserved-%d", i), func(t *testing.T) {
+	for _, body := range []string{"hyphae.group/v99\n{}", "hyphae.group/not-a-version"} {
+		t.Run(body, func(t *testing.T) {
 			event := signedIncomingEvent(t, nostr.Generate(), mySK.Public(), body, nil)
 			seen := newSeenSet()
 			stores, notifications, replies, logs := 0, 0, 0, 0
@@ -818,26 +818,50 @@ func TestProcessIncomingEventFailsClosedForReservedGroupPayloads(t *testing.T) {
 				reply:  func(string, string) { replies++ },
 				logf:   func(string, ...any) { logs++ },
 			}
-			_, err := processIncomingEvent(event, mySK, seen, true, true, myIdentity, ks, hooks)
-			assert.ErrorIs(t, err, messaging.ErrReservedGroupRequiresHandler)
-			assert.NotContains(t, err.Error(), body)
+			processed, err := processIncomingEvent(event, mySK, seen, true, true, myIdentity, ks, hooks)
+			require.NoError(t, err)
+			assert.False(t, processed)
 			assert.Zero(t, stores)
 			assert.Zero(t, notifications)
 			assert.Zero(t, replies)
 			assert.Zero(t, logs)
-			assert.False(t, seen.Has(hex.EncodeToString(event.ID[:])), "rejected event must not be marked successfully seen")
+			assert.False(t, seen.Has(hex.EncodeToString(event.ID[:])))
 			msg, err := messaging.GetStore()
 			require.NoError(t, err)
 			stored, err := msg.GetMessage(hex.EncodeToString(event.ID[:]))
 			require.NoError(t, err)
 			assert.Nil(t, stored)
-			// A fresh process-local seen set after restart still cannot convert a
-			// rejected group envelope into a completed DM receive.
-			_, err = processIncomingEvent(event, mySK, newSeenSet(), true, true, myIdentity, ks, hooks)
-			assert.ErrorIs(t, err, messaging.ErrReservedGroupRequiresHandler)
+			processed, err = processIncomingEvent(event, mySK, newSeenSet(), true, true, myIdentity, ks, hooks)
+			require.NoError(t, err)
+			assert.False(t, processed)
 			assert.Zero(t, stores)
 		})
 	}
+	t.Run("malformed v1", func(t *testing.T) {
+		body := "hyphae.group/v1\n{}"
+		event := signedIncomingEvent(t, nostr.Generate(), mySK.Public(), body, nil)
+		seen := newSeenSet()
+		stores, notifications, replies, logs := 0, 0, 0, 0
+		hooks := incomingReceiveHooks{
+			store:  func(*nostr.Event, string, string, bool) (bool, error) { stores++; return true, nil },
+			notify: func(string, string) { notifications++ },
+			reply:  func(string, string) { replies++ },
+			logf:   func(string, ...any) { logs++ },
+		}
+		_, err := processIncomingEvent(event, mySK, seen, true, true, myIdentity, ks, hooks)
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), body)
+		assert.Zero(t, stores)
+		assert.Zero(t, notifications)
+		assert.Zero(t, replies)
+		assert.Zero(t, logs)
+		assert.False(t, seen.Has(hex.EncodeToString(event.ID[:])))
+		msg, err := messaging.GetStore()
+		require.NoError(t, err)
+		stored, err := msg.GetMessage(hex.EncodeToString(event.ID[:]))
+		require.NoError(t, err)
+		assert.Nil(t, stored)
+	})
 
 	direct := signedIncomingEvent(t, nostr.Generate(), mySK.Public(), "ordinary DM", nil)
 	seen := newSeenSet()

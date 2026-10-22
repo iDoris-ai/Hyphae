@@ -827,7 +827,18 @@ func processIncomingEvent(
 		return false, fmt.Errorf("decode message: %w", err)
 	}
 	if err := messaging.RejectReservedGroupPayload(content); err != nil {
-		return false, err
+		outcome, groupErr := acceptReservedGroup(event, recipientSK)
+		if groupErr != nil {
+			return false, groupErr
+		}
+		if outcome.handled {
+			seen.Add(eventID)
+		}
+		if !outcome.inserted {
+			return false, nil
+		}
+		emitGroupReceive(hooks, common.EncodeNpub(event.PubKey))
+		return true, nil
 	}
 	first, err := hooks.store(event, myIdentity.Npub, content, isEncrypted)
 	if err != nil {
