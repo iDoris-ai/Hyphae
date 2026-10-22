@@ -190,6 +190,12 @@ func acceptGroupCommand(c *cli.Command) (groupIDView, error) {
 	if err != nil {
 		return groupIDView{}, err
 	}
+	if len(activations) == 0 {
+		activations, err = session.store.localActivations(env.CreatorNpub, env.GroupID)
+		if err != nil {
+			return groupIDView{}, err
+		}
+	}
 	recipients := make([]nostr.SecretKey, len(activations))
 	for i, activation := range activations {
 		recipientSK, ok, lookupErr := secretForNpub(session.ks, activation.InviteeNpub)
@@ -202,13 +208,16 @@ func acceptGroupCommand(c *cli.Command) (groupIDView, error) {
 		recipients[i] = recipientSK
 	}
 	for i, activation := range activations {
-		verifiedAct, event, deliverErr := verifyDelivery(creatorSK, recipients[i], activation)
+		verifiedAct, _, deliverErr := verifyDelivery(creatorSK, recipients[i], activation)
 		if deliverErr != nil {
 			return groupIDView{}, deliverErr
 		}
-		queuedErr := session.store.MarkActivationQueued(env.CreatorNpub, activation.GroupID, activation.InviteID, event.ID.Hex(), true)
-		if queuedErr != nil {
-			return groupIDView{}, queuedErr
+		// Co-resident delivery stays in this process and stores no event id.
+		if err := session.store.MarkLocalActivationDelivered(env.CreatorNpub, activation.GroupID, activation.InviteID); err != nil {
+			return groupIDView{}, err
+		}
+		if os.Getenv("HYPHAE_HALT_BEFORE_ACTIVATION_RECEIVE") == activation.InviteID {
+			os.Exit(75)
 		}
 		if _, err := session.store.ReceiveActivation(verifiedAct); err != nil {
 			return groupIDView{}, err

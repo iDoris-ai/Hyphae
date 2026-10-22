@@ -66,6 +66,9 @@ func TestGroupLifecycleCLI(t *testing.T) {
 	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_fanout`) != 0 || queryInt(t, home, `SELECT COUNT(*) FROM messages`) != 0 {
 		t.Fatal("accept wrote fanout or a DM row")
 	}
+	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_invites WHERE local_npub = ? AND group_id = ? AND activation_event_id != ''`, alice.Npub, groupID) != 0 {
+		t.Fatal("accept stored a creator activation event id")
+	}
 
 	repeated := mustCLI(t, bin, home, "groupchat", "accept", "--identity", "bob", "--invite", inviteID)
 	if oneLine(t, repeated) != groupID {
@@ -92,22 +95,63 @@ func TestGroupLifecycleCLI(t *testing.T) {
 		t.Fatal("partial accept activated bob")
 	}
 
-	held := mustCLI(t, bin, home, "groupchat", "create", "--name", "held", "--identity", "alice", "--invitee", bob.Npub, "--invitee", carol.Npub)
-	heldID := oneLine(t, held)
-	heldInvites := listInvites(t, bin, home, "alice", heldID)
-	carolInvite := inviteFor(t, heldInvites, carol.Npub, heldID)
-	stdout, stderr, code = runCLI(t, bin, home, "groupchat", "accept", "--identity", "carol", "--invite", carolInvite)
-	if code == 0 || !strings.Contains(stderr, "group is not active") {
-		t.Fatalf("first of two accepts code %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	resumeID := oneLine(t, mustCLI(t, bin, home, "groupchat", "create", "--name", "resume", "--identity", "alice", "--invitee", bob.Npub))
+	resumeInvite := inviteFor(t, listInvites(t, bin, home, "alice", resumeID), bob.Npub, resumeID)
+	stdout, stderr, code = runCLIEnv(t, bin, home, []string{"HYPHAE_HALT_BEFORE_ACTIVATION_RECEIVE=" + resumeInvite}, "groupchat", "accept", "--identity", "bob", "--invite", resumeInvite)
+	if code != 75 || queryState(t, home, alice.Npub, resumeID) != "active" || queryState(t, home, bob.Npub, resumeID) == "active" {
+		t.Fatalf("resume halt code %d alice %s bob %s\nstdout: %s\nstderr: %s", code, queryState(t, home, alice.Npub, resumeID), queryState(t, home, bob.Npub, resumeID), stdout, stderr)
 	}
-	dropIdentity(t, home, "carol")
-	bobInvite := inviteFor(t, heldInvites, bob.Npub, heldID)
-	stdout, stderr, code = runCLI(t, bin, home, "groupchat", "accept", "--identity", "bob", "--invite", bobInvite)
-	if code == 0 || strings.TrimSpace(stdout) == heldID || !strings.Contains(stderr, "invitee key is absent from the local keystore") {
+	if oneLine(t, mustCLI(t, bin, home, "groupchat", "accept", "--identity", "bob", "--invite", resumeInvite)) != resumeID || queryState(t, home, bob.Npub, resumeID) != "active" {
+		t.Fatal("resume rerun left bob inactive")
+	}
+
+	lowNick, highNick := "bob", "carol"
+	low, high := bob, carol
+	if bob.Npub > carol.Npub {
+		low, high = carol, bob
+		lowNick, highNick = "carol", "bob"
+	}
+	trioID := oneLine(t, mustCLI(t, bin, home, "groupchat", "create", "--name", "trio", "--identity", "alice", "--invitee", bob.Npub, "--invitee", carol.Npub))
+	trioInvites := listInvites(t, bin, home, "alice", trioID)
+	lowInvite := inviteFor(t, trioInvites, low.Npub, trioID)
+	highInvite := inviteFor(t, trioInvites, high.Npub, trioID)
+	stdout, stderr, code = runCLI(t, bin, home, "groupchat", "accept", "--identity", highNick, "--invite", highInvite)
+	if code == 0 || !strings.Contains(stderr, "group is not active") {
+		t.Fatalf("trio first accept code %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	stdout, stderr, code = runCLIEnv(t, bin, home, []string{"HYPHAE_HALT_BEFORE_ACTIVATION_RECEIVE=" + lowInvite}, "groupchat", "accept", "--identity", lowNick, "--invite", lowInvite)
+	if code != 75 || queryState(t, home, alice.Npub, trioID) != "activating" || queryState(t, home, low.Npub, trioID) == "active" {
+		t.Fatalf("trio halt code %d alice %s low %s\nstdout: %s\nstderr: %s", code, queryState(t, home, alice.Npub, trioID), queryState(t, home, low.Npub, trioID), stdout, stderr)
+	}
+	if oneLine(t, mustCLI(t, bin, home, "groupchat", "accept", "--identity", lowNick, "--invite", lowInvite)) != trioID {
+		t.Fatal("trio rerun did not print the group id")
+	}
+	if queryState(t, home, alice.Npub, trioID) != "active" || queryState(t, home, low.Npub, trioID) != "active" || queryState(t, home, high.Npub, trioID) != "active" {
+		t.Fatal("trio rerun left a group inactive")
+	}
+	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_invites WHERE local_npub = ? AND group_id = ? AND activation_event_id != ''`, alice.Npub, trioID) != 0 {
+		t.Fatal("trio stored a creator activation event id")
+	}
+
+	heldID := oneLine(t, mustCLI(t, bin, home, "groupchat", "create", "--name", "held", "--identity", "alice", "--invitee", bob.Npub, "--invitee", carol.Npub))
+	heldInvites := listInvites(t, bin, home, "alice", heldID)
+	stdout, stderr, code = runCLI(t, bin, home, "groupchat", "accept", "--identity", highNick, "--invite", inviteFor(t, heldInvites, high.Npub, heldID))
+	if code == 0 || !strings.Contains(stderr, "group is not active") {
+		t.Fatalf("held first accept code %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	dropIdentity(t, home, highNick)
+	stdout, stderr, code = runCLI(t, bin, home, "groupchat", "accept", "--identity", lowNick, "--invite", inviteFor(t, heldInvites, low.Npub, heldID))
+	if code == 0 || !strings.Contains(stderr, "invitee key is absent from the local keystore") {
 		t.Fatalf("absent invitee code %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
 	}
-	if queryState(t, home, bob.Npub, heldID) == "active" {
-		t.Fatal("absent invitee key still activated bob")
+	if queryState(t, home, low.Npub, heldID) == "active" {
+		t.Fatal("absent invitee key activated the completing member")
+	}
+	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_invites WHERE local_npub = ? AND group_id = ? AND state = 'active'`, alice.Npub, heldID) != 0 {
+		t.Fatal("absent invitee key marked a creator invite active")
+	}
+	if highNick == "bob" {
+		bob = createIdentity(t, bin, home, "bob")
 	}
 
 	gone := mustCLI(t, bin, home, "groupchat", "create", "--name", "gone", "--identity", "alice", "--invitee", bob.Npub)
@@ -160,8 +204,13 @@ func commandEnv(home string) []string {
 
 func runCLI(t *testing.T, bin, home string, args ...string) (string, string, int) {
 	t.Helper()
+	return runCLIEnv(t, bin, home, nil, args...)
+}
+
+func runCLIEnv(t *testing.T, bin, home string, extra []string, args ...string) (string, string, int) {
+	t.Helper()
 	cmd := exec.Command(bin, args...)
-	cmd.Env = commandEnv(home)
+	cmd.Env = append(commandEnv(home), extra...)
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
