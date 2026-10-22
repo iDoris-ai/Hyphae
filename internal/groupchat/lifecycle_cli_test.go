@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 
@@ -170,6 +171,30 @@ func TestGroupLifecycleCLI(t *testing.T) {
 	}
 	if oneLine(t, mustCLI(t, bin, home, "groupchat", "accept", "--identity", highNick, "--invite", otherHigh)) != otherID || queryState(t, home, low.Npub, otherID) != "active" || queryState(t, home, high.Npub, otherID) != "active" {
 		t.Fatal("other rerun by the later member left a group inactive")
+	}
+
+	dave := createIdentity(t, bin, home, "dave")
+	quadOrder := []struct {
+		nick string
+		npub string
+	}{{"bob", bob.Npub}, {"carol", carol.Npub}, {"dave", dave.Npub}}
+	sort.Slice(quadOrder, func(i, j int) bool { return quadOrder[i].npub < quadOrder[j].npub })
+	n1, n2, n3 := quadOrder[0], quadOrder[1], quadOrder[2]
+	quadID := oneLine(t, mustCLI(t, bin, home, "groupchat", "create", "--name", "quad", "--identity", "alice", "--invitee", bob.Npub, "--invitee", carol.Npub, "--invitee", dave.Npub))
+	quadInvites := listInvites(t, bin, home, "alice", quadID)
+	n2Invite := inviteFor(t, quadInvites, n2.npub, quadID)
+	for _, member := range []struct{ nick, invite string }{{n3.nick, inviteFor(t, quadInvites, n3.npub, quadID)}, {n2.nick, n2Invite}} {
+		stdout, stderr, code = runCLI(t, bin, home, "groupchat", "accept", "--identity", member.nick, "--invite", member.invite)
+		if code == 0 || !strings.Contains(stderr, "group is not active") {
+			t.Fatalf("quad partial %s code %d\nstdout: %s\nstderr: %s", member.nick, code, stdout, stderr)
+		}
+	}
+	stdout, stderr, code = runCLIEnv(t, bin, home, []string{"HYPHAE_HALT_BEFORE_ACTIVATION_RECEIVE=" + n2Invite}, "groupchat", "accept", "--identity", n1.nick, "--invite", inviteFor(t, quadInvites, n1.npub, quadID))
+	if code != 75 || queryState(t, home, alice.Npub, quadID) != "activating" || queryState(t, home, n1.npub, quadID) != "active" || queryState(t, home, n2.npub, quadID) == "active" {
+		t.Fatalf("quad halt code %d alice %s n1 %s n2 %s\nstdout: %s\nstderr: %s", code, queryState(t, home, alice.Npub, quadID), queryState(t, home, n1.npub, quadID), queryState(t, home, n2.npub, quadID), stdout, stderr)
+	}
+	if oneLine(t, mustCLI(t, bin, home, "groupchat", "accept", "--identity", n1.nick, "--invite", inviteFor(t, quadInvites, n1.npub, quadID))) != quadID || queryState(t, home, n2.npub, quadID) != "active" || queryState(t, home, n3.npub, quadID) != "active" || queryState(t, home, alice.Npub, quadID) != "active" {
+		t.Fatal("quad rerun by the earlier member left a later member pending")
 	}
 
 	heldID := oneLine(t, mustCLI(t, bin, home, "groupchat", "create", "--name", "held", "--identity", "alice", "--invitee", bob.Npub, "--invitee", carol.Npub))

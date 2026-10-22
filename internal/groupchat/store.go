@@ -718,7 +718,7 @@ func (s *Store) localActivations(creator, groupID string) ([]Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	if group.State != StateActive {
+	if group.State != StateActive && group.State != StateActivating {
 		return nil, nil
 	}
 	tx, err := s.beginImmediate()
