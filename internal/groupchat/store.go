@@ -707,7 +707,8 @@ func (s *Store) MarkActivationQueued(localNpub, groupID, inviteID, eventID strin
 const unqueuedLocalActivation = "0000000000000000000000000000000000000000000000000000000000000000"
 
 // MarkLocalActivationDelivered records an in-process activation for co-resident keys.
-// The invite's activation event id stays empty.
+// An active invite with an empty activation event id is that local simulation.
+// The empty id is not an outbox credential, and the invitee group can still be pending.
 func (s *Store) MarkLocalActivationDelivered(localNpub, groupID, inviteID string) error {
 	return s.MarkActivationQueued(localNpub, groupID, inviteID, unqueuedLocalActivation, true)
 }

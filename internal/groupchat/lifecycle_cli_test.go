@@ -83,6 +83,13 @@ func TestGroupLifecycleCLI(t *testing.T) {
 	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_fanout`) != 0 {
 		t.Fatal("repeat wrote fanout")
 	}
+	wrongOut, wrongErr, wrongCode := runCLI(t, bin, home, "groupchat", "accept", "--identity", "alice", "--invite", inviteID)
+	if wrongCode == 0 || strings.TrimSpace(wrongOut) == groupID || !strings.Contains(wrongErr, "current identity does not match group invitation") {
+		t.Fatalf("creator accept code %d\nstdout: %s\nstderr: %s", wrongCode, wrongOut, wrongErr)
+	}
+	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_members WHERE local_npub = ? AND group_id = ?`, bob.Npub, groupID) != members {
+		t.Fatal("creator accept changed membership")
+	}
 
 	partial := mustCLI(t, bin, home, "groupchat", "create", "--name", "partial", "--identity", "alice", "--invitee", bob.Npub, "--invitee", carol.Npub)
 	partialID := oneLine(t, partial)
@@ -131,6 +138,38 @@ func TestGroupLifecycleCLI(t *testing.T) {
 	}
 	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_invites WHERE local_npub = ? AND group_id = ? AND activation_event_id != ''`, alice.Npub, trioID) != 0 {
 		t.Fatal("trio stored a creator activation event id")
+	}
+
+	peerID := oneLine(t, mustCLI(t, bin, home, "groupchat", "create", "--name", "peer", "--identity", "alice", "--invitee", bob.Npub, "--invitee", carol.Npub))
+	peerInvites := listInvites(t, bin, home, "alice", peerID)
+	peerLow := inviteFor(t, peerInvites, low.Npub, peerID)
+	peerHigh := inviteFor(t, peerInvites, high.Npub, peerID)
+	stdout, stderr, code = runCLI(t, bin, home, "groupchat", "accept", "--identity", highNick, "--invite", peerHigh)
+	if code == 0 || !strings.Contains(stderr, "group is not active") {
+		t.Fatalf("peer first accept code %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	stdout, stderr, code = runCLIEnv(t, bin, home, []string{"HYPHAE_HALT_BEFORE_ACTIVATION_RECEIVE=" + peerHigh}, "groupchat", "accept", "--identity", lowNick, "--invite", peerLow)
+	if code != 75 || queryState(t, home, low.Npub, peerID) != "active" || queryState(t, home, high.Npub, peerID) == "active" {
+		t.Fatalf("peer halt code %d low %s high %s\nstdout: %s\nstderr: %s", code, queryState(t, home, low.Npub, peerID), queryState(t, home, high.Npub, peerID), stdout, stderr)
+	}
+	if oneLine(t, mustCLI(t, bin, home, "groupchat", "accept", "--identity", lowNick, "--invite", peerLow)) != peerID || queryState(t, home, high.Npub, peerID) != "active" {
+		t.Fatal("peer rerun by the earlier member left the later member pending")
+	}
+
+	otherID := oneLine(t, mustCLI(t, bin, home, "groupchat", "create", "--name", "other", "--identity", "alice", "--invitee", bob.Npub, "--invitee", carol.Npub))
+	otherInvites := listInvites(t, bin, home, "alice", otherID)
+	otherLow := inviteFor(t, otherInvites, low.Npub, otherID)
+	otherHigh := inviteFor(t, otherInvites, high.Npub, otherID)
+	stdout, stderr, code = runCLI(t, bin, home, "groupchat", "accept", "--identity", lowNick, "--invite", otherLow)
+	if code == 0 || !strings.Contains(stderr, "group is not active") {
+		t.Fatalf("other first accept code %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	stdout, stderr, code = runCLIEnv(t, bin, home, []string{"HYPHAE_HALT_BEFORE_ACTIVATION_RECEIVE=" + otherLow}, "groupchat", "accept", "--identity", highNick, "--invite", otherHigh)
+	if code != 75 || queryState(t, home, high.Npub, otherID) == "active" {
+		t.Fatalf("other halt code %d high %s\nstdout: %s\nstderr: %s", code, queryState(t, home, high.Npub, otherID), stdout, stderr)
+	}
+	if oneLine(t, mustCLI(t, bin, home, "groupchat", "accept", "--identity", highNick, "--invite", otherHigh)) != otherID || queryState(t, home, low.Npub, otherID) != "active" || queryState(t, home, high.Npub, otherID) != "active" {
+		t.Fatal("other rerun by the later member left a group inactive")
 	}
 
 	heldID := oneLine(t, mustCLI(t, bin, home, "groupchat", "create", "--name", "held", "--identity", "alice", "--invitee", bob.Npub, "--invitee", carol.Npub))

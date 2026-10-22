@@ -160,15 +160,18 @@ func acceptGroupCommand(c *cli.Command) (groupIDView, error) {
 		return groupIDView{}, err
 	}
 	defer session.db.Close()
-	var groupID, inviteState, groupState string
-	err = session.store.db.QueryRow(`SELECT i.group_id, i.state, g.state FROM groupchat_invites i JOIN groupchat_groups g ON g.local_npub = i.local_npub AND g.group_id = i.group_id WHERE i.local_npub = ? AND i.invite_id = ?`, session.me, c.String("invite")).Scan(&groupID, &inviteState, &groupState)
+	var groupID, inviteState, groupState, invitee string
+	err = session.store.db.QueryRow(`SELECT i.group_id, i.state, g.state, i.invitee_npub FROM groupchat_invites i JOIN groupchat_groups g ON g.local_npub = i.local_npub AND g.group_id = i.group_id WHERE i.local_npub = ? AND i.invite_id = ?`, session.me, c.String("invite")).Scan(&groupID, &inviteState, &groupState, &invitee)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = nil
 	}
 	if err != nil {
 		return groupIDView{}, err
 	}
-	if inviteState == string(InviteActive) && groupState == string(StateActive) {
+	if invitee == session.me && inviteState == string(InviteActive) && groupState == string(StateActive) {
+		if err := finishLocalActivation(session, groupID); err != nil {
+			return groupIDView{}, err
+		}
 		return groupIDView{GroupID: groupID}, nil
 	}
 	env, err := session.store.AcceptInvite(c.String("invite"), session.me)
@@ -180,7 +183,7 @@ func acceptGroupCommand(c *cli.Command) (groupIDView, error) {
 		return groupIDView{}, err
 	}
 	if !found {
-		return groupIDView{}, errors.New("creator key is absent from the local keystore")
+		return groupIDView{}, missingCreatorKey()
 	}
 	verified, _, err := verifyDelivery(session.sk, creatorSK, env)
 	if err != nil {
@@ -196,32 +199,8 @@ func acceptGroupCommand(c *cli.Command) (groupIDView, error) {
 			return groupIDView{}, err
 		}
 	}
-	recipients := make([]nostr.SecretKey, len(activations))
-	for i, activation := range activations {
-		recipientSK, ok, lookupErr := secretForNpub(session.ks, activation.InviteeNpub)
-		if lookupErr != nil {
-			return groupIDView{}, lookupErr
-		}
-		if !ok {
-			return groupIDView{}, errors.New("invitee key is absent from the local keystore")
-		}
-		recipients[i] = recipientSK
-	}
-	for i, activation := range activations {
-		verifiedAct, _, deliverErr := verifyDelivery(creatorSK, recipients[i], activation)
-		if deliverErr != nil {
-			return groupIDView{}, deliverErr
-		}
-		// Co-resident delivery stays in this process and stores no event id.
-		if err := session.store.MarkLocalActivationDelivered(env.CreatorNpub, activation.GroupID, activation.InviteID); err != nil {
-			return groupIDView{}, err
-		}
-		if os.Getenv("HYPHAE_HALT_BEFORE_ACTIVATION_RECEIVE") == activation.InviteID {
-			os.Exit(75)
-		}
-		if _, err := session.store.ReceiveActivation(verifiedAct); err != nil {
-			return groupIDView{}, err
-		}
+	if err := deliverActivations(session, creatorSK, env.CreatorNpub, activations); err != nil {
+		return groupIDView{}, err
 	}
 	group, err := session.store.GetGroup(session.me, env.GroupID)
 	if err != nil {
@@ -231,4 +210,57 @@ func acceptGroupCommand(c *cli.Command) (groupIDView, error) {
 		return groupIDView{}, ErrGroupNotActive
 	}
 	return groupIDView{GroupID: group.ID}, nil
+}
+
+func missingCreatorKey() error {
+	return errors.New("creator key is absent from the local keystore")
+}
+
+func finishLocalActivation(session cliSession, groupID string) error {
+	group, err := session.store.GetGroup(session.me, groupID)
+	if err != nil {
+		return err
+	}
+	creatorSK, found, err := secretForNpub(session.ks, group.Creator)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return missingCreatorKey()
+	}
+	activations, err := session.store.localActivations(group.Creator, groupID)
+	if err != nil {
+		return err
+	}
+	return deliverActivations(session, creatorSK, group.Creator, activations)
+}
+
+func deliverActivations(session cliSession, creatorSK nostr.SecretKey, creator string, activations []Envelope) error {
+	recipients := make([]nostr.SecretKey, len(activations))
+	for i, activation := range activations {
+		recipientSK, ok, lookupErr := secretForNpub(session.ks, activation.InviteeNpub)
+		if lookupErr != nil {
+			return lookupErr
+		}
+		if !ok {
+			return errors.New("invitee key is absent from the local keystore")
+		}
+		recipients[i] = recipientSK
+	}
+	for i, activation := range activations {
+		verifiedAct, _, deliverErr := verifyDelivery(creatorSK, recipients[i], activation)
+		if deliverErr != nil {
+			return deliverErr
+		}
+		if err := session.store.MarkLocalActivationDelivered(creator, activation.GroupID, activation.InviteID); err != nil {
+			return err
+		}
+		if os.Getenv("HYPHAE_HALT_BEFORE_ACTIVATION_RECEIVE") == activation.InviteID {
+			os.Exit(75)
+		}
+		if _, err := session.store.ReceiveActivation(verifiedAct); err != nil {
+			return err
+		}
+	}
+	return nil
 }
