@@ -20,6 +20,9 @@ var Cmd = &cli.Command{
 	Name:  "groupchat",
 	Usage: "Persist encrypted group fanout",
 	Commands: []*cli.Command{
+		createCmd,
+		inviteCmd,
+		acceptCmd,
 		sendCmd,
 	},
 }
@@ -94,4 +97,73 @@ func enqueueOwned(db *sql.DB, sk nostr.SecretKey, groupID, logicalID, body strin
 		return FanoutReport{}, err
 	}
 	return store.EnqueueMessageFanout(sk, groupID, logicalID, body, nostr.Timestamp(time.Now().Unix()), maxRetries)
+}
+
+func localIdentityFlags() []cli.Flag {
+	return []cli.Flag{
+		&cli.StringFlag{Name: "identity", Usage: "Local nickname; default identity when empty"},
+		&cli.BoolFlag{Name: "password-stdin", Usage: "Read an encrypted keystore password from stdin"},
+	}
+}
+
+func emitGroupID(c *cli.Command, view groupIDView) error {
+	common.Emit(common.JSONMode(c), view, func() { fmt.Println(view.GroupID) })
+	return nil
+}
+
+var createCmd = &cli.Command{
+	Name:  "create",
+	Usage: "Create a group and hand local invitations to co-located invitees",
+	Flags: append([]cli.Flag{
+		&cli.StringFlag{Name: "name", Required: true, Usage: "Group name"},
+		&cli.StringSliceFlag{Name: "invitee", Required: true, Usage: "Invitee npub"},
+	}, localIdentityFlags()...),
+	Action: func(ctx context.Context, c *cli.Command) error {
+		view, err := createGroupCommand(c)
+		if err != nil {
+			return err
+		}
+		return emitGroupID(c, view)
+	},
+}
+
+var inviteCmd = &cli.Command{
+	Name:  "invite",
+	Usage: "Show group invitations",
+	Commands: []*cli.Command{
+		{
+			Name:  "list",
+			Usage: "List invitations stored for one group",
+			Flags: append([]cli.Flag{
+				&cli.StringFlag{Name: "group", Required: true, Usage: "Group id"},
+			}, localIdentityFlags()...),
+			Action: func(ctx context.Context, c *cli.Command) error {
+				entries, err := listInvitesCommand(c)
+				if err != nil {
+					return err
+				}
+				common.Emit(common.JSONMode(c), map[string]any{"invites": entries}, func() {
+					for _, invite := range entries {
+						fmt.Println(invite.InviteeNpub)
+					}
+				})
+				return nil
+			},
+		},
+	},
+}
+
+var acceptCmd = &cli.Command{
+	Name:  "accept",
+	Usage: "Accept an invitation and print the group id when it is active",
+	Flags: append([]cli.Flag{
+		&cli.StringFlag{Name: "invite", Required: true, Usage: "Invitation id"},
+	}, localIdentityFlags()...),
+	Action: func(ctx context.Context, c *cli.Command) error {
+		view, err := acceptGroupCommand(c)
+		if err != nil {
+			return err
+		}
+		return emitGroupID(c, view)
+	},
 }

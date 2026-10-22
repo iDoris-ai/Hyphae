@@ -1,0 +1,319 @@
+package groupchat_test
+
+import (
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+
+	"fiatjaf.com/nostr"
+	"github.com/iDoris-ai/hyphae/internal/common"
+	_ "modernc.org/sqlite"
+)
+
+func TestGroupLifecycleCLI(t *testing.T) {
+	bin := buildHyphae(t)
+	home := t.TempDir()
+
+	legacy, stderr, code := runCLI(t, bin, home, "group", "chat", "--name", "legacy")
+	if code != 0 || !strings.Contains(legacy, "coming soon") {
+		t.Fatalf("legacy group chat code %d\nstdout: %s\nstderr: %s", code, legacy, stderr)
+	}
+
+	alice := createIdentity(t, bin, home, "alice")
+	bob := createIdentity(t, bin, home, "bob")
+	carol := createIdentity(t, bin, home, "carol")
+	remote := common.EncodeNpub(nostr.Generate().Public())
+
+	remoteOut := mustCLI(t, bin, home, "groupchat", "create", "--name", "remote", "--identity", "alice", "--invitee", remote)
+	remoteID := oneLine(t, remoteOut)
+	remoteList := listInvites(t, bin, home, "alice", remoteID)
+	if !hasInvitee(remoteList, remote) {
+		t.Fatalf("remote invite list = %#v", remoteList)
+	}
+	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_groups WHERE local_npub = ?`, remote) != 0 {
+		t.Fatal("non-local invitee gained a group row")
+	}
+
+	created := mustCLI(t, bin, home, "groupchat", "create", "--name", "planning", "--identity", "alice", "--invitee", bob.Npub)
+	groupID := oneLine(t, created)
+	if queryState(t, home, bob.Npub, groupID) != "pending" || queryState(t, home, alice.Npub, groupID) != "pending" {
+		t.Fatalf("create left an active group alice=%s bob=%s", queryState(t, home, alice.Npub, groupID), queryState(t, home, bob.Npub, groupID))
+	}
+	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_fanout`) != 0 {
+		t.Fatal("create wrote fanout")
+	}
+	invites := listInvites(t, bin, home, "alice", groupID)
+	inviteID := inviteFor(t, invites, bob.Npub, groupID)
+
+	accepted := mustCLI(t, bin, home, "groupchat", "accept", "--identity", "bob", "--invite", inviteID)
+	if oneLine(t, accepted) != groupID {
+		t.Fatalf("accept printed %q", accepted)
+	}
+	if queryState(t, home, bob.Npub, groupID) != "active" || queryState(t, home, alice.Npub, groupID) != "active" {
+		t.Fatalf("accept states alice=%s bob=%s", queryState(t, home, alice.Npub, groupID), queryState(t, home, bob.Npub, groupID))
+	}
+	members := queryInt(t, home, `SELECT COUNT(*) FROM groupchat_members WHERE local_npub = ? AND group_id = ?`, bob.Npub, groupID)
+	inviteRows := queryInt(t, home, `SELECT COUNT(*) FROM groupchat_invites WHERE local_npub = ? AND group_id = ?`, bob.Npub, groupID)
+	if members != 2 || inviteRows != 1 {
+		t.Fatalf("membership members=%d invites=%d", members, inviteRows)
+	}
+	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_fanout`) != 0 || queryInt(t, home, `SELECT COUNT(*) FROM messages`) != 0 {
+		t.Fatal("accept wrote fanout or a DM row")
+	}
+
+	repeated := mustCLI(t, bin, home, "groupchat", "accept", "--identity", "bob", "--invite", inviteID)
+	if oneLine(t, repeated) != groupID {
+		t.Fatalf("repeat printed %q", repeated)
+	}
+	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_members WHERE local_npub = ? AND group_id = ?`, bob.Npub, groupID) != members {
+		t.Fatal("repeat added a membership")
+	}
+	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_invites WHERE local_npub = ? AND group_id = ?`, bob.Npub, groupID) != inviteRows {
+		t.Fatal("repeat added an invite")
+	}
+	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_fanout`) != 0 {
+		t.Fatal("repeat wrote fanout")
+	}
+
+	partial := mustCLI(t, bin, home, "groupchat", "create", "--name", "partial", "--identity", "alice", "--invitee", bob.Npub, "--invitee", carol.Npub)
+	partialID := oneLine(t, partial)
+	partialInvite := inviteFor(t, listInvites(t, bin, home, "alice", partialID), bob.Npub, partialID)
+	stdout, stderr, code := runCLI(t, bin, home, "groupchat", "accept", "--identity", "bob", "--invite", partialInvite)
+	if code == 0 || strings.TrimSpace(stdout) == partialID || !strings.Contains(stderr, "group is not active") {
+		t.Fatalf("partial accept code %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if queryState(t, home, bob.Npub, partialID) == "active" {
+		t.Fatal("partial accept activated bob")
+	}
+
+	held := mustCLI(t, bin, home, "groupchat", "create", "--name", "held", "--identity", "alice", "--invitee", bob.Npub, "--invitee", carol.Npub)
+	heldID := oneLine(t, held)
+	heldInvites := listInvites(t, bin, home, "alice", heldID)
+	carolInvite := inviteFor(t, heldInvites, carol.Npub, heldID)
+	stdout, stderr, code = runCLI(t, bin, home, "groupchat", "accept", "--identity", "carol", "--invite", carolInvite)
+	if code == 0 || !strings.Contains(stderr, "group is not active") {
+		t.Fatalf("first of two accepts code %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	dropIdentity(t, home, "carol")
+	bobInvite := inviteFor(t, heldInvites, bob.Npub, heldID)
+	stdout, stderr, code = runCLI(t, bin, home, "groupchat", "accept", "--identity", "bob", "--invite", bobInvite)
+	if code == 0 || strings.TrimSpace(stdout) == heldID || !strings.Contains(stderr, "invitee key is absent from the local keystore") {
+		t.Fatalf("absent invitee code %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if queryState(t, home, bob.Npub, heldID) == "active" {
+		t.Fatal("absent invitee key still activated bob")
+	}
+
+	gone := mustCLI(t, bin, home, "groupchat", "create", "--name", "gone", "--identity", "alice", "--invitee", bob.Npub)
+	goneID := oneLine(t, gone)
+	goneInvite := inviteFor(t, listInvites(t, bin, home, "alice", goneID), bob.Npub, goneID)
+	dropIdentity(t, home, "alice")
+	stdout, stderr, code = runCLI(t, bin, home, "groupchat", "accept", "--identity", "bob", "--invite", goneInvite)
+	if code == 0 || strings.TrimSpace(stdout) == goneID || !strings.Contains(stderr, "creator key is absent from the local keystore") {
+		t.Fatalf("absent creator code %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if queryState(t, home, bob.Npub, goneID) == "active" {
+		t.Fatal("absent creator key still activated bob")
+	}
+	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_fanout`) != 0 {
+		t.Fatal("lifecycle wrote fanout")
+	}
+}
+
+func buildHyphae(t *testing.T) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "hyphae")
+	cmd := exec.Command("go", "build", "-o", bin, "./cmd/hyphae")
+	cmd.Dir = moduleRoot(t)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build hyphae: %v\n%s", err, out)
+	}
+	return bin
+}
+
+func moduleRoot(t *testing.T) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+}
+
+func commandEnv(home string) []string {
+	filtered := make([]string, 0, len(os.Environ())+1)
+	for _, entry := range os.Environ() {
+		if strings.HasPrefix(entry, "HOME=") || strings.HasPrefix(entry, "HYPHAE_OUTPUT=") || strings.HasPrefix(entry, "AGENT_SPEAKER_OUTPUT=") {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	return append(filtered, "HOME="+home)
+}
+
+func runCLI(t *testing.T, bin, home string, args ...string) (string, string, int) {
+	t.Helper()
+	cmd := exec.Command(bin, args...)
+	cmd.Env = commandEnv(home)
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err == nil {
+		return stdout.String(), stderr.String(), 0
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("run %v: %v", args, err)
+	}
+	return stdout.String(), stderr.String(), exitErr.ExitCode()
+}
+
+func mustCLI(t *testing.T, bin, home string, args ...string) string {
+	t.Helper()
+	stdout, stderr, code := runCLI(t, bin, home, args...)
+	if code != 0 {
+		t.Fatalf("exit %d for %v\nstdout: %s\nstderr: %s", code, args, stdout, stderr)
+	}
+	return stdout
+}
+
+type identityDTO struct {
+	Npub string `json:"npub"`
+}
+
+func createIdentity(t *testing.T, bin, home, nickname string) identityDTO {
+	t.Helper()
+	stdout := mustCLI(t, bin, home, "identity", "create", "--nickname", nickname, "--json")
+	var env struct {
+		OK   bool        `json:"ok"`
+		Data identityDTO `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil || !env.OK || env.Data.Npub == "" {
+		t.Fatalf("identity %s: %v\n%s", nickname, err, stdout)
+	}
+	return env.Data
+}
+
+type inviteDTO struct {
+	InviteID    string `json:"invite_id"`
+	InviteeNpub string `json:"invitee_npub"`
+	GroupID     string `json:"group_id"`
+}
+
+func listInvites(t *testing.T, bin, home, nickname, groupID string) []inviteDTO {
+	t.Helper()
+	stdout := mustCLI(t, bin, home, "groupchat", "invite", "list", "--group", groupID, "--identity", nickname, "--json")
+	var env struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Invites []inviteDTO `json:"invites"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil || !env.OK {
+		t.Fatalf("invite list: %v\n%s", err, stdout)
+	}
+	return env.Data.Invites
+}
+
+func hasInvitee(invites []inviteDTO, npub string) bool {
+	for _, invite := range invites {
+		if invite.InviteeNpub == npub {
+			return true
+		}
+	}
+	return false
+}
+
+func inviteFor(t *testing.T, invites []inviteDTO, npub, groupID string) string {
+	t.Helper()
+	for _, invite := range invites {
+		if invite.InviteeNpub == npub && invite.GroupID == groupID && invite.InviteID != "" {
+			return invite.InviteID
+		}
+	}
+	t.Fatalf("missing invite for %s in %#v", npub, invites)
+	return ""
+}
+
+func oneLine(t *testing.T, stdout string) string {
+	t.Helper()
+	id := strings.TrimSpace(stdout)
+	if len(id) != 32 {
+		t.Fatalf("group id %q", stdout)
+	}
+	for _, r := range id {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			t.Fatalf("group id %q", stdout)
+		}
+	}
+	return id
+}
+
+func queryInt(t *testing.T, home, query string, args ...any) int {
+	t.Helper()
+	db := openMessages(t, home)
+	defer db.Close()
+	var n int
+	if err := db.QueryRow(query, args...).Scan(&n); err != nil {
+		t.Fatalf("%s: %v", query, err)
+	}
+	return n
+}
+
+func queryState(t *testing.T, home, npub, groupID string) string {
+	t.Helper()
+	db := openMessages(t, home)
+	defer db.Close()
+	var state string
+	err := db.QueryRow(`SELECT state FROM groupchat_groups WHERE local_npub = ? AND group_id = ?`, npub, groupID).Scan(&state)
+	if err != nil {
+		t.Fatalf("state %s %s: %v", npub, groupID, err)
+	}
+	return state
+}
+
+func openMessages(t *testing.T, home string) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(home, ".hyphae", "messages.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
+
+func dropIdentity(t *testing.T, home, nickname string) {
+	t.Helper()
+	path := filepath.Join(home, ".hyphae", "keystore.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	identities, _ := doc["identities"].(map[string]any)
+	delete(identities, nickname)
+	if doc["default_identity"] == nickname {
+		doc["default_identity"] = ""
+		for name := range identities {
+			doc["default_identity"] = name
+			break
+		}
+	}
+	encoded, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(encoded, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
