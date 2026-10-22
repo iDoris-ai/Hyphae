@@ -665,17 +665,21 @@ func (s *Store) MarkActivationQueued(localNpub, groupID, inviteID, eventID strin
 	if inviteState != string(InviteAccepted) && inviteState != string(InviteActive) {
 		return ErrInvalidTransition
 	}
+	storedID := eventID
+	if eventID == unqueuedLocalActivation {
+		storedID = ""
+	}
 	if inviteState == string(InviteActive) {
 		if err := tx.QueryRow(`SELECT activation_event_id FROM groupchat_invites WHERE local_npub = ? AND invite_id = ?`,
 			localNpub, inviteID).Scan(&oldActivationEventID); err != nil {
 			return err
 		}
-		if oldActivationEventID != eventID {
+		if oldActivationEventID != eventID && oldActivationEventID != storedID {
 			return ErrProtocolMismatch
 		}
 	}
 	if _, err := tx.Exec(`UPDATE groupchat_invites SET state = ?, activation_event_id = ?, updated_at = ?
-		WHERE local_npub = ? AND invite_id = ?`, InviteActive, eventID, time.Now().Unix(), localNpub, inviteID); err != nil {
+		WHERE local_npub = ? AND invite_id = ?`, InviteActive, storedID, time.Now().Unix(), localNpub, inviteID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`UPDATE groupchat_members SET state = ? WHERE local_npub = ? AND group_id = ? AND npub = ?`,
@@ -700,64 +704,12 @@ func (s *Store) MarkActivationQueued(localNpub, groupID, inviteID, eventID strin
 	return tx.Commit()
 }
 
-// MarkLocalActivationDelivered records an in-process activation for co-resident
-// keys. No outbox row is written, and the invite keeps an empty activation event id.
+const unqueuedLocalActivation = "0000000000000000000000000000000000000000000000000000000000000000"
+
+// MarkLocalActivationDelivered records an in-process activation for co-resident keys.
+// The invite's activation event id stays empty.
 func (s *Store) MarkLocalActivationDelivered(localNpub, groupID, inviteID string) error {
-	localNpub, err := canonicalNpub(localNpub)
-	if err != nil {
-		return err
-	}
-	tx, err := s.beginImmediate()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	var groupState, creator, inviteState, eventID, recipient string
-	err = tx.QueryRow(`SELECT g.state, g.creator_npub, i.state, i.activation_event_id, i.invitee_npub
-		FROM groupchat_groups g JOIN groupchat_invites i
-		ON i.local_npub = g.local_npub AND i.group_id = g.group_id
-		WHERE g.local_npub = ? AND g.group_id = ? AND i.invite_id = ?`,
-		localNpub, groupID, inviteID).Scan(&groupState, &creator, &inviteState, &eventID, &recipient)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return ErrInviteNotFound
-		}
-		return err
-	}
-	if creator != localNpub || (groupState != string(StateActivating) && groupState != string(StateActive)) {
-		return ErrInvalidTransition
-	}
-	if inviteState == string(InviteActive) {
-		return nil
-	}
-	if inviteState != string(InviteAccepted) || eventID != "" {
-		return ErrInvalidTransition
-	}
-	now := time.Now().Unix()
-	if _, err = tx.Exec(`UPDATE groupchat_invites SET state = ?, updated_at = ? WHERE local_npub = ? AND invite_id = ?`,
-		InviteActive, now, localNpub, inviteID); err != nil {
-		return err
-	}
-	if _, err = tx.Exec(`UPDATE groupchat_members SET state = ? WHERE local_npub = ? AND group_id = ? AND npub = ?`,
-		InviteActive, localNpub, groupID, recipient); err != nil {
-		return err
-	}
-	var waiting int
-	if err = tx.QueryRow(`SELECT COUNT(*) FROM groupchat_invites WHERE local_npub = ? AND group_id = ? AND state != ?`,
-		localNpub, groupID, InviteActive).Scan(&waiting); err != nil {
-		return err
-	}
-	if waiting == 0 {
-		if _, err = tx.Exec(`UPDATE groupchat_groups SET state = ?, updated_at = ? WHERE local_npub = ? AND group_id = ?`,
-			StateActive, now, localNpub, groupID); err != nil {
-			return err
-		}
-		if _, err = tx.Exec(`UPDATE groupchat_members SET state = ? WHERE local_npub = ? AND group_id = ?`,
-			InviteActive, localNpub, groupID); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
+	return s.MarkActivationQueued(localNpub, groupID, inviteID, unqueuedLocalActivation, true)
 }
 
 func (s *Store) localActivations(creator, groupID string) ([]Envelope, error) {
