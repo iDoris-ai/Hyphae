@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
-	"time"
 
 	"fiatjaf.com/nostr"
 	"github.com/iDoris-ai/hyphae/internal/common"
@@ -24,6 +23,9 @@ var Cmd = &cli.Command{
 		inviteCmd,
 		acceptCmd,
 		sendCmd,
+		retryCmd,
+		statusCmd,
+		historyCmd,
 	},
 }
 
@@ -96,7 +98,7 @@ func enqueueOwned(db *sql.DB, sk nostr.SecretKey, groupID, logicalID, body strin
 	if err != nil {
 		return FanoutReport{}, err
 	}
-	return store.EnqueueMessageFanout(sk, groupID, logicalID, body, nostr.Timestamp(time.Now().Unix()), maxRetries)
+	return enqueueThroughProvider(store, sk, groupID, logicalID, body, maxRetries)
 }
 
 func localIdentityFlags() []cli.Flag {
