@@ -32,7 +32,7 @@ def binary_fixture(platform: str, suffix: bytes = b"fixture") -> bytes:
 def production_lock() -> bytes:
     return json.dumps({
         "schema": 1,
-        "source_sha": "671c584f9e9eb807a15968e2aa42fd7507e178b8",
+        "source_sha": joint_ci.PRODUCTION_HYPHAE_SHA,
         "go": "go1.26.4",
         "recipe": joint_ci.GO_RECIPE,
         "binaries": {

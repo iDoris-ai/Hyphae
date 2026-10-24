@@ -30,3 +30,7 @@ Thumbs.db
 CLAUDE.md
 .codex/goals/
 .loopx/
+
+# Python bytecode
+__pycache__/
+*.pyc
