@@ -198,7 +198,10 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("create groupchat schema: %w", err)
 		}
 	}
-	return s.migrateFanoutAccounting()
+	if err := s.migrateFanoutAccounting(); err != nil {
+		return err
+	}
+	return validateGroupchatSchema(s.db)
 }
 
 // migrateFanoutAccounting adds the rev7 F1 columns without deriving retry
