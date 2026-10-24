@@ -23,8 +23,8 @@
 | T2.1 | 2 发布 | 准备 Go 1.26.4 工具链（本机缓存已无） | Hyphae | DONE | 2026-10-24：`GOTOOLCHAIN=go1.26.4 go version` 自动下载；工具链在 `~/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.4.darwin-arm64`，构建时把它的 `bin` 放到 PATH 最前 |
 | T2.2 | 2 发布 | 干净 checkout `144555ca`，用 `scripts/build_release_artifacts.py` 构建 bundle，两次构建 hash 一致 | Hyphae | DONE | 2026-10-24：两次构建 `SHA256SUMS` 完全一致。darwin-arm64 CLI `545636015d027fa4614ad48361829ff5a5116683a5553f8e2d08fb65ae14261c`；linux-x64 CLI `d741fb9461a6b16d92d471eb103536295808e4dc22a3874b193e12937ee8b99b`；lock 文件 `007fbfbce8f78c98b9a55faa4f60ba1ec28a2835e1d3510905fdbfc8e51c9cf8`。产物在会话 scratchpad `rel/out-a` |
 | T2.3 | 2 发布 | `scripts/verify_artifact_bundle.py` 校验 bundle | Hyphae | DONE | 2026-10-24：`shasum -c SHA256SUMS` 八个文件全 OK；`hyphae.lock.json` 的 source_sha 和两平台 hash 与二进制一致；darwin 二进制可运行。`verify_artifact_bundle.py` 对 Agent24 现有生产 lock 报 `production-lock-sha256`：这是预期的，它拿新 bundle 对旧 lock，要等 T4 升级 lock 之后才会通过 |
-| T2.4 | 2 发布 | 打 tag `v0.26.3` 指向 `144555ca` 并推送 | Hyphae | TODO | |
-| T2.5 | 2 发布 | 创建 GitHub Release，上传 assets，写 release notes | Hyphae | TODO | |
+| T2.4 | 2 发布 | 打 tag `v0.26.3` 指向 `144555ca` 并推送 | Hyphae | DONE | 2026-10-24：轻量 tag（与 v0.26.2 一致），`git ls-remote` 确认指向 `144555ca6b04…` |
+| T2.5 | 2 发布 | 创建 GitHub Release，上传 assets，写 release notes | Hyphae | DONE | 2026-10-24：https://github.com/iDoris-ai/Hyphae/releases/tag/v0.26.3 ，非 draft，9 个 assets，digest 与 `SHA256SUMS` 一致；下载 `SHA256SUMS` 与本地逐字节相同，darwin CLI 和 lock 文件校验 OK |
 | T3.1 | 3 joint-ci | 手动触发 joint-ci candidate 模式对准 `v0.26.3` | Hyphae | TODO | |
 | T4.1 | 4 lock 升级 | 读 Agent24 LOCK-UPGRADE-20261005 先例，确定要改的文件 | Agent24 | TODO | |
 | T4.2 | 4 lock 升级 | 新分支改 `hyphae.lock.json`（`source_sha`、两平台 hash）和 `binary.rs` 断言 | Agent24 | TODO | Sonnet 写 |
