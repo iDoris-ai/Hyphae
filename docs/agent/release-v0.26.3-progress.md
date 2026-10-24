@@ -26,9 +26,9 @@
 | T2.4 | 2 发布 | 打 tag `v0.26.3` 指向 `144555ca` 并推送 | Hyphae | DONE | 2026-10-24：轻量 tag（与 v0.26.2 一致），`git ls-remote` 确认指向 `144555ca6b04…` |
 | T2.5 | 2 发布 | 创建 GitHub Release，上传 assets，写 release notes | Hyphae | DONE | 2026-10-24：https://github.com/iDoris-ai/Hyphae/releases/tag/v0.26.3 ，非 draft，9 个 assets，digest 与 `SHA256SUMS` 一致；下载 `SHA256SUMS` 与本地逐字节相同，darwin CLI 和 lock 文件校验 OK |
 | T3.1 | 3 joint-ci | 手动触发 joint-ci candidate 模式对准 `v0.26.3` | Hyphae | TODO | |
-| T4.1 | 4 lock 升级 | 读 Agent24 LOCK-UPGRADE-20261005 先例，确定要改的文件 | Agent24 | TODO | |
-| T4.2 | 4 lock 升级 | 新分支改 `hyphae.lock.json`（`source_sha`、两平台 hash）和 `binary.rs` 断言 | Agent24 | TODO | Sonnet 写 |
-| T4.3 | 4 lock 升级 | 本地 `cargo test -p agent24-comm` 和 lock verify | Agent24 | TODO | |
+| T4.1 | 4 lock 升级 | 读 Agent24 LOCK-UPGRADE-20261005 先例，确定要改的文件 | Agent24 | DONE | 2026-10-24：先例在 `docs/comm/LOCK-UPGRADE-20261005.md`（#676）。要改：`rust/crates/agent24-comm/hyphae.lock.json`、`src/binary.rs` 里 `embedded_lock_parses_and_resolves_baseline_platform` 断言、`docs/Deployment/HYPHAE-NETWORK-DELIVERY.md` 当前锁说明，另写一份升级记录。工作流不用改（从 lock 读值）。在独立 worktree `/Users/jason/Dev/auraai/Agent24-hyphae-lock-v0263` 做，不动用户在 Agent24 主目录的分支和未跟踪文件 |
+| T4.2 | 4 lock 升级 | 新分支改 `hyphae.lock.json`（`source_sha`、两平台 hash）和 `binary.rs` 断言 | Agent24 | DONE | 2026-10-24：分支 `jhfnetboy/hyphae-lock-v0.26.3-20261024`，基于 Agent24 origin/main `f16e65a9`；新增 `docs/comm/LOCK-UPGRADE-20261024.md`。6 行替换，没有改生产逻辑 |
+| T4.3 | 4 lock 升级 | 本地 `cargo test -p agent24-comm` 和 lock verify | Agent24 | DONE | 2026-10-24：`HYPHAE_TEST_BIN=<v0.26.3 darwin 二进制> cargo test -p agent24-comm` 全部 ok：单元 163 项；`real_binary`、`import_real_binary`、`keystore_write_lock`、`router_lifecycle` 等调用真二进制的用例通过；3 个 `#[ignore]` 联调用例（`joint_round1`、`send_history_e2e`、`daemon_joint`、`unlock_real_binary`）留到 T5。linux lock verify 由 CI 的 `hyphae-lock-verify` 在 PR 上跑 |
 | T4.4 | 4 lock 升级 | push、开 PR、等 CI 和 clestons 评审、合并 | Agent24 | TODO | |
 | T5.1 | 5 联调 | `joint_round1` | Agent24 | TODO | |
 | T5.2 | 5 联调 | `send_history_e2e` | Agent24 | TODO | |
