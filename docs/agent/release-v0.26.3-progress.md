@@ -34,8 +34,17 @@
 | T5.2 | 5 联调 | `send_history_e2e` | Agent24 | DONE | 2026-10-24：1 passed（3.02s），`send/pull/retry round trip against real binaries: all assertions passed`。环境：Agent24 origin/main `3a433bb0`（含 #1193），`HYPHAE_JOINT_BIN`=v0.26.3 darwin-arm64 CLI（sha256 `54563601…`，与新 lock 一致），`HYPHAE_JOINT_RELAY`=同 bundle 的 `hyphae-relay-darwin-arm64`，macOS arm64 本机。日志在会话 scratchpad `joint/` |
 | T5.3 | 5 联调 | `daemon_joint` | Agent24 | DONE | 2026-10-24：1 passed（32.76s）：daemon 启动 → running → 经 watch-interval 自动把 B 的消息拉进 A 的 history → 停止，全程走 Agent24 路由。另跑 `unlock_real_binary`（`HYPHAE_TEST_BIN`）1 passed（8.60s）。环境：Agent24 origin/main `3a433bb0`（含 #1193），`HYPHAE_JOINT_BIN`=v0.26.3 darwin-arm64 CLI（sha256 `54563601…`，与新 lock 一致），`HYPHAE_JOINT_RELAY`=同 bundle 的 `hyphae-relay-darwin-arm64`，macOS arm64 本机。日志在会话 scratchpad `joint/` |
 | T6.1 | 6 混合版本 | 旧 `671c584` 二进制与 `v0.26.3` 双向收发 | 两边 | DONE | 2026-10-24：A=旧 CLI（`671c584` 按 lock 配方重建，sha256 `d1171421…` 与旧 lock 一致，身份加密），B=v0.26.3 darwin CLI（`54563601…`），同一个 v0.26.3 relay，隔离 HOME。结果：旧→新、新→旧都 `published_to=1`，对端 history 各恰 1 条；各再拉取一次后仍是 1 条；新端 relay 断开时发送 `published_to=0, queued_for_retry=true`，relay 恢复后 `storage outbox retry` 返回 `sent=true`，同一 event id（`97eab33b…`），旧端 history 恰 1 条。脚本和输出在会话 scratchpad `mixed/run.sh`、`mixed/result.txt`。未覆盖：旧 relay 与新客户端的组合；群聊（旧版没有） |
-| T7.1 | 7 基线 | Agent24 合入后更新 `.github/joint-ci-baseline.json`，开 PR | Hyphae | DOING | 2026-10-24：PR [Hyphae #281](https://github.com/iDoris-ai/Hyphae/pull/281)，分支 `jhfnetboy/joint-baseline-v0.26.3-20261024`（worktree `agent-speaker-worktrees/joint-baseline-v0263`）。baseline 三个值改到 Agent24 `3a433bb0` / lock sha256 `78a58f5f…` / Hyphae `144555ca`；`scripts/test_joint_ci.py` fixture 原本写死旧 SHA，改为读 baseline（否则 6 项失败）；`joint-ci-acceptance.md` 的 pin 表同步。本机 `scripts` 119 项测试通过。待办：PR CI（尤其 joint-ci 首次在 Agent24 `3a433bb0` 上跑）和 clestons 批准精确 head |
+| T7.1 | 7 基线 | Agent24 合入后更新 `.github/joint-ci-baseline.json`，开 PR | Hyphae | DONE | 2026-10-24：[Hyphae #281](https://github.com/iDoris-ai/Hyphae/pull/281) 已合并，merge commit `58f378dcc4531eff20e8ef3bc93e0de13d475a85`。baseline 改到 Agent24 `3a433bb0` / lock sha256 `78a58f5f…` / Hyphae `144555ca`。PR head `92b6fde7` 的 CI run [40112860007](https://github.com/iDoris-ai/Hyphae/actions/runs/40112860007) 全部 11 项通过，含两个构建 job 和四个十阶段 runner（candidate / pinned-production × darwin-arm64 / linux-x64），这是新 baseline 第一次在 Agent24 `3a433bb0` 上真跑。clestons 批准精确 head，`--match-head-commit` 合并。过程中两个返工：Codex P2（文档把旧 10/10 说成验证了新 pin，已改措辞）；clestons Blocker（我 `git add -A` 误提交 18 个 `.pyc`，已取消跟踪并加 `.gitignore`）|
 
 ## 日志
 
 - 2026-10-24：建立文档。`v0.26.2` tag 在 `9c1b9f5a`，无 Release；Agent24 main `f16e65a9` 锁 Hyphae `671c584`。
+- 2026-10-24：T1–T7 全部完成。v0.26.3 已发布，Agent24 锁到 `144555ca`（#1193），三条联调和混合版本互通通过，Hyphae joint-ci baseline 已跟进（#281）。main 现在是 `58f378dc`。
+
+## 范围外 / 后续
+
+- Agent24 的 Rust / REST / UI 没有群聊接线；T22 消息 UI（发消息、看历史）也没做。这是下一阶段，不在本计划内。
+- 旧 relay 与新客户端的组合没测。
+- 上游 nostrlib 竞争修复 PR（NIP-34 事件 `e6561592…`）无回应，上游 10-22 版也没修；仍靠 `iDoris-ai/nostr` fork 的 `replace`。
+- #280 留下的 4 个 P2、`--drop-recipient` PTY 用例在当前 main 上重跑，见 `handoff-20261024.md`。
+- Agent24 worktree `/Users/jason/Dev/auraai/Agent24-hyphae-lock-v0263` 和 Hyphae worktree `agent-speaker-worktrees/joint-baseline-v0263` 可以删，本会话没清理。
