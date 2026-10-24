@@ -1,6 +1,6 @@
 # Agent24 × Hyphae joint CI acceptance
 
-Status: In [run 37627002418](https://github.com/iDoris-ai/Hyphae/actions/runs/37627002418), all four native candidate/pinned-production × darwin-arm64/linux-x64 consumers passed 10/10, and macOS cleanup stress passed. The run was not fully green: macOS ordinary Go tests hit a stdout/stderr ordering race in `TestDaemonJSONLCLIOutputModesAndGenerationRestart`, so `ci-ok` failed. A test-only two-event synchronization fix is being validated on a new head; until that head has fresh CI, do not claim the overall gate passed. CLI/relay acceptance does not imply desktop M1 acceptance.
+Status: The run results below were produced against the former pins (Agent24 `fc862cf3…`, Hyphae `671c584f…`). They do not validate the baseline in the table underneath (Agent24 `3a433bb0…`, Hyphae `144555ca…`), which is pending until the joint-ci run of the PR that moved it passes. In [run 37627002418](https://github.com/iDoris-ai/Hyphae/actions/runs/37627002418), all four native candidate/pinned-production × darwin-arm64/linux-x64 consumers passed 10/10, and macOS cleanup stress passed. The run was not fully green: macOS ordinary Go tests hit a stdout/stderr ordering race in `TestDaemonJSONLCLIOutputModesAndGenerationRestart`, so `ci-ok` failed. A test-only two-event synchronization fix is being validated on a new head; until that head has fresh CI, do not claim the overall gate passed. CLI/relay acceptance does not imply desktop M1 acceptance.
 
 ## Independent inputs
 
