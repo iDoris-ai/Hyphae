@@ -8,10 +8,17 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/iDoris-ai/hyphae/internal/audit"
+	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/urfave/cli/v3"
 )
+
+// errNotImplemented fails a stub command with a user error (exit 1), so the
+// caller can tell it from a successful no-op.
+func errNotImplemented(what string) error {
+	return common.NewExitError(common.ErrCodeUser, fmt.Errorf("%s is not implemented yet", what))
+}
 
 // GroupCmd manages group chat
 var GroupCmd = &cli.Command{
@@ -294,9 +301,7 @@ var GroupRemoveCmd = &cli.Command{
 		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
-		// Similar to add-member but removes
-		fmt.Println("⚠️  Remove member functionality - not yet implemented")
-		return nil
+		return errNotImplemented("group remove-member")
 	},
 }
 
@@ -378,9 +383,7 @@ var GroupDeleteCmd = &cli.Command{
 		},
 	},
 	Action: func(ctx context.Context, c *cli.Command) error {
-		// Implementation similar to leave but deletes group
-		fmt.Println("⚠️  Delete group functionality - not yet implemented")
-		return nil
+		return errNotImplemented("group delete")
 	},
 }
 
