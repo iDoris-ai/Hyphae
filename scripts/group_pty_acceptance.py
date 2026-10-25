@@ -407,19 +407,23 @@ def run_execution(args: argparse.Namespace, report: Report) -> None:
             else:
                 report.set("three_isolated_identities", "FAIL", "identity HOME isolation check failed")
 
-            # `group create` currently writes local membership and `group chat`
-            # is a placeholder. Calling either would make a false acceptance.
-            # Probe the actual user-facing help surface without invoking a state
-            # mutation; unimplemented behaviors remain explicit in the report.
-            help_result = subprocess.run([str(cli), "group", "--help"], stdin=subprocess.DEVNULL,
-                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                         env=isolated_env(homes[0], cache), timeout=15, check=False)
-            help_text = (help_result.stdout + help_result.stderr).decode("utf-8", "replace").lower()
-            if "coming soon" in help_text or "invite" not in help_text or "accept" not in help_text:
-                # This is a capability finding, not a hidden assertion failure.
-                reason = "public group invite/accept and encrypted TUI contract is absent"
+            # The legacy `group` command is a local roster whose `chat` is a
+            # placeholder; the encrypted lifecycle lives under `groupchat`.
+            # Probe both help surfaces without invoking a state mutation, so a
+            # missing capability is reported precisely instead of as a hidden
+            # assertion failure or a false pass.
+            def help_text_of(*args: str) -> str:
+                result = subprocess.run([str(cli), *args, "--help"], stdin=subprocess.DEVNULL,
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                        env=isolated_env(homes[0], cache), timeout=15, check=False)
+                return (result.stdout + result.stderr).decode("utf-8", "replace").lower()
+
+            lifecycle = help_text_of("groupchat")
+            if "invite" not in lifecycle or "accept" not in lifecycle or "send" not in lifecycle:
+                reason = "groupchat invite/accept/send commands are absent"
             else:
-                reason = "full end-to-end driver awaits a stable user-facing group command contract"
+                reason = ("groupchat CLI exists (covered by the Go e2e tests), but this runner has no "
+                          "group TUI to drive: group TUI and cross-device invite delivery are not implemented")
             for key, _ in CHECKS:
                 if report.statuses[key] == "NOT_IMPLEMENTED":
                     report.reasons[key] = reason

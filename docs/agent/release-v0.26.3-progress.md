@@ -35,16 +35,26 @@
 | T5.3 | 5 联调 | `daemon_joint` | Agent24 | DONE | 2026-10-24：1 passed（32.76s）：daemon 启动 → running → 经 watch-interval 自动把 B 的消息拉进 A 的 history → 停止，全程走 Agent24 路由。另跑 `unlock_real_binary`（`HYPHAE_TEST_BIN`）1 passed（8.60s）。环境：Agent24 origin/main `3a433bb0`（含 #1193），`HYPHAE_JOINT_BIN`=v0.26.3 darwin-arm64 CLI（sha256 `54563601…`，与新 lock 一致），`HYPHAE_JOINT_RELAY`=同 bundle 的 `hyphae-relay-darwin-arm64`，macOS arm64 本机。日志在会话 scratchpad `joint/` |
 | T6.1 | 6 混合版本 | 旧 `671c584` 二进制与 `v0.26.3` 双向收发 | 两边 | DONE | 2026-10-24：A=旧 CLI（`671c584` 按 lock 配方重建，sha256 `d1171421…` 与旧 lock 一致，身份加密），B=v0.26.3 darwin CLI（`54563601…`），同一个 v0.26.3 relay，隔离 HOME。结果：旧→新、新→旧都 `published_to=1`，对端 history 各恰 1 条；各再拉取一次后仍是 1 条；新端 relay 断开时发送 `published_to=0, queued_for_retry=true`，relay 恢复后 `storage outbox retry` 返回 `sent=true`，同一 event id（`97eab33b…`），旧端 history 恰 1 条。脚本和输出在会话 scratchpad `mixed/run.sh`、`mixed/result.txt`。未覆盖：旧 relay 与新客户端的组合；群聊（旧版没有） |
 | T7.1 | 7 基线 | Agent24 合入后更新 `.github/joint-ci-baseline.json`，开 PR | Hyphae | DONE | 2026-10-24：[Hyphae #281](https://github.com/iDoris-ai/Hyphae/pull/281) 已合并，merge commit `58f378dcc4531eff20e8ef3bc93e0de13d475a85`。baseline 改到 Agent24 `3a433bb0` / lock sha256 `78a58f5f…` / Hyphae `144555ca`。PR head `92b6fde7` 的 CI run [40112860007](https://github.com/iDoris-ai/Hyphae/actions/runs/40112860007) 全部 11 项通过，含两个构建 job 和四个十阶段 runner（candidate / pinned-production × darwin-arm64 / linux-x64），这是新 baseline 第一次在 Agent24 `3a433bb0` 上真跑。clestons 批准精确 head，`--match-head-commit` 合并。过程中两个返工：Codex P2（文档把旧 10/10 说成验证了新 pin，已改措辞）；clestons Blocker（我 `git add -A` 误提交 18 个 `.pyc`，已取消跟踪并加 `.gitignore`）|
+| T8.1 | 8 发布后加固 | 在发布提交上跑完整门禁：vet、gofmt、`go test ./... -race`、`-tags integration ./tests`、Python 工具测试 | Hyphae | DONE | 2026-10-25：`main` 在 `c456122e`（含 v0.26.3 源码 `144555ca`）全部通过；`./tests` 105s、Python 119 项。逐包语句覆盖率 0%～98%；合并 `-coverpkg` 后进程内总覆盖率 79.4%（子进程里跑的 CLI 包装函数不计入，真实值更高） |
+| T8.2 | 8 发布后加固 | 功能 × 测试矩阵：逐个子命令检查有没有 Go 级测试 | Hyphae | DONE | 2026-10-25：缺口是 `storage audit-log`、`storage migrate`、旧 `group` 的 `add-member/remove-member/delete`、`identity export`（只被 CI 不跑的 shell 脚本碰过）。`profile show/list/search/discover`、`tui chat/contacts` 仍只有脚本覆盖，未补 |
+| T8.3 | 8 发布后加固 | 补 `cmd/hyphae/cli_surface_test.go`（5 个用真实二进制的测试） | Hyphae | DONE | 2026-10-25：全部通过；把旧的桩行为放回后 `TestLegacyGroupRosterLifecycle` 变红，证明断言有效。测试同时钉住 `audit-log --verify` 在篡改后非 0 退出 |
+| T8.4 | 8 发布后加固 | 修缺陷：旧 `group remove-member`/`group delete` 是空桩，打印警告却退出码 0 | Hyphae | DONE | 2026-10-25：改为返回 `user_error`（退出码 1，stderr `… is not implemented yet`）。`group chat` 占位保持原样，因为 `internal/groupchat/lifecycle_cli_test.go` 与 `internal/tui/group_retry_test.go` 明确钉住它 |
+| T8.5 | 8 发布后加固 | 修陈旧的群聊 PTY 探针 | Hyphae | DONE | 2026-10-25：`scripts/group_pty_acceptance.py` 只看 `group --help`，会误报「邀请/接受不存在」。改为探测 `groupchat`，原因文案改为「CLI 已有，但无群聊 TUI、跨设备邀请投递未实现」。检查项仍是 NOT_IMPLEMENTED，没有伪造通过 |
+| T8.6 | 8 发布后加固 | 修 #282 合并后 Codex 的 P2：handoff 仍让人从 `144555ca` 开始 | Hyphae | DONE | 2026-10-25：`handoff-20261024.md` 区分「发布源码」与「当前 main」，以 `git fetch` 后的 `origin/main` 为准 |
+| T8.7 | 8 发布后加固 | 核实群聊真实边界并更正此前说法 | Hyphae | DONE | 2026-10-25：群聊只在「所有成员身份在同一 keystore」时成立（`accept` 要创建者私钥，`deliverActivations` 要被邀请人私钥；`PrepareControlFanout` 未被 CLI 调用）。此前「M1 含三人群聊完成」应读作「同机三身份群聊完成」。详见 `group-chat-agent24-interface-20261025.md` |
+| T8.8 | 8 发布后加固 | 清理临时资源 | Hyphae | DONE | 2026-10-25：删除两个已合并 worktree（Hyphae `joint-baseline-v0263`、Agent24 `Agent24-hyphae-lock-v0263`）及本地已合并分支；终止 10 个自 10-01 起空转的残留进程（`/bin/sh …/hyphae-<hash> daemon --relay wss://relay.example` 九个，脚本文件已删、PPID 1，其余一个 `ws://127.0.0.1:1`）和两个旧 sidecar/relay。保留 `/tmp/pr-daemon-check-fetch`（可复用的 pre-pr-check 副本）。`/private/tmp` 共 261 GB，大头是 130 个 `idoris-*` 构建目录（来自 iDoris/Agent24 仓库，不是本仓库产物），未动 |
+| T9.1 | 9 群聊契约 | 写 Agent24 接口契约与 Hyphae 交付计划 | Hyphae | DONE | 2026-10-25：`docs/agent/group-chat-agent24-interface-20261025.md`。命令 JSON 形状全部用真实二进制核对过，包括两处文档最初写错后更正的行为（部分失败时无逐人数据；`id` 即 `logical_id`）。H-G0～H-G7 是 Hyphae 要做的，Agent24 仅按契约接入 |
 
 ## 日志
 
 - 2026-10-24：建立文档。`v0.26.2` tag 在 `9c1b9f5a`，无 Release；Agent24 main `f16e65a9` 锁 Hyphae `671c584`。
 - 2026-10-24：T1–T7 全部完成。v0.26.3 已发布，Agent24 锁到 `144555ca`（#1193），三条联调和混合版本互通通过，Hyphae joint-ci baseline 已跟进（#281）。main 现在是 `58f378dc`。
+- 2026-10-25：T8 发布后加固与 T9.1 群聊契约。#282 已合并（`c456122e`），合并时 Codex 还有一条未处理的 P2，在 T8.6 修掉。
 
 ## 范围外 / 后续
 
-- Agent24 的 Rust / REST / UI 没有群聊接线；T22 消息 UI（发消息、看历史）也没做。这是下一阶段，不在本计划内。
+- Agent24 的 Rust / REST / UI 没有群聊接线；T22 消息 UI 也没做。契约已写（T9.1），但跨设备群聊要先有 Hyphae 的 H-G1/H-G2，Agent24 侧的界面由 Agent24 自己实现。
 - 旧 relay 与新客户端的组合没测。
 - 上游 nostrlib 竞争修复 PR（NIP-34 事件 `e6561592…`）无回应，上游 10-22 版也没修；仍靠 `iDoris-ai/nostr` fork 的 `replace`。
 - #280 留下的 4 个 P2、`--drop-recipient` PTY 用例在当前 main 上重跑，见 `handoff-20261024.md`。
-- Agent24 worktree `/Users/jason/Dev/auraai/Agent24-hyphae-lock-v0263` 和 Hyphae worktree `agent-speaker-worktrees/joint-baseline-v0263` 可以删，本会话没清理。
+- 两个临时 worktree 已在 T8.8 删除。
