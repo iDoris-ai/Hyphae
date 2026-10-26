@@ -1,6 +1,6 @@
 # 群聊接线与消息界面：Hyphae 提供的契约（给 Agent24）
 
-日期：2026-10-25。基线：Hyphae v0.26.3（`144555ca`）。本文是 Hyphae 一侧的设计与约定接口；**不修改 Agent24 代码**。Agent24 按本文自行实现界面，有出入时以 Hyphae 的实际二进制输出为准，并在 Hyphae 仓库提 issue。
+日期：2026-10-25，2026-10-26 更新为接线版本状态（H-G0…H-G6 已合并，见第 5 节）。基线：Hyphae v0.26.3（`144555ca`）；接线版本见 `docs/agent/release-*-progress.md`。本文是 Hyphae 一侧的设计与约定接口；**不修改 Agent24 代码**。Agent24 按本文自行实现界面，有出入时以 Hyphae 的实际二进制输出为准，并在 Hyphae 仓库提 issue。
 
 ## 1. 边界
 
@@ -20,12 +20,12 @@
 | 同一 keystore 内三身份：create → accept → 激活 → 发送 → 恰好一次历史 | 可用 | `tests/m1_group_invite_offline_partial_fanout_e2e_test.go`；`internal/groupchat/lifecycle_cli_test.go` |
 | 逐收件人 NIP-44 加密、签名、独立 event id | 可用 | `groupchat send`；契约见 `m1-group-fanout-contract-20261008.md` |
 | 单个收件人失败时部分成功、可单独重试 | 可用 | e2e 的 `HYPHAE_FAIL_GROUP_RECIPIENT` 场景；`groupchat retry/status` |
-| 跨设备建群：邀请经 relay 送到另一台机器上的身份 | **未接线** | `groupchat create` 把邀请「交给同机被邀请人」；`PrepareControlFanout` 只存在于库内，CLI 不调用 |
-| 跨设备接受与激活 | **未接线** | `accept` 需要创建者私钥在本地 keystore（`secretForNpub`），`deliverActivations` 要求被邀请人私钥也在本地 |
+| 跨设备建群：邀请经 relay 送到另一台机器上的身份 | 可用（接线版本） | `create` 对本机没有私钥的被邀请人排队发送；daemon 注册发布器发布群 outbox 行；`tests/m1_group_invite_remote_e2e_test.go`（三 HOME + 真 relay） |
+| 跨设备接受与激活 | 可用（接线版本） | `accept` 在创建者不在本机时排队发给创建者，返回 `pending`；创建者的 daemon 在最后一人接受后发出激活；同一 e2e 覆盖到消息送达与 `relay_accepted` |
 | 群聊 TUI | **未实现** | `hyphae group chat` 是占位输出；`hyphae tui` 只有单聊 |
-| 列出我所在的群 | **没有 CLI** | `Store.ListGroups` 存在，但没有对应的 `groupchat list` 命令 |
+| 列出我所在的群 | 可用 | `groupchat list`、`groupchat members` |
 
-结论：Agent24 现在就能做的是「单机多身份」的界面验证；真正的多设备群聊要等 Hyphae 先交付第 5 节的 H-G1/H-G2。
+结论：接线版本起，多设备群聊可用（每台设备只需自己的密钥，经 relay 与 daemon）；前提是该设备的 `hyphae daemon` 在运行，否则排队的群事件不会发出。群聊 TUI 仍未实现（H-G7，可选）。
 
 ## 3. 命令契约（当前二进制已有的部分）
 
@@ -34,12 +34,14 @@
 | 命令 | 成功 `data` | 说明 |
 | --- | --- | --- |
 | `groupchat create --name N --identity A --invitee <npub>…` | `{"group_id":"<32 hex>"}` | 邀请此时只落在本地库 |
-| `groupchat invite list --group G --identity A` | `{"invites":[{"invite_id","invitee_npub","group_id"}]}` | 创建者查看待接受邀请 |
-| `groupchat accept --invite I --identity B` | `{"group_id":"…"}` | **仅当群已激活（全员接受）时成功**；其他成员还没接受时退出码 4、`other_error` / `group is not active`。接受本身已记录：最后一位接受后群即激活，先接受的人无需重来（2026-10-25 实测）。`invite list` 没有状态字段，界面无法区分「已接受」和「未接受」（见 H-G2） |
-| `groupchat send --group-id G --body T [--logical-id L] [--max-retries N] --identity A` | 发送报告：`group_id, logical_id, created_at, state, accepted, queued, failed, recipients[]` | **部分失败时退出码 4、stdout 为空、stderr 只有一行 `{"ok":false,"error":"other_error","message":"logical <id>: partial fanout queued X failed Y"}`，不带逐人数据。** 调用方必须自己传 `--logical-id`，失败后用它调 `status` 取逐人结果 |
+| `groupchat invite list --group G --identity A` | `{"invites":[{"invite_id","invitee_npub","group_id","state"}]}` | 创建者查看待接受邀请 |
+| `groupchat accept --invite I --identity B` | `{"group_id":"…","state":"pending" \| "active"}` | 接受已记录即成功（退出码 0）。`pending` = 还在等其他成员或创建者的激活；`active` = 群已激活。创建者不在本机时，接受以加密事件排队发给创建者，需本机 daemon 运行 |
+| `groupchat send --group-id G --body T [--logical-id L] [--max-retries N] --identity A` | 发送报告：`group_id, logical_id, created_at, state, accepted, queued, failed, recipients[]` | **部分失败时退出码 4、stdout 为空、stderr 为 `{"ok":false,"error":"other_error","message":"logical <id>: partial fanout queued X failed Y","data":<与成功相同的发送报告>}`，`data` 含逐人结果。** 仍建议调用方自己传 `--logical-id`，便于之后 `status`/`retry` |
 | `groupchat status --group-id G --logical-id L --identity A` | 同上发送报告 | 只读 |
 | `groupchat retry --group-id G --logical-id L --recipient <npub> --identity A` | 同上发送报告 | 为失败的收件人换新 queue id 重发，沿用原 event |
-| `groupchat history --group-id G [--limit 20] --identity A` | `{"messages":[{"id","event_id","group_id","sender","content","plaintext","created_at","is_encrypted"}]}` | 只含本地已落库消息。`id` 就是发送时的 `logical_id`，可直接用于 `status`；发送者自己的行 `event_id` 为空、`content` 为空，显示用 `plaintext` |
+| `groupchat list --identity A` | `{"groups":[{"group_id","name","state","creator_npub","members":[npub],"updated_at"}]}` | 无群时为 `[]` |
+| `groupchat members --group-id G --identity A` | `{"members":[{"npub","state","is_creator"}]}` | 创建者在前 |
+| `groupchat history --group-id G [--limit 20] [--before-id ID \| --after-id ID] --identity A` | `{"messages":[{"id","event_id","group_id","sender","content","plaintext","created_at","is_encrypted"}]}` | 只含本地已落库消息，最旧在前。`--before-id`：比该消息更旧的最新 `limit` 条；`--after-id`：比该消息更新的最旧 `limit` 条（增量刷新）；同秒消息按 id 排序，不重不漏；未知游标或同时给两个 → 退出码 1。`id` 就是发送时的 `logical_id`，可直接用于 `status`；发送者自己的行 `event_id` 为空、`content` 为空，显示用 `plaintext` |
 
 `recipients[]` 每项：`recipient_npub, event_id, queue_id, state, relay_acks, relay_count, attempts, max_retries`，另有 `issue`、`retry_queue_id`、`attempt_phase` 等诊断字段；界面只依赖前五个，其余可忽略。
 
@@ -53,26 +55,24 @@
 - 重试复用原签名事件，不会产生重复消息；界面不得自己重新调用 `send` 来「重发」。
 - 消息正文来自网络，显示前必须清除终端/控制字符，并限制长度。
 
-## 5. 缺口与 Hyphae 的交付计划
+## 5. 交付状态
 
-按依赖排序。每项单独 PR（生产代码 ≤300 行），按现有流程评审合并。
-
-| 编号 | 内容 | 验收 |
+| 编号 | 内容 | 状态 |
 | --- | --- | --- |
-| H-G0 | 契约测试：把第 3 节每个命令的成功/错误 JSON 形状固定成 golden fixture，Agent24 可直接消费 | 字段增删会让测试失败；错误码与退出码有断言 |
-| H-G1 | 跨设备邀请投递：`create` 经 `PrepareControlFanout` 把邀请作为加密事件发到被邀请人，被邀请人的 daemon 收到后落库为待处理邀请 | 两个独立 HOME、一个本地 relay：B 的 HOME 里没有 A 的私钥也能看到邀请 |
-| H-G2 | 接受与激活：`accept` 只需本地私钥，接受以加密事件回到创建者；`accept` 在「已记录、等待他人」时返回成功并带 `state:"pending"`，不再用错误表示等待 | 三个独立 HOME 完成 create/accept/激活；未全员接受时 accept 退出码 0 且 `pending` |
-| H-G3 | `groupchat list`（我所在的群：id、名称、状态、成员 npub、创建者）和 `groupchat members` | JSON 形状进 H-G0 的 fixture |
-| H-G4 | `history` 支持 `--before <created_at>` 翻页；`send` 部分失败时在错误里带 `data`（逐人结果），不再让调用方靠 `status` 补查；`invite list` 增加状态字段 | 翻页不重不漏；部分失败的 JSON 错误含 `recipients[]` |
-| H-G5 | 收件刷新：Agent24 不必自己轮询 relay，daemon 收到群消息落库后，界面通过 `history` 取增量；约定 `--after <created_at>` | 重启后历史不重复（沿用现有恰好一次测试） |
-| H-G6 | 三个独立 HOME、真实 relay 的端到端测试，覆盖离线成员、重启、部分失败重试 | 作为后续发布的门禁 |
-| H-G7（可选） | Hyphae 自己的群聊 TUI | 沿用 `scripts/group_pty_acceptance.py` 的检查项 |
+| H-G0 | 命令 JSON 字段集固定成测试 | 已合并：`internal/groupchat/contract_json_test.go`（字段增删改名会失败） |
+| H-G1 | 跨设备邀请投递（含 daemon 发布器） | 已合并 #284 |
+| H-G2 | 跨设备 accept / 激活，`accept` 返回 `pending` | 已合并 #285 |
+| H-G3 | `groupchat list` / `members` | 已合并 #286 |
+| H-G4 | `history` 游标、部分失败带 `data`、邀请 `state` | 已合并 #287（游标是消息 id：`--before-id/--after-id`，而不是原设想的时间戳，时间戳在同秒时做不到不重不漏） |
+| H-G5 | 增量刷新 | 已由 `--after-id` 提供 |
+| H-G6 | 三个独立 HOME + 真 relay 的端到端 | 已合并：`TestGroupAcrossThreeHomesThroughRelay`（建群→邀请→接受→激活→消息→`relay_accepted`）。离线成员 / 重启 / 部分失败重试仍由同机的 `TestM1GroupInviteOfflinePartialFanoutExactlyOnce` 覆盖，尚未在跨 HOME 版本里重做 |
+| H-G7（可选） | Hyphae 群聊 TUI | 未做 |
 
-H-G1 到 H-G2 是协议与状态机工作，风险最大；设计依据是 `m1-group-chat-design-20261007.md` 与 `m1-group-fanout-contract-20261008.md`（固定 roster、显式接受、创建者权威、不引入共享群密钥）。动态成员、密钥轮换、远端撤权不在范围内。
+已知缺口：创建者 daemon 在记下最后一个 accept 与排队激活之间崩溃时，群停在 `activating`，要等同一 accept 事件重放才会修复，没有定期修复；TUI 进程不注册发布器，只有 `hyphae daemon` 发布群事件。设计依据仍是 `m1-group-chat-design-20261007.md` 与 `m1-group-fanout-contract-20261008.md`。
 
 ## 6. 给 Agent24 的界面建议（可自行取舍）
 
-1. 群聊列表依赖 H-G3，在此之前只能展示「当前会话已知的群」。
+1. 群聊列表用 `groupchat list`；邀请页用 `invite list`（按群）。
 2. 消息流：用 `history` 拉取，按 `created_at` 排序；自己发的消息旁显示逐人状态，数据来自 `status --logical-id <该消息的 id>`。
 3. 发送：先生成 `logical_id` 再调用 `send`；成功就渲染返回的逐人 `state`，退出码 4 且信息含 `partial fanout` 时改调 `status` 渲染；`failed` 的收件人给「重试」按钮，对应 `retry`。
 4. 邀请确认页：展示群名、创建者 npub 指纹、成员列表，用户明确点击后才调用 `accept`；不要自动接受。
@@ -80,4 +80,4 @@ H-G1 到 H-G2 是协议与状态机工作，风险最大；设计依据是 `m1-g
 
 ## 7. 验收与证据
 
-本文的事实部分对应：`go test ./...`、`-tags integration ./tests`、`internal/groupchat/lifecycle_cli_test.go` 与 e2e。第 5 节所有条目在对应 PR 合入、门禁通过之前都**不能**当作已完成能力对外声明。
+本文的事实部分对应：`go test ./...`、`-tags integration ./tests`、`internal/groupchat/lifecycle_cli_test.go` 与 e2e。第 5 节表中「已合并」的条目对应发布门禁中的测试；未列为已合并的（H-G7、跨 HOME 的离线/重启重做）不能对外声明为已完成。
