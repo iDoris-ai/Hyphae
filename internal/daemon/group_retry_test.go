@@ -134,13 +134,28 @@ func TestDaemonGroupRetryUsesProvider(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		useDaemonGroupProviders(t)
 		path, before := saveGroupOutbox(t, groupOutboxEntry("evt-live", messaging.OutboxStatusGroupPending, 10, 0, 3))
+		// the retry step on its own, with nothing registered
+		outbox, err := messaging.LoadOutbox()
+		require.NoError(t, err)
 		out := captureStdout(t, func() {
-			processOutbox(t.Context(), &types.Identity{Nickname: "alice"}, nil)
+			retryDaemonGroupOutbox(t.Context(), daemonLoggerForContext(t.Context()), outbox, time.Now().Unix())
 		})
 		after, err := os.ReadFile(path)
 		require.NoError(t, err)
 		require.Equal(t, string(before), string(after))
 		require.Contains(t, out, "group provider group: not_registered")
+	})
+
+	t.Run("daemon pass registers the production publisher", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		useDaemonGroupProviders(t)
+		saveGroupOutbox(t, groupOutboxEntry("evt-live", messaging.OutboxStatusGroupPending, 10, 0, 3))
+		captureStdout(t, func() {
+			processOutbox(t.Context(), &types.Identity{Nickname: "alice"}, nil)
+		})
+		provider, err := daemonGroupProviders.Lookup(daemonGroupProviderName)
+		require.NoError(t, err)
+		require.IsType(t, groupPublisher{}, provider)
 	})
 
 	t.Run("expired token", func(t *testing.T) {
@@ -196,7 +211,9 @@ func TestDaemonGroupRetryUsesProvider(t *testing.T) {
 		done := make(chan stdoutResult, 1)
 		go func() {
 			out, err := readStdout(func() {
-				processOutbox(context.Background(), &types.Identity{Nickname: "alice"}, nil)
+				outbox, loadErr := messaging.LoadOutbox()
+				require.NoError(t, loadErr)
+				retryDaemonGroupOutbox(context.Background(), daemonLoggerForContext(context.Background()), outbox, time.Now().Unix())
 			})
 			done <- stdoutResult{out: out, err: err}
 		}()

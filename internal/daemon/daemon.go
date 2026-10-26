@@ -41,7 +41,7 @@ const (
 const daemonGroupRetryDecision groupchat.ReconcileDecision = "retry"
 
 // daemonGroupProviders is the registry processOutbox consults for group rows.
-// Tests replace the pointer. Production starts empty.
+// Tests replace the pointer. Production gets groupPublisher on the first outbox pass.
 var daemonGroupProviders = groupchat.NewGroupProviderRegistry()
 
 // seenSet is a bounded set of recently-seen event IDs with FIFO eviction.
@@ -274,6 +274,7 @@ func processOutboxWithLogger(ctx context.Context, myIdentity *types.Identity, re
 		return
 	}
 
+	ensureGroupPublisher(ctx, relays)
 	retryDaemonGroupOutbox(ctx, logger, outbox, time.Now().Unix())
 
 	pending := messaging.GetPendingOutbox(outbox)
