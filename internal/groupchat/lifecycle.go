@@ -3,6 +3,7 @@ package groupchat
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 
 	"fiatjaf.com/nostr"
@@ -13,6 +14,9 @@ import (
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/urfave/cli/v3"
 )
+
+// controlFanoutRetries is the retry budget stored with each queued invite.
+const controlFanoutRetries = 10
 
 type groupIDView struct {
 	GroupID string `json:"group_id"`
@@ -112,6 +116,11 @@ func createGroupCommand(c *cli.Command) (groupIDView, error) {
 			return groupIDView{}, err
 		}
 		if !found {
+			// The invitee lives on another device: queue the signed invite for
+			// the outbox so the daemon delivers it through the relay.
+			if _, err := session.store.PrepareControlFanout(session.sk, invitation, 0, controlFanoutRetries); err != nil {
+				return groupIDView{}, fmt.Errorf("queue invite for %s: %w", invitation.InviteeNpub, err)
+			}
 			continue
 		}
 		verified, _, err := verifyDelivery(session.sk, recipientSK, invitation)

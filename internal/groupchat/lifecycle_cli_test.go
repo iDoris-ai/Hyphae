@@ -40,13 +40,22 @@ func TestGroupLifecycleCLI(t *testing.T) {
 	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_groups WHERE local_npub = ?`, remote) != 0 {
 		t.Fatal("non-local invitee gained a group row")
 	}
+	// the invitee is on another device: its invite is queued for the relay,
+	// and only that one (co-located invitees below are handed over locally).
+	const queuedInvites = 1
+	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_fanout WHERE envelope_type = 'invite' AND recipient_npub = ? AND state = 'queued'`, remote) != queuedInvites {
+		t.Fatal("remote invite was not queued for delivery")
+	}
+	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_fanout`) != queuedInvites {
+		t.Fatal("create queued more than the remote invite")
+	}
 
 	created := mustCLI(t, bin, home, "groupchat", "create", "--name", "planning", "--identity", "alice", "--invitee", bob.Npub)
 	groupID := oneLine(t, created)
 	if queryState(t, home, bob.Npub, groupID) != "pending" || queryState(t, home, alice.Npub, groupID) != "pending" {
 		t.Fatalf("create left an active group alice=%s bob=%s", queryState(t, home, alice.Npub, groupID), queryState(t, home, bob.Npub, groupID))
 	}
-	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_fanout`) != 0 {
+	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_fanout`) != queuedInvites {
 		t.Fatal("create wrote fanout")
 	}
 	invites := listInvites(t, bin, home, "alice", groupID)
@@ -64,7 +73,7 @@ func TestGroupLifecycleCLI(t *testing.T) {
 	if members != 2 || inviteRows != 1 {
 		t.Fatalf("membership members=%d invites=%d", members, inviteRows)
 	}
-	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_fanout`) != 0 || queryInt(t, home, `SELECT COUNT(*) FROM messages`) != 0 {
+	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_fanout`) != queuedInvites || queryInt(t, home, `SELECT COUNT(*) FROM messages`) != 0 {
 		t.Fatal("accept wrote fanout or a DM row")
 	}
 	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_invites WHERE local_npub = ? AND group_id = ? AND activation_event_id != ''`, alice.Npub, groupID) != 0 {
@@ -81,7 +90,7 @@ func TestGroupLifecycleCLI(t *testing.T) {
 	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_invites WHERE local_npub = ? AND group_id = ?`, bob.Npub, groupID) != inviteRows {
 		t.Fatal("repeat added an invite")
 	}
-	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_fanout`) != 0 {
+	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_fanout`) != queuedInvites {
 		t.Fatal("repeat wrote fanout")
 	}
 	wrongOut, wrongErr, wrongCode := runCLI(t, bin, home, "groupchat", "accept", "--identity", "alice", "--invite", inviteID)
@@ -229,7 +238,7 @@ func TestGroupLifecycleCLI(t *testing.T) {
 	if queryState(t, home, bob.Npub, goneID) == "active" {
 		t.Fatal("absent creator key still activated bob")
 	}
-	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_fanout`) != 0 {
+	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_fanout`) != queuedInvites {
 		t.Fatal("lifecycle wrote fanout")
 	}
 }
