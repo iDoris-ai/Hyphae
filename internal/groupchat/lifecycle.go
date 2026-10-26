@@ -33,6 +33,7 @@ type inviteListEntry struct {
 	InviteID    string `json:"invite_id"`
 	InviteeNpub string `json:"invitee_npub"`
 	GroupID     string `json:"group_id"`
+	State       string `json:"state"`
 }
 
 type cliSession struct {
@@ -145,7 +146,7 @@ func (s *Store) listInvites(localNpub, groupID string) ([]inviteListEntry, error
 	if _, err := s.GetGroup(localNpub, groupID); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(`SELECT invite_id, invitee_npub, group_id FROM groupchat_invites WHERE local_npub = ? AND group_id = ? ORDER BY invitee_npub, invite_id`, localNpub, groupID)
+	rows, err := s.db.Query(`SELECT invite_id, invitee_npub, group_id, state FROM groupchat_invites WHERE local_npub = ? AND group_id = ? ORDER BY invitee_npub, invite_id`, localNpub, groupID)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +154,7 @@ func (s *Store) listInvites(localNpub, groupID string) ([]inviteListEntry, error
 	entries := []inviteListEntry{}
 	for rows.Next() {
 		var entry inviteListEntry
-		if err := rows.Scan(&entry.InviteID, &entry.InviteeNpub, &entry.GroupID); err != nil {
+		if err := rows.Scan(&entry.InviteID, &entry.InviteeNpub, &entry.GroupID, &entry.State); err != nil {
 			return nil, err
 		}
 		entries = append(entries, entry)

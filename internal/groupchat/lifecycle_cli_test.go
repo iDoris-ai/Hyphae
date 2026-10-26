@@ -37,6 +37,9 @@ func TestGroupLifecycleCLI(t *testing.T) {
 	if !hasInvitee(remoteList, remote) {
 		t.Fatalf("remote invite list = %#v", remoteList)
 	}
+	if remoteList[0].State != "pending" {
+		t.Fatalf("a fresh invite must report state pending, got %q", remoteList[0].State)
+	}
 	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_groups WHERE local_npub = ?`, remote) != 0 {
 		t.Fatal("non-local invitee gained a group row")
 	}
@@ -336,6 +339,7 @@ type inviteDTO struct {
 	InviteID    string `json:"invite_id"`
 	InviteeNpub string `json:"invitee_npub"`
 	GroupID     string `json:"group_id"`
+	State       string `json:"state"`
 }
 
 func listInvites(t *testing.T, bin, home, nickname, groupID string) []inviteDTO {

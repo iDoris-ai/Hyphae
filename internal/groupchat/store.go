@@ -93,14 +93,16 @@ const (
 )
 
 var (
-	ErrGroupNotFound     = errors.New("group not found")
-	ErrInviteNotFound    = errors.New("group invitation not found")
-	ErrGroupNotActive    = errors.New("group is not active")
-	ErrGroupLeft         = errors.New("group was left locally")
-	ErrIdentityMismatch  = errors.New("current identity does not match group invitation")
-	ErrProtocolMismatch  = errors.New("group protocol identity or roster mismatch")
-	ErrInvalidTransition = errors.New("invalid group state transition")
-	ErrLogicalIDConflict = errors.New("group logical message ID conflict")
+	ErrGroupNotFound      = errors.New("group not found")
+	ErrInviteNotFound     = errors.New("group invitation not found")
+	ErrGroupNotActive     = errors.New("group is not active")
+	ErrGroupLeft          = errors.New("group was left locally")
+	ErrCursorNotFound     = errors.New("history cursor is not a message of this group")
+	ErrConflictingCursors = errors.New("use only one of --before-id and --after-id")
+	ErrIdentityMismatch   = errors.New("current identity does not match group invitation")
+	ErrProtocolMismatch   = errors.New("group protocol identity or roster mismatch")
+	ErrInvalidTransition  = errors.New("invalid group state transition")
+	ErrLogicalIDConflict  = errors.New("group logical message ID conflict")
 )
 
 // Store owns only the groupchat_* tables. It may share SQLite with existing

@@ -43,6 +43,15 @@ func TestGroupSendRetryStatusCLI(t *testing.T) {
 	if len(history) != 1 || history[0].Plaintext != "hello group" {
 		t.Fatalf("history %#v", history)
 	}
+	for _, flag := range []string{"--before-id", "--after-id"} {
+		edge := mustCLI(t, bin, home, "groupchat", "history", "--json", "--group-id", groupID, "--identity", "alice", flag, history[0].ID)
+		if !strings.Contains(edge, `"messages":null`) && !strings.Contains(edge, `"messages":[]`) {
+			t.Fatalf("history %s the only message must be empty, got %s", flag, edge)
+		}
+	}
+	if _, badErr, badCode := runCLI(t, bin, home, "groupchat", "history", "--json", "--group-id", groupID, "--identity", "alice", "--before-id", "nope"); badCode != 1 || !strings.Contains(badErr, "user_error") {
+		t.Fatalf("unknown cursor code %d stderr %s", badCode, badErr)
+	}
 	if queryInt(t, home, `SELECT COUNT(*) FROM messages`) != 0 {
 		t.Fatal("history wrote a DM row")
 	}
@@ -66,6 +75,19 @@ func TestGroupSendRetryStatusCLI(t *testing.T) {
 		"groupchat", "send", "--group-id", groupID, "--logical-id", failedLogical, "--body", "half", "--identity", "alice", "--max-retries", "1")
 	if code == 0 || !strings.Contains(stderr, "partial fanout queued 1 failed 1") {
 		t.Fatalf("partial send code %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	// the JSON error carries the per-recipient outcome so a caller need not call status
+	jsonLogical := opaqueID(t)
+	_, jsonErr, jsonCode := runCLIEnv(t, bin, home, []string{"HYPHAE_FAIL_GROUP_RECIPIENT=" + bob.Npub},
+		"--json", "groupchat", "send", "--group-id", groupID, "--logical-id", jsonLogical, "--body", "half json", "--identity", "alice", "--max-retries", "1")
+	var failure struct {
+		OK    bool       `json:"ok"`
+		Error string     `json:"error"`
+		Data  sendReport `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(jsonErr), &failure); err != nil || jsonCode != 4 || failure.OK || failure.Error != "other_error" ||
+		failure.Data.LogicalID != jsonLogical || failure.Data.Queued != 1 || failure.Data.Failed != 1 || len(failure.Data.Recipients) != 2 {
+		t.Fatalf("partial send JSON error code %d err %v\n%s", jsonCode, err, jsonErr)
 	}
 	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_fanout WHERE send_key=? AND state='failed'`, failedLogical) != 1 ||
 		queryInt(t, home, `SELECT COUNT(*) FROM groupchat_fanout WHERE send_key=? AND state='queued'`, failedLogical) != 1 {
@@ -180,6 +202,7 @@ type retryReport struct {
 }
 
 type historyMessage struct {
+	ID        string `json:"id"`
 	Plaintext string `json:"plaintext"`
 }
 
