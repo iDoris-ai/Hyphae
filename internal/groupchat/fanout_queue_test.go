@@ -139,10 +139,10 @@ func TestEnqueuePrepared(t *testing.T) {
 		require.Equal(t, report, report2)
 	})
 
-	t.Run("message_only_extension_guard", func(t *testing.T) {
+	t.Run("unsupported_type_extension_guard", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		member := newMemberWithSecret(t, fixedQueueTestSecret(14))
-		key := FanoutKey{LocalNpub: member.npub, GroupID: mustOpaque(t), EnvelopeType: EnvelopeType("activate"), SendKey: mustOpaque(t)}
+		key := FanoutKey{LocalNpub: member.npub, GroupID: mustOpaque(t), EnvelopeType: EnvelopeType("decline"), SendKey: mustOpaque(t)}
 		eID, eJSON, recipient := signedGroupEvent(t, member.sk, fixedQueueTestSecret(6), key)
 		insertTestFanout(t, member, key, recipient, RecipientPrepared, eID, eJSON, "", 0)
 

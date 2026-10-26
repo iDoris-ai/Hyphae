@@ -157,7 +157,7 @@ var inviteCmd = &cli.Command{
 
 var acceptCmd = &cli.Command{
 	Name:  "accept",
-	Usage: "Accept an invitation and print the group id when it is active",
+	Usage: "Accept an invitation; state is pending until every member has accepted",
 	Flags: append([]cli.Flag{
 		&cli.StringFlag{Name: "invite", Required: true, Usage: "Invitation id"},
 	}, localIdentityFlags()...),
@@ -166,6 +166,13 @@ var acceptCmd = &cli.Command{
 		if err != nil {
 			return err
 		}
-		return emitGroupID(c, view)
+		common.Emit(common.JSONMode(c), view, func() {
+			if view.State == string(StateActive) {
+				fmt.Println(view.GroupID)
+				return
+			}
+			fmt.Println(view.GroupID, view.State)
+		})
+		return nil
 	},
 }

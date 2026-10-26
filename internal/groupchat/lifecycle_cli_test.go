@@ -42,7 +42,7 @@ func TestGroupLifecycleCLI(t *testing.T) {
 	}
 	// the invitee is on another device: its invite is queued for the relay,
 	// and only that one (co-located invitees below are handed over locally).
-	const queuedInvites = 1
+	queuedInvites := 1
 	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_fanout WHERE envelope_type = 'invite' AND recipient_npub = ? AND state = 'queued'`, remote) != queuedInvites {
 		t.Fatal("remote invite was not queued for delivery")
 	}
@@ -104,9 +104,9 @@ func TestGroupLifecycleCLI(t *testing.T) {
 	partial := mustCLI(t, bin, home, "groupchat", "create", "--name", "partial", "--identity", "alice", "--invitee", bob.Npub, "--invitee", carol.Npub)
 	partialID := oneLine(t, partial)
 	partialInvite := inviteFor(t, listInvites(t, bin, home, "alice", partialID), bob.Npub, partialID)
-	stdout, stderr, code := runCLI(t, bin, home, "groupchat", "accept", "--identity", "bob", "--invite", partialInvite)
-	if code == 0 || strings.TrimSpace(stdout) == partialID || !strings.Contains(stderr, "group is not active") {
-		t.Fatalf("partial accept code %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	stdout, stderr, code := runCLI(t, bin, home, "--json", "groupchat", "accept", "--identity", "bob", "--invite", partialInvite)
+	if code != 0 || !strings.Contains(stdout, `"state":"pending"`) || !strings.Contains(stdout, partialID) {
+		t.Fatalf("partial accept must succeed as pending, code %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
 	}
 	if queryState(t, home, bob.Npub, partialID) == "active" {
 		t.Fatal("partial accept activated bob")
@@ -133,7 +133,7 @@ func TestGroupLifecycleCLI(t *testing.T) {
 	lowInvite := inviteFor(t, trioInvites, low.Npub, trioID)
 	highInvite := inviteFor(t, trioInvites, high.Npub, trioID)
 	stdout, stderr, code = runCLI(t, bin, home, "groupchat", "accept", "--identity", highNick, "--invite", highInvite)
-	if code == 0 || !strings.Contains(stderr, "group is not active") {
+	if code != 0 || !strings.Contains(stdout, "pending") {
 		t.Fatalf("trio first accept code %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
 	}
 	stdout, stderr, code = runCLIEnv(t, bin, home, []string{"HYPHAE_HALT_BEFORE_ACTIVATION_RECEIVE=" + lowInvite}, "groupchat", "accept", "--identity", lowNick, "--invite", lowInvite)
@@ -155,7 +155,7 @@ func TestGroupLifecycleCLI(t *testing.T) {
 	peerLow := inviteFor(t, peerInvites, low.Npub, peerID)
 	peerHigh := inviteFor(t, peerInvites, high.Npub, peerID)
 	stdout, stderr, code = runCLI(t, bin, home, "groupchat", "accept", "--identity", highNick, "--invite", peerHigh)
-	if code == 0 || !strings.Contains(stderr, "group is not active") {
+	if code != 0 || !strings.Contains(stdout, "pending") {
 		t.Fatalf("peer first accept code %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
 	}
 	stdout, stderr, code = runCLIEnv(t, bin, home, []string{"HYPHAE_HALT_BEFORE_ACTIVATION_RECEIVE=" + peerHigh}, "groupchat", "accept", "--identity", lowNick, "--invite", peerLow)
@@ -171,7 +171,7 @@ func TestGroupLifecycleCLI(t *testing.T) {
 	otherLow := inviteFor(t, otherInvites, low.Npub, otherID)
 	otherHigh := inviteFor(t, otherInvites, high.Npub, otherID)
 	stdout, stderr, code = runCLI(t, bin, home, "groupchat", "accept", "--identity", lowNick, "--invite", otherLow)
-	if code == 0 || !strings.Contains(stderr, "group is not active") {
+	if code != 0 || !strings.Contains(stdout, "pending") {
 		t.Fatalf("other first accept code %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
 	}
 	stdout, stderr, code = runCLIEnv(t, bin, home, []string{"HYPHAE_HALT_BEFORE_ACTIVATION_RECEIVE=" + otherLow}, "groupchat", "accept", "--identity", highNick, "--invite", otherHigh)
@@ -194,7 +194,7 @@ func TestGroupLifecycleCLI(t *testing.T) {
 	n2Invite := inviteFor(t, quadInvites, n2.npub, quadID)
 	for _, member := range []struct{ nick, invite string }{{n3.nick, inviteFor(t, quadInvites, n3.npub, quadID)}, {n2.nick, n2Invite}} {
 		stdout, stderr, code = runCLI(t, bin, home, "groupchat", "accept", "--identity", member.nick, "--invite", member.invite)
-		if code == 0 || !strings.Contains(stderr, "group is not active") {
+		if code != 0 || !strings.Contains(stdout, "pending") {
 			t.Fatalf("quad partial %s code %d\nstdout: %s\nstderr: %s", member.nick, code, stdout, stderr)
 		}
 	}
@@ -209,20 +209,23 @@ func TestGroupLifecycleCLI(t *testing.T) {
 	heldID := oneLine(t, mustCLI(t, bin, home, "groupchat", "create", "--name", "held", "--identity", "alice", "--invitee", bob.Npub, "--invitee", carol.Npub))
 	heldInvites := listInvites(t, bin, home, "alice", heldID)
 	stdout, stderr, code = runCLI(t, bin, home, "groupchat", "accept", "--identity", highNick, "--invite", inviteFor(t, heldInvites, high.Npub, heldID))
-	if code == 0 || !strings.Contains(stderr, "group is not active") {
+	if code != 0 || !strings.Contains(stdout, "pending") {
 		t.Fatalf("held first accept code %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
 	}
 	dropIdentity(t, home, highNick)
 	stdout, stderr, code = runCLI(t, bin, home, "groupchat", "accept", "--identity", lowNick, "--invite", inviteFor(t, heldInvites, low.Npub, heldID))
-	if code == 0 || !strings.Contains(stderr, "invitee key is absent from the local keystore") {
-		t.Fatalf("absent invitee code %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	// the dropped member is now treated as living on another device: low
+	// activates in-process, high's activation is queued for the relay.
+	if code != 0 || strings.TrimSpace(stdout) != heldID {
+		t.Fatalf("held completing accept code %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
 	}
-	if queryState(t, home, low.Npub, heldID) == "active" {
-		t.Fatal("absent invitee key activated the completing member")
+	if queryState(t, home, low.Npub, heldID) != "active" || queryState(t, home, alice.Npub, heldID) != "active" {
+		t.Fatal("completing accept left the group inactive")
 	}
-	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_invites WHERE local_npub = ? AND group_id = ? AND state = 'active'`, alice.Npub, heldID) != 0 {
-		t.Fatal("absent invitee key marked a creator invite active")
+	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_fanout WHERE envelope_type = 'activate' AND recipient_npub = ? AND state = 'queued'`, high.Npub) != 1 {
+		t.Fatal("remote member's activation was not queued")
 	}
+	queuedInvites++
 	if highNick == "bob" {
 		bob = createIdentity(t, bin, home, "bob")
 	}
@@ -232,14 +235,19 @@ func TestGroupLifecycleCLI(t *testing.T) {
 	goneInvite := inviteFor(t, listInvites(t, bin, home, "alice", goneID), bob.Npub, goneID)
 	dropIdentity(t, home, "alice")
 	stdout, stderr, code = runCLI(t, bin, home, "groupchat", "accept", "--identity", "bob", "--invite", goneInvite)
-	if code == 0 || strings.TrimSpace(stdout) == goneID || !strings.Contains(stderr, "creator key is absent from the local keystore") {
+	// the creator is treated as living on another device: the acceptance is
+	// queued for the relay and bob waits for the activation.
+	if code != 0 || !strings.Contains(stdout, "pending") {
 		t.Fatalf("absent creator code %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
 	}
 	if queryState(t, home, bob.Npub, goneID) == "active" {
-		t.Fatal("absent creator key still activated bob")
+		t.Fatal("bob activated without the creator's activation")
 	}
-	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_fanout`) != queuedInvites {
-		t.Fatal("lifecycle wrote fanout")
+	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_fanout WHERE envelope_type = 'accept' AND state = 'queued'`) != 1 {
+		t.Fatal("acceptance was not queued for the creator")
+	}
+	if queryInt(t, home, `SELECT COUNT(*) FROM groupchat_fanout`) != queuedInvites+1 {
+		t.Fatal("lifecycle wrote unexpected fanout")
 	}
 }
 
