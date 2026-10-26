@@ -55,6 +55,18 @@ func (s *Store) StoreLocalMessage(localNpub, groupID, logicalID, body string, cr
 // group is not displayable through the core API; its retained database rows
 // remain available for explicit future export tooling.
 func (s *Store) GroupMessages(localNpub, groupID string, limit int) ([]types.GroupMessage, error) {
+	return s.GroupMessagesPage(localNpub, groupID, limit, "", "")
+}
+
+// GroupMessagesPage is GroupMessages with a cursor. beforeID returns the
+// newest limit messages strictly older than that message; afterID returns the
+// oldest limit messages strictly newer than it. Ties on created_at are broken
+// by id, so pages neither repeat nor skip a message. Both are empty for the
+// newest limit messages. Results are oldest first.
+func (s *Store) GroupMessagesPage(localNpub, groupID string, limit int, beforeID, afterID string) ([]types.GroupMessage, error) {
+	if beforeID != "" && afterID != "" {
+		return nil, ErrConflictingCursors
+	}
 	localNpub, err := canonicalNpub(localNpub)
 	if err != nil {
 		return nil, err
@@ -72,9 +84,27 @@ func (s *Store) GroupMessages(localNpub, groupID string, limit int) ([]types.Gro
 	if limit <= 0 {
 		limit = 100
 	}
+	cond, order, args := "", "DESC", []any{localNpub, groupID}
+	if cursor := beforeID + afterID; cursor != "" {
+		var at int64
+		err := s.db.QueryRow(`SELECT created_at FROM groupchat_messages WHERE local_npub = ? AND group_id = ? AND logical_id = ?`,
+			localNpub, groupID, cursor).Scan(&at)
+		if err == sql.ErrNoRows {
+			return nil, ErrCursorNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		op := "<"
+		if afterID != "" {
+			op, order = ">", "ASC"
+		}
+		cond = " AND (created_at, logical_id) " + op + " (?, ?)"
+		args = append(args, at, cursor)
+	}
 	rows, err := s.db.Query(`SELECT logical_id, COALESCE(event_id, ''), group_id, sender_npub, body, created_at
-		FROM groupchat_messages WHERE local_npub = ? AND group_id = ?
-		ORDER BY created_at DESC, logical_id DESC LIMIT ?`, localNpub, groupID, limit)
+		FROM groupchat_messages WHERE local_npub = ? AND group_id = ?`+cond+`
+		ORDER BY created_at `+order+`, logical_id `+order+` LIMIT ?`, append(args, limit)...)
 	if err != nil {
 		return nil, err
 	}
@@ -92,9 +122,6 @@ func (s *Store) GroupMessages(localNpub, groupID string, limit int) ([]types.Gro
 		return nil, err
 	}
 	sortGroupMessages(messages)
-	if len(messages) > limit {
-		messages = messages[len(messages)-limit:]
-	}
 	return messages, nil
 }
 

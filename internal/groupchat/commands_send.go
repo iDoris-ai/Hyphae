@@ -2,6 +2,7 @@ package groupchat
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -58,7 +59,8 @@ func enqueueThroughProvider(store *Store, sk nostr.SecretKey, groupID, logicalID
 	now := time.Now().Unix()
 	ran, err := registry.Dispatch(cliSendProviderName, GroupSendToken{ID: logicalID, ExpiresAt: now + 60}, now, ReconcileDecision("enqueue"))
 	if err != nil {
-		return FanoutReport{}, err
+		// on a partial fanout the report still says who was queued and who failed
+		return provider.report, err
 	}
 	if !ran {
 		return FanoutReport{}, fmt.Errorf("group send provider did not run")
@@ -188,6 +190,8 @@ var historyCmd = &cli.Command{
 	Flags: append([]cli.Flag{
 		&cli.StringFlag{Name: "group-id", Required: true, Usage: "Active group id"},
 		&cli.IntFlag{Name: "limit", Value: 20, Usage: "Maximum messages"},
+		&cli.StringFlag{Name: "before-id", Usage: "Message id: return the messages just older than it"},
+		&cli.StringFlag{Name: "after-id", Usage: "Message id: return the messages just newer than it"},
 	}, localIdentityFlags()...),
 	Action: func(ctx context.Context, c *cli.Command) error {
 		messages, err := historyCommand(c)
@@ -209,5 +213,9 @@ func historyCommand(c *cli.Command) ([]types.GroupMessage, error) {
 		return nil, err
 	}
 	defer session.db.Close()
-	return session.store.GroupMessages(session.me, c.String("group-id"), c.Int("limit"))
+	messages, err := session.store.GroupMessagesPage(session.me, c.String("group-id"), c.Int("limit"), c.String("before-id"), c.String("after-id"))
+	if errors.Is(err, ErrCursorNotFound) || errors.Is(err, ErrConflictingCursors) {
+		return nil, common.NewExitError(common.ErrCodeUser, err)
+	}
+	return messages, err
 }

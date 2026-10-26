@@ -90,7 +90,12 @@ func sendMessage(c *cli.Command) (FanoutReport, error) {
 	defer db.Close()
 	report, err := enqueueOwned(db, sk, groupID, logicalID, body, maxRetries)
 	if err != nil {
-		return FanoutReport{}, fmt.Errorf("logical %s: %w", logicalID, err)
+		err = fmt.Errorf("logical %s: %w", logicalID, err)
+		if len(report.Recipients) > 0 {
+			// partial fanout: the caller gets who was queued and who failed
+			return FanoutReport{}, common.NewExitErrorWithData(common.ErrCodeOther, err, report)
+		}
+		return FanoutReport{}, err
 	}
 	return report, nil
 }
