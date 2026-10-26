@@ -17,7 +17,7 @@ type fanoutQueuedRow struct {
 
 func onFanoutQueuedTx(tx queryExecer, key FanoutKey, row fanoutQueuedRow) error {
 	switch key.EnvelopeType {
-	case EnvelopeMessage, EnvelopeInvite:
+	case EnvelopeMessage, EnvelopeInvite, EnvelopeAccept, EnvelopeActivate:
 		return nil
 	default:
 		return fmt.Errorf("onFanoutQueuedTx: unsupported envelope type %q", key.EnvelopeType)

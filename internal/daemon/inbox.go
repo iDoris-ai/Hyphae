@@ -33,7 +33,7 @@ func acceptReservedGroup(event *nostr.Event, recipientSK nostr.SecretKey) (group
 		return groupInboundOutcome{}, err
 	}
 	inserted := false
-	err = messaging.DispatchVerifiedGroup(groupInboxMachines(store, &inserted), message)
+	err = messaging.DispatchVerifiedGroup(groupInboxMachines(store, recipientSK, &inserted), message)
 	if err != nil {
 		return groupInboundOutcome{}, err
 	}
@@ -47,7 +47,7 @@ func groupInboxStore() (*groupchat.Store, error) {
 	return groupchat.NewStore(storage.DB)
 }
 
-func groupInboxMachines(store *groupchat.Store, inserted *bool) messaging.GroupMachines {
+func groupInboxMachines(store *groupchat.Store, recipientSK nostr.SecretKey, inserted *bool) messaging.GroupMachines {
 	callBool := func(fn func(groupchat.VerifiedIncoming) (bool, error)) func(messaging.VerifiedAgentMessage) error {
 		return func(message messaging.VerifiedAgentMessage) error {
 			incoming, err := groupchat.FromVerifiedAgentMessage(message)
@@ -92,8 +92,13 @@ func groupInboxMachines(store *groupchat.Store, inserted *bool) messaging.GroupM
 		Activate: callBool(store.ReceiveActivation),
 		Message:  callBool(store.ReceiveMessage),
 		Accept: callChange(func(incoming groupchat.VerifiedIncoming) error {
-			_, err := store.ReceiveAcceptance(incoming)
-			return err
+			activations, err := store.ReceiveAcceptance(incoming)
+			if err != nil {
+				return err
+			}
+			// the final acceptance makes this device (the creator) send the
+			// activations; a replay of the same accept re-queues the same ones.
+			return store.QueueActivations(recipientSK, activations)
 		}),
 		Decline: callChange(func(incoming groupchat.VerifiedIncoming) error {
 			_, err := store.ReceiveDecline(incoming)

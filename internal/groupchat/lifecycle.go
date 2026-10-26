@@ -22,6 +22,13 @@ type groupIDView struct {
 	GroupID string `json:"group_id"`
 }
 
+// acceptView is the accept result. State is "active" once every member has
+// accepted and this device holds the activation, "pending" while it waits.
+type acceptView struct {
+	GroupID string `json:"group_id"`
+	State   string `json:"state"`
+}
+
 type inviteListEntry struct {
 	InviteID    string `json:"invite_id"`
 	InviteeNpub string `json:"invitee_npub"`
@@ -163,10 +170,10 @@ func listInvitesCommand(c *cli.Command) ([]inviteListEntry, error) {
 	return session.store.listInvites(session.me, c.String("group"))
 }
 
-func acceptGroupCommand(c *cli.Command) (groupIDView, error) {
+func acceptGroupCommand(c *cli.Command) (acceptView, error) {
 	session, err := openSession(c)
 	if err != nil {
-		return groupIDView{}, err
+		return acceptView{}, err
 	}
 	defer session.db.Close()
 	var groupID, inviteState, groupState, invitee string
@@ -175,54 +182,56 @@ func acceptGroupCommand(c *cli.Command) (groupIDView, error) {
 		err = nil
 	}
 	if err != nil {
-		return groupIDView{}, err
+		return acceptView{}, err
 	}
 	if invitee == session.me && inviteState == string(InviteActive) && groupState == string(StateActive) {
 		if err := finishLocalActivation(session, groupID); err != nil {
-			return groupIDView{}, err
+			return acceptView{}, err
 		}
-		return groupIDView{GroupID: groupID}, nil
+		return acceptView{GroupID: groupID, State: string(StateActive)}, nil
 	}
 	env, err := session.store.AcceptInvite(c.String("invite"), session.me)
 	if err != nil {
-		return groupIDView{}, err
+		return acceptView{}, err
 	}
 	creatorSK, found, err := secretForNpub(session.ks, env.CreatorNpub)
 	if err != nil {
-		return groupIDView{}, err
+		return acceptView{}, err
 	}
 	if !found {
-		return groupIDView{}, missingCreatorKey()
+		// The creator is on another device: send the acceptance through the
+		// relay. The group turns active when the creator's activation arrives.
+		if _, err := session.store.PrepareControlFanout(session.sk, env, 0, controlFanoutRetries); err != nil {
+			return acceptView{}, fmt.Errorf("queue acceptance for %s: %w", env.CreatorNpub, err)
+		}
+		return session.acceptResult(env.GroupID)
 	}
 	verified, _, err := verifyDelivery(session.sk, creatorSK, env)
 	if err != nil {
-		return groupIDView{}, err
+		return acceptView{}, err
 	}
 	activations, err := session.store.ReceiveAcceptance(verified)
 	if err != nil {
-		return groupIDView{}, err
+		return acceptView{}, err
 	}
 	if len(activations) == 0 {
 		activations, err = session.store.localActivations(env.CreatorNpub, env.GroupID)
 		if err != nil {
-			return groupIDView{}, err
+			return acceptView{}, err
 		}
 	}
 	if err := deliverActivations(session, creatorSK, env.CreatorNpub, activations); err != nil {
-		return groupIDView{}, err
+		return acceptView{}, err
 	}
-	group, err := session.store.GetGroup(session.me, env.GroupID)
-	if err != nil {
-		return groupIDView{}, err
-	}
-	if group.State != StateActive {
-		return groupIDView{}, ErrGroupNotActive
-	}
-	return groupIDView{GroupID: group.ID}, nil
+	return session.acceptResult(env.GroupID)
 }
 
-func missingCreatorKey() error {
-	return errors.New("creator key is absent from the local keystore")
+func (s cliSession) acceptResult(groupID string) (acceptView, error) {
+	group, err := s.store.GetGroup(s.me, groupID)
+	if err != nil {
+		return acceptView{}, err
+	}
+	return acceptView{GroupID: group.ID, State: string(group.State)}, nil
 }
 
 func finishLocalActivation(session cliSession, groupID string) error {
@@ -235,7 +244,7 @@ func finishLocalActivation(session cliSession, groupID string) error {
 		return err
 	}
 	if !found {
-		return missingCreatorKey()
+		return nil
 	}
 	activations, err := session.store.localActivations(group.Creator, groupID)
 	if err != nil {
@@ -246,17 +255,26 @@ func finishLocalActivation(session cliSession, groupID string) error {
 
 func deliverActivations(session cliSession, creatorSK nostr.SecretKey, creator string, activations []Envelope) error {
 	recipients := make([]nostr.SecretKey, len(activations))
+	local := make([]bool, len(activations))
+	remote := []Envelope(nil)
 	for i, activation := range activations {
 		recipientSK, ok, lookupErr := secretForNpub(session.ks, activation.InviteeNpub)
 		if lookupErr != nil {
 			return lookupErr
 		}
+		recipients[i], local[i] = recipientSK, ok
 		if !ok {
-			return errors.New("invitee key is absent from the local keystore")
+			remote = append(remote, activation)
 		}
-		recipients[i] = recipientSK
+	}
+	// invitees on other devices get their activation through the relay
+	if err := session.store.QueueActivations(creatorSK, remote); err != nil {
+		return err
 	}
 	for i, activation := range activations {
+		if !local[i] {
+			continue
+		}
 		verifiedAct, _, deliverErr := verifyDelivery(creatorSK, recipients[i], activation)
 		if deliverErr != nil {
 			return deliverErr

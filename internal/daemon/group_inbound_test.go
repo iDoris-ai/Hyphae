@@ -3,6 +3,7 @@ package daemon
 import (
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -137,15 +138,16 @@ func TestGroupInboundRestart(t *testing.T) {
 		assert.Zero(t, *replies)
 		group, err := store.GetGroup(alice.Npub, draft.Group.ID)
 		require.NoError(t, err)
-		assert.Equal(t, groupchat.StateActivating, group.State)
+		// the last acceptance makes the creator queue one activation for bob
+		assert.Equal(t, groupchat.StateActive, group.State)
 		assertNoDM(t, event)
-		assert.Zero(t, fanoutRows(t))
+		assert.Equal(t, 1, fanoutRows(t))
 
 		processed, err = processIncomingEvent(event, aliceSK, newSeenSet(), true, true, alice, ks, countingHooks(logs, stores, notes, replies))
 		require.NoError(t, err)
 		assert.False(t, processed)
 		assert.Len(t, *logs, 1)
-		assert.Zero(t, fanoutRows(t))
+		assert.Equal(t, 1, fanoutRows(t), "a replayed accept must not queue a second activation")
 	})
 
 	t.Run("decline", func(t *testing.T) {
@@ -343,4 +345,80 @@ func assertNoDM(t *testing.T, event *nostr.Event) {
 	got, err := msg.GetMessage(hex.EncodeToString(event.ID[:]))
 	require.NoError(t, err)
 	assert.Nil(t, got)
+}
+
+// useHome points the process at one device's HOME, keeping what earlier calls
+// stored there, so a test can play two machines that share only relay events.
+func useHome(t *testing.T, home string) *groupchat.Store {
+	t.Helper()
+	t.Setenv("HOME", home)
+	messaging.ResetStoreForTest()
+	t.Cleanup(messaging.ResetStoreForTest)
+	require.NoError(t, messaging.InitStorage())
+	store, err := groupchat.NewStore(storage.DB)
+	require.NoError(t, err)
+	return store
+}
+
+func queuedEvent(t *testing.T, envelopeType, recipient string) *nostr.Event {
+	t.Helper()
+	var raw string
+	require.NoError(t, storage.DB.QueryRow(`SELECT event_json FROM groupchat_fanout WHERE envelope_type = ? AND recipient_npub = ?`, envelopeType, recipient).Scan(&raw))
+	var event nostr.Event
+	require.NoError(t, json.Unmarshal([]byte(raw), &event))
+	return &event
+}
+
+// deliveries numbers the throwaway receiver identities one test creates.
+var deliveries int
+
+func deliver(t *testing.T, event *nostr.Event, recipientSK nostr.SecretKey) {
+	t.Helper()
+	deliveries++
+	ks, me, _ := newDaemonIdentity(t, fmt.Sprintf("receiver%d", deliveries))
+	logs, stores, notes, replies := receiveCounters()
+	processed, err := processIncomingEvent(event, recipientSK, newSeenSet(), true, true, me, ks, countingHooks(logs, stores, notes, replies))
+	require.NoError(t, err)
+	require.True(t, processed)
+}
+
+func groupState(t *testing.T, npub, groupID string) string {
+	t.Helper()
+	var state string
+	require.NoError(t, storage.DB.QueryRow(`SELECT state FROM groupchat_groups WHERE local_npub = ? AND group_id = ?`, npub, groupID).Scan(&state))
+	return state
+}
+
+// Two devices, each holding only its own key, reach an active group using
+// nothing but the events the relay would carry: invite, accept, activate.
+func TestInviteAcceptActivateAcrossTwoHomes(t *testing.T) {
+	aliceSK, bobSK := nostr.Generate(), nostr.Generate()
+	alice, bob := common.EncodeNpub(aliceSK.Public()), common.EncodeNpub(bobSK.Public())
+	homeA, homeB := t.TempDir(), t.TempDir()
+
+	creator := useHome(t, homeA)
+	draft, err := creator.CreateGroup("planning", alice, []string{bob})
+	require.NoError(t, err)
+	_, err = creator.PrepareControlFanout(aliceSK, draft.Invitations[0], 0, 10)
+	require.NoError(t, err)
+	invite := queuedEvent(t, "invite", bob)
+
+	invitee := useHome(t, homeB)
+	deliver(t, invite, bobSK)
+	accept, err := invitee.AcceptInvite(draft.Invitations[0].InviteID, bob)
+	require.NoError(t, err)
+	_, err = invitee.PrepareControlFanout(bobSK, accept, 0, 10)
+	require.NoError(t, err)
+	acceptEvent := queuedEvent(t, "accept", alice)
+	assert.Equal(t, "pending", groupState(t, bob, draft.Group.ID), "bob waits for the creator's activation")
+
+	useHome(t, homeA)
+	deliver(t, acceptEvent, aliceSK)
+	assert.Equal(t, "active", groupState(t, alice, draft.Group.ID))
+	activation := queuedEvent(t, "activate", bob)
+
+	useHome(t, homeB)
+	deliver(t, activation, bobSK)
+	assert.Equal(t, "active", groupState(t, bob, draft.Group.ID))
+	assert.Zero(t, dmRows(t), "group control traffic is not a DM")
 }
