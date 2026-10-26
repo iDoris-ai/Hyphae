@@ -119,7 +119,7 @@ func createGroupCommand(c *cli.Command) (groupIDView, error) {
 			// The invitee lives on another device: queue the signed invite for
 			// the outbox so the daemon delivers it through the relay.
 			if _, err := session.store.PrepareControlFanout(session.sk, invitation, 0, controlFanoutRetries); err != nil {
-				return groupIDView{}, fmt.Errorf("queue invite for %s: %w", invitation.InviteeNpub, err)
+				return groupIDView{}, fmt.Errorf("group %s was created but queueing the invite for %s failed: %w", draft.Group.ID, invitation.InviteeNpub, err)
 			}
 			continue
 		}
