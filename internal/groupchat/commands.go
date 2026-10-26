@@ -20,6 +20,8 @@ var Cmd = &cli.Command{
 	Usage: "Persist encrypted group fanout",
 	Commands: []*cli.Command{
 		createCmd,
+		listCmd,
+		membersCmd,
 		inviteCmd,
 		acceptCmd,
 		sendCmd,
