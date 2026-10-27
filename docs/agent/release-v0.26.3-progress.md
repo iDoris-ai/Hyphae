@@ -49,6 +49,7 @@
 | T10.3 | 10 接线版本 | 两次干净构建 bundle，hash 一致；校验 | Hyphae | DONE | 2026-10-26：Go 1.26.4，`SHA256SUMS` 两次相同；darwin CLI `6b7969a3d4e9767e65927ebd0c2830d272c4b567f05e740a985291b9e462a01a`；`shasum -c` 全 OK；构建出的二进制有 `groupchat list` |
 | T10.4 | 10 接线版本 | 打 tag `v0.27.0`（`9126147e`）、发 GitHub Release | Hyphae | DONE | 2026-10-26：https://github.com/iDoris-ai/Hyphae/releases/tag/v0.27.0 ，非 draft，9 个 assets；线上 `SHA256SUMS` 与本地逐字节相同，darwin CLI hash 一致 |
 | T10.5 | 10 接线版本 | joint-ci 在 main 上手动触发 | Hyphae | DONE | 2026-10-26：[run 40283438544](https://github.com/iDoris-ai/Hyphae/actions/runs/40283438544)，head `9126147e`，六个 job 全部 success（两平台 producer，candidate / pinned-production 各两平台的十阶段 runner）。注意 joint-ci 跑的是旧 Agent24 契约下的十阶段，不含群聊跨设备流程；群聊跨设备由 `TestGroupAcrossThreeHomesThroughRelay` 覆盖 |
+| T10.6 | 10 接线版本 | 群聊 TUI（H-G7，#291）与交接说明（#290）；打 `v0.27.1`（`859d8fb7`） | Hyphae | DONE | 2026-10-27：#291 被要求修改（群重试无退避、`ctrl+u` 翻页不生效、重复发送），修复后 clestons 批准精确 head `6292f680`。`v0.27.1` 两次构建 `SHA256SUMS` 一致，9 个 assets；joint-ci [run 40463638383](https://github.com/iDoris-ai/Hyphae/actions/runs/40463638383) 成功。Agent24 跟进 issue：iDoris-ai/Agent24#1346 |
 
 ## 日志
 
@@ -65,3 +66,12 @@
 - 上游 nostrlib 竞争修复 PR（NIP-34 事件 `e6561592…`）无回应，上游 10-22 版也没修；仍靠 `iDoris-ai/nostr` fork 的 `replace`。
 - #280 留下的 4 个 P2、`--drop-recipient` PTY 用例在当前 main 上重跑，见 `handoff-20261024.md`。
 - 两个临时 worktree 已在 T8.8 删除。
+
+## 后续待办（2026-10-27 记录，接线版本之后再做）
+
+- `activating` 群的周期性修复：创建者 daemon 在记录最后一个 accept 与排队 activation 之间崩溃，群停在 `activating`，目前只有重放该 accept 才会修复。
+- 跨 HOME 的离线成员与重启场景（目前只覆盖单 HOME 群）。
+- 群聊 TUI：真实终端人工验收、真实 relay 的 TUI 端到端；逐人投递状态、重试按钮、邀请/接受；远端明文渲染前剥离 ANSI/控制字符（DM 界面同样没做）。
+- `profile show/list/search/discover` 与其余 TUI 的 Go 测试。
+- Agent24 升级锁后，更新 `.github/joint-ci-baseline.json` 的 `production_hyphae_sha`（先例 #281）；交接说明里的"待确认"项由 Agent24 核对。
+- `/private/tmp` 下约 130 个 `idoris-*` 临时目录（等用户决定）；Claude Docs 状态报告更新。
