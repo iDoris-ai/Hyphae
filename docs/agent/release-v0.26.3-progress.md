@@ -44,6 +44,11 @@
 | T8.7 | 8 发布后加固 | 核实群聊真实边界并更正此前说法 | Hyphae | DONE | 2026-10-25：群聊只在「所有成员身份在同一 keystore」时成立（`accept` 要创建者私钥，`deliverActivations` 要被邀请人私钥；`PrepareControlFanout` 未被 CLI 调用）。此前「M1 含三人群聊完成」应读作「同机三身份群聊完成」。详见 `group-chat-agent24-interface-20261025.md` |
 | T8.8 | 8 发布后加固 | 清理临时资源 | Hyphae | DONE | 2026-10-25：删除两个已合并 worktree（Hyphae `joint-baseline-v0263`、Agent24 `Agent24-hyphae-lock-v0263`）及本地已合并分支；终止 10 个自 10-01 起空转的残留进程（`/bin/sh …/hyphae-<hash> daemon --relay wss://relay.example` 九个，脚本文件已删、PPID 1，其余一个 `ws://127.0.0.1:1`）和两个旧 sidecar/relay。保留 `/tmp/pr-daemon-check-fetch`（可复用的 pre-pr-check 副本）。`/private/tmp` 共 261 GB，大头是 130 个 `idoris-*` 构建目录（来自 iDoris/Agent24 仓库，不是本仓库产物），未动 |
 | T9.1 | 9 群聊契约 | 写 Agent24 接口契约与 Hyphae 交付计划 | Hyphae | DONE | 2026-10-25：`docs/agent/group-chat-agent24-interface-20261025.md`。命令 JSON 形状全部用真实二进制核对过，包括两处文档最初写错后更正的行为（部分失败时无逐人数据；`id` 即 `logical_id`）。H-G0～H-G7 是 Hyphae 要做的，Agent24 仅按契约接入 |
+| T10.1 | 10 接线版本 | 跨设备群聊接线：H-G1…H-G4/H-G5（#284–#287）；H-G0 契约测试与文档（#288） | Hyphae | DONE | 2026-10-26：五个 PR 均经 clestons 批准精确 head 后 `--merge`，未 self-approve、未 `--admin`。#284 被要求修改：生产 daemon 没有注册 group 发布器，所有群 outbox 行（邀请与消息）从不发布；已补 `groupPublisher` 与三 HOME 真 relay 测试（去掉注册会超时） |
+| T10.2 | 10 接线版本 | 在 `9126147e` 跑发布门禁 | Hyphae | DONE | 2026-10-26：`go vet`、gofmt、`go test ./... -race`、`-tags integration ./tests`（196s，含 `TestGroupAcrossThreeHomesThroughRelay`）、Python 119 项全过 |
+| T10.3 | 10 接线版本 | 两次干净构建 bundle，hash 一致；校验 | Hyphae | DONE | 2026-10-26：Go 1.26.4，`SHA256SUMS` 两次相同；darwin CLI `6b7969a3d4e9767e65927ebd0c2830d272c4b567f05e740a985291b9e462a01a`；`shasum -c` 全 OK；构建出的二进制有 `groupchat list` |
+| T10.4 | 10 接线版本 | 打 tag `v0.27.0`（`9126147e`）、发 GitHub Release | Hyphae | DONE | 2026-10-26：https://github.com/iDoris-ai/Hyphae/releases/tag/v0.27.0 ，非 draft，9 个 assets；线上 `SHA256SUMS` 与本地逐字节相同，darwin CLI hash 一致 |
+| T10.5 | 10 接线版本 | joint-ci 在 main 上手动触发 | Hyphae | DONE | 2026-10-26：[run 40283438544](https://github.com/iDoris-ai/Hyphae/actions/runs/40283438544)，head `9126147e`，六个 job 全部 success（两平台 producer，candidate / pinned-production 各两平台的十阶段 runner）。注意 joint-ci 跑的是旧 Agent24 契约下的十阶段，不含群聊跨设备流程；群聊跨设备由 `TestGroupAcrossThreeHomesThroughRelay` 覆盖 |
 
 ## 日志
 
@@ -52,6 +57,8 @@
 - 2026-10-25：T8 发布后加固与 T9.1 群聊契约。#282 已合并（`c456122e`），合并时 Codex 还有一条未处理的 P2，在 T8.6 修掉。
 
 ## 范围外 / 后续
+
+- 接线版本 `v0.27.0` 已发（T10）。Agent24 升级 lock 与它自己的群聊界面由 Agent24 负责，按 `group-chat-agent24-interface-20261025.md` 对接；Hyphae 没有改 Agent24 仓库。
 
 - Agent24 的 Rust / REST / UI 没有群聊接线；T22 消息 UI 也没做。契约已写（T9.1），但跨设备群聊要先有 Hyphae 的 H-G1/H-G2，Agent24 侧的界面由 Agent24 自己实现。
 - 旧 relay 与新客户端的组合没测。
