@@ -332,6 +332,14 @@ func CreateIdentityWithPassword(ks *types.KeyStore, nickname, password string) (
 	return created, err
 }
 
+// IdentityNotFoundError reports a nickname the keystore does not hold. Callers
+// that classify errors (for example --json user_error) match it with errors.As.
+type IdentityNotFoundError struct{ Nickname string }
+
+func (e *IdentityNotFoundError) Error() string {
+	return fmt.Sprintf("identity '%s' not found", e.Nickname)
+}
+
 // GetIdentity retrieves an identity by nickname
 func GetIdentity(ks *types.KeyStore, nickname string) (*types.Identity, error) {
 	if nickname == "" {
@@ -340,7 +348,7 @@ func GetIdentity(ks *types.KeyStore, nickname string) (*types.Identity, error) {
 
 	identity, exists := ks.Identities[nickname]
 	if !exists {
-		return nil, fmt.Errorf("identity '%s' not found", nickname)
+		return nil, &IdentityNotFoundError{Nickname: nickname}
 	}
 
 	return identity, nil
@@ -382,7 +390,7 @@ func GetPublicKey(ks *types.KeyStore, nickname string) (nostr.PubKey, error) {
 func SetDefault(ks *types.KeyStore, nickname string) error {
 	return runKeyStoreTransaction(ks, func(fresh *types.KeyStore) error {
 		if _, exists := fresh.Identities[nickname]; !exists {
-			return fmt.Errorf("identity '%s' not found", nickname)
+			return &IdentityNotFoundError{Nickname: nickname}
 		}
 		fresh.DefaultIdentity = nickname
 		return nil

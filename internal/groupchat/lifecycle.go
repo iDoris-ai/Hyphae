@@ -56,7 +56,7 @@ func openSession(c *cli.Command) (cliSession, error) {
 	}
 	sk, err := identity.GetSecretKey(ks, c.String("identity"))
 	if err != nil {
-		return cliSession{}, err
+		return cliSession{}, userInputError(err)
 	}
 	me, err := canonicalLocalNpub(common.EncodeNpub(sk.Public()))
 	if err != nil {
@@ -163,12 +163,16 @@ func (s *Store) listInvites(localNpub, groupID string) ([]inviteListEntry, error
 }
 
 func listInvitesCommand(c *cli.Command) ([]inviteListEntry, error) {
+	if err := requireGroupID(c.String("group")); err != nil {
+		return nil, err
+	}
 	session, err := openSession(c)
 	if err != nil {
 		return nil, err
 	}
 	defer session.db.Close()
-	return session.store.listInvites(session.me, c.String("group"))
+	entries, err := session.store.listInvites(session.me, c.String("group"))
+	return entries, userInputError(err)
 }
 
 func acceptGroupCommand(c *cli.Command) (acceptView, error) {
@@ -193,7 +197,7 @@ func acceptGroupCommand(c *cli.Command) (acceptView, error) {
 	}
 	env, err := session.store.AcceptInvite(c.String("invite"), session.me)
 	if err != nil {
-		return acceptView{}, err
+		return acceptView{}, userInputError(err)
 	}
 	creatorSK, found, err := secretForNpub(session.ks, env.CreatorNpub)
 	if err != nil {

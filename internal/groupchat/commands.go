@@ -63,6 +63,14 @@ func sendMessage(c *cli.Command) (FanoutReport, error) {
 	logicalID := c.String("logical-id")
 	body := c.String("body")
 	maxRetries := c.Int("max-retries")
+	if err := requireGroupID(groupID); err != nil {
+		return FanoutReport{}, err
+	}
+	if logicalID != "" {
+		if err := requireLogicalID(logicalID); err != nil {
+			return FanoutReport{}, err
+		}
+	}
 	if logicalID == "" {
 		id, err := NewOpaqueID()
 		if err != nil {
@@ -81,7 +89,7 @@ func sendMessage(c *cli.Command) (FanoutReport, error) {
 	}
 	sk, err := identity.GetSecretKey(ks, nickname)
 	if err != nil {
-		return FanoutReport{}, err
+		return FanoutReport{}, userInputError(err)
 	}
 	db, err := storage.OpenDB()
 	if err != nil {
@@ -95,7 +103,7 @@ func sendMessage(c *cli.Command) (FanoutReport, error) {
 			// partial fanout: the caller gets who was queued and who failed
 			return FanoutReport{}, common.NewExitErrorWithData(common.ErrCodeOther, err, report)
 		}
-		return FanoutReport{}, err
+		return FanoutReport{}, userInputError(err)
 	}
 	return report, nil
 }

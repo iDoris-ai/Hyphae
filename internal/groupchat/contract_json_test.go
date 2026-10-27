@@ -112,6 +112,52 @@ func TestCommandJSONContract(t *testing.T) {
 	history := j("history", "--group-id", groupID, "--identity", "alice")
 	wantKeys(t, "history", dataKeys(t, history, "messages"),
 		"content", "created_at", "event_id", "group_id", "id", "is_encrypted", "plaintext", "sender")
+
+	// Caller-input mistakes are user_error (exit 1), never other_error (exit 4),
+	// so a UI can tell "fix your request" from "Hyphae is broken".
+	pendingOut := j("create", "--name", "pending", "--identity", "alice", "--invitee", bob.Npub)
+	pendingID := strings.TrimSpace(strings.SplitN(strings.SplitN(pendingOut, `"group_id":"`, 2)[1], `"`, 2)[0])
+	unknownGroup := opaqueID(t)
+	unknownLogical := opaqueID(t)
+	userErrors := []struct {
+		name string
+		args []string
+		msg  string
+	}{
+		{"send to inactive group", []string{"send", "--group-id", pendingID, "--body", "x", "--identity", "alice"}, "group is not active"},
+		{"history of inactive group", []string{"history", "--group-id", pendingID, "--identity", "alice"}, "group is not active"},
+		{"send with malformed group id", []string{"send", "--group-id", "bogus", "--body", "x", "--identity", "alice"}, "invalid group ID"},
+		{"send with malformed logical id", []string{"send", "--group-id", groupID, "--logical-id", "bogus", "--body", "x", "--identity", "alice"}, "invalid logical message ID"},
+		{"send to unknown group", []string{"send", "--group-id", unknownGroup, "--body", "x", "--identity", "alice"}, "group not found"},
+		{"members of unknown group", []string{"members", "--group-id", unknownGroup, "--identity", "alice"}, "group not found"},
+		{"invite list of malformed group", []string{"invite", "list", "--group", "bogus", "--identity", "alice"}, "invalid group ID"},
+		{"status of unknown logical id", []string{"status", "--group-id", groupID, "--logical-id", unknownLogical, "--identity", "alice"}, "not found"},
+		{"retry of unknown logical id", []string{"retry", "--group-id", groupID, "--logical-id", unknownLogical, "--identity", "alice"}, "not found"},
+		{"accept unknown invite", []string{"accept", "--invite", "nope", "--identity", "bob"}, "invitation not found"},
+		{"unknown identity", []string{"list", "--identity", "ghost"}, "identity 'ghost' not found"},
+		{"history limit 0", []string{"history", "--group-id", groupID, "--limit", "0", "--identity", "alice"}, "--limit must be at least 1"},
+		{"history limit -1", []string{"history", "--group-id", groupID, "--limit", "-1", "--identity", "alice"}, "--limit must be at least 1"},
+	}
+	for _, tc := range userErrors {
+		t.Run("user_error/"+tc.name, func(t *testing.T) {
+			out, errOut, code := runCLI(t, bin, home, append([]string{"--json", "groupchat"}, tc.args...)...)
+			var failure struct {
+				OK      bool   `json:"ok"`
+				Error   string `json:"error"`
+				Message string `json:"message"`
+			}
+			if err := json.Unmarshal([]byte(errOut), &failure); err != nil {
+				t.Fatalf("error JSON: %v\n%s", err, errOut)
+			}
+			if code != 1 || out != "" || failure.OK || failure.Error != "user_error" || !strings.Contains(failure.Message, tc.msg) {
+				t.Fatalf("want exit 1 user_error containing %q, got exit %d stdout %q: %s", tc.msg, code, out, errOut)
+			}
+		})
+	}
+	// the smallest valid limit still works
+	one := j("history", "--group-id", groupID, "--limit", "1", "--identity", "alice")
+	wantKeys(t, "history limit 1", dataKeys(t, one, "messages"),
+		"content", "created_at", "event_id", "group_id", "id", "is_encrypted", "plaintext", "sender")
 }
 
 func contains(list []string, want string) bool {
