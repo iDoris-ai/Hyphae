@@ -46,6 +46,9 @@ func (m *ChatModel) startOutboxWorker() tea.Cmd {
 		m.outboxStarted = true
 		m.inboxMu.Unlock()
 
+		// Without a registered publisher, retryGroupOutbox only reports
+		// not_registered and group rows queued from this process never leave.
+		daemon.EnsureGroupPublisher(m.outboxCtx, m.relays)
 		go m.runOutboxWorker()
 		return outboxWorkerStartedMsg{}
 	}

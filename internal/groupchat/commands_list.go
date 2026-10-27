@@ -76,6 +76,15 @@ var membersCmd = &cli.Command{
 	},
 }
 
+// MemberEntry is one row of a group's member list.
+type MemberEntry = memberEntry
+
+// ListMembers returns one group's members, creator first. It is the read the
+// `groupchat members` command uses, exported for the TUI.
+func (s *Store) ListMembers(localNpub, groupID string) ([]MemberEntry, error) {
+	return s.listMembers(localNpub, groupID)
+}
+
 func (s *Store) listMembers(localNpub, groupID string) ([]memberEntry, error) {
 	if _, err := s.GetGroup(localNpub, groupID); err != nil {
 		return nil, err
