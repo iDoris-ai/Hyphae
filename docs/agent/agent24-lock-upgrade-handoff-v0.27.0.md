@@ -1,12 +1,13 @@
 # 交接说明：Agent24 把 Hyphae 锁升级到 v0.27.0
 
-日期：2026-10-27。写给 Agent24 团队。本文是 Hyphae 一侧的设计与约定接口说明，由 Agent24 自行完成接线。Hyphae 不修改、也没有读取 Agent24 仓库代码；凡涉及 Agent24 内部文件和现状的地方一律标「待确认」。有出入时以 Hyphae 发布的二进制实际输出和 `SHA256SUMS` 为准，并在 Hyphae 仓库提 issue。
+日期：2026-10-27。写给 Agent24 团队。本文是 Hyphae 一侧的设计与约定接口说明，由 Agent24 自行完成接线。Hyphae 不修改、也没有读取 Agent24 仓库代码；凡涉及 Agent24 内部文件和现状的地方，原先标「待确认」的各项已由 Agent24 在 iDoris-ai/Agent24#1346 逐条核对并回帖，下文标注「Agent24 已核对」处的事实来自 Agent24 的回复，不是 Hyphae 读 Agent24 代码得出的。有出入时以 Hyphae 发布的二进制实际输出和 `SHA256SUMS` 为准，并在 Hyphae 仓库提 issue。
 
 ## 1. 要升级到哪里
 
 | 项 | 值 | 来源 |
 | --- | --- | --- |
-| 当前已知的 Agent24 锁（升级起点） | Hyphae `144555ca6b043be77225786ddbf4e6bce5ad3228`（v0.26.3） | `.github/joint-ci-baseline.json` 的 `production_hyphae_sha`；对应 Agent24 `3a433bb0`（#1193 合并）。Agent24 之后是否又改过锁：待确认，请以 Agent24 当前 `rust/crates/agent24-comm/hyphae.lock.json` 为准 |
+| 当前已知的 Agent24 锁（升级起点） | Hyphae `144555ca6b043be77225786ddbf4e6bce5ad3228`（v0.26.3） | `.github/joint-ci-baseline.json` 的 `production_hyphae_sha`；对应 Agent24 `3a433bb0`（#1193 合并）。**已核对（2026-10-27，Agent24 在 iDoris-ai/Agent24#1346 回帖）：** 此后锁已两次变动。v0.27.0 `9126147e` 已合入 Agent24 main（#1352）；v0.27.1 `859d8fb7` 见 Agent24 #1368，合并前以其为准。`144555ca` 仅是 10-24 起点。Agent24 仓库里没有 `joint-ci-baseline.json`，该文件在 Hyphae 一侧 |
+| 最新版本 | `v0.27.1`（`859d8fb7e79c67beb3c7a5a5d6d58c36baac7d0f`） | 相对 v0.27.0 只多群聊 TUI 与 TUI 侧群发布器注册，命令 JSON 契约不变；https://github.com/iDoris-ai/Hyphae/releases/tag/v0.27.1 。Agent24 目标锁 v0.27.1 |
 | 目标 tag | `v0.27.0` | https://github.com/iDoris-ai/Hyphae/releases/tag/v0.27.0 （2026-10-26 发布） |
 | 目标 commit | `9126147e8eb5e497e3055f9eda27473fefbb91b2`（PR #288 合并提交） | `gh api repos/iDoris-ai/Hyphae/git/ref/tags/v0.27.0`，已核对 tag 指向该 commit |
 | Go 工具链 | `go1.26.4` | release 的 `hyphae.lock.json` |
@@ -31,9 +32,14 @@ cat hyphae.lock.json          # 看 source_sha 与两平台 binaries
 
 release notes 声明：两次独立构建得到完全相同的 `SHA256SUMS`。
 
-### 1.3 Agent24 侧要改什么（待确认）
+### 1.3 Agent24 侧要改什么（Agent24 已核对）
 
-v0.26.3 那次升级的先例（见 `docs/agent/release-v0.26.3-progress.md` 的 T4.1/T4.2）改了：`rust/crates/agent24-comm/hyphae.lock.json`（`source_sha` 与两平台 hash）、`src/binary.rs` 里 `embedded_lock_parses_and_resolves_baseline_platform` 的断言、`docs/Deployment/HYPHAE-NETWORK-DELIVERY.md` 的当前锁说明，另写了升级记录 `docs/comm/LOCK-UPGRADE-20261024.md`。这些是 10-24 的记录，Agent24 现在的文件布局是否仍一致：待确认。
+v0.26.3 那次升级的先例（见 `docs/agent/release-v0.26.3-progress.md` 的 T4.1/T4.2）改了：`rust/crates/agent24-comm/hyphae.lock.json`（`source_sha` 与两平台 hash）、`src/binary.rs` 里 `embedded_lock_parses_and_resolves_baseline_platform` 的断言、`docs/Deployment/HYPHAE-NETWORK-DELIVERY.md` 的当前锁说明，另写了升级记录 `docs/comm/LOCK-UPGRADE-20261024.md`。这些是 10-24 的记录。Agent24 核对后的结论：布局基本一致，有以下补充。
+- 锁经 `include_str!` 嵌入（`rust/crates/agent24-comm/src/binary.rs`），`embedded_lock_parses_and_resolves_baseline_platform` 的断言仍是必改文件。
+- 升级还要改 `docs/Deployment/HYPHAE-HEALTH-ROLLBACK-CONTRACT.md`（它引用当前锁 `source_sha`，两处），上面的清单漏了这个文件。
+- 升级记录现在命名为 `docs/comm/LOCK-UPGRADE-<日期>[b]`（v0.27.0 是 `LOCK-UPGRADE-20261027.md`，v0.27.1 是 `LOCK-UPGRADE-20261027b.md`），不是 20261024 那份。
+- 运行时数据布局（由 Agent24 提供）：`<state_dir>/comm/hyphae-home`（Hyphae 的 HOME，agent24d 强制设置 `HOME`）、`comm/bin`（校验后拷入的二进制副本）、`comm/hyphae-daemon.pid`、`comm/logs/hyphae-daemon.log`、`comm/daemon-autostart.json`。二进制来源按 `A24_HYPHAE_BIN` → 旧 `A24_SPEAKER_BIN` → agent24d 同目录 `hyphae` 解析，校验的是嵌入锁里的 sha256。
+- Agent24 的 `darwin-x64`、`linux-arm64` 条目在 v0.27.x 无 release 资产，保持 null。
 
 ## 2. v0.27.0 新增 / 变化
 
@@ -79,24 +85,24 @@ v0.26.3 那次升级的先例（见 `docs/agent/release-v0.26.3-progress.md` 的
 
 - 生产 daemon 现在会发布群 outbox 行（此前只有测试注册了群发布器，群事件不会离开 outbox）。跨设备群聊的前提是每台设备的 `hyphae daemon` 在运行。（#284、#285）
 - 旧 `group remove-member` / `group delete` 改为返回用户错误、退出码 1，不再假装成功（#283）。
-- 单聊命令在本次发布中无已知契约变化。Agent24 的 v0.26.3 单聊联调（`joint_round1`、`send_history_e2e`、`daemon_joint`）结论见 `release-v0.26.3-progress.md`；v0.27.0 上是否需要重跑：待确认，建议重跑。
+- 单聊命令在本次发布中无已知契约变化。Agent24 的 v0.26.3 单聊联调（`joint_round1`、`send_history_e2e`、`daemon_joint`）结论见 `release-v0.26.3-progress.md`；Agent24 已在 v0.27.0（#1352）与 v0.27.1（#1368）上重跑，三条均通过。
 
 ## 3. 已知缺口与 Agent24 需注意的事项
 
 来自 release notes 与接口文档第 5 节，均为 Hyphae 一侧事实：
 
 1. **没有群聊 TUI**。`hyphae group chat` 是占位输出，`hyphae tui` 只有单聊（H-G7，可选，未做）。群聊界面只能由 Agent24 经 CLI 实现。
-2. **TUI 进程不注册群发布器**，只有 `hyphae daemon` 发布群事件。若用户只开 TUI 不开 daemon，排队的群事件不会发出。Agent24 如何管理 daemon 生命周期：待确认。
+2. **TUI 进程不注册群发布器**，只有 `hyphae daemon` 发布群事件。若用户只开 TUI 不开 daemon，排队的群事件不会发出。**Agent24 已核对：** Agent24 只跑 `hyphae daemon`，不使用 `hyphae tui`；由其 `HyphaeDaemonSupervisor` 监管（启动参数 `daemon --identity <昵称> --password-stdin --json --notify=false --auto-reply=false [--relay …]`，口令走 stdin，独立进程组，不传 `--watch-interval`）。崩溃重启 500ms 起翻倍、连续 5 次熔断、稳定运行 60 秒复位；停止为 SIGTERM 进程组、宽限后 SIGKILL，按 pid 加启动时间校验后才杀。v0.27.1 起 TUI 也会注册发布器，对 Agent24 无影响。
 3. **`activating` 卡住**：创建者 daemon 在记下最后一个 accept 与排队激活之间崩溃，群会停在 `activating`，要等同一 accept 事件重放才修复，没有定期修复。界面应能容忍群长时间处于 `activating`。
 4. **离线成员 / 重启只覆盖同机单 HOME**：`TestM1GroupInviteOfflinePartialFanoutExactlyOnce` 覆盖同机版本；跨 HOME 只做了 `TestGroupAcrossThreeHomesThroughRelay`（建群、邀请、接受、激活、消息、`relay_accepted`）。跨 HOME 的离线 / 重启 / 部分失败重试没有重做，不能对外声称已验证。
 5. 本地 `history` 只含已落库消息，不是 relay 上的全量历史。
 6. 旧 relay 与新客户端的组合未测（见 `release-v0.26.3-progress.md` 范围外一节）。
 7. `accept` 应由明确的用户操作触发，不要自动接受邀请（接口文档第 6 节建议）。
-8. Agent24 的 `/api/v1/comm/*` 或 Rust 路由若已对 `groupchat` 做过假设（例如把 `accept` 非 0 退出码当失败），需对照 2.2 重新检查：待确认。
+8. Agent24 的 `/api/v1/comm/*` 或 Rust 路由若已对 `groupchat` 做过假设（例如把 `accept` 非 0 退出码当失败），需对照 2.2 重新检查。**Agent24 已核对：** 全仓目前没有 `groupchat` 调用；信封解析按退出码类别与信封处理（退出码 0 要求 `ok:true`，1–5 要求 stderr 的 `ok:false` 信封并保留 `data`），`accept` 的 `pending` 与 `send` 部分失败都能原样解析。群聊接线拆为 Agent24 #1360、#1361、#1362。
 
 ## 4. 升级后建议的验收步骤
 
-1. **核对产物**：按 1.2 取 `SHA256SUMS`、`hyphae.lock.json`，`shasum -a 256 -c`；确认 `source_sha` 为 `9126147e…`。Agent24 的 `hyphae-lock-verify`（v0.26.3 升级 PR #1193 上有该检查）能否直接复用：待确认。
+1. **核对产物**：按 1.2 取 `SHA256SUMS`、`hyphae.lock.json`，`shasum -a 256 -c`；确认 `source_sha` 为 `9126147e…`。Agent24 的 `.github/workflows/hyphae-lock-verify.yml` 可直接复用（Agent24 已确认）：它在锁文件变更时按 `source_sha` 与 `recipe` 在 ubuntu 上重建 linux-x64 并比对；darwin-arm64 无 CI 复现，由升级人本机复算。
 2. **本地真二进制测试**：用 v0.27.0 的 darwin-arm64 / linux-amd64 CLI 跑 Agent24 自己调用真二进制的测试，以及三条 `#[ignore]` 联调用例（`joint_round1`、`send_history_e2e`、`daemon_joint`；环境变量 `HYPHAE_JOINT_BIN`、`HYPHAE_JOINT_RELAY` 的用法见 `release-v0.26.3-progress.md` T5.1～T5.3，relay 用同一 bundle 的 `hyphae-relay-*`）。
 3. **群聊契约对照**：用真二进制对 2.2 的每个命令各跑一遍 `--json`，对照字段，尤其是 `accept` 的 `pending`、`send` 部分失败的 stderr `data`、`history --before-id/--after-id`。Hyphae 一侧的参考测试：`go test ./internal/groupchat -run TestCommandJSONContract -v`、`go test -tags integration ./tests -run TestGroupAcrossThreeHomesThroughRelay -v`。
 4. **联合验收 workflow**（`.github/workflows/joint-ci.yml`，说明见 `docs/agent/joint-ci-acceptance.md`）：
