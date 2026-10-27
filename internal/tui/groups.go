@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"fiatjaf.com/nostr"
@@ -102,10 +103,15 @@ type GroupsModel struct {
 	members  []groupchat.MemberEntry
 	messages []types.GroupMessage
 	older    bool // false once the oldest stored message is on screen
-	input    textinput.Model
-	status   string
-	width    int
-	height   int
+	scrollUp int  // history lines hidden below the window; 0 = pinned to the newest
+	sending  bool // a send is in flight; further Enter presses are ignored
+	sentBody string
+
+	publishing atomic.Bool // a publish pass is in flight
+	input      textinput.Model
+	status     string
+	width      int
+	height     int
 
 	sendFn    func(groupID, body string) (groupchat.FanoutReport, error)
 	publishFn func(now int64) string
@@ -205,10 +211,15 @@ func (m *GroupsModel) loadOlder() tea.Cmd {
 }
 
 func (m *GroupsModel) send(groupID, body string) tea.Cmd {
+	lastID := ""
+	if n := len(m.messages); n > 0 {
+		lastID = m.messages[n-1].ID
+	}
 	return func() tea.Msg {
 		report, err := m.sendFn(groupID, body)
-		// A partial fanout still stored the message locally; reload either way.
-		messages, _ := m.store.GroupMessagesPage(m.me.Npub, groupID, groupHistoryPage, "", "")
+		// A partial fanout still stored the message locally; fetch what is
+		// newer than the last message on screen so scrolled-back pages stay.
+		messages, _ := m.store.GroupMessagesPage(m.me.Npub, groupID, groupHistoryPage, "", lastID)
 		return groupSentMsg{groupID: groupID, report: report, err: err, messages: messages}
 	}
 }
@@ -232,9 +243,16 @@ func publishGroupOutbox(now int64) string {
 	if err != nil {
 		return "outbox unreadable: " + err.Error()
 	}
-	called, problems := 0, []string{}
+	called, failed, problems := 0, 0, []string{}
 	for _, entry := range outbox.Entries {
 		if entry.Route != messaging.OutboxRouteGroup {
+			continue
+		}
+		if entry.Status == messaging.OutboxStatusGroupFailed {
+			failed++
+			continue
+		}
+		if !groupRowDue(entry, now) {
 			continue
 		}
 		switch outcome := daemon.GroupRetryOutcome(entry, now); {
@@ -244,20 +262,26 @@ func publishGroupOutbox(now int64) string {
 			problems = append(problems, outcome)
 		}
 	}
+	suffix := ""
+	if failed > 0 {
+		// stays on screen every pass: a failed row never retries by itself
+		suffix = fmt.Sprintf(" • %d group event(s) FAILED after the retry limit; run `hyphae groupchat retry`", failed)
+	}
 	switch {
 	case len(problems) > 0:
-		return "publish: " + problems[0]
+		return "publish: " + problems[0] + suffix
 	case called > 0:
-		return fmt.Sprintf("publish: %d group event(s) handed to the relay publisher", called)
+		return fmt.Sprintf("publish: %d group event(s) handed to the relay publisher", called) + suffix
 	}
-	return ""
+	return strings.TrimPrefix(suffix, " • ")
 }
 
 func (m *GroupsModel) publishPass() tea.Cmd {
 	return func() tea.Msg {
-		if m.ctx.Err() != nil {
+		if m.ctx.Err() != nil || !m.publishing.CompareAndSwap(false, true) {
 			return nil
 		}
+		defer m.publishing.Store(false)
 		return groupPublishMsg{status: m.publishFn(time.Now().Unix())}
 	}
 }
@@ -282,12 +306,16 @@ func (m *GroupsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = fmt.Sprintf("%d group(s)", len(m.groups))
 
 	case groupOpenedMsg:
+		if msg.groupID != m.current.ID || m.view != groupsViewChat {
+			return m, nil
+		}
 		if msg.err != nil {
 			m.status = "Could not open group: " + msg.err.Error()
 			return m, nil
 		}
 		m.members, m.messages = msg.members, msg.messages
 		m.older = len(msg.messages) >= groupHistoryPage
+		m.scrollUp = 0
 		m.status = ""
 
 	case groupOlderMsg:
@@ -299,24 +327,27 @@ func (m *GroupsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.messages = append(append([]types.GroupMessage{}, msg.messages...), m.messages...)
+		m.scrollUp += m.historyKeep() // move the window up onto the page just loaded
 		m.older = len(msg.messages) >= groupHistoryPage
 		m.status = fmt.Sprintf("loaded %d older message(s)", len(msg.messages))
 
 	case groupSentMsg:
-		if msg.groupID == m.current.ID && m.view == groupsViewChat && msg.messages != nil {
-			m.messages = msg.messages
-		}
-		switch {
-		case msg.err != nil:
-			// A partial fanout stored the message and queued some recipients;
-			// clearing the input avoids a duplicate send. Nothing stored: keep it.
-			if len(msg.report.Recipients) > 0 {
-				m.input.Reset()
+		m.sending = false
+		if msg.groupID == m.current.ID && m.view == groupsViewChat {
+			if len(msg.messages) > 0 {
+				m.messages = append(m.messages, msg.messages...)
+				m.scrollUp = 0
 			}
-			m.status = fmt.Sprintf("Send failed: %v (queued %d, failed %d)", msg.err, msg.report.Queued, msg.report.Failed)
-		default:
-			m.input.Reset()
-			m.status = fmt.Sprintf("Queued for %d member(s); not delivered until a relay accepts", msg.report.Queued)
+			switch {
+			case msg.err != nil:
+				// Nothing stored: give the text back so it is not lost.
+				if len(msg.report.Recipients) == 0 && m.input.Value() == "" {
+					m.input.SetValue(m.sentBody)
+				}
+				m.status = fmt.Sprintf("Send failed: %v (queued %d, failed %d)", msg.err, msg.report.Queued, msg.report.Failed)
+			default:
+				m.status = fmt.Sprintf("Queued for %d member(s); not delivered until a relay accepts", msg.report.Queued)
+			}
 		}
 		return m, m.publishPass()
 
@@ -379,16 +410,26 @@ func (m *GroupsModel) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input.Blur()
 		return m, m.loadGroups()
 	case "ctrl+u":
+		// Scroll through what is loaded first, then fetch the next older page.
+		if keep := m.historyKeep(); keep > 0 && len(m.historyAll())-m.scrollUp > keep {
+			m.scrollUp = min(m.scrollUp+keep, len(m.historyAll())-keep)
+			return m, nil
+		}
 		if !m.older {
 			m.status = "no older messages"
 			return m, nil
 		}
 		return m, m.loadOlder()
+	case "ctrl+d":
+		m.scrollUp = max(0, m.scrollUp-max(1, m.historyKeep()))
+		return m, nil
 	case "enter":
 		body := strings.TrimSpace(m.input.Value())
-		if body == "" {
+		if body == "" || m.sending {
 			return m, nil
 		}
+		m.sending, m.sentBody = true, body
+		m.input.Reset() // cleared on press so a second Enter cannot resend it
 		m.status = "Sending..."
 		return m, m.send(m.current.ID, body)
 	}
@@ -426,7 +467,7 @@ func (m *GroupsModel) View() string {
 			b.WriteString(line + "\n")
 		}
 		b.WriteString("\n" + inputStyle.Render(m.input.View()))
-		b.WriteString("\n" + helpStyle.Render("enter: send • ctrl+u: older • esc: back • ctrl+c: quit"))
+		b.WriteString("\n" + helpStyle.Render("enter: send • ctrl+u/ctrl+d: scroll history • esc: back • ctrl+c: quit"))
 	}
 	if m.status != "" {
 		b.WriteString("\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(m.status))
@@ -456,9 +497,16 @@ func (m *GroupsModel) npubLabel(npub string) string {
 	return safeTruncate(npub, 12) + "…"
 }
 
-// historyLines renders the loaded history, trimmed to the screen when the
-// terminal size is known.
-func (m *GroupsModel) historyLines() []string {
+// historyKeep is how many history lines fit on screen; 0 when the terminal
+// size is unknown (show everything).
+func (m *GroupsModel) historyKeep() int {
+	if keep := m.height - 10; m.height > 0 && keep > 0 {
+		return keep
+	}
+	return 0
+}
+
+func (m *GroupsModel) historyAll() []string {
 	lines := make([]string, 0, len(m.messages)+1)
 	if m.older {
 		lines = append(lines, helpStyle.Render("-- ctrl+u for older messages --"))
@@ -471,8 +519,17 @@ func (m *GroupsModel) historyLines() []string {
 		ts := timestampStyle.Render(time.Unix(msg.CreatedAt, 0).Format("01-02 15:04"))
 		lines = append(lines, fmt.Sprintf("%s %s: %s", ts, who, msg.Plaintext))
 	}
-	if keep := m.height - 10; m.height > 0 && keep > 0 && len(lines) > keep {
-		lines = lines[len(lines)-keep:]
-	}
 	return lines
+}
+
+// historyLines is the window of history on screen: the newest lines, moved up
+// by scrollUp.
+func (m *GroupsModel) historyLines() []string {
+	lines := m.historyAll()
+	keep := m.historyKeep()
+	if keep <= 0 || len(lines) <= keep {
+		return lines
+	}
+	end := len(lines) - min(m.scrollUp, len(lines)-keep)
+	return lines[end-keep : end]
 }
