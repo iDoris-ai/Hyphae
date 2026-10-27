@@ -58,6 +58,9 @@ var membersCmd = &cli.Command{
 		&cli.StringFlag{Name: "group-id", Required: true, Usage: "Group id"},
 	}, localIdentityFlags()...),
 	Action: func(ctx context.Context, c *cli.Command) error {
+		if err := requireGroupID(c.String("group-id")); err != nil {
+			return err
+		}
 		session, err := openSession(c)
 		if err != nil {
 			return err
@@ -65,7 +68,7 @@ var membersCmd = &cli.Command{
 		defer session.db.Close()
 		members, err := session.store.listMembers(session.me, c.String("group-id"))
 		if err != nil {
-			return err
+			return userInputError(err)
 		}
 		common.Emit(common.JSONMode(c), map[string]any{"members": members}, func() {
 			for _, m := range members {

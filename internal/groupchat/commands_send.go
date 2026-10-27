@@ -135,12 +135,23 @@ var retryCmd = &cli.Command{
 }
 
 func retryCommand(c *cli.Command) (FanoutReport, error) {
+	if err := requireGroupID(c.String("group-id")); err != nil {
+		return FanoutReport{}, err
+	}
+	if err := requireLogicalID(c.String("logical-id")); err != nil {
+		return FanoutReport{}, err
+	}
 	session, err := openSession(c)
 	if err != nil {
 		return FanoutReport{}, err
 	}
 	defer session.db.Close()
 	key := FanoutKey{LocalNpub: session.me, GroupID: c.String("group-id"), EnvelopeType: EnvelopeMessage, SendKey: c.String("logical-id")}
+	// Look the send up first so only "no such logical id" becomes a user error;
+	// a sql.ErrNoRows surfacing later inside RequeueFailed stays internal.
+	if _, err := session.store.LoadFanoutReport(key); err != nil {
+		return FanoutReport{}, unknownLogicalError(err, key)
+	}
 	return session.store.RequeueFailed(key, c.String("recipient"))
 }
 
@@ -178,6 +189,12 @@ var statusCmd = &cli.Command{
 }
 
 func statusCommand(c *cli.Command) (statusView, error) {
+	if err := requireGroupID(c.String("group-id")); err != nil {
+		return statusView{}, err
+	}
+	if err := requireLogicalID(c.String("logical-id")); err != nil {
+		return statusView{}, err
+	}
 	session, err := openSession(c)
 	if err != nil {
 		return statusView{}, err
@@ -186,7 +203,7 @@ func statusCommand(c *cli.Command) (statusView, error) {
 	key := FanoutKey{LocalNpub: session.me, GroupID: c.String("group-id"), EnvelopeType: EnvelopeMessage, SendKey: c.String("logical-id")}
 	report, err := session.store.LoadFanoutReport(key)
 	if err != nil {
-		return statusView{}, err
+		return statusView{}, unknownLogicalError(err, key)
 	}
 	books, err := session.store.InspectFanoutBookkeeping(key)
 	if err != nil {
@@ -223,6 +240,12 @@ var historyCmd = &cli.Command{
 }
 
 func historyCommand(c *cli.Command) ([]types.GroupMessage, error) {
+	if err := requireGroupID(c.String("group-id")); err != nil {
+		return nil, err
+	}
+	if limit := c.Int("limit"); limit < 1 {
+		return nil, common.NewExitError(common.ErrCodeUser, fmt.Errorf("--limit must be at least 1, got %d", limit))
+	}
 	session, err := openSession(c)
 	if err != nil {
 		return nil, err
@@ -232,5 +255,5 @@ func historyCommand(c *cli.Command) ([]types.GroupMessage, error) {
 	if errors.Is(err, ErrCursorNotFound) || errors.Is(err, ErrConflictingCursors) {
 		return nil, common.NewExitError(common.ErrCodeUser, err)
 	}
-	return messages, err
+	return messages, userInputError(err)
 }

@@ -6,7 +6,7 @@
 
 | 事项 | 谁做 |
 | --- | --- |
-| 群的创建、邀请、接受、激活、逐收件人加密发送、重试、状态、本地历史 | Hyphae（`hyphae groupchat …`） |
+| 群的创建、邀请、接受、激活、逐收件人加密发送、重试、状态、本地历史 | Hyphae（`hyphae groupchat …`）。**激活不是命令**：没有 `groupchat activate`，最后一人 `accept` 后自动激活（见第 3 节命令清单） |
 | 稳定的 `--json` 输出、错误码、退出码、状态语义 | Hyphae（本文第 3、4 节） |
 | 群聊列表、消息流、发送框、逐人投递状态、重试按钮、邀请确认页 | Agent24（通过它自己的 `/api/v1/comm/*` 调 Hyphae CLI） |
 | 终端里的群聊 TUI | Hyphae（可选，独立于 Agent24） |
@@ -29,10 +29,13 @@
 
 ## 3. 命令契约（当前二进制已有的部分）
 
-通用：`--json` 或 `HYPHAE_OUTPUT=json`；成功 `{"ok":true,"data":…}` 写 stdout，失败 `{"ok":false,"error":"<code>","message":"…"}` 写 stderr；退出码 0/1/2/3/4/5 对应 成功/用户错误/网络错误/鉴权错误/其他错误/写冲突（见 `internal/common/output.go`）。需要口令时用 `--password-stdin`，不要用 `--password` 参数。身份由 `--identity <昵称>` 指定，缺省为默认身份。
+通用：`--json` 或 `HYPHAE_OUTPUT=json`；成功 `{"ok":true,"data":…}` 写 stdout，失败 `{"ok":false,"error":"<code>","message":"…"}` 写 stderr；退出码 0/1/2/3/4/5 对应 成功/用户错误/网络错误/鉴权错误/其他错误/写冲突（见 `internal/common/output.go`）。
+
+**调用方输入错误一律 `user_error`（退出码 1）**，不会是 `other_error`（退出码 4）：群未激活或已退出（`group is not active` / `group was left locally`）、群不存在、`group-id` / `logical-id` 格式不对（`invalid group ID` / `invalid logical message ID`）、`status`/`retry` 的 `logical-id` 不存在、邀请不存在、身份昵称不存在、`history --limit` 小于 1。`other_error` 只留给内部故障（存储、协议不一致、部分失败的 `send` 等）。回归测试：`TestCommandJSONContract` 的 `user_error/*` 子测试。需要口令时用 `--password-stdin`，不要用 `--password` 参数。身份由 `--identity <昵称>` 指定，缺省为默认身份。
 
 | 命令 | 成功 `data` | 说明 |
 | --- | --- | --- |
+| 命令清单（完整） | `create`、`list`、`members`、`invite list`、`accept`、`send`、`retry`、`status`、`history`。**没有** `activate`；`invite` 下**只有**只读的 `invite list`（没有 invite send/create/revoke，邀请由 `create` 产生，由 `accept` 消费） | 激活由系统触发：创建者在本机时，最后一人 `accept` 返回 `state:"active"`；创建者在另一台设备时，`accept` 返回 `pending`，由创建者 daemon 在收齐 accept 后发出激活，之后 `list`/`members` 才显示 `active` |
 | `groupchat create --name N --identity A --invitee <npub>…` | `{"group_id":"<32 hex>"}` | 邀请此时只落在本地库 |
 | `groupchat invite list --group G --identity A` | `{"invites":[{"invite_id","invitee_npub","group_id","state"}]}` | 创建者查看待接受邀请 |
 | `groupchat accept --invite I --identity B` | `{"group_id":"…","state":"pending" \| "active"}` | 接受已记录即成功（退出码 0）。`pending` = 还在等其他成员或创建者的激活；`active` = 群已激活。创建者不在本机时，接受以加密事件排队发给创建者，需本机 daemon 运行 |
@@ -41,7 +44,7 @@
 | `groupchat retry --group-id G --logical-id L --recipient <npub> --identity A` | 同上发送报告 | 为失败的收件人换新 queue id 重发，沿用原 event |
 | `groupchat list --identity A` | `{"groups":[{"group_id","name","state","creator_npub","members":[npub],"updated_at"}]}` | 无群时为 `[]` |
 | `groupchat members --group-id G --identity A` | `{"members":[{"npub","state","is_creator"}]}` | 创建者在前 |
-| `groupchat history --group-id G [--limit 20] [--before-id ID \| --after-id ID] --identity A` | `{"messages":[{"id","event_id","group_id","sender","content","plaintext","created_at","is_encrypted"}]}` | 只含本地已落库消息，最旧在前。`--before-id`：比该消息更旧的最新 `limit` 条；`--after-id`：比该消息更新的最旧 `limit` 条（增量刷新）；同秒消息按 id 排序，不重不漏；未知游标或同时给两个 → 退出码 1。`id` 就是发送时的 `logical_id`，可直接用于 `status`；发送者自己的行 `event_id` 为空、`content` 为空，显示用 `plaintext` |
+| `groupchat history --group-id G [--limit 20] [--before-id ID \| --after-id ID] --identity A` | `{"messages":[{"id","event_id","group_id","sender","content","plaintext","created_at","is_encrypted"}]}` | 只含本地已落库消息，最旧在前。`--limit` 必须 ≥ 1，否则退出码 1（`user_error`）；上限不由 Hyphae 限制，调用方自行约束。`--before-id`：比该消息更旧的最新 `limit` 条；`--after-id`：比该消息更新的最旧 `limit` 条（增量刷新）；同秒消息按 id 排序，不重不漏；未知游标或同时给两个 → 退出码 1。`id` 就是发送时的 `logical_id`，可直接用于 `status`；发送者自己的行 `event_id` 为空、`content` 为空，显示用 `plaintext` |
 
 `recipients[]` 每项：`recipient_npub, event_id, queue_id, state, relay_acks, relay_count, attempts, max_retries`，另有 `issue`、`retry_queue_id`、`attempt_phase` 等诊断字段；界面只依赖前五个，其余可忽略。
 
