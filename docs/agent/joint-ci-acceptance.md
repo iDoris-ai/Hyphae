@@ -1,14 +1,14 @@
 # Agent24 × Hyphae joint CI acceptance
 
-Status: The baseline in the table below (Agent24 `3a433bb0…`, Hyphae `144555ca…`) passed joint-ci in [run 40112860007](https://github.com/iDoris-ai/Hyphae/actions/runs/40112860007) (PR #281, head `92b6fde7`): both producer builds and all four ten-stage runners (candidate and pinned-production × darwin-arm64 and linux-x64) succeeded. The older results quoted next were produced against the former pins (Agent24 `fc862cf3…`, Hyphae `671c584f…`) and do not validate the current baseline. In [run 37627002418](https://github.com/iDoris-ai/Hyphae/actions/runs/37627002418), all four native candidate/pinned-production × darwin-arm64/linux-x64 consumers passed 10/10, and macOS cleanup stress passed. The run was not fully green: macOS ordinary Go tests hit a stdout/stderr ordering race in `TestDaemonJSONLCLIOutputModesAndGenerationRestart`, so `ci-ok` failed. A test-only two-event synchronization fix is being validated on a new head; until that head has fresh CI, do not claim the overall gate passed. CLI/relay acceptance does not imply desktop M1 acceptance.
+Status: The baseline in the table below was moved to Agent24 `df8a9d96…` / Hyphae `859d8fb7…` (v0.27.1, Agent24 #1368) on 2026-10-27; it has not passed joint-ci yet at the time of this edit, so do not claim the new pins validated until the PR's CI run is green. The previous baseline (Agent24 `3a433bb0…`, Hyphae `144555ca…`) passed joint-ci in [run 40112860007](https://github.com/iDoris-ai/Hyphae/actions/runs/40112860007) (PR #281, head `92b6fde7`). Older results quoted next were produced against former pins and do not validate the current baseline. In [run 37627002418](https://github.com/iDoris-ai/Hyphae/actions/runs/37627002418), all four native candidate/pinned-production × darwin-arm64/linux-x64 consumers passed 10/10, and macOS cleanup stress passed. The run was not fully green: macOS ordinary Go tests hit a stdout/stderr ordering race in `TestDaemonJSONLCLIOutputModesAndGenerationRestart`, so `ci-ok` failed. A test-only two-event synchronization fix is being validated on a new head; until that head has fresh CI, do not claim the overall gate passed. CLI/relay acceptance does not imply desktop M1 acceptance.
 
 ## Independent inputs
 
 | Input | Pinned value | Meaning |
 |---|---|---|
-| Agent24 build source | `3a433bb0ce02a801a3a424ce731ec3878454e078` | Public Agent24 main after [#1193](https://github.com/iDoris-ai/Agent24/pull/1193) locked Hyphae v0.26.3 (previously `fc862cf3f765f3e59686e816aea6fa4792f10da2`) |
-| Production lock SHA-256 | `78a58f5fe329eae79a9fdae6cd9a39fe6d3826e5b6079f411398ee9509b01804` | Exact bytes in that Agent24 commit (previously `a83b7a58…`) |
-| Production lock `source_sha` | `144555ca6b043be77225786ddbf4e6bce5ad3228` | Hyphae v0.26.3 source for pinned-production baseline (previously `671c584f…`) |
+| Agent24 build source | `df8a9d96b01d853796495d923fab268f05923e0a` | Public Agent24 main after [#1368](https://github.com/iDoris-ai/Agent24/pull/1368) locked Hyphae v0.27.1 (previously `3a433bb0…`) |
+| Production lock SHA-256 | `59b28a8190fabb77f5d6d23078d0acdd23f6e50f04b296d71a28ec1e9ae2f894` | Exact bytes in that Agent24 commit (previously `78a58f5f…`) |
+| Production lock `source_sha` | `859d8fb7e79c67beb3c7a5a5d6d58c36baac7d0f` | Hyphae v0.27.1 source for pinned-production baseline (previously `144555ca…`) |
 | Go toolchain | `go1.26.4` | Fixed release build recipe |
 | Candidate source | triggering `github.sha` | PR/push source under test; must not replace the production input |
 
