@@ -50,6 +50,21 @@ func (p *cliSendProvider) Send(call GroupSendCall) error {
 	return nil
 }
 
+// DefaultSendMaxRetries is the retry budget `groupchat send` stores with a fanout.
+const DefaultSendMaxRetries = 10
+
+// SendGroupMessage queues one message for every other member of an active group
+// through the same provider path as `groupchat send` and returns the report with
+// a freshly generated logical id. On a partial fanout the report is still
+// returned next to the error.
+func SendGroupMessage(store *Store, sk nostr.SecretKey, groupID, body string) (FanoutReport, error) {
+	logicalID, err := NewOpaqueID()
+	if err != nil {
+		return FanoutReport{}, err
+	}
+	return enqueueThroughProvider(store, sk, groupID, logicalID, body, DefaultSendMaxRetries)
+}
+
 func enqueueThroughProvider(store *Store, sk nostr.SecretKey, groupID, logicalID, body string, maxRetries int) (FanoutReport, error) {
 	provider := &cliSendProvider{store: store, sk: sk, groupID: groupID, logicalID: logicalID, body: body, maxRetries: maxRetries}
 	registry := NewGroupProviderRegistry()

@@ -66,9 +66,9 @@
 | H-G4 | `history` 游标、部分失败带 `data`、邀请 `state` | 已合并 #287（游标是消息 id：`--before-id/--after-id`，而不是原设想的时间戳，时间戳在同秒时做不到不重不漏） |
 | H-G5 | 增量刷新 | 已由 `--after-id` 提供 |
 | H-G6 | 三个独立 HOME + 真 relay 的端到端 | 已合并：`TestGroupAcrossThreeHomesThroughRelay`（建群→邀请→接受→激活→消息→`relay_accepted`）。离线成员 / 重启 / 部分失败重试仍由同机的 `TestM1GroupInviteOfflinePartialFanoutExactlyOnce` 覆盖，尚未在跨 HOME 版本里重做 |
-| H-G7（可选） | Hyphae 群聊 TUI | 未做 |
+| H-G7（可选） | Hyphae 群聊 TUI | 本 PR：`hyphae tui groups`（只读 + 发送：群列表、成员、历史翻页 `ctrl+u`、发消息；邀请/接受仍用 `groupchat` 命令）。TUI 进程现在与 daemon 一样注册群发布器（`daemon.EnsureGroupPublisher`；`tui groups` 与 `hyphae chat` 的 outbox worker 都会注册） |
 
-已知缺口：创建者 daemon 在记下最后一个 accept 与排队激活之间崩溃时，群停在 `activating`，要等同一 accept 事件重放才会修复，没有定期修复；TUI 进程不注册发布器，只有 `hyphae daemon` 发布群事件。设计依据仍是 `m1-group-chat-design-20261007.md` 与 `m1-group-fanout-contract-20261008.md`。
+已知缺口：创建者 daemon 在记下最后一个 accept 与排队激活之间崩溃时，群停在 `activating`，要等同一 accept 事件重放才会修复，没有定期修复；TUI 的群聊界面不含邀请/接受/重试按钮，也不显示逐人投递状态（用 `groupchat status/retry`）；TUI 发布依赖本进程里的发布器，退出 TUI 后未发完的群事件仍由 `hyphae daemon` 接手；TUI 界面本身没有做过真实终端的人工验收，只有模型层 Go 测试。设计依据仍是 `m1-group-chat-design-20261007.md` 与 `m1-group-fanout-contract-20261008.md`。
 
 ## 6. 给 Agent24 的界面建议（可自行取舍）
 

@@ -31,6 +31,13 @@ func ensureGroupPublisher(ctx context.Context, relays []string) {
 	}
 }
 
+// EnsureGroupPublisher is ensureGroupPublisher for other processes that drain
+// the group outbox (the TUI). ctx bounds the publishes; relays is where they go.
+// A provider that is already registered is kept.
+func EnsureGroupPublisher(ctx context.Context, relays []string) {
+	ensureGroupPublisher(ctx, relays)
+}
+
 // groupPublisher publishes one group outbox row through the fanout attempt
 // handler, which records the attempt, the relay acceptance or the failure in
 // the group tables as well as the outbox.

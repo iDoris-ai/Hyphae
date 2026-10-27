@@ -46,6 +46,9 @@ func (m *ChatModel) startOutboxWorker() tea.Cmd {
 		m.outboxStarted = true
 		m.inboxMu.Unlock()
 
+		// Without a registered publisher, retryGroupOutbox only reports
+		// not_registered and group rows queued from this process never leave.
+		daemon.EnsureGroupPublisher(m.outboxCtx, m.relays)
 		go m.runOutboxWorker()
 		return outboxWorkerStartedMsg{}
 	}
@@ -165,6 +168,9 @@ func (m *ChatModel) retryGroupOutbox(ctx context.Context, outbox *types.Outbox, 
 		if ctx.Err() != nil {
 			return
 		}
+		if !groupRowDue(entry, now) {
+			continue
+		}
 		outcome := daemon.GroupRetryOutcome(entry, now)
 		if outcome == "not_registered" {
 			if !reportedMissing {
@@ -175,6 +181,19 @@ func (m *ChatModel) retryGroupOutbox(ctx context.Context, outbox *types.Outbox, 
 		}
 		m.publishOutboxUpdate(ctx, outboxDeliveryUpdate{eventID: entry.ID, detail: outcome})
 	}
+}
+
+// groupRetryBackoff is the minimum gap between two attempts on one group row,
+// the same 60 seconds the daemon waits between passes. Each failed attempt
+// spends one of the row's MaxRetries (10), so without a gap the 500ms chat
+// worker or the 2s groups tick would turn an unreachable relay into a
+// permanent group_failed within seconds.
+const groupRetryBackoff = 60 * time.Second
+
+// groupRowDue reports whether a group outbox row may be attempted now: never
+// attempted, or last attempted at least groupRetryBackoff ago.
+func groupRowDue(entry types.OutboxEntry, now int64) bool {
+	return entry.LastAttempt <= 0 || now-entry.LastAttempt >= int64(groupRetryBackoff/time.Second)
 }
 
 func (m *ChatModel) restoreOutboxHistory(entry types.OutboxEntry) error {

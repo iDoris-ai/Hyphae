@@ -46,6 +46,7 @@ var TUICmd = &cli.Command{
 	Commands: []*cli.Command{
 		ChatCmd,
 		ContactsCmd,
+		GroupsCmd,
 	},
 }
 
