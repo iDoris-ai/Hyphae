@@ -29,11 +29,16 @@ export const EVENTS_DDL = `
   DROP INDEX IF EXISTS tags_lookup;
   CREATE INDEX IF NOT EXISTS tags_cover ON event_tags (name, value, event_id);
   CREATE INDEX IF NOT EXISTS tags_event ON event_tags (event_id);
+  -- Row counters for tombstones / coord_cutoffs (counting rows on every write would be O(n)).
+  CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, n INTEGER NOT NULL);
 `;
 
 // Rough on-disk cost model used for the "does this write grow a full database" decision.
 const ROW_OVERHEAD = 150; // events row + its indexes, besides the JSON
 const TAG_ROW = 64; // one event_tags row + indexes, besides the value
+// Row writes per operation (table row + index rows), used for the deletion write budget.
+export const W_EVENT_BASE = 6; // events row + 5 indexes
+export const W_TAG_ROW = 3; // event_tags row + 2 indexes
 
 /** The (name, value) pairs of single-letter tags that get indexed: distinct, at most `max`. */
 export function indexedTags(tags: string[][], max: number): [string, string][] {
@@ -78,4 +83,21 @@ export function deleteEvent(db: Db, id: string): { writes: number; freed: number
   const b = db.sql.exec("DELETE FROM events WHERE id = ?", id);
   b.toArray();
   return { writes: Math.max(1, a.rowsWritten + b.rowsWritten), freed };
+}
+
+export function setCounter(db: Db, k: string, n: number) {
+  db.sql.exec("INSERT INTO meta (k, n) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET n = excluded.n", k, n);
+}
+
+export function counter(db: Db, k: string): number {
+  const r = db.sql.exec("SELECT n FROM meta WHERE k = ?", k).toArray();
+  return r.length > 0 ? (r[0].n as number) : 0;
+}
+
+export function bump(db: Db, k: string, delta = 1) {
+  db.sql.exec("INSERT INTO meta (k, n) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET n = n + ?", k, delta, delta);
+}
+
+export function tagRows(db: Db, id: string): number {
+  return db.sql.exec("SELECT count(*) AS n FROM event_tags WHERE event_id = ?", id).one().n as number;
 }

@@ -36,6 +36,11 @@ export const LIMITS = {
   // --- storage
   maxIndexedTags: 64, // distinct single-letter tags that are indexed per event
   maxStorageBytes: 5 * 1024 * MB,
+  // --- deletion requests (NIP-09)
+  maxTombstones: 1_000_000, // at the cap the OLDEST record is evicted (new kind 5 is never refused for it)
+  maxCoordCutoffs: 1_000_000,
+  maxDeletionTargets: 100, // e/a targets processed per kind 5
+  maxDeletionRowWrites: 5000, // estimated row writes (incl. index rows) per kind 5; never exceeded
 };
 
 export type Limits = { [K in keyof typeof LIMITS]: number };
