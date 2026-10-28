@@ -166,6 +166,7 @@ Tests can override numeric limits with a `LIMITS_JSON` variable (for example
   source allowance. The per-address limits are coarse abuse controls, not a fairness guarantee.
 - Source and global budgets restart from full whenever the Durable Object is rebuilt.
 - `storeEvent` throws on SQL errors; the caller turns that into `OK false "error: ..."`.
+- More low-severity review notes are in `docs/agent/relay-worker-followups-20261028.md`.
 
 ## Develop and test
 
@@ -192,6 +193,20 @@ and pass `--src-header=x-e2e-src`). The cap checks need relays with tiny limits;
    `wrangler.toml`, then check `curl -H 'Accept: application/nostr+json' https://<host>/`.
 5. Point clients at `wss://<host>`. Watch `pnpm exec wrangler tail` during the first hours; start
    with the default limits and loosen them only based on real traffic.
+
+### Redeploying over an existing Durable Object (staging)
+
+A deployed object keeps its SQLite data. The schema changes are additive and the counters are
+reconciled once, so an upgrade normally just works. When you want a clean slate instead (or the
+stored data may have been written by much older code), do one of these first. Nothing here has been
+run by this repository.
+
+- Empty the state: `pnpm exec wrangler delete` removes the worker together with its Durable Object
+  storage; then `pnpm exec wrangler deploy` creates both again from migration `v1`.
+- Or keep the old data aside and start a new object: rename the class (for example `RelayV2` in
+  `src/relay.ts`, `src/index.ts` and the binding in `wrangler.toml`) and add a migration with a new
+  tag, `[[migrations]] tag = "v2"`, `new_sqlite_classes = ["RelayV2"]`, and `deleted_classes =
+  ["Relay"]` once the old data is no longer needed; then `pnpm exec wrangler deploy`.
 
 `wrangler.toml` keeps `compatibility_date = "2026-01-01"`; the installed wrangler 4.40 warns that
 its bundled workerd is older and falls back, which does not affect local runs.
