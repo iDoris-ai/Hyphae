@@ -41,6 +41,14 @@ export const LIMITS = {
   maxCoordCutoffs: 1_000_000,
   maxDeletionTargets: 100, // e/a targets processed per kind 5
   maxDeletionRowWrites: 5000, // estimated row writes (incl. index rows) per kind 5; never exceeded
+  // --- subscriptions / queries
+  maxLimit: 500,
+  maxSubsPerConn: 20,
+  maxSubBytes: 4096, // serialized filters of one subscription
+  maxSubBytesPerConn: 16 * 1024,
+  maxSubRows: 20_000, // subscription rows across the whole relay
+  subCacheBytes: 4 * MB, // in-memory cache of subscriptions; the rest is read from SQL
+  maxResultBytes: 4 * MB, // total size of the stored events one REQ returns
 };
 
 export type Limits = { [K in keyof typeof LIMITS]: number };
