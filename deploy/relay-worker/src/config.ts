@@ -33,6 +33,9 @@ export const LIMITS = {
   globalHistoryBytesPerMinute: 128 * MB,
   quotaWindowMs: 60_000,
   maxOverQuotaWindows: 3, // close (1013) after dropping continuously for about (N-1) windows
+  // --- storage
+  maxIndexedTags: 64, // distinct single-letter tags that are indexed per event
+  maxStorageBytes: 5 * 1024 * MB,
 };
 
 export type Limits = { [K in keyof typeof LIMITS]: number };
