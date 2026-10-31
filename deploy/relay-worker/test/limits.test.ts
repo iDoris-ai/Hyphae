@@ -172,18 +172,115 @@ describe("Budgets", () => {
     for (let i = 0; i < 5 && r === "ok"; i++) r = b.chargeDelivery("s", "c", MB);
     expect(r).toBe("socket"); // the socket quota is reachable before the source share
     expect(b.overQuota("c", 1_000_000)).toBe(false);
-    expect(b.overQuota("c", 1_070_000)).toBe(false);
-    expect(b.overQuota("c", 1_130_000)).toBe(true); // over quota for about two windows
+    expect(b.overQuota("c", 1_055_000)).toBe(false);
+    expect(b.overQuota("c", 1_110_000)).toBe(false);
+    expect(b.overQuota("c", 1_121_000)).toBe(true); // over quota for two windows, gaps below one window
   });
   it("overQuota closes a socket only after it stays over quota for (N-1) windows", () => {
     const b = new Budgets(lim({ quotaWindowMs: 1000, maxOverQuotaWindows: 3, socketOutboundBytesPerMinute: 1 }));
     b.chargeDelivery("s", "c", 1);
     b.chargeDelivery("s", "c", 1); // the socket entry exists now
     expect(b.overQuota("c", 10_000)).toBe(false); // episode starts
-    expect(b.overQuota("c", 11_500)).toBe(false); // 1.5 windows
-    expect(b.overQuota("c", 12_100)).toBe(true); // 2.1 windows, gaps below 2 windows
-    expect(b.overQuota("c", 20_000)).toBe(false); // gap >= 2 windows: a new episode
+    expect(b.overQuota("c", 10_900)).toBe(false);
+    expect(b.overQuota("c", 11_800)).toBe(false); // 1.8 windows
+    expect(b.overQuota("c", 12_100)).toBe(true); // 2.1 windows, every gap below one window
+    expect(b.overQuota("c", 20_000)).toBe(false); // gap >= 1 window: a new episode
     b.forget("c");
     expect(b.overQuota("c", 30_000)).toBe(false);
+  });
+  it("overQuota: a gap of exactly one window ends the episode, a gap just below it does not", () => {
+    const mk = () => {
+      const b = new Budgets(lim({ quotaWindowMs: 1000, maxOverQuotaWindows: 3, socketOutboundBytesPerMinute: 1 }));
+      b.chargeDelivery("s", "c", 5);
+      return b;
+    };
+    const a = mk();
+    a.overQuota("c", 10_000);
+    a.overQuota("c", 10_999);
+    a.overQuota("c", 11_998);
+    expect(a.overQuota("c", 12_997)).toBe(true); // every gap 999: continuous, ~3 windows
+    const b = mk();
+    b.overQuota("c", 10_000);
+    b.overQuota("c", 11_000); // gap == window: new episode
+    expect(b.overQuota("c", 12_000)).toBe(false); // gap == window again: still no continuous episode
+  });
+  it("a socket refused only by the source quota can still be closed with overQuota", () => {
+    const b = new Budgets(lim({ quotaWindowMs: 1000, maxOverQuotaWindows: 3, sourceOutboundBytesPerMinute: 1 }));
+    expect(b.chargeDelivery("s", "fresh", 5)).toBe("source"); // never reached the socket bucket
+    expect(b.overQuota("fresh", 10_000)).toBe(false);
+    expect(b.overQuota("fresh", 10_900)).toBe(false);
+    expect(b.overQuota("fresh", 12_100)).toBe(false); // gap 1.2 windows: restarted
+    expect(b.overQuota("fresh", 12_900)).toBe(false);
+    expect(b.overQuota("fresh", 14_200)).toBe(false);
+    expect(b.overQuota("fresh", 14_900)).toBe(false);
+    const c = new Budgets(lim({ quotaWindowMs: 1000, maxOverQuotaWindows: 3, sourceOutboundBytesPerMinute: 1 }));
+    c.chargeDelivery("s", "x", 5);
+    c.overQuota("x", 10_000);
+    c.overQuota("x", 10_900);
+    c.overQuota("x", 11_800);
+    expect(c.overQuota("x", 12_100)).toBe(true);
+  });
+  it("the per-socket table is bounded, oldest first, and forget still removes an entry", () => {
+    const b = new Budgets(lim({ maxSourceEntries: 2, sourceOutboundBytesPerMinute: 1, quotaWindowMs: 1000, maxOverQuotaWindows: 2 }));
+    b.chargeDelivery("s", "a", 5);
+    b.chargeDelivery("s", "b", 5);
+    b.chargeDelivery("s", "c", 5); // evicts "a"
+    expect(b.overQuota("a", 1000)).toBe(false);
+    b.overQuota("c", 1000);
+    expect(b.overQuota("c", 1900)).toBe(false);
+    expect(b.overQuota("c", 2000)).toBe(true); // "c" survived
+    b.forget("c");
+    expect(b.overQuota("c", 2100)).toBe(false);
+  });
+});
+
+describe("hardening (review of #301)", () => {
+  it("takeToken rejects zero, negative and non-finite costs and clocks, leaving the bucket untouched", () => {
+    const b = { tokens: 1, last: 0 };
+    for (const c of [0, -5, NaN, Infinity]) {
+      const r = takeToken(b, 0, 10, c);
+      expect(r.ok).toBe(false);
+      expect(r.bucket).toBe(b);
+    }
+    expect(takeToken(b, NaN, 10, 1).ok).toBe(false);
+    expect(takeToken(undefined, 0, 10, -1).bucket.tokens).toBe(10);
+  });
+  it("takeToken never moves last backwards", () => {
+    const r = takeToken({ tokens: 3, last: 5000 }, 1000, 60);
+    expect(r.bucket.last).toBe(5000);
+    // the interval 1000..5000 is not refilled a second time when the clock recovers
+    const r2 = takeToken(r.bucket, 5000, 60, 1);
+    expect(r2.bucket.tokens).toBe(1);
+  });
+  it("eventWeight does not overflow int32 for huge sizes", () => {
+    expect(eventWeight(0, 2 ** 31)).toBe(1 + 2 ** 19);
+    expect(eventWeight(0, 2 ** 32)).toBe(1 + 2 ** 20);
+    expect(eventWeight(2 ** 32, 0)).toBe(1 + 2 ** 27);
+  });
+  it("countViolation: an exact-60s boundary is the next window, and a burst across it is still caught", () => {
+    const a: ConnState = { id: "c", src: "s" };
+    countViolation(a, 3, 1000);
+    countViolation(a, 3, 2000);
+    expect(countViolation(a, 3, 61_000)).toBe(true); // exactly 60s after the window start: next window, previous one fully weighted
+    const b: ConnState = { id: "c", src: "s" };
+    countViolation(b, 3, 1000);
+    countViolation(b, 3, 2000);
+    expect(countViolation(b, 2, 61_001)).toBe(true); // a fixed window would have reset to 1 here
+    const c: ConnState = { id: "c", src: "s" };
+    countViolation(c, 3, 1000);
+    countViolation(c, 3, 2000);
+    expect(countViolation(c, 3, 100_000)).toBe(false); // the previous window has mostly aged out
+    expect(countViolation({ id: "c", src: "s" }, 3, 0)).toBe(false); // now = 0 is a valid start
+    const d: ConnState = { id: "c", src: "s" };
+    countViolation(d, 3, 0);
+    countViolation(d, 3, 1);
+    expect(countViolation(d, 3, 2)).toBe(true);
+  });
+  it("sourceKey caps the key length and maps an empty input to a fixed key", () => {
+    expect(sourceKey("")).toBe("unknown");
+    expect(sourceKey("   ")).toBe("unknown");
+    expect(sourceKey("%eth0")).toBe("unknown");
+    expect(sourceKey("x".repeat(100_000)).length).toBeLessThanOrEqual(64);
+    expect(sourceKey("1:2:3:4:5:6:7:8:9" + "a".repeat(500)).length).toBeLessThanOrEqual(64);
   });
 });
