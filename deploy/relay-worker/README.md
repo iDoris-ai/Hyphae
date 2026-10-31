@@ -155,6 +155,25 @@ Cloudflare. A request that reaches the Worker directly on
 Tests can override numeric limits with a `LIMITS_JSON` variable (for example
 `wrangler dev --var 'LIMITS_JSON:{"maxStorageBytes":1}'`). Do not set it in production.
 
+## Edge admission (before the Durable Object)
+
+`src/index.ts` calls `src/admission.ts` for every WebSocket upgrade after the source header check and
+before the Durable Object, so a handshake flood from one source is refused with 429 + `Retry-After`
+without queuing in the DO. NIP-11 and plain GETs are never subject to it. Two best-effort filters:
+
+- A per-isolate token bucket per source key: 2x the DO's upgrade budget (120/min by default), bounded
+  LRU of 10 000 keys. Exact inside one isolate, but isolates are many and short-lived, so a flood
+  spread across them sees a fraction of it. Weak by design.
+- Cloudflare's Rate Limiting binding `UPGRADE_LIMITER` (`[[ratelimits]]`, 100 requests / 10 s per
+  source key). It is per Cloudflare location, eventually consistent and permissive (it can admit more
+  than the limit), and is not visible in the dashboard. The limit is above the DO's 60-upgrade burst so
+  the Go client's one-socket-per-page pattern is unaffected. `namespace_id` must be unique per account.
+
+If the binding throws, the request is admitted and the error logged once per isolate (the DO limits
+remain). These filters do not stop traffic from being billed: a request that reaches the Worker counts,
+even when answered 429. Configure a WAF rate-limiting rule on the zone as well (see the PR description
+for the rule and sources). Verified only under `wrangler dev --local`, not on real Cloudflare.
+
 ## Known limits
 
 - The global budgets (event weight, outbound bytes) are shared by everyone; a handful of source
@@ -170,8 +189,9 @@ Tests can override numeric limits with a `LIMITS_JSON` variable (for example
   100 targets.
 - `sql.databaseSize` does not shrink after deletes, so "storage full" can persist until the object's
   data is cleaned up by hand.
-- An upgrade counts the open sockets of its source by scanning all sockets (at most 2000), and every
-  upgrade is first forwarded to the Durable Object before it can be refused.
+- An upgrade counts the open sockets of its source by scanning all sockets (at most 2000). Upgrades
+  pass the edge admission filter (below) first, but a flood below that filter, or from many sources,
+  still reaches the Durable Object.
 - Fan-out costs O(subscriptions) per event, with no index by predicate, and has not been load
   tested; neither has 2000 connections.
 - A few source addresses can still drain the global budgets, and agents behind one NAT share one
