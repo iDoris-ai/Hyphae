@@ -71,7 +71,7 @@ export default {
         return new Response("relay unavailable", { status: 503, headers: { "retry-after": "30" } });
       }
     }
-    if (request.headers.get("Accept")?.includes("application/nostr+json")) {
+    if (request.headers.get("Accept")?.toLowerCase().includes("application/nostr+json")) {
       return new Response(JSON.stringify(nip11(loadLimits(env.LIMITS_JSON))), {
         headers: { "content-type": "application/nostr+json", ...CORS },
       });
