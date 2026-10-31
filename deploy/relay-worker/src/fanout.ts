@@ -9,8 +9,9 @@ import { type NostrEvent, utf8Length } from "./nostr";
  * per event, global bytes/min, per-source bytes/min (a source gets at most a quarter of the
  * global budget) and per-socket bytes/min. A delivery over a per-source or per-socket quota is
  * dropped (and counted); only a socket that stays over quota for several windows is closed.
+ * Returns how many deliveries were sent, and whether the global outbound budget cut the fan-out short.
  */
-export function broadcast(hub: Hub, e: NostrEvent) {
+export function broadcast(hub: Hub, e: NostrEvent): { delivered: number; cut: boolean } {
   const json = JSON.stringify(e);
   const evBytes = utf8Length(json);
   // Live matching sees the same tags a stored query does: only the indexed subset.
@@ -22,10 +23,10 @@ export function broadcast(hub: Hub, e: NostrEvent) {
       if (!st || st.closed) continue;
       for (const [subId, filters] of hub.subs.get(st.id)) {
         if (!matchAny(filters, seen)) continue;
-        if (delivered >= hub.lim.maxDeliveriesPerEvent) return;
+        if (delivered >= hub.lim.maxDeliveriesPerEvent) return { delivered, cut: false };
         const idJson = JSON.stringify(subId);
         const charge = hub.budgets.chargeDelivery(st.src, st.id, deliveryCost(evBytes, idJson));
-        if (charge === "global") return; // global outbound budget exhausted: drop the rest of this event's delivery
+        if (charge === "global") return { delivered, cut: true }; // global outbound budget exhausted: drop the rest of this event's delivery
         if (charge === "source") continue; // this source already uses its share: drop this delivery
         if (charge === "socket") {
           if (hub.budgets.overQuota(st.id)) {
@@ -41,4 +42,5 @@ export function broadcast(hub: Hub, e: NostrEvent) {
       console.error("broadcast failed for a socket", err);
     }
   }
+  return { delivered, cut: false };
 }

@@ -57,6 +57,8 @@ export function processEvent(hub: Hub, ws: WebSocket, st: ConnState, raw: unknow
     }
     // A replay of a stored event costs the shared budgets nothing.
     if (!ephemeral && hasEvent(hub.db, e.id)) return reply(true, "duplicate: already have this event", e.id);
+    // A replay of an ephemeral event within the window is acknowledged but not broadcast again.
+    if (ephemeral && hub.budgets.seenEphemeral(e.id)) return reply(true, "duplicate: already broadcast this event", e.id);
     // The sender's stored bytes and event weight count against it; the global budget running out is not its fault.
     const charge = hub.budgets.chargeEvent(st.src, ephemeral ? 0 : size, weight);
     if (charge === "source") {
@@ -66,7 +68,14 @@ export function processEvent(hub: Hub, ws: WebSocket, st: ConnState, raw: unknow
     if (charge === "global") return reply(false, "rate-limited: relay is busy, retry later", e.id);
     if (ephemeral) {
       if (isBlocked(hub.db, e, "")) return reply(false, "blocked: event was deleted", e.id);
-      broadcast(hub, e);
+      hub.budgets.rememberEphemeral(e.id);
+      const { delivered, cut } = broadcast(hub, e);
+      if (cut && delivered === 0) {
+        // The global outbound budget was empty: nobody got it, so the retry must not be called a duplicate.
+        hub.budgets.forgetEphemeral(e.id);
+        return reply(false, "rate-limited: relay is busy, retry later", e.id);
+      }
+      hub.budgets.chargeFanout(st.src, delivered);
       return reply(true, "", e.id);
     }
     switch (storeEvent(hub.db, e)) {

@@ -127,6 +127,7 @@ export class Budgets {
   private globalOut?: Bucket;
   private globalHist?: Bucket;
   private sockOut = new Map<string, SockOut>();
+  private recentEphemeral = new Map<string, number>(); // id -> first seen (ms), insertion order = age
 
   constructor(private lim: Limits) {}
 
@@ -190,6 +191,46 @@ export class Budgets {
     this.globalEv = g.bucket;
     if (wr) s.wr = wr.bucket;
     return "ok";
+  }
+
+  /** True when this ephemeral id was already accepted within the dedupe window (expired entries are dropped first). */
+  seenEphemeral(id: string, now = Date.now()): boolean {
+    const ttl = this.lim.ephemeralDedupeTtlMs;
+    for (const [k, at] of this.recentEphemeral) {
+      if (at <= now && now - at < ttl) break; // oldest first: the rest is younger. An entry from a clock that has since stepped back counts as expired
+      this.recentEphemeral.delete(k);
+    }
+    const at = this.recentEphemeral.get(id);
+    return at !== undefined && at <= now && now - at < ttl; // exact for this id even when the order is off after a clock step
+  }
+
+  /** Forgets an id whose broadcast reached nobody because the relay was out of outbound budget, so a retry is not called a duplicate. */
+  forgetEphemeral(id: string) {
+    this.recentEphemeral.delete(id);
+  }
+
+  /** Remembers an accepted ephemeral id; the set never holds more than ephemeralDedupeEntries ids. */
+  rememberEphemeral(id: string, now = Date.now()) {
+    const max = this.lim.ephemeralDedupeEntries;
+    if (max <= 0 || this.lim.ephemeralDedupeTtlMs <= 0) return;
+    this.recentEphemeral.set(id, now);
+    while (this.recentEphemeral.size > max) this.recentEphemeral.delete(this.recentEphemeral.keys().next().value as string);
+  }
+
+  /**
+   * Charges the publisher of an ephemeral event for the deliveries it caused (the receivers pay the
+   * bytes, nobody paid for the work). It is after the fact, so it cannot refuse this event: the cost is
+   * always subtracted, and what the bucket could not cover stays as debt (at most one minute's capacity)
+   * that refills away, so the source's next events are refused until it is repaid.
+   */
+  chargeFanout(src: string, delivered: number, now = Date.now()) {
+    const cost = Math.floor(delivered / this.lim.ephemeralDeliveriesPerWeight);
+    if (cost <= 0) return;
+    const s = this.source(src);
+    const cap = this.lim.sourceEventWeightPerMinute;
+    const cur = s.ew ?? { tokens: cap, last: now };
+    const tokens = Math.min(cap, cur.tokens + (Math.max(0, now - cur.last) / 60_000) * cap); // same refill as takeToken
+    s.ew = { tokens: Math.max(-cap, tokens - cost), last: Math.max(cur.last, now) };
   }
 
   /**
