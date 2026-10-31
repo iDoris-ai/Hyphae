@@ -13,19 +13,21 @@ of this doc) or `[unverified]`.
 
 ### A. PR #301 (w2 limits) review: 7 Low/Nit items in `src/limits.ts`
 
-These are being fixed in a separate PR to main on branch `jhfnetboy/relay-limits-hardening`
-(not part of this stack; at the time of writing that branch was not yet visible on origin [read: `git ls-remote`]).
-Until it merges, all seven are open on this stack. All were reported by the reviewer as non-blocking.
+Merged to main as #305 (`jhfnetboy/relay-limits-hardening`). Status below is taken from the #305 description
+and its tests [review]; items 1, 3, 4, 5, 6 and 7 are fixed, item 2 was **skipped** and is still open. #305's own
+review added one open P2: the per-socket table is capped by `maxSourceEntries` (default 10000), so with more
+concurrent sockets than that, eviction resets an active socket's quota and timers (needs >10k concurrent sockets;
+the connection cap is 2000, so it cannot trigger with the shipped defaults).
 
 | # | sev | what | status |
 | --- | --- | --- | --- |
-| 1 | Low | `takeToken` accepts a negative cost (acts as a refund) and a clock that moved backwards (a successful take sets `last = now`, so the interval is refilled twice after a rewind). `eventWeight` uses `>>` (int32): `eventWeight(0, 2**31)` is negative, `2**32` gives 1. Unreachable today (frames are far below 2 GiB, Workers' `Date.now()` is near monotonic). Fix: reject `cost<=0` or non-finite, use `Math.floor(bytes/4096)`. | tracked in relay-limits-hardening [review] |
-| 2 | Low | Per-source LRU eviction resets an exhausted source to a full bucket (reviewer reproduced with maxSourceEntries=100; production value 10000, so an attacker needs about 10k distinct sources / IPv6 /64s). Rejected operations also insert entries. | tracked in relay-limits-hardening [review] |
-| 3 | Low | `overQuota` never closes a new socket that was refused only by the *source* quota (`if (!k) return false`; `chargeDelivery` has not yet called `sock(conn)`). The socket silently loses deliveries and is never closed with 1013. The reviewer did not reproduce this independently (Codex repro, code reading). | tracked in relay-limits-hardening [review] |
-| 4 | Low | `overQuota` continuity test is too lenient: a drop every <2 windows counts as "continuous" (one drop per 100 s triggers on the 3rd). | tracked in relay-limits-hardening [review] |
-| 5 | Nit | `countViolation` is a fixed window anchored at the first violation (98 violations in 2 s around a boundary do not trigger max=50) and `now - badAt > 60_000` is strict, so exactly 60000 ms still counts as the old window. The 300/min frame bucket is the backstop. | tracked in relay-limits-hardening [review] |
-| 6 | Nit | `sockOut` entries are created by refused `chargeDelivery` calls and only `Budgets.forget` removes them. Wiring check: `Relay.dropConn` calls `this.budgets.forget(st.id)` and every close path funnels through `dropConn` (`src/relay.ts:145,159,194`) [read]. A socket whose attachment is null skips `forget` (`if (!st) return`) [read], so a leak remains possible for attachment-less sockets (see the Low item on `serializeAttachment` below). | partly mitigated by wiring; rest tracked in relay-limits-hardening |
-| 7 | Nit | `sourceKey` returns unparseable input verbatim (`""`, `"001.2.3.4"`, `"1.2.3.4:80"` are each their own key). Safe only if the input is `CF-Connecting-IP`; `SRC_HEADER` (env override) or a missing header changes that (see `src/index.ts:54` in the Low table). An empty string makes all header-less requests share one bucket (fail-closed). | tracked in relay-limits-hardening; header trust is an open deployment question |
+| 1 | Low | `takeToken` accepts a negative cost (acts as a refund) and a clock that moved backwards (a successful take sets `last = now`, so the interval is refilled twice after a rewind). `eventWeight` uses `>>` (int32): `eventWeight(0, 2**31)` is negative, `2**32` gives 1. Unreachable today (frames are far below 2 GiB, Workers' `Date.now()` is near monotonic). Fix: reject `cost<=0` or non-finite, use `Math.floor(bytes/4096)`. | fixed in #305 [review] |
+| 2 | Low | Per-source LRU eviction resets an exhausted source to a full bucket (reviewer reproduced with maxSourceEntries=100; production value 10000, so an attacker needs about 10k distinct sources / IPv6 /64s). Rejected operations also insert entries. | skipped in #305, still open [review] |
+| 3 | Low | `overQuota` never closes a new socket that was refused only by the *source* quota (`if (!k) return false`; `chargeDelivery` has not yet called `sock(conn)`). The socket silently loses deliveries and is never closed with 1013. The reviewer did not reproduce this independently (Codex repro, code reading). | fixed in #305 [review] |
+| 4 | Low | `overQuota` continuity test is too lenient: a drop every <2 windows counts as "continuous" (one drop per 100 s triggers on the 3rd). | fixed in #305 [review] |
+| 5 | Nit | `countViolation` is a fixed window anchored at the first violation (98 violations in 2 s around a boundary do not trigger max=50) and `now - badAt > 60_000` is strict, so exactly 60000 ms still counts as the old window. The 300/min frame bucket is the backstop. | fixed in #305 [review] |
+| 6 | Nit | `sockOut` entries are created by refused `chargeDelivery` calls and only `Budgets.forget` removes them. Wiring check: `Relay.dropConn` calls `this.budgets.forget(st.id)` and every close path funnels through `dropConn` (`src/relay.ts:145,159,194`) [read]. A socket whose attachment is null skips `forget` (`if (!st) return`) [read], so a leak remains possible for attachment-less sockets (see the Low item on `serializeAttachment` below). | partly mitigated by wiring; rest fixed in #305 [review] |
+| 7 | Nit | `sourceKey` returns unparseable input verbatim (`""`, `"001.2.3.4"`, `"1.2.3.4:80"` are each their own key). Safe only if the input is `CF-Connecting-IP`; `SRC_HEADER` (env override) or a missing header changes that (see `src/index.ts:54` in the Low table). An empty string makes all header-less requests share one bucket (fail-closed). | fixed in #305 [review] |
 
 Wiring gates the reviewers set for the handler/DO slices, checked in code [read]: `Relay` runs
 `EVENTS_DDL + DELETION_DDL + SUBS_DDL` and `reconcileCounters` at start (`src/relay.ts:53-54`);
@@ -105,6 +107,31 @@ Labels: `[review]` = reported by the Codex full-stack review, not re-run here; `
 
 Verified in this stack (author-level, on the branches): typecheck and the vitest unit suites, plus the default
 e2e mode. See each PR body for the numbers.
+
+### G. Findings from the #306 / #308 reviews and the acceptance run (added after the stack merged)
+
+Not fixed unless the last column says so. `[review]` = Codex or clestons, `[read]` = checked in code, `[run]` = observed.
+
+| # | sev | what | status |
+| --- | --- | --- | --- |
+| G1 | **High, blocks production** | Handshake flood: every upgrade reaches the single Durable Object `main`, and the per-source limits run **inside** it (list connections, deserialize attachments, then answer 429). The limits do not protect the DO's own input queue. Fix: admission rate limiting at the edge (Cloudflare rate-limiting rule / WAF) before the DO; any partitioning must keep query, storage and broadcast semantics. | open [review] |
+| G2 | **High, blocks production** | Fan-out work is unbounded per event (no candidate index, no per-event work cap, no subscription-cache LRU); ephemeral events are not de-duplicated or charged to the publisher; tag-filter queries lack a `created_at` index; multi-filter pagination returns early. | open [read], planned as a separate slice |
+| G3 | Medium | After DO hibernation the constructor reruns and every in-memory bucket (per-source, global, over-quota state) refills to full. Per-connection buckets live in the attachment and survive. | open, also in README Known limits [review] |
+| G4 | Medium | `chargeEvent` is not refunded when the store write fails; kind-5 write budget and H303-2 are still open. | open [read] |
+| G5 | Medium | During a rollout the Worker serves NIP-11 with the new limits while an active DO keeps the old ones (it reads config only in its constructor; the platform may delay the update up to about 300 s). | open [review] |
+| G6 | Medium | HTTP probes (`/`, NIP-11) return 200 even when the DO is failing or full, so they do not reflect relay health. No metrics for rejection reasons, forward latency, connection count or overload; no persistent log config. | open [review] |
+| G7 | Medium | No heartbeat or auto-response: idle connections are not pinged; CORS headers exist only on the NIP-11 and OPTIONS responses, not on the plain-text one. | open [read] |
+| G8 | Medium | No load test: 2000 connections and the 5 GB storage cap are configuration, not measurements. Not run against a real Durable Object at all, only `wrangler dev --local`. The long-history CLI walk was not checked against the 60 upgrades/min quota. | open |
+| G9 | Fixed | A WebSocket upgrade without the source address header used to land in one shared `unknown` bucket. Now refused with 400 and logged (#308). Bad `LIMITS_JSON` was logged on every NIP-11 request; now once per isolate (#308). | fixed in #308 |
+| G10 | Fixed | History allowance is reserved before `runQuery`; admission weights for kind 5 and indexed tags; OK id empty unless 64 lowercase hex; `peekEventId` reads only the top-level id; `reply` cannot throw; stale over-quota test (#311). | fixed in #311 |
+
+Cutover and migration hazards (for the person who binds `relay.aastar.io`) [review]:
+
+- `wrangler.toml` migration `v1` with `new_sqlite_classes = ["Relay"]` is a valid first migration. A later class rename must keep history and add a new `renamed_classes` tag; a new class gets a different namespace and does not keep data.
+- `wrangler rollback` does not restore Durable Object data and is refused across class-lifecycle changes. It is not a migration undo.
+- If the old tunnel hostname is a CNAME, creating a Custom Domain on it conflicts. Deleting the record first and then failing the deploy means downtime.
+- Old and new relays must not both accept writes while connections drain, or the stores diverge; rolling back loses what was written to the new one in between. Plan the history copy, the drain, and the write copy-back.
+- Binding the domain needs the user's explicit confirmation; the non-interactive deploy can overwrite an existing DNS record.
 
 ## Medium, deferred
 
