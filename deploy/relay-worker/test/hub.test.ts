@@ -332,6 +332,15 @@ describe("processReq and processClose", () => {
     expect(String(c.fake.frames().at(-1)?.[2])).toMatch(/rate-limited/);
     expect(hub.subs.get(c.st.id).has("u")).toBe(false);
   });
+  it("a REQ with an invalid subscription id still pays a token and counts as a violation", () => {
+    const { hub, conn } = setup({ reqsPerMinute: 2, maxViolations: 3 });
+    const c = conn();
+    for (let i = 0; i < 4; i++) processReq(hub, c.ws, c.st, ["", {}]);
+    const notices = c.fake.frames().map((f) => String(f[1]));
+    expect(notices.slice(0, 2)).toEqual(["error: invalid subscription id", "error: invalid subscription id"]);
+    expect(notices[2]).toMatch(/rate-limited/); // the bucket ran dry although no id was ever valid
+    expect(c.fake.closed?.[0]).toBe(1008); // and the violations closed the socket
+  });
   it("rejects bad subscription ids, filter counts and oversize filters", () => {
     const { hub, conn } = setup();
     const c = conn();

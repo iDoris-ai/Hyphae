@@ -20,15 +20,18 @@ function closeSub(hub: Hub, ws: WebSocket, conn: string, subId: string, reason: 
 
 export function processReq(hub: Hub, ws: WebSocket, st: ConnState, args: unknown[]) {
   const conn = st.id;
-  const subId = args[0];
-  if (typeof subId !== "string" || subId.length === 0 || subId.length > hub.lim.maxSubIdLength) {
-    hub.send(ws, ["NOTICE", "error: invalid subscription id"]);
-    return;
-  }
-  // Every REQ costs a token, including repeated REQs for the same subId and invalid ones.
+  const subId = args[0] as string;
+  const validId = typeof subId === "string" && subId.length > 0 && subId.length <= hub.lim.maxSubIdLength;
+  // Every REQ costs a token, including repeated REQs for the same subId and ones with an invalid id.
   if (!hub.take(ws, st, "rq", hub.lim.reqsPerMinute) || !hub.budgets.takeSource(st.src, "rq")) {
     hub.violation(ws, st);
+    if (!validId) return hub.send(ws, ["NOTICE", "rate-limited: too many REQs, slow down"]);
     return closeSub(hub, ws, conn, subId, "rate-limited: too many REQs, slow down");
+  }
+  if (!validId) {
+    hub.violation(ws, st);
+    hub.send(ws, ["NOTICE", "error: invalid subscription id"]);
+    return;
   }
   const raw = args.slice(1);
   if (raw.length === 0 || raw.length > hub.lim.maxFiltersPerReq) {
