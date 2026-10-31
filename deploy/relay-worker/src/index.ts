@@ -49,6 +49,13 @@ const nip11 = (lim: Limits) => ({
   },
 });
 
+// loadLimits reports bad overrides on every call; cache per LIMITS_JSON so one bad value logs once per isolate, not once per request.
+let limitsCache: { key: string | undefined; value: Limits } | undefined;
+const limitsFor = (json: string | undefined): Limits => {
+  if (!limitsCache || limitsCache.key !== json) limitsCache = { key: json, value: loadLimits(json) };
+  return limitsCache.value;
+};
+
 const CORS = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET, OPTIONS",
@@ -61,10 +68,16 @@ export default {
       return new Response(null, { status: 204, headers: { ...CORS, "access-control-max-age": "86400" } });
     }
     if (request.headers.get("Upgrade")?.toLowerCase() === "websocket") {
+      // No source address means a misconfigured path; sharing one "unknown" budget would let one client starve the rest.
+      const src = request.headers.get(env.SRC_HEADER ?? "CF-Connecting-IP");
+      if (!src) {
+        console.error("upgrade without a source address header");
+        return new Response("source address unavailable", { status: 400 });
+      }
       try {
         // Pass the client address to the Durable Object. `set` replaces any x-hyphae-src the client sent.
         const headers = new Headers(request.headers);
-        headers.set("x-hyphae-src", sourceKey(request.headers.get(env.SRC_HEADER ?? "CF-Connecting-IP") ?? "unknown"));
+        headers.set("x-hyphae-src", sourceKey(src));
         return await env.RELAY.get(env.RELAY.idFromName("main")).fetch(new Request(request, { headers }));
       } catch (err) {
         console.error("relay forward failed", err);
@@ -72,7 +85,7 @@ export default {
       }
     }
     if (request.headers.get("Accept")?.toLowerCase().includes("application/nostr+json")) {
-      return new Response(JSON.stringify(nip11(loadLimits(env.LIMITS_JSON))), {
+      return new Response(JSON.stringify(nip11(limitsFor(env.LIMITS_JSON))), {
         headers: { "content-type": "application/nostr+json", ...CORS },
       });
     }
