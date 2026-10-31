@@ -557,6 +557,34 @@ describe("ephemeral events: replay window and fan-out charge", () => {
     expect(run(1)).toEqual([true, true, false]); // 1 + 8 leaves 1; the next event drains it; the third is refused
     expect(run(1000)).toEqual([true, true, true]); // same traffic, fan-out effectively free
   });
+  it("a fan-out cost the bucket cannot cover stays as debt instead of being forgiven", () => {
+    const { hub, conn } = setup({ sourceEventWeightPerMinute: 10, ephemeralDeliveriesPerWeight: 1 });
+    listener(conn, hub, 8);
+    const p = conn("7.7.7.7");
+    hub.budgets.chargeValidation("7.7.7.7", 9); // 1 left
+    processEvent(hub, p.ws, p.st, signed(alice, { kind: 20001, content: "d0", created_at: now() }), 300); // validation 1 -> 0, fan-out 8 -> debt -8
+    vi.setSystemTime(Date.now() + 6000); // refills 1 weight (10 per minute): still in debt
+    processEvent(hub, p.ws, p.st, signed(alice, { kind: 20001, content: "d1", created_at: now() }), 300);
+    expect(p.fake.frames().map((f) => f[2])).toEqual([true, false]);
+    vi.setSystemTime(Date.now() + 60_000); // debt repaid
+    processEvent(hub, p.ws, p.st, signed(alice, { kind: 20001, content: "d2", created_at: now() }), 300);
+    expect(p.fake.frames().at(-1)?.[2]).toBe(true);
+  });
+  it("when the global outbound budget leaves nobody served, the event is refused and a retry is not a duplicate", () => {
+    const { hub, conn } = setup({ globalOutboundBytesPerMinute: 1 });
+    const l = listener(conn, hub);
+    const p = conn();
+    const eph = signed(alice, { kind: 20001, created_at: now() });
+    processEvent(hub, p.ws, p.st, eph, 300);
+    processEvent(hub, p.ws, p.st, eph, 300);
+    expect(p.fake.frames().map((f) => String(f[3]))).toEqual(["rate-limited: relay is busy, retry later", "rate-limited: relay is busy, retry later"]);
+    expect(events(l)).toHaveLength(0);
+  });
+  it("an id from a clock that has stepped back is not treated as a live replay", () => {
+    const { hub } = setup({ ephemeralDedupeTtlMs: 5000 });
+    hub.budgets.rememberEphemeral("a".repeat(64), Date.now() + 100_000);
+    expect(hub.budgets.seenEphemeral("a".repeat(64))).toBe(false);
+  });
   it("validates the new limits", () => {
     const lim = loadLimits('{"ephemeralDeliveriesPerWeight":0,"ephemeralDedupeEntries":5,"ephemeralDedupeTtlMs":-1}');
     expect([lim.ephemeralDeliveriesPerWeight, lim.ephemeralDedupeEntries, lim.ephemeralDedupeTtlMs]).toEqual([32, 5, 60_000]);

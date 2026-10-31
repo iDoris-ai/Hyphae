@@ -69,7 +69,13 @@ export function processEvent(hub: Hub, ws: WebSocket, st: ConnState, raw: unknow
     if (ephemeral) {
       if (isBlocked(hub.db, e, "")) return reply(false, "blocked: event was deleted", e.id);
       hub.budgets.rememberEphemeral(e.id);
-      hub.budgets.chargeFanout(st.src, broadcast(hub, e));
+      const { delivered, cut } = broadcast(hub, e);
+      if (cut && delivered === 0) {
+        // The global outbound budget was empty: nobody got it, so the retry must not be called a duplicate.
+        hub.budgets.forgetEphemeral(e.id);
+        return reply(false, "rate-limited: relay is busy, retry later", e.id);
+      }
+      hub.budgets.chargeFanout(st.src, delivered);
       return reply(true, "", e.id);
     }
     switch (storeEvent(hub.db, e)) {
