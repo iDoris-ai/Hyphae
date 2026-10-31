@@ -147,8 +147,9 @@ address: cross-zone ones get a shared Cloudflare address, so they would all shar
 header named in `SRC_HEADER` is client-controlled and would let one client pick a fresh source
 bucket per connection, defeating every per-address limit; it exists only for `wrangler dev --local`,
 where the dev server does not set `CF-Connecting-IP`. `wrangler.toml` therefore has no `[vars]`
-section. If the header is missing the address becomes `unknown` and all such requests share one
-bucket (this does not happen behind Cloudflare). A request that reaches the Worker directly on
+section. A WebSocket upgrade without the header is refused with 400 and logged (it used to fall into one
+shared `unknown` bucket that one client could exhaust for all the others); this does not happen behind
+Cloudflare. A request that reaches the Worker directly on
 `*.workers.dev` goes through the same edge, so the same rule applies there.
 
 Tests can override numeric limits with a `LIMITS_JSON` variable (for example
