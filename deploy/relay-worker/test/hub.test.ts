@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Limits } from "../src/config";
+import { type Limits, loadLimits } from "../src/config";
 import { EVENTS_DDL } from "../src/db";
 import { DELETION_DDL } from "../src/deletion";
 import { broadcast } from "../src/fanout";
@@ -485,5 +485,80 @@ describe("broadcast", () => {
     c.fake.att = st;
     broadcast(hub, signed(alice, { kind: 20001 }));
     expect(c.fake.frames().filter((f) => f[0] === "EVENT")).toHaveLength(0);
+  });
+});
+
+describe("ephemeral events: replay window and fan-out charge", () => {
+  const now = () => Math.floor(Date.now() / 1000);
+  const listener = (conn: ReturnType<typeof setup>["conn"], hub: Hub, subs = 1) => {
+    const l = conn("9.9.9.9");
+    for (let i = 0; i < subs; i++) processReq(hub, l.ws, l.st, ["s" + i, { kinds: [20001] }]);
+    return l;
+  };
+  const events = (l: { fake: FakeWs }) => l.fake.frames().filter((f) => f[0] === "EVENT");
+
+  it("acknowledges a replayed ephemeral id with duplicate: but does not deliver it twice", () => {
+    const { hub, conn } = setup();
+    const l = listener(conn, hub);
+    const p = conn();
+    const eph = signed(alice, { kind: 20001, created_at: now() });
+    processEvent(hub, p.ws, p.st, eph, 300);
+    processEvent(hub, p.ws, p.st, eph, 300);
+    expect(events(l)).toHaveLength(1);
+    expect(p.fake.frames()).toEqual([["OK", eph.id, true, ""], ["OK", eph.id, true, "duplicate: already broadcast this event"]]);
+  });
+  it("lets the same id through again once the window has passed", () => {
+    const { hub, conn } = setup({ ephemeralDedupeTtlMs: 5000 });
+    const l = listener(conn, hub);
+    const p = conn();
+    const eph = signed(alice, { kind: 20001, created_at: now() });
+    processEvent(hub, p.ws, p.st, eph, 300);
+    vi.setSystemTime(Date.now() + 4999);
+    processEvent(hub, p.ws, p.st, eph, 300);
+    expect(events(l)).toHaveLength(1);
+    vi.setSystemTime(Date.now() + 2);
+    processEvent(hub, p.ws, p.st, eph, 300);
+    expect(events(l)).toHaveLength(2);
+  });
+  it("remembers at most ephemeralDedupeEntries ids, oldest evicted first", () => {
+    const { hub, conn } = setup({ ephemeralDedupeEntries: 3 });
+    const l = listener(conn, hub);
+    const p = conn();
+    const es = [0, 1, 2, 3].map((i) => signed(alice, { kind: 20001, content: "e" + i, created_at: now() }));
+    for (const e of es) processEvent(hub, p.ws, p.st, e, 300);
+    expect(events(l)).toHaveLength(4);
+    processEvent(hub, p.ws, p.st, es[3], 300); // still remembered
+    expect(events(l)).toHaveLength(4);
+    processEvent(hub, p.ws, p.st, es[0], 300); // evicted: delivered again
+    expect(events(l)).toHaveLength(5);
+    // the Budgets table itself is bounded
+    expect((hub.budgets as unknown as { recentEphemeral: Map<string, number> }).recentEphemeral.size).toBe(3);
+  });
+  it("does not remember an event that was refused, and stored events are untouched by the window", () => {
+    const { hub, conn } = setup({ globalEventWeightPerMinute: 1 });
+    const l = listener(conn, hub);
+    const p = conn();
+    const a = signed(alice, { kind: 20001, content: "a", created_at: now() });
+    const b = signed(alice, { kind: 20001, content: "b", created_at: now() });
+    processEvent(hub, p.ws, p.st, a, 300); // takes the only global weight
+    processEvent(hub, p.ws, p.st, b, 300); // refused: relay busy
+    expect(String(p.fake.frames()[1][3])).toMatch(/^rate-limited: relay is busy/);
+    expect(hub.budgets.seenEphemeral(b.id)).toBe(false);
+    expect(events(l)).toHaveLength(1);
+  });
+  it("charges the publisher's source for the deliveries its ephemeral event caused", () => {
+    const run = (perWeight: number) => {
+      const { hub, conn } = setup({ sourceEventWeightPerMinute: 10, ephemeralDeliveriesPerWeight: perWeight });
+      listener(conn, hub, 8); // 8 matching subscriptions = 8 deliveries per event
+      const p = conn("7.7.7.7");
+      for (let i = 0; i < 3; i++) processEvent(hub, p.ws, p.st, signed(alice, { kind: 20001, content: "c" + i, created_at: now() }), 300);
+      return p.fake.frames().map((f) => f[2]);
+    };
+    expect(run(1)).toEqual([true, true, false]); // 1 + 8 leaves 1; the next event drains it; the third is refused
+    expect(run(1000)).toEqual([true, true, true]); // same traffic, fan-out effectively free
+  });
+  it("validates the new limits", () => {
+    const lim = loadLimits('{"ephemeralDeliveriesPerWeight":0,"ephemeralDedupeEntries":5,"ephemeralDedupeTtlMs":-1}');
+    expect([lim.ephemeralDeliveriesPerWeight, lim.ephemeralDedupeEntries, lim.ephemeralDedupeTtlMs]).toEqual([32, 5, 60_000]);
   });
 });

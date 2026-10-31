@@ -53,6 +53,10 @@ export const LIMITS = {
   maxFiltersPerReq: 10,
   maxSubIdLength: 64,
   maxDeliveriesPerEvent: 5000,
+  // --- ephemeral events (never stored): replay window and fan-out charge
+  ephemeralDedupeEntries: 10_000, // recent ephemeral ids remembered (0 turns dedupe off); oldest evicted first
+  ephemeralDedupeTtlMs: 60_000, // how long an id counts as a replay
+  ephemeralDeliveriesPerWeight: 32, // the publisher pays 1 event-weight per this many deliveries its event caused
   // --- connections and frames
   maxMessageBytes: 512_000, // UTF-8 bytes per frame (same as the old khatru relay)
   maxConnections: 2000,
@@ -60,7 +64,7 @@ export const LIMITS = {
 
 export type Limits = { [K in keyof typeof LIMITS]: number };
 
-const MINIMUM: Partial<Record<keyof Limits, number>> = { maxLimit: 1 };
+const MINIMUM: Partial<Record<keyof Limits, number>> = { maxLimit: 1, ephemeralDeliveriesPerWeight: 1 };
 
 /**
  * The defaults, with overrides from a JSON object (the e2e tests start the relay with tiny caps).

@@ -127,6 +127,7 @@ export class Budgets {
   private globalOut?: Bucket;
   private globalHist?: Bucket;
   private sockOut = new Map<string, SockOut>();
+  private recentEphemeral = new Map<string, number>(); // id -> first seen (ms), insertion order = age
 
   constructor(private lim: Limits) {}
 
@@ -190,6 +191,37 @@ export class Budgets {
     this.globalEv = g.bucket;
     if (wr) s.wr = wr.bucket;
     return "ok";
+  }
+
+  /** True when this ephemeral id was already accepted within the dedupe window (expired entries are dropped first). */
+  seenEphemeral(id: string, now = Date.now()): boolean {
+    const ttl = this.lim.ephemeralDedupeTtlMs;
+    for (const [k, at] of this.recentEphemeral) {
+      if (now - at < ttl) break; // oldest first: the rest is younger
+      this.recentEphemeral.delete(k);
+    }
+    return this.recentEphemeral.has(id);
+  }
+
+  /** Remembers an accepted ephemeral id; the set never holds more than ephemeralDedupeEntries ids. */
+  rememberEphemeral(id: string, now = Date.now()) {
+    const max = this.lim.ephemeralDedupeEntries;
+    if (max <= 0 || this.lim.ephemeralDedupeTtlMs <= 0) return;
+    this.recentEphemeral.set(id, now);
+    while (this.recentEphemeral.size > max) this.recentEphemeral.delete(this.recentEphemeral.keys().next().value as string);
+  }
+
+  /**
+   * Charges the publisher of an ephemeral event for the deliveries it caused (the receivers pay the
+   * bytes, nobody paid for the work). It is after the fact, so it cannot refuse this event: it takes
+   * what the source's event-weight bucket has (down to empty) and so throttles the source's next events.
+   */
+  chargeFanout(src: string, delivered: number, now = Date.now()) {
+    const cost = Math.floor(delivered / this.lim.ephemeralDeliveriesPerWeight);
+    if (cost <= 0) return;
+    const s = this.source(src);
+    const r = takeToken(s.ew, now, this.lim.sourceEventWeightPerMinute, cost);
+    s.ew = r.ok ? r.bucket : { tokens: 0, last: now };
   }
 
   /**
