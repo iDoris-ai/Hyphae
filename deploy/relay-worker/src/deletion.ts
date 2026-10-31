@@ -181,13 +181,15 @@ export function applyDeletion(db: Db, req: NostrEvent): DeletionResult {
         "INSERT INTO coord_cutoffs (coord, cutoff) VALUES (?, ?) ON CONFLICT(coord) DO UPDATE SET cutoff = max(cutoff, excluded.cutoff)",
         coord, req.created_at,
       );
-      writes += estCut;
+      let delWrites = 0;
       for (const v of victims) {
         const del = deleteEvent(db, v.id as string);
-        writes += del.writes;
+        delWrites += del.writes;
         freed += del.freed;
         deleted++;
       }
+      // Same rule as the id branch: charge whichever is larger, the estimate the check used or the real count.
+      writes += estCut + Math.max(estDel, delWrites);
     }
   }
   return done(false);
