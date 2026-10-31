@@ -56,6 +56,9 @@ export const LIMITS = {
   // --- connections and frames
   maxMessageBytes: 512_000, // UTF-8 bytes per frame (same as the old khatru relay)
   maxConnections: 2000,
+  // A connection that has sent nothing (not even a text "ping") for this long may be closed when a connection
+  // slot is needed (checked only at the connection caps, never by a timer). 0 disables.
+  idleTimeoutSeconds: 900,
 };
 
 export type Limits = { [K in keyof typeof LIMITS]: number };

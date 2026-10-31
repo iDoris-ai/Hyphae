@@ -4,6 +4,7 @@ import { DELETION_DDL, reconcileCounters } from "./deletion";
 import { type Db, EVENTS_DDL } from "./db";
 import { processEvent } from "./events";
 import { type Hub, peekEventId } from "./hub";
+import { idleSockets } from "./idle";
 import { Budgets, type ConnState, countViolation, takeConn } from "./limits";
 import { utf8Length } from "./nostr";
 import { processClose, processReq } from "./req";
@@ -49,6 +50,8 @@ export class Relay extends DurableObject<Env> {
       forceClose: (ws, code, reason, st) => this.forceClose(ws, code, reason, st),
       sockets: () => ctx.getWebSockets(),
     };
+    // A text "ping" is answered with "pong" by the runtime without waking the object from hibernation.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     ctx.blockConcurrencyWhile(async () => {
       this.db.sql.exec(EVENTS_DDL + DELETION_DDL + SUBS_DDL);
       reconcileCounters(this.db);
@@ -70,14 +73,22 @@ export class Relay extends DurableObject<Env> {
   }
 
   async fetch(request: Request): Promise<Response> {
+    // The Worker forwards only WebSocket upgrades and /healthz probes here, so any other request is a probe.
+    if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") return this.health();
     try {
       const src = (request.headers.get("x-hyphae-src") ?? "unknown").slice(0, 64);
-      const socks = this.ctx.getWebSockets();
+      // A socket we already started closing still lists until its close handshake ends (up to ~10 s under wrangler dev); it holds no slot.
+      let socks = this.ctx.getWebSockets().filter((w) => !(w.deserializeAttachment() as ConnState | null)?.closed);
+      // At a cap, first free the slots held by connections that went silent (half-dead sockets never send a close).
+      const sameSrc = (w: WebSocket) => (w.deserializeAttachment() as ConnState | null)?.src === src;
+      if (socks.length >= this.lim.maxConnections || socks.filter(sameSrc).length >= this.lim.maxConnsPerSource) {
+        socks = this.reapIdle(socks);
+      }
       if (socks.length >= this.lim.maxConnections) {
         return new Response("relay is at its connection limit", { status: 503, headers: { "retry-after": "30" } });
       }
       // Concurrency first: a refused attempt must not burn an upgrade token.
-      const open = socks.filter((w) => (w.deserializeAttachment() as ConnState | null)?.src === src).length;
+      const open = socks.filter(sameSrc).length;
       if (open >= this.lim.maxConnsPerSource) {
         return new Response("too many connections from this address", { status: 429, headers: { "retry-after": "30" } });
       }
@@ -87,7 +98,7 @@ export class Relay extends DurableObject<Env> {
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
       this.ctx.acceptWebSocket(server);
-      server.serializeAttachment({ id: crypto.randomUUID(), src } satisfies ConnState);
+      server.serializeAttachment({ id: crypto.randomUUID(), src, lastSeen: Date.now() } satisfies ConnState);
       return new Response(null, { status: 101, webSocket: client });
     } catch (err) {
       console.error("fetch failed", err);
@@ -107,6 +118,7 @@ export class Relay extends DurableObject<Env> {
   private handleMessage(ws: WebSocket, message: string | ArrayBuffer) {
     const st = ws.deserializeAttachment() as ConnState | null;
     if (!st || st.closed) return; // closing: frames still in flight must not create state
+    st.lastSeen = Date.now(); // persisted by take() or violation() just below
     // Every frame costs a token, whatever it contains.
     if (!this.hub.take(ws, st, "fr", this.lim.framesPerMinute)) {
       this.violation(ws, st);
@@ -163,6 +175,36 @@ export class Relay extends DurableObject<Env> {
       } catch {
         // already closed
       }
+    }
+  }
+
+  /** Closes (1001) the sockets idle past the timeout and returns the rest. Never throws. */
+  private reapIdle(socks: WebSocket[]): WebSocket[] {
+    try {
+      const idle = new Set(
+        idleSockets(
+          socks,
+          (w) => ({ st: w.deserializeAttachment() as ConnState | null, auto: this.ctx.getWebSocketAutoResponseTimestamp(w)?.getTime() }),
+          Date.now(),
+          this.lim.idleTimeoutSeconds * 1000,
+        ),
+      );
+      for (const w of idle) this.forceClose(w, 1001, "idle timeout");
+      return idle.size ? socks.filter((w) => !idle.has(w)) : socks;
+    } catch (err) {
+      console.error("idle reaping failed", err);
+      return socks;
+    }
+  }
+
+  /** Liveness probe: succeeds only if the object runs and its SQLite store answers. */
+  private health(): Response {
+    try {
+      this.db.sql.exec("SELECT count(*) AS n FROM sqlite_master").toArray();
+      return new Response("ok\n", { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
+    } catch (err) {
+      console.error("health check failed", err);
+      return new Response("relay storage unavailable\n", { status: 503, headers: { "cache-control": "no-store" } });
     }
   }
 
