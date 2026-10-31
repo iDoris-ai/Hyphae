@@ -219,6 +219,30 @@ describe("processEvent", () => {
     expect(real("SELECT count(*) AS n FROM events").one().n).toBe(0);
     log.mockRestore();
   });
+  it("maps stale, blocked and full store results to rejecting OK frames and tells no subscriber", () => {
+    const { hub, conn } = setup();
+    const now = Math.floor(Date.now() / 1000);
+    const sub = conn("9.9.9.9");
+    processReq(hub, sub.ws, sub.st, ["s", { kinds: [0, 1] }]);
+    const c = conn();
+    const newer = signed(alice, { kind: 0, created_at: now, content: "{}" });
+    const older = signed(alice, { kind: 0, created_at: now - 10, content: "{\"a\":1}" });
+    processEvent(hub, c.ws, c.st, newer, 300);
+    processEvent(hub, c.ws, c.st, older, 300);
+    expect(c.fake.frames().at(-1)).toEqual(["OK", older.id, false, "invalid: a newer version of this event exists"]);
+    const victim = signed(alice, { created_at: now - 5 });
+    processEvent(hub, c.ws, c.st, signed(alice, { kind: 5, created_at: now, tags: [["e", victim.id]] }), 300);
+    const before = sub.fake.sent.length;
+    processEvent(hub, c.ws, c.st, victim, 300);
+    expect(c.fake.frames().at(-1)).toEqual(["OK", victim.id, false, "blocked: event was deleted"]);
+    expect(sub.fake.sent.length).toBe(before);
+    const full = setup({ maxStorageBytes: 0 });
+    const f = full.conn();
+    const e = signed(alice, { created_at: now });
+    processEvent(full.hub, f.ws, f.st, e, 300);
+    expect(f.fake.frames().at(-1)).toEqual(["OK", e.id, false, "rate-limited: relay storage is full"]);
+  });
+
   it("closes a connection with 1008 after maxViolations rejected frames", () => {
     const { hub, conn } = setup({ eventsPerMinute: 1, maxViolations: 3 });
     const c = conn();
