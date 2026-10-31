@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // End-to-end checks for the relay worker.
+// The suite is not idempotent: start the relay on fresh state (wrangler --persist-to <new dir>) for every run.
 //   node test/e2e/run.mjs [ws://127.0.0.1:8787] [--src-header=NAME] [--seed FILE | --capped FILE]
 // Each connection pretends to come from its own address by sending it in the source header
 // (CF-Connecting-IP by default; start wrangler with `--var SRC_HEADER:x-e2e-src` and pass

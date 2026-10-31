@@ -22,7 +22,7 @@ dispatch); the work is in small modules that take their dependencies explicitly:
   edge. Only `wrangler dev --local` was used.
 - **Single Durable Object.** Everything (all events, all sockets, all fan-out) goes through one
   object, so throughput is bounded by one single-threaded isolate. Sharding is not implemented.
-- **Storage ceiling 5 GB** (`maxStorageBytes`, checked against `sql.databaseSize`; the Durable
+- **Storage ceiling 5 GiB (5 368 709 120 bytes)** (`maxStorageBytes`, checked against `sql.databaseSize`; the Durable
   Object SQLite limit is the hard wall). When over the cap, writes that grow the database are
   refused (see below). There is no pruning or retention policy yet. **Fill-time estimate** (worst
   case, not measured): the global EVENT budget lets ~238 events of 500 KB per minute through (about
@@ -137,8 +137,19 @@ Why 60 upgrades per minute per address: the Hyphae Go client opens a **new WebSo
 query** (`relayquery.FetchWithTimeout`), and `Walk` pages through history one query per page, up to
 100 pages, with no retry on HTTP 429. A full walk by one agent, or a few agents behind one NAT
 polling their inbox every 30 s, must fit; ten per minute did not. The limit is a token bucket, so
-short bursts above 60 get through slowly rather than failing at a hard boundary. If the client
+the bucket holds 60 tokens and refills one per second, so a burst above 60 is refused (HTTP 429) until tokens come back; a client has to pace itself (a 100-page walk from a full bucket needs about 40 s of refill). If the client
 later reuses one connection, this can be lowered again.
+
+**Production must not set `SRC_HEADER`.** The default (`CF-Connecting-IP`) is overwritten by
+Cloudflare's edge on every direct client request, so a client cannot choose its own address through it
+(requests that reach this Worker as a subrequest from another Worker do not carry the end client's
+address: cross-zone ones get a shared Cloudflare address, so they would all share one bucket). Any other
+header named in `SRC_HEADER` is client-controlled and would let one client pick a fresh source
+bucket per connection, defeating every per-address limit; it exists only for `wrangler dev --local`,
+where the dev server does not set `CF-Connecting-IP`. `wrangler.toml` therefore has no `[vars]`
+section. If the header is missing the address becomes `unknown` and all such requests share one
+bucket (this does not happen behind Cloudflare). A request that reaches the Worker directly on
+`*.workers.dev` goes through the same edge, so the same rule applies there.
 
 Tests can override numeric limits with a `LIMITS_JSON` variable (for example
 `wrangler dev --var 'LIMITS_JSON:{"maxStorageBytes":1}'`). Do not set it in production.
@@ -166,7 +177,6 @@ Tests can override numeric limits with a `LIMITS_JSON` variable (for example
   source allowance. The per-address limits are coarse abuse controls, not a fairness guarantee.
 - Source and global budgets restart from full whenever the Durable Object is rebuilt.
 - `storeEvent` throws on SQL errors; the caller turns that into `OK false "error: ..."`.
-- More low-severity review notes are in `docs/agent/relay-worker-followups-20261028.md`.
 
 ## Develop and test
 
@@ -181,7 +191,8 @@ pnpm e2e                          # in another terminal: end-to-end checks again
 The e2e script gives every connection its own fake source address through the
 `CF-Connecting-IP` header (if your wrangler overwrites it, start with `--var SRC_HEADER:x-e2e-src`
 and pass `--src-header=x-e2e-src`). The cap checks need relays with tiny limits; see the header of
-`test/e2e/run.mjs` (`--seed`, `--capped`, `--fanout`). Use fresh `--persist-to` state for them.
+`test/e2e/run.mjs` (`--seed`, `--capped`, `--fanout`). Start every e2e run on fresh state (`--persist-to <new dir>`): the suite is not idempotent, a second run
+on the same data fails the `#t` indexing check because the earlier run's events still match.
 
 ## Deploying (not done by this repo's tooling; run it yourself)
 
@@ -189,24 +200,48 @@ and pass `--src-header=x-e2e-src`). The cap checks need relays with tiny limits;
 2. `pnpm exec wrangler login` (or set `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`).
 3. `pnpm exec wrangler deploy`. The first deploy applies migration `v1` which creates the
    SQLite-backed `Relay` class (`new_sqlite_classes`); that needs a Workers plan with Durable Objects.
-4. Optional custom domain: add a route or custom domain for the worker in the dashboard or in
-   `wrangler.toml`, then check `curl -H 'Accept: application/nostr+json' https://<host>/`.
+4. Optional custom domain: see "Custom domain relay.aastar.io" below, then check
+   `curl -H 'Accept: application/nostr+json' https://<host>/`.
 5. Point clients at `wss://<host>`. Watch `pnpm exec wrangler tail` during the first hours; start
    with the default limits and loosen them only based on real traffic.
 
-### Redeploying over an existing Durable Object (staging)
-
-A deployed object keeps its SQLite data. The schema changes are additive and the counters are
-reconciled once, so an upgrade normally just works. When you want a clean slate instead (or the
-stored data may have been written by much older code), do one of these first. Nothing here has been
-run by this repository.
-
-- Empty the state: `pnpm exec wrangler delete` removes the worker together with its Durable Object
-  storage; then `pnpm exec wrangler deploy` creates both again from migration `v1`.
-- Or keep the old data aside and start a new object: rename the class (for example `RelayV2` in
-  `src/relay.ts`, `src/index.ts` and the binding in `wrangler.toml`) and add a migration with a new
-  tag, `[[migrations]] tag = "v2"`, `new_sqlite_classes = ["RelayV2"]`, and `deleted_classes =
-  ["Relay"]` once the old data is no longer needed; then `pnpm exec wrangler deploy`.
-
 `wrangler.toml` keeps `compatibility_date = "2026-01-01"`; the installed wrangler 4.40 warns that
-its bundled workerd is older and falls back, which does not affect local runs.
+its bundled workerd is older and falls back to `2025-09-24`, so local runs (unit, e2e) use different
+compatibility behaviour than the configured date on the real edge; upgrade wrangler to remove the gap.
+The platform also has its own Durable Object storage quota per account (the Free plan's is about
+5 000 000 000 bytes, shared by all objects), which can stop writes before `maxStorageBytes`; use a paid plan.
+
+## Custom domain relay.aastar.io
+
+Not active in `wrangler.toml` (a commented example only), so a plain `wrangler deploy` does not
+touch the domain. To serve `relay.aastar.io` from this Worker, uncomment and add to `wrangler.toml`:
+
+```toml
+routes = [
+  { pattern = "relay.aastar.io", custom_domain = true, zone_name = "aastar.io" },
+]
+```
+
+- With `custom_domain = true`, `wrangler deploy` creates the proxied DNS record and the certificate
+  for `relay.aastar.io` itself. **A non-interactive deploy (CI, no TTY) makes wrangler override an
+  existing DNS record / origin for that name without asking** (wrangler 4.40 behaviour as reported
+  in review; not tested here). If another relay already serves the name, that takes it over
+  immediately for every client. Check what the name points to **before** deploying, and run the
+  first deploy with the stanza interactively.
+- The API token needs: Account / Workers Scripts: Edit and, for the custom domain, Zone / Workers
+  Routes: Edit on the `aastar.io` zone (plus Zone: Read), and the Durable Objects plan from step 3
+  above. Cloudflare manages the domain's DNS record itself; Zone / DNS: Edit is only needed if you
+  restore or edit the old record by hand during a rollback (do that with a separate, short-lived
+  token). Not verified against the live account.
+- Before switching traffic, deploy once without the route and smoke test `<name>.workers.dev`:
+  the NIP-11 curl, then one EVENT and a REQ with any Nostr client. Do not run `test/e2e/run.mjs`
+  against the edge: it fakes client addresses through a header the edge overwrites, so all its
+  connections would share one source bucket. Read the Known limits above; none of it has been load
+  tested against the real edge.
+- Rollback: delete the custom domain under Workers & Pages > hyphae-relay > Settings > Domains &
+  Routes (or `wrangler` equivalent; removing the `routes` entry and redeploying is not guaranteed to
+  remove an existing binding, so confirm in the dashboard), then remove or comment out the `routes` stanza (a later deploy would otherwise claim the name
+  again, silently in CI), restore the previous DNS record /
+  origin for `relay.aastar.io` (write it down before the first deploy) and verify with the NIP-11 curl.
+  Events stored in the Durable Object are not migrated back; data written while the Worker served
+  the name stays in the Worker.

@@ -3,6 +3,12 @@ main = "src/index.ts"
 compatibility_date = "2026-01-01"
 workers_dev = true
 
+# Custom domain (NOT active; see README "Custom domain relay.aastar.io" before enabling):
+# routes = [
+#   { pattern = "relay.aastar.io", custom_domain = true, zone_name = "aastar.io" },
+# ]
+# Do not add a [vars] SRC_HEADER here: it replaces CF-Connecting-IP and is client-controlled.
+
 [[durable_objects.bindings]]
 name = "RELAY"
 class_name = "Relay"
