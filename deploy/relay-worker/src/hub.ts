@@ -23,10 +23,25 @@ export interface Hub {
 /** Bytes an `["EVENT",subId,<json>]` frame costs against the outbound or history budgets. */
 export const deliveryCost = (eventBytes: number, subIdJson: string): number => eventBytes + utf8Length(subIdJson) + 12;
 
-/** Event id of an oversized `["EVENT",{...}]` frame, read from its first or last bytes only (no full parse). */
+const TOKEN = /\s*("(?:[^"\\]|\\.)*"|[[\]{}:,]|[^\s"[\]{}:,]+)/y;
+
+/** Top-level event id of an oversized `["EVENT",{...}]` frame, read from its first or last bytes only (no full parse). */
 export function peekEventId(message: string): string | null {
-  const m = /^\s*\[\s*"EVENT"\s*,\s*\{[^]{0,4000}?"id"\s*:\s*"([0-9a-f]{64})"/.exec(message.slice(0, 4200));
-  if (m) return m[1];
+  if (!/^\s*\[\s*"EVENT"\s*,\s*\{/.test(message.slice(0, 64))) return null;
+  // Walk the leading tokens, tracking depth so only a key of the event object itself (depth 2) counts.
+  const head = message.slice(0, 4200);
+  TOKEN.lastIndex = 0;
+  let depth = 0;
+  let prev = "";
+  let idValue = false;
+  for (let m = TOKEN.exec(head); m; m = TOKEN.exec(head)) {
+    const t = m[1];
+    if (idValue) return /^"[0-9a-f]{64}"$/.test(t) ? t.slice(1, -1) : null;
+    if (t === "[" || t === "{") depth++;
+    else if (t === "]" || t === "}") depth--;
+    else idValue = t === ":" && depth === 2 && prev === '"id"';
+    prev = t;
+  }
   // Some clients put "id" and "sig" last, after a large content field.
   const t = /"id"\s*:\s*"([0-9a-f]{64})"\s*,\s*"sig"\s*:\s*"[0-9a-f]{128}"\s*\}\s*\]\s*$/.exec(message.slice(-400));
   return t ? t[1] : null;

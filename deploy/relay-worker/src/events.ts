@@ -1,10 +1,20 @@
+import type { Limits } from "./config";
 import { broadcast } from "./fanout";
 import type { Hub } from "./hub";
 import { eventWeight, type ConnState } from "./limits";
 import { type NostrEvent, isEphemeral, validateEvent } from "./nostr";
 import { isBlocked } from "./deletion";
-import { hasEvent } from "./db";
+import { hasEvent, indexedTags } from "./db";
 import { storeEvent } from "./store";
+
+const HEX64 = /^[0-9a-f]{64}$/;
+
+/** Admission weight: bytes and tag strings, plus the rows a kind 5 (e/a targets) or the indexed tags will write. */
+export function admissionWeight(e: NostrEvent, size: number, lim: Limits): number {
+  const strings = e.tags.reduce((n, t) => n + t.length, 0);
+  const targets = e.kind === 5 ? Math.min(lim.maxDeletionTargets, e.tags.filter((t) => t[0] === "e" || t[0] === "a").length) : 0;
+  return eventWeight(strings, size) + (targets >> 2) + (indexedTags(e.tags, lim.maxIndexedTags).length >> 5);
+}
 
 /**
  * EVENT admission: this connection's and this source's own budgets first (a reject counts as the
@@ -13,8 +23,16 @@ import { storeEvent } from "./store";
  */
 export function processEvent(hub: Hub, ws: WebSocket, st: ConnState, raw: unknown, size: number) {
   const { lim } = hub;
-  const id = typeof (raw as NostrEvent | undefined)?.id === "string" ? (raw as NostrEvent).id.slice(0, 64) : "";
-  const reply = (ok: boolean, msg: string, eid = id) => hub.send(ws, ["OK", eid, ok, msg]);
+  const rawId = (raw as NostrEvent | undefined)?.id;
+  const id = typeof rawId === "string" && HEX64.test(rawId) ? rawId : "";
+  // A violation may already have closed the socket: a failing send must never escape the handler.
+  const reply = (ok: boolean, msg: string, eid = id) => {
+    try {
+      hub.send(ws, ["OK", eid, ok, msg]);
+    } catch (err) {
+      console.error("reply failed", err);
+    }
+  };
   try {
     if (!hub.take(ws, st, "ev", lim.eventsPerMinute) || !hub.budgets.takeSource(st.src, "ev")) {
       hub.violation(ws, st);
@@ -32,8 +50,7 @@ export function processEvent(hub: Hub, ws: WebSocket, st: ConnState, raw: unknow
     const ephemeral = isEphemeral(e.kind);
     // Now the tags are known to be sane: the source also pays for the tag part of the event weight,
     // the same weight the global budget will be charged, so tag-heavy events cannot be cheap for it.
-    const strings = e.tags.reduce((n, t) => n + t.length, 0);
-    const weight = eventWeight(strings, size);
+    const weight = admissionWeight(e, size, lim);
     if (weight > eventWeight(0, size) && !hub.budgets.chargeValidation(st.src, weight - eventWeight(0, size))) {
       hub.violation(ws, st);
       return reply(false, "rate-limited: too much load from this address, slow down", e.id);
