@@ -252,6 +252,30 @@ describe("deletion budgets", () => {
   });
 });
 
+describe("deletion budget for coordinates", () => {
+  it("charges a coordinate target by the same estimate as an id target, so a request cannot delete more than the budget allows", () => {
+    const db = open({ maxDeletionRowWrites: 100 });
+    const tags = (i: number) => [["d", "c" + i], ...Array.from({ length: 7 }, (_, j) => ["t", `v${i}-${j}`])];
+    const evs = Array.from({ length: 10 }, (_, i) => signed(alice, { kind: 30023, tags: tags(i), created_at: 100 }));
+    for (const e of evs) storeEvent(db, e);
+    const req = signed(alice, { kind: 5, created_at: 110, tags: evs.map((_, i) => ["a", `30023:${alice.pk}:c${i}`]) });
+    expect(storeEvent(db, req)).toBe("ok_partial");
+    const left = evs.filter((e) => has(db, e.id)).length;
+    // each target is charged 3 (cutoff) + 6 + 3 * 8 tag rows = 33, so 3 of the 10 fit in 100
+    expect(10 - left).toBeLessThanOrEqual(3);
+  });
+});
+
+describe("deletion requests are never blocked themselves", () => {
+  it("a kind 5 whose id was named by an earlier deletion is still stored", () => {
+    const db = open();
+    const second = signed(alice, { kind: 5, tags: [["e", "f".repeat(64)]], content: "second" });
+    storeEvent(db, signed(alice, { kind: 5, tags: [["e", second.id]], content: "first" }));
+    expect(storeEvent(db, second)).toBe("ok");
+    expect(has(db, second.id)).toBe(true);
+  });
+});
+
 describe("deletion when the database is over its size cap", () => {
   it("allows a deletion that frees more than it adds and refuses one that does not", () => {
     const db = open();
