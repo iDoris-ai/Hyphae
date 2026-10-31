@@ -4,7 +4,7 @@ import { EVENTS_DDL } from "../src/db";
 import { DELETION_DDL } from "../src/deletion";
 import { broadcast } from "../src/fanout";
 import { type Hub, peekEventId } from "../src/hub";
-import { processEvent } from "../src/events";
+import { admissionWeight, processEvent } from "../src/events";
 import { Budgets, type ConnState, countViolation, takeConn } from "../src/limits";
 import { processClose, processReq } from "../src/req";
 import { storeEvent } from "../src/store";
@@ -88,6 +88,36 @@ describe("peekEventId", () => {
     expect(peekEventId(JSON.stringify(["EVENT", { id: e.id, pubkey: e.pubkey, content: "y".repeat(600_000) }]))).toBe(e.id);
     expect(peekEventId(JSON.stringify(["REQ", "x", {}]))).toBeNull();
     expect(peekEventId("garbage")).toBeNull();
+  });
+  it("returns only the top-level id of an EVENT frame", () => {
+    const a = "a".repeat(64);
+    const b = "b".repeat(64);
+    expect(peekEventId(`["EVENT",{"extra":{"id":"${a}"},"id":"${b}","content":"x"}]`)).toBe(b);
+    expect(peekEventId(`["EVENT",{"tags":[["id","${a}"]],"extra":{"id":"${a}"}}]`)).toBeNull();
+    expect(peekEventId(`["REQ","s",{"id":"${a}"}]`)).toBeNull();
+    expect(peekEventId(`["OK",{"id":"${a}","sig":"${"c".repeat(128)}"}]`)).toBeNull();
+  });
+});
+
+describe("admissionWeight", () => {
+  it("keeps ordinary events at 1 and charges kind 5 targets and indexed tag rows", () => {
+    const { db } = setup();
+    expect(admissionWeight(signed(alice), 300, db.lim)).toBe(1);
+    const del = signed(alice, { kind: 5, tags: Array.from({ length: 100 }, (_, i) => ["e", i.toString(16).padStart(64, "0")]) });
+    expect(admissionWeight(del, 300, db.lim)).toBeGreaterThanOrEqual(25);
+    const many = signed(alice, { tags: Array.from({ length: 64 }, (_, i) => [String.fromCharCode(65 + i), "v"]) });
+    const plain = admissionWeight({ ...many, tags: [] }, 300, db.lim);
+    expect(admissionWeight(many, 300, db.lim) - plain).toBeGreaterThanOrEqual(2 + 4);
+  });
+  it("answers OK with an empty id when the id is not 64 hex and survives a throwing send", () => {
+    const { hub, conn } = setup();
+    const c = conn();
+    processEvent(hub, c.ws, c.st, { id: "Z".repeat(80) }, 300);
+    expect(c.fake.frames()[0][1]).toBe("");
+    hub.send = () => {
+      throw new Error("closed");
+    };
+    expect(() => processEvent(hub, c.ws, c.st, signed(alice, { created_at: Math.floor(Date.now() / 1000) }), 300)).not.toThrow();
   });
 });
 
@@ -298,6 +328,22 @@ describe("processReq and processClose", () => {
     processReq(hub, other.ws, other.st, ["s", { kinds: [1] }]);
     expect(other.fake.frames().filter((f) => f[0] === "EVENT").length).toBeGreaterThan(0);
   });
+  it("does not read history at all once the history allowance is used up", () => {
+    const { hub, conn, db } = setup({ socketHistoryBytesPerMinute: 30 });
+    for (let i = 0; i < 5; i++) storeEvent(db, signed(alice, { content: "h".repeat(600) + i, created_at: 100 + i }));
+    const c = conn();
+    processReq(hub, c.ws, c.st, ["s", { kinds: [1] }]);
+    processReq(hub, c.ws, c.st, ["s", { kinds: [1] }]);
+    const exec = db.sql.exec.bind(db.sql);
+    let reads = 0;
+    (db.sql as { exec: unknown }).exec = (q: string, ...p: unknown[]) => {
+      if (/FROM events/i.test(q)) reads++;
+      return exec(q, ...p);
+    };
+    processReq(hub, c.ws, c.st, ["t", { kinds: [1] }]);
+    expect(c.fake.frames().at(-1)).toEqual(["EOSE", "t", ["more"]]);
+    expect(reads).toBe(0);
+  });
   it("pulling a lot of history does not use up the budgets of live delivery", () => {
     const { hub, conn, db } = setup({ socketHistoryBytesPerMinute: 2000, sourceHistoryBytesPerMinute: 2000 });
     for (let i = 0; i < 6; i++) storeEvent(db, signed(alice, { kind: 1, tags: [["t", "x"]], content: "h".repeat(600) + i, created_at: 100 + i }));
@@ -404,8 +450,13 @@ describe("broadcast", () => {
     broadcast(hub, big(2));
     expect(c.fake.frames().filter((f) => f[0] === "EVENT")).toHaveLength(1);
     expect(c.fake.closed).toBeUndefined();
-    vi.setSystemTime(Date.now() + 60); // still over quota one window later (the clock is frozen, so move it)
+    // The clock is frozen, so move it. Keep every gap between two drops under one window (50ms): a gap of a
+    // full window resets the streak, so a single 60ms jump would never reach the close.
+    vi.setSystemTime(Date.now() + 30);
     broadcast(hub, big(3));
+    expect(c.fake.closed).toBeUndefined();
+    vi.setSystemTime(Date.now() + 30);
+    broadcast(hub, big(4));
     expect(c.fake.closed?.[0]).toBe(1013);
     expect((c.fake.att as ConnState).closed).toBe(true);
   });
