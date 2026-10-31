@@ -241,7 +241,8 @@ describe("deletion budgets", () => {
     expect(storeEvent(db, ids[4])).toBe("ok");
   });
   it("never exceeds the estimated row-write budget (3 per tombstone, 6 once the cap forces an eviction)", () => {
-    const db = open({ maxDeletionRowWrites: 30, maxTombstones: 3 });
+    // 96 = 30 for the targets + 66 for the request's own rows (6 + 3 * 20 indexed e tags), which count since H303-2
+    const db = open({ maxDeletionRowWrites: 96, maxTombstones: 3 });
     const us = Array.from({ length: 20 }, (_, i) => signed(alice, { content: "u" + i }));
     expect(storeEvent(db, signed(alice, { kind: 5, tags: us.map((u) => ["e", u.id]) }))).toBe("ok_partial");
     // targets 0..4 were processed (3 + 3 + 3 + 6 + 6 = 21, the next one would need 6 more > 30 - 21... 27), the cap keeps the newest 3
@@ -249,6 +250,21 @@ describe("deletion budgets", () => {
     expect(db.sql.exec("SELECT count(*) AS n FROM tombstones").one().n).toBe(3);
     expect(blocked.length).toBe(3);
     expect(Math.max(...blocked.map(([i]) => i))).toBeLessThan(10);
+  });
+});
+
+describe("deletion budget counts the request's own rows (H303-2)", () => {
+  it("the request's events row and indexed tag rows come out of the same row-write budget", () => {
+    const db = open({ maxDeletionRowWrites: 30 });
+    const ids = Array.from({ length: 5 }, (_, i) => signed(alice, { content: "own" + i }));
+    // own rows: 6 + 3 * 5 indexed e tags = 21, so only 3 tombstones (3 rows each) fit in 30; before the fix all 5 did.
+    expect(storeEvent(db, signed(alice, { kind: 5, tags: ids.map((e) => ["e", e.id]) }))).toBe("ok_partial");
+    expect(db.sql.exec("SELECT count(*) AS n FROM tombstones").one().n).toBe(3);
+  });
+  it("a request with few tags still gets its full budget for targets", () => {
+    const db = open({ maxDeletionRowWrites: 30 });
+    const ids = Array.from({ length: 2 }, (_, i) => signed(alice, { content: "few" + i }));
+    expect(storeEvent(db, signed(alice, { kind: 5, tags: ids.map((e) => ["e", e.id]) }))).toBe("ok"); // 6 + 6 + 6 = 18
   });
 });
 

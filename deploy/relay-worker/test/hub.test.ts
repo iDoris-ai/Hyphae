@@ -249,6 +249,36 @@ describe("processEvent", () => {
     expect(real("SELECT count(*) AS n FROM events").one().n).toBe(0);
     log.mockRestore();
   });
+  it("refunds the write charge when the store is unavailable or throws, so honest clients do not burn their quota", () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { hub, conn, db } = setup({ sourceWriteBytesPerMinute: 1000, globalEventWeightPerMinute: 4 });
+    const real = db.sql.exec.bind(db.sql);
+    let mode: "ok" | "unavailable" | "throw" = "unavailable";
+    (db.sql as unknown as { exec: unknown }).exec = (q: string, ...p: unknown[]) => {
+      if (mode === "unavailable" && /count\(\*\)/i.test(q) && /FROM (tombstones|coord_cutoffs)/.test(q)) throw new Error("count failed");
+      if (mode === "throw" && /^INSERT INTO events/.test(q)) throw new Error("disk");
+      return real(q, ...p);
+    };
+    const now = Math.floor(Date.now() / 1000);
+    const c = conn();
+    for (let i = 0; i < 6; i++) processEvent(hub, c.ws, c.st, signed(alice, { kind: 5, created_at: now, content: "u" + i, tags: [["e", "f".repeat(64)]] }), 300);
+    mode = "throw";
+    for (let i = 0; i < 6; i++) processEvent(hub, c.ws, c.st, signed(alice, { content: "t" + i, created_at: now }), 300);
+    expect(c.fake.frames().every((f) => f[2] === false)).toBe(true);
+    mode = "ok";
+    // 12 failures of 300 bytes / weight >= 1 would have emptied both budgets; they are untouched.
+    expect(hub.budgets.chargeEvent(c.st.src, 1000, 4)).toBe("ok");
+    log.mockRestore();
+  });
+  it("does not refund a store refusal that is the sender's doing (blocked)", () => {
+    const { hub, conn } = setup({ globalEventWeightPerMinute: 3 });
+    const now = Math.floor(Date.now() / 1000);
+    const note = signed(alice, { content: "gone", created_at: now });
+    const c = conn();
+    processEvent(hub, c.ws, c.st, signed(alice, { kind: 5, created_at: now, tags: [["e", note.id]] }), 300);
+    for (let i = 0; i < 2; i++) processEvent(hub, c.ws, c.st, note, 300); // blocked twice
+    expect(hub.budgets.chargeEvent("z", 0, 1)).toBe("global"); // 1 (kind 5) + 2 (blocked, not refunded) = 3
+  });
   it("maps stale, blocked and full store results to rejecting OK frames and tells no subscriber", () => {
     const { hub, conn } = setup();
     const now = Math.floor(Date.now() / 1000);

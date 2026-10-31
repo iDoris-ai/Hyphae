@@ -108,6 +108,35 @@ describe("per-connection buckets and violations", () => {
   });
 });
 
+describe("refundEvent", () => {
+  it("gives back exactly what chargeEvent took, from the source and the global budget", () => {
+    const b = new Budgets(lim({ sourceWriteBytesPerMinute: 1000, globalEventWeightPerMinute: 10 }));
+    expect(b.chargeEvent("a", 900, 9)).toBe("ok");
+    expect(b.chargeEvent("a", 900, 1)).toBe("source");
+    b.refundEvent("a", 900, 9);
+    expect(b.chargeEvent("a", 1000, 10)).toBe("ok"); // both are back to full
+  });
+  it("never lifts a bucket above its capacity, and ignores negative, zero and non-finite amounts", () => {
+    const b = new Budgets(lim({ sourceWriteBytesPerMinute: 1000, globalEventWeightPerMinute: 10 }));
+    expect(b.chargeEvent("a", 100, 1)).toBe("ok");
+    b.refundEvent("a", 100_000, 1000); // far more than was taken
+    expect(b.chargeEvent("a", 1001, 1)).toBe("source");
+    expect(b.chargeEvent("a", 1000, 10)).toBe("ok");
+    expect(b.chargeEvent("a", 1, 1)).toBe("source");
+    b.refundEvent("a", -500, -5);
+    b.refundEvent("a", NaN, NaN);
+    b.refundEvent("a", Infinity, Infinity);
+    b.refundEvent("a", 0, 0);
+    expect(b.chargeEvent("a", 1, 1)).toBe("source");
+    expect(b.chargeEvent("z", 0, 1)).toBe("global");
+  });
+  it("does not create state for a source that is not tracked", () => {
+    const b = new Budgets(lim({ maxSourceEntries: 1 }));
+    b.refundEvent("never-seen", 500, 1);
+    expect((b as unknown as { sources: Map<string, unknown> }).sources.size).toBe(0);
+  });
+});
+
 describe("Budgets", () => {
   it("chargeEvent: a source over its stored bytes is told so; running out of global weight is a different answer", () => {
     const b = new Budgets(lim({ sourceWriteBytesPerMinute: 1000, globalEventWeightPerMinute: 10 }));
