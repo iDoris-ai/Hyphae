@@ -450,8 +450,13 @@ describe("broadcast", () => {
     broadcast(hub, big(2));
     expect(c.fake.frames().filter((f) => f[0] === "EVENT")).toHaveLength(1);
     expect(c.fake.closed).toBeUndefined();
-    vi.setSystemTime(Date.now() + 60); // still over quota one window later (the clock is frozen, so move it)
+    // The clock is frozen, so move it. Keep every gap between two drops under one window (50ms): a gap of a
+    // full window resets the streak, so a single 60ms jump would never reach the close.
+    vi.setSystemTime(Date.now() + 30);
     broadcast(hub, big(3));
+    expect(c.fake.closed).toBeUndefined();
+    vi.setSystemTime(Date.now() + 30);
+    broadcast(hub, big(4));
     expect(c.fake.closed?.[0]).toBe(1013);
     expect((c.fake.att as ConnState).closed).toBe(true);
   });
