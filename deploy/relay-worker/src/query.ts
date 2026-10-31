@@ -77,7 +77,7 @@ function expand(f: Filter): Filter[] {
 /**
  * Stored events matching the filters, newest first, de-duplicated. Each filter is read on its own
  * with LIMIT (its limit + 1), so the rows read are bounded by the sum of the per-filter limits (a
- * multi-value driver tag costs one such read per value) and each read also stops at the byte cap.
+ * multi-value driver tag costs one such read per value); a read also stops at the byte cap, and each filter keeps only its best rows (at most maxResultBytes) while units merge.
  * The filters' rows are then merged by (created_at DESC, id ASC) and cut at maxLimit events or
  * maxResultBytes. `truncated` is true when matching history was left out because of those caps (not
  * because of the client's own `limit`).
@@ -92,25 +92,46 @@ export function runQuery(db: Db, filters: Filter[]): QueryResult {
     if (eff === 0) continue;
     // The client asked for more than we serve (or gave no limit): more history may exist.
     const capped = f.limit === undefined || f.limit > maxLimit;
-    const group = new Map<string, Row>();
+    // The filter's best rows so far (at most eff, at most maxResultBytes), merged unit by unit so
+    // memory never holds more than that plus one unit's read.
+    let group: Row[] = [];
+    let dropped: Row | undefined; // newest row that did not fit the byte cap: nothing older may be used
+    let over = false; // rows beyond eff exist (monotone: later units only push them further down)
+    const noteDrop = (r: Row) => {
+      if (!dropped || newestFirst(r, dropped) < 0) dropped = r;
+    };
     for (const unit of expand(f)) {
       const { sql, params } = buildSql(unit, eff + 1);
+      const got = new Map<string, Row>(group.map((r) => [r.id, r]));
       let bytes = 0;
-      let n = 0;
       for (const r of db.sql.exec(sql, ...params)) {
         const json = r.json as string;
-        const size = utf8Length(json);
-        if (n++ < eff && bytes + size > db.lim.maxResultBytes) {
-          truncated = true; // nothing at or past this row can fit in the response
+        const row = { id: r.id as string, created_at: r.created_at as number, json, size: utf8Length(json) };
+        if (bytes + row.size > db.lim.maxResultBytes) {
+          noteDrop(row); // nothing at or past this row can fit in the response
           break;
         }
-        bytes += size;
-        group.set(r.id as string, { id: r.id as string, created_at: r.created_at as number, json, size });
+        bytes += row.size;
+        got.set(row.id, row);
+      }
+      let merged = [...got.values()].sort(newestFirst);
+      if (dropped) merged = merged.filter((r) => newestFirst(r, dropped as Row) < 0);
+      if (merged.length > eff) over = true;
+      group = [];
+      let total = 0;
+      for (const r of merged.slice(0, eff)) {
+        if (total + r.size > db.lim.maxResultBytes) {
+          noteDrop(r);
+          break;
+        }
+        total += r.size;
+        group.push(r);
       }
     }
-    const rows = [...group.values()].sort(newestFirst);
-    if (capped && rows.length > eff) truncated = true;
-    for (const r of rows.slice(0, eff)) all.set(r.id, r);
+    // The dropped row only matters if it would have been among the filter's newest `eff`.
+    if (dropped && (group.length < eff || newestFirst(dropped, group[group.length - 1]) < 0)) truncated = true;
+    if (capped && over) truncated = true;
+    for (const r of group) all.set(r.id, r);
   }
   const events: string[] = [];
   let bytes = 0;

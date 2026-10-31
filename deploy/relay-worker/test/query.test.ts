@@ -117,6 +117,31 @@ describe("multi-filter REQ", () => {
     expect(text(r)).toEqual(["new-b", "new-a", "old19", "old18", "old17"]);
     expect(r.truncated).toBe(true);
   });
+  it("byte pruning inside one multi-value tag filter never returns an event outside the client's newest `limit`", () => {
+    const db = open();
+    const mk = (content: string, at: number, v: string) => signed(alice, { content, created_at: at, tags: [["p", v]] });
+    const A = mk("a".repeat(600), 300, "a");
+    const B = mk("b".repeat(600), 200, "a");
+    const C = mk("c".repeat(100), 100, "b");
+    for (const e of [A, B, C]) storeEvent(db, e);
+    db.lim.maxResultBytes = JSON.stringify(A).length + JSON.stringify(C).length + 10; // A+C fit, A+B do not
+    const r = runQuery(db, [{ "#p": ["a", "b"], limit: 2 }]);
+    expect(text(r)).toEqual(["a".repeat(600)]); // newest two are A,B; B does not fit; C is not in the newest two
+    expect(r.truncated).toBe(true);
+  });
+  it("rows cut by the byte cap in an older branch do not make the result truncated", () => {
+    const db = open();
+    const mk = (content: string, at: number, v: string) => signed(alice, { content, created_at: at, tags: [["p", v]] });
+    const A = mk("a".repeat(600), 300, "a");
+    const B = mk("b".repeat(600), 200, "a");
+    const C = mk("c".repeat(100), 500, "b");
+    const D = mk("d".repeat(100), 400, "b");
+    for (const e of [A, B, C, D]) storeEvent(db, e);
+    db.lim.maxResultBytes = JSON.stringify(C).length + JSON.stringify(D).length + 10; // A+B overflow
+    const r = runQuery(db, [{ "#p": ["a", "b"], limit: 2 }]);
+    expect(text(r)).toEqual(["c".repeat(100), "d".repeat(100)]);
+    expect(r.truncated).toBe(false);
+  });
   it("stops one filter at the byte cap", () => {
     const db = open({ maxResultBytes: 2500 });
     for (let i = 0; i < 8; i++) storeEvent(db, signed(alice, { content: "y".repeat(900) + i, created_at: 100 + i }));
