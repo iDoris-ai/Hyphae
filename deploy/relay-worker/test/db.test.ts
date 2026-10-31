@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EVENTS_DDL, footprint, hasEvent, indexedTags } from "../src/db";
+import { DELETION_DDL } from "../src/deletion";
 import { storeEvent } from "../src/store";
 import { alice, bob, signed } from "./helpers/keys";
 import { makeDb } from "./helpers/sqlite";
@@ -17,6 +18,7 @@ describe("indexedTags", () => {
 
 const DDL =
   EVENTS_DDL
+  + DELETION_DDL
   ;
 
 const ids = (db: ReturnType<typeof makeDb>) => db.sql.exec("SELECT id FROM events").toArray().map((r) => r.id);
