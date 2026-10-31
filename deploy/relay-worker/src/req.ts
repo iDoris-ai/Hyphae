@@ -51,12 +51,15 @@ export function processReq(hub: Hub, ws: WebSocket, st: ConnState, args: unknown
       return;
     }
     const idJson = JSON.stringify(subId);
-    const { events, truncated } = runQuery(hub.db, filters);
     // History is outbound traffic too: it is charged to the history budgets (source, global, socket),
-    // separate from live delivery, and cut short with the "more" hint where one runs out.
+    // separate from live delivery. The smallest possible frame is reserved BEFORE reading anything, so an
+    // exhausted allowance costs no query at all; the reserve is part of the first event's cost.
+    const reserve = deliveryCost(0, idJson);
+    if (!hub.budgets.chargeHistory(st.src, conn, reserve)) return void hub.send(ws, ["EOSE", subId, ["more"]]);
+    const { events, truncated } = runQuery(hub.db, filters);
     let sent = 0;
     for (const json of events) {
-      if (!hub.budgets.chargeHistory(st.src, conn, deliveryCost(utf8Length(json), idJson))) break;
+      if (!hub.budgets.chargeHistory(st.src, conn, deliveryCost(utf8Length(json), idJson) - (sent === 0 ? reserve : 0))) break;
       hub.sendRaw(ws, `["EVENT",${idJson},${json}]`);
       sent++;
     }
