@@ -4,6 +4,79 @@ Scope: the PR stack `relay-w1…w8` for `deploy/relay-worker`. The review found 
 The High item and the Medium items about limits, tag sizes, deletion bookkeeping, live/stored matching and NIP-11 were fixed in this stack.
 This list holds what was **not** fixed: every remaining Medium (also summarised in the README "Known limits") and the Low items that need more than a one-line change.
 
+## Production-readiness register for relay.aastar.io (read this first)
+
+Status: **not production-ready.** The stack is code-complete and unit/e2e tested, but nothing below the
+"Verified" line has been run against a real Durable Object at production scale. Items are labelled
+`[read]` (checked in code on this branch), `[review]` (taken from a PR review, not re-run by the author
+of this doc) or `[unverified]`.
+
+### A. PR #301 (w2 limits) review: 7 Low/Nit items in `src/limits.ts`
+
+These are being fixed in a separate PR to main on branch `jhfnetboy/relay-limits-hardening`
+(not part of this stack; at the time of writing that branch was not yet visible on origin [read: `git ls-remote`]).
+Until it merges, all seven are open on this stack. All were reported by the reviewer as non-blocking.
+
+| # | sev | what | status |
+| --- | --- | --- | --- |
+| 1 | Low | `takeToken` accepts a negative cost (acts as a refund) and a clock that moved backwards (a successful take sets `last = now`, so the interval is refilled twice after a rewind). `eventWeight` uses `>>` (int32): `eventWeight(0, 2**31)` is negative, `2**32` gives 1. Unreachable today (frames are far below 2 GiB, Workers' `Date.now()` is near monotonic). Fix: reject `cost<=0` or non-finite, use `Math.floor(bytes/4096)`. | tracked in relay-limits-hardening [review] |
+| 2 | Low | Per-source LRU eviction resets an exhausted source to a full bucket (reviewer reproduced with maxSourceEntries=100; production value 10000, so an attacker needs about 10k distinct sources / IPv6 /64s). Rejected operations also insert entries. | tracked in relay-limits-hardening [review] |
+| 3 | Low | `overQuota` never closes a new socket that was refused only by the *source* quota (`if (!k) return false`; `chargeDelivery` has not yet called `sock(conn)`). The socket silently loses deliveries and is never closed with 1013. The reviewer did not reproduce this independently (Codex repro, code reading). | tracked in relay-limits-hardening [review] |
+| 4 | Low | `overQuota` continuity test is too lenient: a drop every <2 windows counts as "continuous" (one drop per 100 s triggers on the 3rd). | tracked in relay-limits-hardening [review] |
+| 5 | Nit | `countViolation` is a fixed window anchored at the first violation (98 violations in 2 s around a boundary do not trigger max=50) and `now - badAt > 60_000` is strict, so exactly 60000 ms still counts as the old window. The 300/min frame bucket is the backstop. | tracked in relay-limits-hardening [review] |
+| 6 | Nit | `sockOut` entries are created by refused `chargeDelivery` calls and only `Budgets.forget` removes them. Wiring check: `Relay.dropConn` calls `this.budgets.forget(st.id)` and every close path funnels through `dropConn` (`src/relay.ts:145,159,194`) [read]. A socket whose attachment is null skips `forget` (`if (!st) return`) [read], so a leak remains possible for attachment-less sockets (see the Low item on `serializeAttachment` below). | partly mitigated by wiring; rest tracked in relay-limits-hardening |
+| 7 | Nit | `sourceKey` returns unparseable input verbatim (`""`, `"001.2.3.4"`, `"1.2.3.4:80"` are each their own key). Safe only if the input is `CF-Connecting-IP`; `SRC_HEADER` (env override) or a missing header changes that (see `src/index.ts:54` in the Low table). An empty string makes all header-less requests share one bucket (fail-closed). | tracked in relay-limits-hardening; header trust is an open deployment question |
+
+Wiring gates the reviewers set for the handler/DO slices, checked in code [read]: `Relay` runs
+`EVENTS_DDL + DELETION_DDL + SUBS_DDL` and `reconcileCounters` at start (`src/relay.ts:53-54`);
+`events.ts` handles `blocked`, `unavailable` and `ok_partial` separately from `ok` (`src/events.ts:60-66`).
+Not re-run against a real Durable Object.
+
+### B. PR #303 (w4 deletion) review notes
+
+- **H303-1 (Medium)**: fixed in 0aac7805. `a` branch accounts `Math.max(estDel, delWrites)` like the `e` branch (`src/deletion.ts:143`).
+- **H303-2 (Low), open**: the request's own stored rows are not counted in the deletion write budget
+  (`store.ts`, `storageFull(db) && added + res.added - res.freed > 0` path). Reviewer's example: estimate
+  5,022 vs actual 5,026, a deviation of about 4 rows against a 5,000 budget. Not changed on purpose: fixing
+  it would change budget semantics. The reviewer did not re-run Codex's number.
+- **Batch-wide `Math.max` (Low, open)**: the `Math.max(estDel, delWrites)` is taken over the whole batch of
+  victims (at most 10), not per victim. A mixed batch where one victim is below its estimate and another
+  above it under-counts by a few rows; negligible against the 5,000 cap and the same granularity as the check.
+- H303-3 (test gap on `e.kind !== 5 && isBlocked`) was closed by test `deletion requests are never blocked themselves`.
+
+### C. Known limits already published in `deploy/relay-worker/README.md` ("Known limits")
+
+1. Global budgets (event weight, outbound bytes) are shared; a few source addresses can drain them. Agents behind one NAT share one source allowance. Per-address limits are coarse abuse controls.
+2. Per-source state is a bounded in-memory LRU; many addresses flush it (resets a throttled source).
+3. All in-memory budgets are lost when the Durable Object sleeps, is evicted or rebuilt; only per-connection buckets survive in the socket attachment.
+4. Tombstones and coordinate cutoffs are evicted FIFO relay-wide; one key writing many can push out other authors' records.
+5. A deletion request cut short by the 100-target / write budget is stored, so resending returns `duplicate`; clients must split into requests of at most 100 targets.
+6. `sql.databaseSize` does not shrink after deletes, so "storage full" can be sticky until data is cleaned by hand.
+7. Upgrades scan all open sockets (at most 2000) and every Upgrade is forwarded to the Durable Object before it can be refused.
+8. Fan-out is O(subscriptions) per event, no predicate index, not load tested; 2000 connections not tested either.
+9. `storeEvent` throws on SQL errors; the caller turns that into `OK false "error: ..."`.
+
+### D. Still unverified or missing for production
+
+None of these is implemented or tested in this stack unless stated.
+
+| area | gap | note |
+| --- | --- | --- |
+| Load | No load test at 2000 concurrent connections or near the 5 GB storage cap | Config values (2000 connections, 5 GB) are limits written in `config.ts`/README, not measured capacity. Fan-out CPU, rows-read billing and DO CPU limits at that scale are unknown. [unverified] |
+| Topology | Single Durable Object: every connection, every budget and all storage live in one object | One object is the throughput ceiling and the single point of failure; global budgets are per-object, not per-region. No sharding plan. |
+| Rebuild | DO eviction/redeploy/rebuild resets all in-memory budgets to full | An attacker who can trigger or wait for eviction gets fresh allowances. Redeploying over an existing DO needs a state reset or a new migration tag; steps are written in the README but were not run. |
+| Live bandwidth | No reserved bandwidth for live delivery | REQ history has separate budgets, but a source sending much live traffic to its own sockets can exhaust live budgets; a minimum live share per socket is not designed. |
+| Monitoring | No monitoring or alerting plan | No metrics export, no alerts on 429/503 rates, storage-full, DO errors or `console.error` lines (for example `dropConn failed`). `wrangler.toml` defines no observability config. |
+| Backup/restore | No backup or restore story for the SQLite-backed DO | A lost or corrupted object means lost events, tombstones and subscriptions; no export job, no restore drill. [unverified] |
+| DNS cutover | No rollback procedure for moving relay.aastar.io to the Worker | The existing relay's DNS record, TTL, and how to switch back are not documented here; DNS was never touched by this work. |
+| Abuse tooling | No ban/blocklist tooling, no operator view of top sources | Only automatic per-source throttling exists; an operator cannot ban a pubkey or address, or list the heaviest sources, short of redeploying. |
+| Exposure | `workers_dev = true` publishes the relay on a workers.dev hostname; no routes defined | Decide whether that host should stay public once the custom domain is live. |
+| Client address trust | `SRC_HEADER` override or a missing `CF-Connecting-IP` changes who shares a bucket | Production must run without the override and with Cloudflare's header. |
+| E2E coverage | cap/fanout/seed e2e modes need manual relay restarts and are not in `pnpm test` | Most limit behaviour in the README was exercised only by hand or by unit tests. |
+
+Verified in this stack (author-level, on the branches): typecheck and the vitest unit suites, plus the default
+e2e mode. See each PR body for the numbers.
+
 ## Medium, deferred
 
 | slice | file:line | severity | note |
