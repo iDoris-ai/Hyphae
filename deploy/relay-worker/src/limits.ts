@@ -72,6 +72,7 @@ export interface ConnState {
   bad?: number; // rejected frames in the current window
   badPrev?: number; // rejected frames in the window before it (weighted down as the current one ages)
   badAt?: number; // current window start
+  lastSeen?: number; // ms timestamp of the last frame the client sent (set at upgrade, refreshed per frame)
   closed?: boolean; // we initiated a close: ignore everything the client still sends
 }
 

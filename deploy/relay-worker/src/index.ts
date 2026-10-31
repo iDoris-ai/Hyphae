@@ -1,4 +1,5 @@
 import { type Limits, loadLimits } from "./config";
+import { withCors } from "./http";
 import { sourceKey } from "./limits";
 export { Relay } from "./relay";
 
@@ -56,16 +57,9 @@ const limitsFor = (json: string | undefined): Limits => {
   return limitsCache.value;
 };
 
-const CORS = {
-  "access-control-allow-origin": "*",
-  "access-control-allow-methods": "GET, OPTIONS",
-  "access-control-allow-headers": "*",
-};
-
-export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+async function route(request: Request, env: Env): Promise<Response> {
     if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: { ...CORS, "access-control-max-age": "86400" } });
+      return new Response(null, { status: 204, headers: { "access-control-max-age": "86400" } });
     }
     if (request.headers.get("Upgrade")?.toLowerCase() === "websocket") {
       // No source address means a misconfigured path; sharing one "unknown" budget would let one client starve the rest.
@@ -86,11 +80,24 @@ export default {
     }
     if (request.headers.get("Accept")?.toLowerCase().includes("application/nostr+json")) {
       return new Response(JSON.stringify(nip11(limitsFor(env.LIMITS_JSON))), {
-        headers: { "content-type": "application/nostr+json", ...CORS },
+        headers: { "content-type": "application/nostr+json" },
       });
+    }
+    if (new URL(request.url).pathname === "/healthz" && request.method === "GET") {
+      // A real call into the Durable Object that runs a SQLite query; the other HTTP paths never reach it.
+      try {
+        return await env.RELAY.get(env.RELAY.idFromName("main")).fetch(new Request(request.url, { method: "GET" }));
+      } catch (err) {
+        console.error("health forward failed", err);
+        return new Response("relay unavailable\n", { status: 503, headers: { "cache-control": "no-store" } });
+      }
     }
     return new Response("Hyphae relay: connect with a Nostr client over WebSocket.\n", {
       headers: { "content-type": "text/plain; charset=utf-8" },
     });
-  },
+}
+
+export default {
+  // CORS goes on every answer a browser can read; withCors leaves the 101 untouched.
+  fetch: async (request: Request, env: Env): Promise<Response> => withCors(await route(request, env)),
 };
