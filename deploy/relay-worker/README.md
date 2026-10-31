@@ -22,7 +22,7 @@ dispatch); the work is in small modules that take their dependencies explicitly:
   edge. Only `wrangler dev --local` was used.
 - **Single Durable Object.** Everything (all events, all sockets, all fan-out) goes through one
   object, so throughput is bounded by one single-threaded isolate. Sharding is not implemented.
-- **Storage ceiling 5 GB** (`maxStorageBytes`, checked against `sql.databaseSize`; the Durable
+- **Storage ceiling 5 GiB (5 368 709 120 bytes)** (`maxStorageBytes`, checked against `sql.databaseSize`; the Durable
   Object SQLite limit is the hard wall). When over the cap, writes that grow the database are
   refused (see below). There is no pruning or retention policy yet. **Fill-time estimate** (worst
   case, not measured): the global EVENT budget lets ~238 events of 500 KB per minute through (about
@@ -137,11 +137,13 @@ Why 60 upgrades per minute per address: the Hyphae Go client opens a **new WebSo
 query** (`relayquery.FetchWithTimeout`), and `Walk` pages through history one query per page, up to
 100 pages, with no retry on HTTP 429. A full walk by one agent, or a few agents behind one NAT
 polling their inbox every 30 s, must fit; ten per minute did not. The limit is a token bucket, so
-short bursts above 60 get through slowly rather than failing at a hard boundary. If the client
+the bucket holds 60 tokens and refills one per second, so a burst above 60 is refused (HTTP 429) until tokens come back; a client has to pace itself (a 100-page walk from a full bucket needs about 40 s of refill). If the client
 later reuses one connection, this can be lowered again.
 
 **Production must not set `SRC_HEADER`.** The default (`CF-Connecting-IP`) is overwritten by
-Cloudflare's edge on every request, so a client cannot choose its own address through it. Any other
+Cloudflare's edge on every direct client request, so a client cannot choose its own address through it
+(requests that reach this Worker as a subrequest from another Worker do not carry the end client's
+address: cross-zone ones get a shared Cloudflare address, so they would all share one bucket). Any other
 header named in `SRC_HEADER` is client-controlled and would let one client pick a fresh source
 bucket per connection, defeating every per-address limit; it exists only for `wrangler dev --local`,
 where the dev server does not set `CF-Connecting-IP`. `wrangler.toml` therefore has no `[vars]`
@@ -204,7 +206,10 @@ on the same data fails the `#t` indexing check because the earlier run's events 
    with the default limits and loosen them only based on real traffic.
 
 `wrangler.toml` keeps `compatibility_date = "2026-01-01"`; the installed wrangler 4.40 warns that
-its bundled workerd is older and falls back, which does not affect local runs.
+its bundled workerd is older and falls back to `2025-09-24`, so local runs (unit, e2e) use different
+compatibility behaviour than the configured date on the real edge; upgrade wrangler to remove the gap.
+The platform also has its own Durable Object storage quota per account (the Free plan's is about
+5 000 000 000 bytes, shared by all objects), which can stop writes before `maxStorageBytes`; use a paid plan.
 
 ## Custom domain relay.aastar.io
 
@@ -218,18 +223,25 @@ routes = [
 ```
 
 - With `custom_domain = true`, `wrangler deploy` creates the proxied DNS record and the certificate
-  for `relay.aastar.io` itself. If a DNS record or another Worker already serves that name (for
-  example the current relay), the deploy fails or must be told to override it; check what the name
-  points to **before** deploying, because the switch is immediate for every client.
-- The API token needs: Account / Workers Scripts: Edit, Zone / Workers Routes: Edit and
-  Zone / DNS: Edit on the `aastar.io` zone (plus Zone: Read), and the Durable Objects plan
-  from step 3 above. `wrangler login` with an account owner has these.
-- Before switching traffic, deploy once without the route, run
-  `node test/e2e/run.mjs wss://<name>.workers.dev` (the checks that need tiny limits are local
-  only) and read the Known limits above; none of it has been load tested against the real edge.
+  for `relay.aastar.io` itself. **A non-interactive deploy (CI, no TTY) makes wrangler override an
+  existing DNS record / origin for that name without asking** (wrangler 4.40 behaviour as reported
+  in review; not tested here). If another relay already serves the name, that takes it over
+  immediately for every client. Check what the name points to **before** deploying, and run the
+  first deploy with the stanza interactively.
+- The API token needs: Account / Workers Scripts: Edit and, for the custom domain, Zone / Workers
+  Routes: Edit on the `aastar.io` zone (plus Zone: Read), and the Durable Objects plan from step 3
+  above. Cloudflare manages the domain's DNS record itself; Zone / DNS: Edit is only needed if you
+  restore or edit the old record by hand during a rollback (do that with a separate, short-lived
+  token). Not verified against the live account.
+- Before switching traffic, deploy once without the route and smoke test `<name>.workers.dev`:
+  the NIP-11 curl, then one EVENT and a REQ with any Nostr client. Do not run `test/e2e/run.mjs`
+  against the edge: it fakes client addresses through a header the edge overwrites, so all its
+  connections would share one source bucket. Read the Known limits above; none of it has been load
+  tested against the real edge.
 - Rollback: delete the custom domain under Workers & Pages > hyphae-relay > Settings > Domains &
   Routes (or `wrangler` equivalent; removing the `routes` entry and redeploying is not guaranteed to
-  remove an existing binding, so confirm in the dashboard), then restore the previous DNS record /
+  remove an existing binding, so confirm in the dashboard), then remove or comment out the `routes` stanza (a later deploy would otherwise claim the name
+  again, silently in CI), restore the previous DNS record /
   origin for `relay.aastar.io` (write it down before the first deploy) and verify with the NIP-11 curl.
   Events stored in the Durable Object are not migrated back; data written while the Worker served
   the name stays in the Worker.
