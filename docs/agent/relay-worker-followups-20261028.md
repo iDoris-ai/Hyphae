@@ -110,17 +110,17 @@ e2e mode. See each PR body for the numbers.
 
 ### G. Findings from the #306 / #308 reviews and the acceptance run (added after the stack merged)
 
-Not fixed unless the last column says so. `[review]` = Codex or clestons, `[read]` = checked in code, `[run]` = observed.
+Not fixed unless the last column says so. `[review]` = taken from a Codex or clestons review and not re-run when this section was written.
 
 | # | sev | what | status |
 | --- | --- | --- | --- |
 | G1 | **High, blocks production** | Handshake flood: every upgrade reaches the single Durable Object `main`, and the per-source limits run **inside** it (list connections, deserialize attachments, then answer 429). The limits do not protect the DO's own input queue. Fix: admission rate limiting at the edge (Cloudflare rate-limiting rule / WAF) before the DO; any partitioning must keep query, storage and broadcast semantics. | open [review] |
-| G2 | **High, blocks production** | Fan-out work is unbounded per event (no candidate index, no per-event work cap, no subscription-cache LRU); ephemeral events are not de-duplicated or charged to the publisher; tag-filter queries lack a `created_at` index; multi-filter pagination returns early. | open [read], planned as a separate slice |
+| G2 | **High, blocks production** | Fan-out work is unbounded per event (no candidate index, no per-event work cap, no subscription-cache LRU); ephemeral events are not de-duplicated or charged to the publisher; tag-filter queries lack a `created_at` index; multi-filter pagination returns early. | open [review], planned as a separate slice |
 | G3 | Medium | After DO hibernation the constructor reruns and every in-memory bucket (per-source, global, over-quota state) refills to full. Per-connection buckets live in the attachment and survive. | open, also in README Known limits [review] |
-| G4 | Medium | `chargeEvent` is not refunded when the store write fails; kind-5 write budget and H303-2 are still open. | open [read] |
+| G4 | Medium | `chargeEvent` is not refunded when the store write fails; kind-5 write budget and H303-2 are still open. | open [review] |
 | G5 | Medium | During a rollout the Worker serves NIP-11 with the new limits while an active DO keeps the old ones (it reads config only in its constructor; the platform may delay the update up to about 300 s). | open [review] |
 | G6 | Medium | HTTP probes (`/`, NIP-11) return 200 even when the DO is failing or full, so they do not reflect relay health. No metrics for rejection reasons, forward latency, connection count or overload; no persistent log config. | open [review] |
-| G7 | Medium | No heartbeat or auto-response: idle connections are not pinged; CORS headers exist only on the NIP-11 and OPTIONS responses, not on the plain-text one. | open [read] |
+| G7 | Medium | No heartbeat or auto-response: idle connections are not pinged; CORS headers exist only on the NIP-11 and OPTIONS responses, not on the plain-text one. | open [review] |
 | G8 | Medium | No load test: 2000 connections and the 5 GB storage cap are configuration, not measurements. Not run against a real Durable Object at all, only `wrangler dev --local`. The long-history CLI walk was not checked against the 60 upgrades/min quota. | open |
 | G9 | Fixed | A WebSocket upgrade without the source address header used to land in one shared `unknown` bucket. Now refused with 400 and logged (#308). Bad `LIMITS_JSON` was logged on every NIP-11 request; now once per isolate (#308). | fixed in #308 |
 | G10 | Fixed | History allowance is reserved before `runQuery`; admission weights for kind 5 and indexed tags; OK id empty unless 64 lowercase hex; `peekEventId` reads only the top-level id; `reply` cannot throw; stale over-quota test (#311). | fixed in #311 |
