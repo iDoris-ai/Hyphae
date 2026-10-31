@@ -10,21 +10,28 @@ export interface Bucket {
  * Pure: a rejected attempt returns the bucket unchanged, so rejects add no state.
  */
 export function takeToken(b: Bucket | undefined, now: number, perMinute: number, cost = 1): { ok: boolean; bucket: Bucket } {
-  const cur = b ?? { tokens: perMinute, last: now };
+  const cur = b ?? { tokens: perMinute, last: Number.isFinite(now) ? now : 0 };
+  // A zero, negative or non-finite cost would refund or poison the bucket; a non-finite clock likewise.
+  if (!(cost > 0) || !Number.isFinite(cost) || !Number.isFinite(now)) return { ok: false, bucket: cur };
   const elapsed = Math.max(0, now - cur.last);
   const tokens = Math.min(perMinute, cur.tokens + (elapsed / 60_000) * perMinute);
-  if (tokens >= cost) return { ok: true, bucket: { tokens: tokens - cost, last: now } };
+  // `last` never moves backwards, so a clock that steps back cannot make the same interval refill twice.
+  if (tokens >= cost) return { ok: true, bucket: { tokens: tokens - cost, last: Math.max(cur.last, now) } };
   return { ok: false, bucket: cur };
 }
 
 /** Cost of one EVENT for the event-weight buckets: grows with the number of tag strings and with size. */
-export const eventWeight = (tagStrings: number, bytes: number) => 1 + (tagStrings >> 5) + (bytes >> 12);
+export const eventWeight = (tagStrings: number, bytes: number) => 1 + Math.floor(tagStrings / 32) + Math.floor(bytes / 4096);
 
 /**
  * Key used for per-source limits: IPv4 as is, IPv6 grouped by /64 (one host owns a whole /64),
  * IPv4-mapped IPv6 as the IPv4 address. Anything unparsable is used unchanged (truncated).
  */
 export function sourceKey(ip: string): string {
+  return parseSourceKey(String(ip).slice(0, 256)).slice(0, 64) || "unknown"; // empty maps to one fixed key
+}
+
+function parseSourceKey(ip: string): string {
   const s = ip.trim().toLowerCase().split("%")[0];
   if (!s.includes(":")) return s.slice(0, 64);
   let head = s;
@@ -63,7 +70,8 @@ export interface ConnState {
   rq?: Bucket; // REQ frames
   fr?: Bucket; // every frame
   bad?: number; // rejected frames in the current window
-  badAt?: number; // window start
+  badPrev?: number; // rejected frames in the window before it (weighted down as the current one ages)
+  badAt?: number; // current window start
   closed?: boolean; // we initiated a close: ignore everything the client still sends
 }
 
@@ -76,12 +84,23 @@ export function takeConn(st: ConnState, which: "ev" | "rq" | "fr", perMinute: nu
 
 /** Counts a rejected frame; returns true when the connection keeps misbehaving and should be closed (1008). */
 export function countViolation(st: ConnState, max: number, now = Date.now()): boolean {
-  if (!st.badAt || now - st.badAt > 60_000) {
+  // Two-bucket sliding approximation: windows are half-open [start, start+60s), so exactly 60s later
+  // is already the next window, and the previous window still counts in proportion to its overlap.
+  if (st.badAt === undefined) {
     st.badAt = now;
     st.bad = 0;
+    st.badPrev = 0;
+  }
+  const elapsed = Math.max(0, now - st.badAt);
+  if (elapsed >= 60_000) {
+    const steps = Math.floor(elapsed / 60_000);
+    st.badPrev = steps === 1 ? (st.bad ?? 0) : 0;
+    st.bad = 0;
+    st.badAt += steps * 60_000;
   }
   st.bad = (st.bad ?? 0) + 1;
-  return st.bad >= max;
+  const weight = 1 - Math.max(0, now - st.badAt) / 60_000;
+  return st.bad + (st.badPrev ?? 0) * weight >= max;
 }
 
 interface SourceState {
@@ -180,11 +199,11 @@ export class Budgets {
   chargeDelivery(src: string, conn: string, cost: number): "ok" | "source" | "global" | "socket" {
     const now = Date.now();
     const s = this.source(src);
+    const k = this.sock(conn); // created before any refusal so overQuota can see a socket only the source quota refused
     const so = takeToken(s.out, now, this.lim.sourceOutboundBytesPerMinute, cost);
     if (!so.ok) return "source";
     const g = takeToken(this.globalOut, now, this.lim.globalOutboundBytesPerMinute, cost);
     if (!g.ok) return "global";
-    const k = this.sock(conn);
     const sk = takeToken(k.b, now, this.lim.socketOutboundBytesPerMinute, cost);
     if (!sk.ok) return "socket";
     s.out = so.bucket;
@@ -195,9 +214,13 @@ export class Budgets {
 
   private sock(conn: string): SockOut {
     let k = this.sockOut.get(conn);
-    if (!k) {
-      k = { since: 0, last: 0 };
-      this.sockOut.set(conn, k);
+    if (k) this.sockOut.delete(conn);
+    else k = { since: 0, last: 0 };
+    this.sockOut.set(conn, k); // LRU: most recently used last
+    // Refused deliveries create entries too and a close path may be missed, so the table is bounded.
+    if (this.sockOut.size > this.lim.maxSourceEntries) {
+      const oldest = this.sockOut.keys().next().value;
+      if (oldest !== undefined) this.sockOut.delete(oldest);
     }
     return k;
   }
@@ -223,12 +246,15 @@ export class Budgets {
     return true;
   }
 
-  /** Records a dropped delivery; true when the socket has stayed over quota long enough to be closed (1013). */
+  /**
+   * Records a dropped delivery; true when the socket has stayed over quota long enough to be closed (1013).
+   * "Continuously" means no gap of a full quota window (quotaWindowMs) or more between two drops.
+   */
   overQuota(conn: string, now = Date.now()): boolean {
     const k = this.sockOut.get(conn);
     if (!k) return false;
     const w = this.lim.quotaWindowMs;
-    if (k.last === 0 || now - k.last >= 2 * w) k.since = now; // a new episode
+    if (k.last === 0 || now - k.last >= w) k.since = now; // a new episode
     k.last = now;
     return now - k.since >= (this.lim.maxOverQuotaWindows - 1) * w;
   }
