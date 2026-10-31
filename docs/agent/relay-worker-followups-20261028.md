@@ -74,6 +74,35 @@ None of these is implemented or tested in this stack unless stated.
 | Client address trust | `SRC_HEADER` override or a missing `CF-Connecting-IP` changes who shares a bucket | Production must run without the override and with Cloudflare's header. |
 | E2E coverage | cap/fanout/seed e2e modes need manual relay restarts and are not in `pnpm test` | Most limit behaviour in the README was exercised only by hand or by unit tests. |
 
+### E. Codex full-stack review and own read (added late; none fixed in this stack)
+
+Labels: `[review]` = reported by the Codex full-stack review, not re-run here; `[read]` = our own code reading, not run.
+
+| sev | what | label |
+| --- | --- | --- |
+| **High** | A tag-filtered REQ has unbounded SQL work: the `tags_cover` index has no `created_at`, `query.ts` `buildSql` uses `id IN (subquery) ORDER BY created_at`, and the history quota is charged after the fact. A cheap REQ can cost a large scan. | review |
+| Medium | Multi-filter pagination: `runQuery` returns `more` at the first capped filter, so later filters are never read, and `until`-paging skips their events. | review |
+| Medium | Upgrade quota of 60/min may be too small for a CLI history walk of up to 100 pages (one connection per page). Unverified. | review, unverified |
+| Low | A kind-5 event's own stored rows are not in the deletion write budget (same as H303-2). | review |
+| - | Per-EVENT fan-out is O(connections): `ctx.getWebSockets()` plus `deserializeAttachment` per socket; a subs-cache miss means one SQL read per connection. | read |
+| - | One DO instance (`main`) is single-threaded; all traffic serialises on it. | read |
+| - | No `setWebSocketAutoResponse` or heartbeat, so dead peers can hold slots until the 2000 cap fills. | read |
+| - | Constructor runs `SELECT DISTINCT conn` on every cold start. | read |
+| - | CORS headers exist only on the `nostr+json` and OPTIONS responses; plain 200/429/503 responses have none. | read |
+| - | Double `hasEvent` check per EVENT. | read |
+| - | `chargeEvent` runs before `storeEvent` and is not refunded on full/stale/blocked/unavailable results. | read |
+| - | Per-source budgets are in memory and rebuilt after DO hibernation or rebuild (same as section D). | read |
+
+### F. Acceptance status
+
+- 7/7 real-client checks passed on `hyphae-relay-v2`. That is a **staging** address, not production relay.aastar.io.
+- Hibernation idle-wake was verified with a Node WebSocket, **not** the Hyphae CLI: the daemon polls and no CLI command holds a live subscription.
+- Group chat needs a fresh build of `bin/hyphae`; the checked-in `bin/hyphae` is stale.
+- `hyphae event` exits 0 when the relay rejects the event, so scripts cannot rely on its exit code.
+- Not tested: real Nostr client libraries against the `more` EOSE extension; load at 2000 connections; Durable Object billing; the 1013/1008 close paths.
+
+(These acceptance facts come from the coordinator's report; the author of this doc did not re-run them.)
+
 Verified in this stack (author-level, on the branches): typecheck and the vitest unit suites, plus the default
 e2e mode. See each PR body for the numbers.
 
