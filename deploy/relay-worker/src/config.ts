@@ -53,6 +53,40 @@ export const LIMITS = {
   maxFiltersPerReq: 10,
   maxSubIdLength: 64,
   maxDeliveriesPerEvent: 5000,
+  // --- connections and frames
+  maxMessageBytes: 512_000, // UTF-8 bytes per frame (same as the old khatru relay)
+  maxConnections: 2000,
 };
 
 export type Limits = { [K in keyof typeof LIMITS]: number };
+
+const MINIMUM: Partial<Record<keyof Limits, number>> = { maxLimit: 1 };
+
+/**
+ * The defaults, with overrides from a JSON object (the e2e tests start the relay with tiny caps).
+ * An override must be a safe integer between its minimum (0, or 1 for maxLimit) and 1e9 (or the
+ * default when that is larger); anything else - unknown keys, fractions, huge numbers - is ignored
+ * and reported once.
+ */
+export function loadLimits(json?: string): Limits {
+  const lim: Limits = { ...LIMITS };
+  try {
+    const o = json ? (JSON.parse(json) as Record<string, unknown>) : {};
+    const ignored: string[] = [];
+    for (const [k, v] of Object.entries(o)) {
+      const key = k as keyof Limits;
+      const ok =
+        Object.hasOwn(LIMITS, k) &&
+        typeof v === "number" &&
+        Number.isSafeInteger(v) &&
+        v >= (MINIMUM[key] ?? 0) &&
+        v <= Math.max(1e9, LIMITS[key]);
+      if (ok) lim[key] = v;
+      else ignored.push(k);
+    }
+    if (ignored.length > 0) console.error("ignored invalid LIMITS_JSON keys:", ignored.join(", "));
+  } catch (err) {
+    console.error("bad LIMITS_JSON", err);
+  }
+  return lim;
+}
