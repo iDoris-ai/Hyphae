@@ -49,6 +49,10 @@ export const LIMITS = {
   maxSubRows: 20_000, // subscription rows across the whole relay
   subCacheBytes: 4 * MB, // in-memory cache of subscriptions; the rest is read from SQL
   maxResultBytes: 4 * MB, // total size of the stored events one REQ returns
+  // --- frames and fan-out
+  maxFiltersPerReq: 10,
+  maxSubIdLength: 64,
+  maxDeliveriesPerEvent: 5000,
 };
 
 export type Limits = { [K in keyof typeof LIMITS]: number };
