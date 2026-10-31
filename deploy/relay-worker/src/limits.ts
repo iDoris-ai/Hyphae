@@ -20,6 +20,15 @@ export function takeToken(b: Bucket | undefined, now: number, perMinute: number,
   return { ok: false, bucket: cur };
 }
 
+/**
+ * Gives `amount` back to a bucket (the inverse of takeToken), never above its capacity.
+ * A missing bucket, or a zero, negative or non-finite amount, changes nothing.
+ */
+export function refundToken(b: Bucket | undefined, perMinute: number, amount: number): Bucket | undefined {
+  if (!b || !(amount > 0) || !Number.isFinite(amount) || !Number.isFinite(b.tokens)) return b;
+  return { tokens: Math.min(perMinute, b.tokens + amount), last: b.last };
+}
+
 /** Cost of one EVENT for the event-weight buckets: grows with the number of tag strings and with size. */
 export const eventWeight = (tagStrings: number, bytes: number) => 1 + Math.floor(tagStrings / 32) + Math.floor(bytes / 4096);
 
@@ -190,6 +199,17 @@ export class Budgets {
     this.globalEv = g.bucket;
     if (wr) s.wr = wr.bucket;
     return "ok";
+  }
+
+  /**
+   * Gives back a successful chargeEvent when the relay failed to store the event (its fault, not the
+   * sender's). Same arguments as the charge; buckets are capped at capacity, and a source whose entry
+   * was evicted meanwhile is not recreated.
+   */
+  refundEvent(src: string, storedBytes: number, weight: number) {
+    const s = this.sources.get(src);
+    if (s && storedBytes > 0) s.wr = refundToken(s.wr, this.lim.sourceWriteBytesPerMinute, storedBytes);
+    this.globalEv = refundToken(this.globalEv, this.lim.globalEventWeightPerMinute, weight);
   }
 
   /**
