@@ -258,45 +258,12 @@ Identities are stored in ~/.hyphae/ with 600 permissions.`,
 			},
 		},
 		{
-			Name:  "export",
-			Usage: "Export identity nsec (be careful!)",
-			Flags: []cli.Flag{
-				&cli.StringFlag{
-					Name:    "nickname",
-					Aliases: []string{"n"},
-					Usage:   "Nickname to export",
-				},
-			},
+			Name:        "export",
+			Usage:       "Export identity nsec (be careful!)",
+			Description: exportDescription,
+			Flags:       exportFlags(),
 			Action: func(ctx context.Context, c *cli.Command) error {
-				ks, err := LoadAndUnlockKeyStore()
-				if err != nil {
-					return fmt.Errorf("failed to load keystore: %w", err)
-				}
-
-				nickname := c.String("nickname")
-				identity, err := GetIdentity(ks, nickname)
-				if err != nil {
-					return err
-				}
-
-				nsec := identity.Nsec
-				if ks.Encrypted {
-					dnsec, err := decryptWithKey(identity.Nsec, *ks.MasterKey)
-					if err != nil {
-						return fmt.Errorf("failed to decrypt nsec: %w", err)
-					}
-					nsec = dnsec
-				}
-
-				red := color.New(color.FgRed).SprintFunc()
-				fmt.Println(red("⚠️  WARNING: You are about to expose your private key!"))
-				fmt.Println(red("   Never share this with anyone or store it insecurely."))
-				fmt.Println()
-				fmt.Printf("Identity: %s\n", identity.Nickname)
-				fmt.Printf("Npub:     %s\n", identity.Npub)
-				fmt.Printf("Nsec:     %s\n", nsec)
-
-				return nil
+				return runExport(c)
 			},
 		},
 		{
