@@ -153,3 +153,12 @@ func TestExportInvalidFormatAndDefaultOutput(t *testing.T) {
 		}
 	}
 }
+
+func TestExportPassphraseKeepsUnterminatedCR(t *testing.T) {
+	home, _ := createExportFixture(t, "")
+	res := runIdentityCLI(t, home, strings.NewReader("abc\r"), nil, "identity", "export", "-n", "alice", "--json", "--format", "ncryptsec")
+	enc := exportData(t, res)["ncryptsec"].(string)
+	if _, err := nip49.Decrypt(enc, "abc\r"); err != nil {
+		t.Fatalf("unterminated CR must stay part of the passphrase: %v", err)
+	}
+}

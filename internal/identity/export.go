@@ -13,6 +13,7 @@ import (
 	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/urfave/cli/v3"
+	"golang.org/x/term"
 )
 
 const (
@@ -26,6 +27,7 @@ const exportDescription = `Stdin protocol (secrets are never accepted on argv). 
   1. keystore password   - only with --password-stdin AND only if the keystore is encrypted
   2. backup passphrase   - only with --format ncryptsec (always from stdin, never prompted)
 Each line is terminated by LF or CRLF; the terminator is stripped, nothing else is trimmed.
+If stdin is a terminal these secrets are prompted without echo instead.
 --format nsec (default) prints the plaintext nsec; --format ncryptsec prints a NIP-49 backup.
 With --out <file> the secret is written to a NEW file (mode 0600, refuses an existing path or
 symlink) and is not printed; stdout/JSON then only carries nickname, npub, format and out.
@@ -46,7 +48,10 @@ func readStdinLine(r *bufio.Reader, what string) (string, error) {
 	if err != nil && (!errors.Is(err, io.EOF) || line == "") {
 		return "", fmt.Errorf("failed to read %s from stdin", what)
 	}
-	line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+	// Strip a CR only when it belongs to a consumed CRLF terminator.
+	if strings.HasSuffix(line, "\n") {
+		line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+	}
 	if line == "" {
 		return "", fmt.Errorf("%s from stdin is empty", what)
 	}
@@ -54,6 +59,21 @@ func readStdinLine(r *bufio.Reader, what string) (string, error) {
 		return "", fmt.Errorf("%s from stdin exceeds %d bytes", what, maxPasswordStdinBytes)
 	}
 	return line, nil
+}
+
+// readSecretLine prompts without echo when stdin is a terminal, otherwise reads a stdin line.
+func readSecretLine(r *bufio.Reader, what string) (string, error) {
+	fd := int(os.Stdin.Fd())
+	if !term.IsTerminal(fd) {
+		return readStdinLine(r, what)
+	}
+	fmt.Fprintf(os.Stderr, "%s: ", what)
+	b, err := term.ReadPassword(fd)
+	fmt.Fprintln(os.Stderr)
+	if err != nil || len(b) == 0 {
+		return "", fmt.Errorf("failed to read %s", what)
+	}
+	return string(b), nil
 }
 
 func unlockForExport(ks *types.KeyStore, jsonMode, passwordStdin bool, in *bufio.Reader) error {
@@ -64,7 +84,7 @@ func unlockForExport(ks *types.KeyStore, jsonMode, passwordStdin bool, in *bufio
 	var err error
 	switch {
 	case passwordStdin:
-		if pw, err = readStdinLine(in, "keystore password"); err != nil {
+		if pw, err = readSecretLine(in, "keystore password"); err != nil {
 			return common.NewExitError(common.ErrCodeAuth, err)
 		}
 	case jsonMode:
@@ -108,7 +128,8 @@ func runExport(c *cli.Command) error {
 	if format != exportFormatNsec && format != exportFormatNcryptsec {
 		return common.NewExitError(common.ErrCodeUser, fmt.Errorf("unsupported --format %q (use nsec or ncryptsec)", format))
 	}
-	in := bufio.NewReader(os.Stdin)
+	// Bounded so a newline-free stream cannot exhaust memory.
+	in := bufio.NewReader(io.LimitReader(os.Stdin, 4*maxPasswordStdinBytes))
 
 	ks, err := LoadKeyStore()
 	if err != nil {
@@ -134,7 +155,7 @@ func runExport(c *cli.Command) error {
 		if perr != nil {
 			return common.NewExitError(common.ErrCodeOther, errors.New("stored key is invalid"))
 		}
-		pass, rerr := readStdinLine(in, "backup passphrase")
+		pass, rerr := readSecretLine(in, "backup passphrase")
 		if rerr != nil {
 			return common.NewExitError(common.ErrCodeUser, rerr)
 		}
@@ -145,6 +166,9 @@ func runExport(c *cli.Command) error {
 	}
 
 	if out := c.String("out"); out != "" {
+		if !exportOutSupported {
+			return common.NewExitError(common.ErrCodeUser, errors.New("--out is not supported on this platform (cannot guarantee owner-only access)"))
+		}
 		if err := writeNewSecretFile(out, secret); err != nil {
 			return err
 		}
