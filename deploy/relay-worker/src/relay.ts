@@ -4,7 +4,7 @@ import { DELETION_DDL, reconcileCounters } from "./deletion";
 import { type Db, EVENTS_DDL } from "./db";
 import { processEvent } from "./events";
 import { type Hub, peekEventId } from "./hub";
-import { idleSockets } from "./idle";
+import { planReap } from "./idle";
 import { Budgets, type ConnState, countViolation, takeConn } from "./limits";
 import { utf8Length } from "./nostr";
 import { processClose, processReq } from "./req";
@@ -81,9 +81,7 @@ export class Relay extends DurableObject<Env> {
       let socks = this.ctx.getWebSockets().filter((w) => !(w.deserializeAttachment() as ConnState | null)?.closed);
       // At a cap, first free the slots held by connections that went silent (half-dead sockets never send a close).
       const sameSrc = (w: WebSocket) => (w.deserializeAttachment() as ConnState | null)?.src === src;
-      if (socks.length >= this.lim.maxConnections || socks.filter(sameSrc).length >= this.lim.maxConnsPerSource) {
-        socks = this.reapIdle(socks);
-      }
+      socks = this.reapIdle(socks, src);
       if (socks.length >= this.lim.maxConnections) {
         return new Response("relay is at its connection limit", { status: 503, headers: { "retry-after": "30" } });
       }
@@ -178,19 +176,13 @@ export class Relay extends DurableObject<Env> {
     }
   }
 
-  /** Closes (1001) the sockets idle past the timeout and returns the rest. Never throws. */
-  private reapIdle(socks: WebSocket[]): WebSocket[] {
+  /** At a cap, closes (1001) just enough idle sockets for a new connection from `src` (see planReap) and returns the rest. Never throws. */
+  private reapIdle(socks: WebSocket[], src: string): WebSocket[] {
     try {
-      const idle = new Set(
-        idleSockets(
-          socks,
-          (w) => ({ st: w.deserializeAttachment() as ConnState | null, auto: this.ctx.getWebSocketAutoResponseTimestamp(w)?.getTime() }),
-          Date.now(),
-          this.lim.idleTimeoutSeconds * 1000,
-        ),
-      );
-      for (const w of idle) this.forceClose(w, 1001, "idle timeout");
-      return idle.size ? socks.filter((w) => !idle.has(w)) : socks;
+      const read = (w: WebSocket) => ({ st: w.deserializeAttachment() as ConnState | null, auto: this.ctx.getWebSocketAutoResponseTimestamp(w)?.getTime() });
+      const doomed = new Set(planReap(socks, read, src, this.lim, Date.now()));
+      for (const w of doomed) this.forceClose(w, 1001, "idle timeout");
+      return doomed.size ? socks.filter((w) => !doomed.has(w)) : socks;
     } catch (err) {
       console.error("idle reaping failed", err);
       return socks;

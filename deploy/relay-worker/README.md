@@ -109,13 +109,17 @@ paid/whitelisted access. Every event is public; there is no access control.
 - Heartbeat: a client text frame `ping` is answered `pong` by the runtime without waking the Durable
   Object (so it costs no DO request and does not hibernate-wake). A connection that has sent nothing
   (a `ping` counts) for `idleTimeoutSeconds` (default 900, 0 = off) is closed with 1001 `idle timeout`,
-  but only when a new upgrade finds the global or per-source connection cap full: there is no timer or
-  alarm, so reaping never wakes an idle object, and a relay below its caps keeps quiet subscribers.
+  but only when a new upgrade finds a cap full: a full source frees only its OWN idle sockets, a full
+  relay frees other sources' too, and in both cases only as many as the new connection needs (longest
+  silent first). There is no timer or alarm, so reaping never wakes an idle object, and a relay below
+  its caps keeps quiet subscribers. A text `ping` is not counted against the frame budget or violations
+  (the runtime answers it without waking the object), so a client can keep an idle socket alive that way.
   Messages the relay sends do not count as life. The close handshake of a reaped socket may take ~10 s to
   finish under `wrangler dev`; the slot is free at once.
 - `GET /healthz` calls into the Durable Object and runs a SQLite query: 200 `ok` only if the object
-  runs and storage answers, 503 otherwise. It costs one DO request per probe (billed like any other),
-  so do not poll it faster than about once a minute. `/` and NIP-11 stay DO-free and prove nothing about it.
+  runs and storage answers, 503 otherwise. It is routed before NIP-11 content negotiation. Each Worker
+  isolate caches the result for 5 s (2 s for a failure) and shares one in-flight probe, so public traffic
+  reaches the object about once per TTL per isolate (not a global bound). `/` and NIP-11 stay DO-free and prove nothing about it.
 
 ## Limits (constants in `src/config.ts`, also advertised in NIP-11 `limitation`)
 

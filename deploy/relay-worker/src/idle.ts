@@ -14,9 +14,42 @@ export interface SocketActivity {
  */
 export function idleSockets<T>(socks: T[], read: (w: T) => SocketActivity, now: number, timeoutMs: number): T[] {
   if (!(timeoutMs > 0)) return [];
-  return socks.filter((w) => {
+  const last = (w: T) => {
     const { st, auto } = read(w);
-    if (!st || st.closed || st.lastSeen === undefined) return false;
-    return now - Math.max(st.lastSeen, auto ?? 0) > timeoutMs;
-  });
+    return st && !st.closed && st.lastSeen !== undefined ? Math.max(st.lastSeen, auto ?? 0) : undefined;
+  };
+  // Oldest first, so a caller that needs only a few takes the longest-silent ones.
+  return socks
+    .filter((w) => {
+      const t = last(w);
+      return t !== undefined && now - t > timeoutMs;
+    })
+    .sort((a, b) => last(a)! - last(b)!);
+}
+
+export interface ReapCaps {
+  maxConnections: number;
+  maxConnsPerSource: number;
+  idleTimeoutSeconds: number;
+}
+
+/**
+ * Which sockets to close so that a new connection from `src` fits, taking no more than needed.
+ * A full source frees only its OWN idle sockets (otherwise a client sitting at its cap could close
+ * other sources' subscribers just by retrying). Only a full relay looks at everyone's.
+ * `socks` must not contain sockets that are already closing.
+ */
+export function planReap<T>(socks: T[], read: (w: T) => SocketActivity, src: string, caps: ReapCaps, now: number): T[] {
+  const ms = caps.idleTimeoutSeconds * 1000;
+  const out: T[] = [];
+  const mine = socks.filter((w) => read(w).st?.src === src);
+  if (mine.length >= caps.maxConnsPerSource) {
+    out.push(...idleSockets(mine, read, now, ms).slice(0, mine.length - caps.maxConnsPerSource + 1));
+  }
+  const taken = new Set(out);
+  const rest = socks.filter((w) => !taken.has(w));
+  if (rest.length >= caps.maxConnections) {
+    out.push(...idleSockets(rest, read, now, ms).slice(0, rest.length - caps.maxConnections + 1));
+  }
+  return out;
 }

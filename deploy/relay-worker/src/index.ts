@@ -1,4 +1,5 @@
 import { type Limits, loadLimits } from "./config";
+import { createHealthCache } from "./health";
 import { withCors } from "./http";
 import { sourceKey } from "./limits";
 export { Relay } from "./relay";
@@ -57,6 +58,8 @@ const limitsFor = (json: string | undefined): Limits => {
   return limitsCache.value;
 };
 
+const checkHealth = createHealthCache();
+
 async function route(request: Request, env: Env): Promise<Response> {
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: { "access-control-max-age": "86400" } });
@@ -78,19 +81,20 @@ async function route(request: Request, env: Env): Promise<Response> {
         return new Response("relay unavailable", { status: 503, headers: { "retry-after": "30" } });
       }
     }
+    // Before NIP-11 content negotiation, or a probe sending Accept: application/nostr+json would never reach the object.
+    if (new URL(request.url).pathname === "/healthz" && request.method === "GET") {
+      const ok = await checkHealth(async () => {
+        // A real call into the Durable Object that runs a SQLite query; the other HTTP paths never reach it.
+        const res = await env.RELAY.get(env.RELAY.idFromName("main")).fetch(new Request(request.url, { method: "GET" }));
+        return res.status === 200;
+      });
+      const headers = { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" };
+      return ok ? new Response("ok\n", { headers }) : new Response("relay unavailable\n", { status: 503, headers });
+    }
     if (request.headers.get("Accept")?.toLowerCase().includes("application/nostr+json")) {
       return new Response(JSON.stringify(nip11(limitsFor(env.LIMITS_JSON))), {
         headers: { "content-type": "application/nostr+json" },
       });
-    }
-    if (new URL(request.url).pathname === "/healthz" && request.method === "GET") {
-      // A real call into the Durable Object that runs a SQLite query; the other HTTP paths never reach it.
-      try {
-        return await env.RELAY.get(env.RELAY.idFromName("main")).fetch(new Request(request.url, { method: "GET" }));
-      } catch (err) {
-        console.error("health forward failed", err);
-        return new Response("relay unavailable\n", { status: 503, headers: { "cache-control": "no-store" } });
-      }
     }
     return new Response("Hyphae relay: connect with a Nostr client over WebSocket.\n", {
       headers: { "content-type": "text/plain; charset=utf-8" },
