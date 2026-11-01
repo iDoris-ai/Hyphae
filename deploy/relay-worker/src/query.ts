@@ -74,10 +74,10 @@ function expand(f: Filter): Filter[] {
   return [...new Set(vals)].map((v) => ({ ...f, [dk]: [v] }) as Filter);
 }
 
-/** Index reads runQuery makes for these filters: one per tag value of each filter's driver tag, else one. */
+/** Index reads runQuery makes for these filters: one per tag value of each filter's driver tag, else one (none for empty or limit-0 filters). */
 export function queryUnits(filters: Filter[]): number {
   let n = 0;
-  for (const f of filters) if (!filterIsEmpty(f)) n += expand(f).length;
+  for (const f of filters) if (!filterIsEmpty(f) && (f.limit === undefined || f.limit > 0)) n += expand(f).length; // limit 0 is live-only: no read
   return n;
 }
 

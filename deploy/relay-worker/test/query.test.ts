@@ -210,6 +210,7 @@ describe("query unit budget", () => {
   it("counts one index read per distinct driver-tag value, one for other filters, none for empty ones", () => {
     expect(queryUnits([{ "#p": vals(89) }])).toBe(89);
     expect(queryUnits([{ "#p": ["a", "a", "b"] }, { kinds: [1] }, { "#p": [] }, { authors: [] }])).toBe(3);
+    expect(queryUnits([{ "#p": vals(60), limit: 0 }, { "#t": vals(60), limit: -1 }, { kinds: [1] }])).toBe(1);
     expect(queryUnits(Array.from({ length: 10 }, () => ({ "#p": vals(89) })))).toBe(890);
   });
   it("is a limit the operator can override through LIMITS_JSON, with a default one maximal filter fits in", () => {
