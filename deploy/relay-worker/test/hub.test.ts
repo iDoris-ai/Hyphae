@@ -501,13 +501,13 @@ describe("fan-out work cap and socket lookup", () => {
     warn.mockRestore();
   });
   it("counts a subscription reached through several buckets once against the work cap", () => {
-    const { hub, conn } = setup({ maxFanoutWorkPerEvent: 10 });
-    const ps = ["1", "2", "3", "4"].map((x) => x.repeat(64));
-    const cs = Array.from({ length: 4 }, (_, i) => conn("d" + i));
+    const { hub, conn } = setup({ maxFanoutWorkPerEvent: 3 });
+    const ps = Array.from({ length: 16 }, (_, i) => i.toString(16).repeat(64).slice(0, 64));
+    const cs = Array.from({ length: 2 }, (_, i) => conn("d" + i));
     cs.forEach((c) => sub(hub, c, "s", { "#p": ps }));
     const wild = conn("w");
     sub(hub, wild, "s", { since: 1 });
-    // 16 references to 4 subscriptions, then the wildcard one: 5 distinct candidates, under the cap of 10
+    // 32 references to 2 subscriptions, then the wildcard one: 3 distinct candidates, within the cap of 3
     broadcast(hub, signed(alice, { kind: 20001, tags: ps.map((p) => ["p", p]) }));
     expect(wild.fake.frames().some((f) => f[0] === "EVENT")).toBe(true);
   });

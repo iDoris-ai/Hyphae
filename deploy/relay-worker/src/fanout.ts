@@ -20,9 +20,10 @@ export function broadcast(hub: Hub, e: NostrEvent) {
   const seen = { ...e, tags: indexedTags(e.tags, hub.lim.maxIndexedTags) };
   let delivered = 0;
   let looked = 0; // distinct candidate subscriptions compared: this is what the work cap limits
-  let visits = 0; // index references walked, duplicates included (a separate, larger bound)
+  let visits = 0; // index references walked, duplicates included (bound 16x the work cap: a subscription has at most 16 index references, so it never binds before the cap)
   const done = new Set<string>();
-  const conns = new Map<string, { ws: WebSocket; st: ConnState; subs: Map<string, Filter[]> } | null>();
+  const conns = new Map<string, { ws: WebSocket; st: ConnState } | null>(); // sockets only: filters are not held here, SubStore's LRU bounds them
+  let last: { conn: string; subs: Map<string, Filter[]> } | undefined; // filters of the connection just handled (at most one, 16 KB)
   let byId: Map<string, WebSocket> | undefined; // fallback for sockets that carry no connection-id tag
   const open = (conn: string) => {
     let ws = hub.socketOf?.(conn);
@@ -31,11 +32,11 @@ export function broadcast(hub: Hub, e: NostrEvent) {
       ws = byId.get(conn);
     }
     const st = ws?.deserializeAttachment() as ConnState | null | undefined;
-    return ws && st && !st.closed ? { ws, st, subs: hub.subs.get(conn) } : null;
+    return ws && st && !st.closed ? { ws, st } : null;
   };
   try {
     for (const ref of hub.subs.candidates(seen)) {
-      if (looked >= hub.lim.maxFanoutWorkPerEvent || ++visits > 8 * hub.lim.maxFanoutWorkPerEvent) {
+      if (looked >= hub.lim.maxFanoutWorkPerEvent || ++visits > 16 * hub.lim.maxFanoutWorkPerEvent) {
         console.warn(`fan-out work cap (${looked} compared, ${visits} walked) reached for event ${e.id}; remaining candidates skipped`);
         return;
       }
@@ -49,7 +50,8 @@ export function broadcast(hub: Hub, e: NostrEvent) {
         let c = conns.get(conn);
         if (c === undefined) conns.set(conn, (c = open(conn)));
         if (!c) continue;
-        const filters = c.subs.get(subId);
+        if (last?.conn !== conn) last = { conn, subs: hub.subs.get(conn) };
+        const filters = last.subs.get(subId);
         if (!filters || !matchAny(filters, seen)) continue;
         if (delivered >= hub.lim.maxDeliveriesPerEvent) return;
         const idJson = JSON.stringify(subId);
