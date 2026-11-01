@@ -57,6 +57,7 @@ export const LIMITS = {
   ephemeralDedupeEntries: 10_000, // recent ephemeral ids remembered (0 turns dedupe off); oldest evicted first
   ephemeralDedupeTtlMs: 60_000, // how long an id counts as a replay
   ephemeralDeliveriesPerWeight: 32, // the publisher pays 1 event-weight per this many deliveries its event caused
+  maxFanoutWorkPerEvent: 10_000, // candidate subscriptions one live event is compared with; the rest are skipped (counted, logged)
   // --- connections and frames
   maxMessageBytes: 512_000, // UTF-8 bytes per frame (same as the old khatru relay)
   maxConnections: 2000,
