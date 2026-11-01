@@ -15,7 +15,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { schnorr } from "@noble/curves/secp256k1";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
 import {
-  ARGS, CAPPED_FILE, HTTP_URL, MAX_LIMIT, SEED_FILE, WS_URL,
+  ARGS, CAPPED_FILE, HTTP_URL, MAX_LIMIT, SEED_FILE, SRC_HEADER, WS_URL,
   check, finish, freshIp, makeEvent, newKey, nextCounter, open, sleep, uniq,
 } from "./lib.mjs";
 
@@ -47,11 +47,38 @@ async function main() {
     );
   }
 
+  {
+    const g = await fetch(HTTP_URL);
+    check("plain GET has access-control-allow-origin", g.status === 200 && g.headers.get("access-control-allow-origin") === "*");
+    const h = await fetch(HTTP_URL + "/healthz", { headers: { Accept: "application/nostr+json" } });
+    check("GET /healthz -> 200 ok from the Durable Object (even with Accept nostr+json)", h.status === 200 && (await h.text()).startsWith("ok") && h.headers.get("access-control-allow-origin") === "*", `status=${h.status}`);
+  }
+
   if (SEED_FILE) return runSeed();
   if (CAPPED_FILE) return runCapped(alice);
   if (ARGS.includes("--fanout")) return runFanout(alice);
 
   const a = await open();
+
+  console.log("heartbeat");
+  {
+    // Raw socket: lib's Client parses every frame as JSON, and "pong" is plain text.
+    const ws = new WebSocket(WS_URL, { headers: { [SRC_HEADER]: freshIp() } });
+    const got = [];
+    ws.addEventListener("message", (ev) => got.push(String(ev.data)));
+    await new Promise((res, rej) => {
+      ws.addEventListener("open", res, { once: true });
+      ws.addEventListener("error", () => rej(new Error("cannot connect")), { once: true });
+    });
+    ws.send("ping");
+    await sleep(300);
+    check("text ping -> pong", got.length === 1 && got[0] === "pong", JSON.stringify(got));
+    got.length = 0;
+    for (let i = 0; i < 500; i++) ws.send("ping");
+    await sleep(1500);
+    check("500 quick pings -> 500 pongs, no NOTICE, connection still open", got.length === 500 && got.every((m) => m === "pong") && ws.readyState === 1, `got=${got.length} first=${got[0]} state=${ws.readyState}`);
+    ws.close();
+  }
 
   console.log("publish");
   const note = makeEvent(alice, { content: "hello " + uniq() });

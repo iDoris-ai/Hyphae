@@ -715,6 +715,20 @@ describe("fan-out work cap and socket lookup", () => {
     expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();
   });
+  it("a small configured cap cannot starve later subscriptions (it is raised to maxSubRows)", () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { hub, conn } = setup(loadLimits('{"maxSubRows":12,"maxFanoutWorkPerEvent":5}'));
+    log.mockRestore();
+    const never = Array.from({ length: 10 }, (_, i) => conn("n" + i));
+    never.forEach((c) => sub(hub, c, "s", { kinds: [20001], "#t": ["never"] }));
+    const kind = conn("kind");
+    sub(hub, kind, "s", { kinds: [20001] });
+    const wild = conn("wild");
+    sub(hub, wild, "s", { since: 1 });
+    broadcast(hub, signed(alice, { kind: 20001 }));
+    expect(kind.fake.frames().some((f) => f[0] === "EVENT")).toBe(true);
+    expect(wild.fake.frames().some((f) => f[0] === "EVENT")).toBe(true);
+  });
   it("counts a subscription reached through several buckets once against the work cap", () => {
     const { hub, conn } = setup({ maxFanoutWorkPerEvent: 3 });
     const ps = Array.from({ length: 16 }, (_, i) => i.toString(16).repeat(64).slice(0, 64));

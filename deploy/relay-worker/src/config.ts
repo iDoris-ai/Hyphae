@@ -57,10 +57,16 @@ export const LIMITS = {
   ephemeralDedupeEntries: 10_000, // recent ephemeral ids remembered (0 turns dedupe off); oldest evicted first
   ephemeralDedupeTtlMs: 60_000, // how long an id counts as a replay
   ephemeralDeliveriesPerWeight: 32, // the publisher pays 1 event-weight per this many deliveries its event caused
-  maxFanoutWorkPerEvent: 10_000, // candidate subscriptions one live event is compared with; the rest are skipped (counted, logged)
+  // Distinct candidate subscriptions one live event is compared with; the rest are skipped and a warning is logged
+  // (no counter). loadLimits keeps this >= maxSubRows: candidates are distinct subscriptions, so the cap then never
+  // skips anyone and the work is at most the old linear scan. A smaller cap would starve later subscriptions.
+  maxFanoutWorkPerEvent: 20_000,
   // --- connections and frames
   maxMessageBytes: 512_000, // UTF-8 bytes per frame (same as the old khatru relay)
   maxConnections: 2000,
+  // A connection that has sent nothing (not even a text "ping") for this long may be closed when a connection
+  // slot is needed (checked only at the connection caps, never by a timer). 0 disables.
+  idleTimeoutSeconds: 900,
 };
 
 export type Limits = { [K in keyof typeof LIMITS]: number };
@@ -90,6 +96,10 @@ export function loadLimits(json?: string): Limits {
       else ignored.push(k);
     }
     if (ignored.length > 0) console.error("ignored invalid LIMITS_JSON keys:", ignored.join(", "));
+    if (lim.maxFanoutWorkPerEvent < lim.maxSubRows) {
+      if (lim.maxFanoutWorkPerEvent !== LIMITS.maxFanoutWorkPerEvent) console.error(`maxFanoutWorkPerEvent raised to maxSubRows (${lim.maxSubRows}): a smaller cap starves later subscriptions`);
+      lim.maxFanoutWorkPerEvent = lim.maxSubRows;
+    }
   } catch (err) {
     console.error("bad LIMITS_JSON", err);
   }

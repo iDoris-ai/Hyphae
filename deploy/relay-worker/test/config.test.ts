@@ -41,4 +41,15 @@ describe("loadLimits", () => {
     loadLimits('{"maxStorageBytes":1}');
     expect(LIMITS.maxStorageBytes).toBe(5 * 1024 * 1024 * 1024);
   });
+  it("keeps maxFanoutWorkPerEvent >= maxSubRows (a smaller cap would starve later subscriptions) and reports an explicit smaller value", () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(LIMITS.maxFanoutWorkPerEvent).toBeGreaterThanOrEqual(LIMITS.maxSubRows);
+    expect(loadLimits('{"maxFanoutWorkPerEvent":5}').maxFanoutWorkPerEvent).toBe(LIMITS.maxSubRows);
+    expect(log).toHaveBeenCalledTimes(1);
+    log.mockClear();
+    expect(loadLimits('{"maxSubRows":30000}').maxFanoutWorkPerEvent).toBe(30000); // follows maxSubRows silently
+    expect(loadLimits('{"maxFanoutWorkPerEvent":50000}').maxFanoutWorkPerEvent).toBe(50000);
+    expect(log).not.toHaveBeenCalled();
+    log.mockRestore();
+  });
 });

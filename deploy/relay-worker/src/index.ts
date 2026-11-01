@@ -1,4 +1,5 @@
 import { type Limits, loadLimits } from "./config";
+import { createHealthCache, withCors } from "./http";
 import { sourceKey } from "./limits";
 export { Relay } from "./relay";
 
@@ -56,16 +57,11 @@ const limitsFor = (json: string | undefined): Limits => {
   return limitsCache.value;
 };
 
-const CORS = {
-  "access-control-allow-origin": "*",
-  "access-control-allow-methods": "GET, OPTIONS",
-  "access-control-allow-headers": "*",
-};
+const checkHealth = createHealthCache();
 
-export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+async function route(request: Request, env: Env): Promise<Response> {
     if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: { ...CORS, "access-control-max-age": "86400" } });
+      return new Response(null, { status: 204, headers: { "access-control-max-age": "86400" } });
     }
     if (request.headers.get("Upgrade")?.toLowerCase() === "websocket") {
       // No source address means a misconfigured path; sharing one "unknown" budget would let one client starve the rest.
@@ -84,13 +80,27 @@ export default {
         return new Response("relay unavailable", { status: 503, headers: { "retry-after": "30" } });
       }
     }
+    // Before NIP-11 content negotiation, or a probe sending Accept: application/nostr+json would never reach the object.
+    if (new URL(request.url).pathname === "/healthz" && request.method === "GET") {
+      const ok = await checkHealth(async () => {
+        // A real call into the Durable Object that runs a SQLite query; the other HTTP paths never reach it.
+        const res = await env.RELAY.get(env.RELAY.idFromName("main")).fetch(new Request(request.url, { method: "GET" }));
+        return res.status === 200;
+      });
+      const headers = { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" };
+      return ok ? new Response("ok\n", { headers }) : new Response("relay unavailable\n", { status: 503, headers });
+    }
     if (request.headers.get("Accept")?.toLowerCase().includes("application/nostr+json")) {
       return new Response(JSON.stringify(nip11(limitsFor(env.LIMITS_JSON))), {
-        headers: { "content-type": "application/nostr+json", ...CORS },
+        headers: { "content-type": "application/nostr+json" },
       });
     }
     return new Response("Hyphae relay: connect with a Nostr client over WebSocket.\n", {
       headers: { "content-type": "text/plain; charset=utf-8" },
     });
-  },
+}
+
+export default {
+  // CORS goes on every answer a browser can read; withCors leaves the 101 untouched.
+  fetch: async (request: Request, env: Env): Promise<Response> => withCors(await route(request, env)),
 };
