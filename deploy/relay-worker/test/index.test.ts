@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import worker from "../src/index";
+import logoFile from "../../../docs/brand/hyphae-logo.svg?raw";
+import { LOGO_SVG } from "../src/landing";
 import { sourceKey } from "../src/limits";
 
 type Seen = { headers: Headers } | null;
@@ -155,5 +157,73 @@ describe("Worker entry: edge admission of upgrades", () => {
       },
     });
     expect((await worker.fetch(from("198.51.100.55"), broken.e)).status).toBe(200); // fail open, the Durable Object still limits
+  });
+});
+
+describe("Worker entry: landing page", () => {
+  const get = (path: string, accept?: string) =>
+    worker.fetch(new Request(`https://relay.test${path}`, accept ? { headers: { accept } } : {}), env().e);
+
+  it("serves HTML with a strict CSP to a browser at / and never calls the Durable Object", async () => {
+    const { e, state } = env();
+    const res = await worker.fetch(new Request("https://relay.test/", { headers: { accept: "text/html,application/xhtml+xml" } }), e);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    expect(res.headers.get("content-security-policy")).toContain("default-src 'none'");
+    expect(await res.text()).toContain("wss://relay.aastar.io");
+    expect(state.seen).toBeNull();
+  });
+
+  it("keeps the plain answer for clients that do not ask for HTML, and NIP-11 for those that ask for it", async () => {
+    expect(await (await get("/")).text()).toContain("connect with a Nostr client");
+    expect(await (await get("/", "*/*")).text()).toContain("connect with a Nostr client");
+    const nip = await get("/", "text/html, application/nostr+json");
+    expect(nip.headers.get("content-type")).toBe("application/nostr+json");
+  });
+
+  it("serves the logo as SVG and nothing else under other paths", async () => {
+    const logo = await get("/logo.svg");
+    expect(logo.headers.get("content-type")).toBe("image/svg+xml");
+    expect(await logo.text()).toContain("<svg");
+    expect(await (await get("/other", "text/html")).text()).toContain("connect with a Nostr client");
+  });
+});
+
+describe("Worker entry: landing page languages", () => {
+  const page = async (path: string, al?: string) => {
+    const headers: Record<string, string> = { accept: "text/html" };
+    if (al) headers["accept-language"] = al;
+    const res = await worker.fetch(new Request(`https://relay.test${path}`, { headers }), env().e);
+    return { res, text: await res.text() };
+  };
+
+  it("picks the language from ?lang= first, then Accept-Language, else English", async () => {
+    expect((await page("/?lang=th", "zh-CN")).text).toContain('<html lang="th"');
+    expect((await page("/", "zh-CN,zh;q=0.9,en;q=0.8")).text).toContain('<html lang="zh"');
+    expect((await page("/", "th-TH")).text).toContain('<html lang="th"');
+    expect((await page("/", "fr-FR")).text).toContain('<html lang="en"');
+    expect((await page("/?lang=xx")).text).toContain('<html lang="en"');
+    expect((await page("/")).res.headers.get("vary")).toMatch(/Accept,\s*Accept-Language/);
+    expect((await page("/", "en;q=0.5, th;q=0.9")).text).toContain('<html lang="th"');
+    expect((await page("/", "fr, th;q=0, zh;q=0.1")).text).toContain('<html lang="zh"');
+  });
+
+  it("states what the relay can and cannot do in every language", async () => {
+    for (const l of ["en", "zh", "th"]) {
+      const { text } = await page(`/?lang=${l}`);
+      expect(text).toContain("NIP-44");
+      expect(text).toContain("--encrypt=false");
+      expect(text).toContain("hyphae relay set");
+      expect(text).toContain("SHA256SUMS");
+      expect(text).toContain("hyphae identity create");
+      expect(text.match(/<li>/g)?.length).toBe(5);
+      expect(text.match(/<details>/g)?.length).toBe(7);
+    }
+  });
+});
+
+describe("Brand copy", () => {
+  it("docs/brand/hyphae-logo.svg is the same file the Worker serves", () => {
+    expect(logoFile).toBe(LOGO_SVG);
   });
 });
