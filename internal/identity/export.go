@@ -136,6 +136,13 @@ func runExport(c *cli.Command) error {
 	if err != nil {
 		return fmt.Errorf("failed to load keystore: %w", err)
 	}
+	// With an unencrypted keystore there is no keystore-password line. If the
+	// caller sent one anyway, it would be read as the backup passphrase and the
+	// backup would be encrypted with the wrong secret, so refuse before reading
+	// stdin. (--format nsec reads nothing from stdin and is unaffected.)
+	if c.Bool("password-stdin") && format == exportFormatNcryptsec && !ks.Encrypted {
+		return common.NewExitError(common.ErrCodeUser, errors.New("--password-stdin was given but the keystore is not encrypted; stdin then carries only the backup passphrase, so drop --password-stdin"))
+	}
 	if err := unlockForExport(ks, jsonMode, c.Bool("password-stdin"), in); err != nil {
 		return err
 	}

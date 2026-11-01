@@ -183,3 +183,29 @@ func TestExportRejectsUnterminatedStdin(t *testing.T) {
 		t.Fatalf("unterminated passphrase accepted: %#v", res)
 	}
 }
+
+// On an unencrypted keystore there is no keystore-password line. A caller that
+// sends "keystore password, backup passphrase" anyway must get an explicit error
+// and no backup, never a backup silently encrypted with the first line.
+func TestExportRejectsPasswordStdinWithNcryptsecOnUnencryptedKeystore(t *testing.T) {
+	home, _ := createExportFixture(t, "")
+	args := []string{"identity", "export", "-n", "alice", "--json", "--format", "ncryptsec", "--password-stdin"}
+	for _, in := range []string{"keystore pw\nreal backup pass\n", "real backup pass\n"} {
+		res := runIdentityCLI(t, home, strings.NewReader(in), nil, args...)
+		decodeCLIError(t, res, common.ExitUserError, common.ErrCodeUser)
+		if strings.Contains(res.stdout+res.stderr, "ncryptsec1") {
+			t.Fatalf("a backup was produced: %#v", res)
+		}
+	}
+	// Without the flag the one-line layout still works, and --format nsec is unaffected.
+	ok := runIdentityCLI(t, home, strings.NewReader("real backup pass\n"), nil,
+		"identity", "export", "-n", "alice", "--json", "--format", "ncryptsec")
+	enc, _ := exportData(t, ok)["ncryptsec"].(string)
+	if _, err := nip49.Decrypt(enc, "real backup pass"); err != nil {
+		t.Fatalf("one-line layout broke: %v", err)
+	}
+	plain := runIdentityCLI(t, home, strings.NewReader(""), nil, "identity", "export", "-n", "alice", "--json", "--password-stdin")
+	if _, has := exportData(t, plain)["nsec"]; !has {
+		t.Fatalf("--format nsec with --password-stdin on an unencrypted keystore changed: %#v", plain)
+	}
+}
