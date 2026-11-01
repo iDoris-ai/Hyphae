@@ -709,6 +709,32 @@ describe("ephemeral events: replay window and fan-out charge", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     expect(broadcast(hub, signed(alice, { kind: 20001, content: "z" }))).toEqual({ delivered: 1, cut: false });
   });
+  it("an ephemeral event nobody received can be sent again once someone subscribes", () => {
+    const { hub, conn } = setup();
+    const p = conn();
+    const eph = signed(alice, { kind: 20001, created_at: now() });
+    processEvent(hub, p.ws, p.st, eph, 300); // no subscriber yet
+    expect(p.fake.frames()[0]).toEqual(["OK", eph.id, true, ""]);
+    const l = listener(conn, hub);
+    processEvent(hub, p.ws, p.st, eph, 300);
+    expect(events(l)).toHaveLength(1);
+    expect(p.fake.frames()[1]).toEqual(["OK", eph.id, true, ""]);
+    processEvent(hub, p.ws, p.st, eph, 300); // delivered now: a further replay is a duplicate
+    expect(p.fake.frames()[2][3]).toMatch(/^duplicate:/);
+    expect(events(l)).toHaveLength(1);
+  });
+  it("an ephemeral event whose every send failed can be sent again", () => {
+    const { hub, conn } = setup();
+    const l = listener(conn, hub);
+    const p = conn();
+    const eph = signed(alice, { kind: 20001, created_at: now() });
+    l.fake.broken = true;
+    processEvent(hub, p.ws, p.st, eph, 300);
+    expect(p.fake.frames()[0]).toEqual(["OK", eph.id, true, ""]);
+    l.fake.broken = false;
+    processEvent(hub, p.ws, p.st, eph, 300);
+    expect(events(l)).toHaveLength(1);
+  });
   it("validates the new limits", () => {
     const lim = loadLimits('{"ephemeralDeliveriesPerWeight":0,"ephemeralDedupeEntries":5,"ephemeralDedupeTtlMs":-1}');
     expect([lim.ephemeralDeliveriesPerWeight, lim.ephemeralDedupeEntries, lim.ephemeralDedupeTtlMs]).toEqual([32, 5, 60_000]);
