@@ -249,9 +249,9 @@ describe("processEvent", () => {
     expect(real("SELECT count(*) AS n FROM events").one().n).toBe(0);
     log.mockRestore();
   });
-  it("refunds the write charge when the store is unavailable or throws, so honest clients do not burn their quota", () => {
+  it("refunds the source's byte charge (not the global weight) when the store is unavailable or throws", () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    const { hub, conn, db } = setup({ sourceWriteBytesPerMinute: 1000, globalEventWeightPerMinute: 4 });
+    const { hub, conn, db } = setup({ sourceWriteBytesPerMinute: 1000, globalEventWeightPerMinute: 20 });
     const real = db.sql.exec.bind(db.sql);
     let mode: "ok" | "unavailable" | "throw" = "unavailable";
     (db.sql as unknown as { exec: unknown }).exec = (q: string, ...p: unknown[]) => {
@@ -261,13 +261,15 @@ describe("processEvent", () => {
     };
     const now = Math.floor(Date.now() / 1000);
     const c = conn();
-    for (let i = 0; i < 6; i++) processEvent(hub, c.ws, c.st, signed(alice, { kind: 5, created_at: now, content: "u" + i, tags: [["e", "f".repeat(64)]] }), 300);
+    for (let i = 0; i < 4; i++) processEvent(hub, c.ws, c.st, signed(alice, { kind: 5, created_at: now, content: "u" + i, tags: [["e", "f".repeat(64)]] }), 300);
     mode = "throw";
-    for (let i = 0; i < 6; i++) processEvent(hub, c.ws, c.st, signed(alice, { content: "t" + i, created_at: now }), 300);
+    for (let i = 0; i < 4; i++) processEvent(hub, c.ws, c.st, signed(alice, { content: "t" + i, created_at: now }), 300);
     expect(c.fake.frames().every((f) => f[2] === false)).toBe(true);
     mode = "ok";
-    // 12 failures of 300 bytes / weight >= 1 would have emptied both budgets; they are untouched.
-    expect(hub.budgets.chargeEvent(c.st.src, 1000, 4)).toBe("ok");
+    // 8 failures x 300 bytes would have emptied the source's 1000 bytes; they were given back.
+    expect(hub.budgets.chargeEvent(c.st.src, 1000, 1)).toBe("ok");
+    // The global weight was not: 8 events of weight >= 1 plus the 1 just charged leave at most 11 of 20.
+    expect(hub.budgets.chargeEvent("z", 0, 12)).toBe("global");
     log.mockRestore();
   });
   it("does not refund a store refusal that is the sender's doing (blocked)", () => {

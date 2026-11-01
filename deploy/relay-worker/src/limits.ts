@@ -202,14 +202,14 @@ export class Budgets {
   }
 
   /**
-   * Gives back a successful chargeEvent when the relay failed to store the event (its fault, not the
-   * sender's). Same arguments as the charge; buckets are capped at capacity, and a source whose entry
-   * was evicted meanwhile is not recreated.
+   * Gives back only the source's stored-bytes charge when the relay failed to store its event (not the
+   * sender's fault). The global event weight is deliberately kept: verification and the failed
+   * transaction already used resources, so retries during an outage must still drain the shared budget.
+   * Capped at capacity; a source whose entry was evicted meanwhile is not recreated.
    */
-  refundEvent(src: string, storedBytes: number, weight: number) {
+  refundEvent(src: string, storedBytes: number) {
     const s = this.sources.get(src);
     if (s && storedBytes > 0) s.wr = refundToken(s.wr, this.lim.sourceWriteBytesPerMinute, storedBytes);
-    this.globalEv = refundToken(this.globalEv, this.lim.globalEventWeightPerMinute, weight);
   }
 
   /**

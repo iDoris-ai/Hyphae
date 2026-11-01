@@ -69,16 +69,15 @@ export function processEvent(hub: Hub, ws: WebSocket, st: ConnState, raw: unknow
       broadcast(hub, e);
       return reply(true, "", e.id);
     }
-    // The relay failing to store (unavailable, or a thrown SQL error) is not the sender's fault: give the charge back.
-    const paid = size;
+    // The relay failing to store (unavailable, or a thrown SQL error) is not the sender's fault: give back the source's byte charge only (the global weight stays spent).
     let result: ReturnType<typeof storeEvent>;
     try {
       result = storeEvent(hub.db, e);
     } catch (err) {
-      hub.budgets.refundEvent(st.src, paid, weight);
+      hub.budgets.refundEvent(st.src, size);
       throw err;
     }
-    if (result === "unavailable") hub.budgets.refundEvent(st.src, paid, weight);
+    if (result === "unavailable") hub.budgets.refundEvent(st.src, size);
     switch (result) {
       case "duplicate":
         return reply(true, "duplicate: already have this event", e.id);
