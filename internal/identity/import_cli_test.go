@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -758,9 +759,11 @@ func TestImportRefusesTerminalStdin(t *testing.T) {
 		t.Fatal("error leaked the secret")
 	}
 	assertNoKeystore(t, home)
-	// Nothing was consumed from stdin.
-	buf := make([]byte, 5)
-	if n, _ := pr.Read(buf); n != 5 {
-		t.Fatalf("stdin was read before the terminal check (only %d bytes left)", n)
+	// Nothing was consumed from stdin: closing the writer makes the read end
+	// non-blocking (EOF), and the whole original input must still be there.
+	pw.Close()
+	left, _ := io.ReadAll(pr)
+	if string(left) != nsec+"\n" {
+		t.Fatalf("stdin was read before the terminal check (%d of %d bytes left)", len(left), len(nsec)+1)
 	}
 }
