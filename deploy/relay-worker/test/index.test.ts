@@ -157,3 +157,32 @@ describe("Worker entry: edge admission of upgrades", () => {
     expect((await worker.fetch(from("198.51.100.55"), broken.e)).status).toBe(200); // fail open, the Durable Object still limits
   });
 });
+
+describe("Worker entry: landing page", () => {
+  const get = (path: string, accept?: string) =>
+    worker.fetch(new Request(`https://relay.test${path}`, accept ? { headers: { accept } } : {}), env().e);
+
+  it("serves HTML with a strict CSP to a browser at / and never calls the Durable Object", async () => {
+    const { e, state } = env();
+    const res = await worker.fetch(new Request("https://relay.test/", { headers: { accept: "text/html,application/xhtml+xml" } }), e);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    expect(res.headers.get("content-security-policy")).toContain("default-src 'none'");
+    expect(await res.text()).toContain("wss://relay.aastar.io");
+    expect(state.seen).toBeNull();
+  });
+
+  it("keeps the plain answer for clients that do not ask for HTML, and NIP-11 for those that ask for it", async () => {
+    expect(await (await get("/")).text()).toContain("connect with a Nostr client");
+    expect(await (await get("/", "*/*")).text()).toContain("connect with a Nostr client");
+    const nip = await get("/", "text/html, application/nostr+json");
+    expect(nip.headers.get("content-type")).toBe("application/nostr+json");
+  });
+
+  it("serves the logo as SVG and nothing else under other paths", async () => {
+    const logo = await get("/logo.svg");
+    expect(logo.headers.get("content-type")).toBe("image/svg+xml");
+    expect(await logo.text()).toContain("<svg");
+    expect(await (await get("/other", "text/html")).text()).toContain("connect with a Nostr client");
+  });
+});

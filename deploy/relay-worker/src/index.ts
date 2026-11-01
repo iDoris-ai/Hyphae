@@ -1,6 +1,7 @@
 import { type Limits, loadLimits } from "./config";
 import { type RateLimiter, createAdmission } from "./admission";
 import { createHealthCache, withCors } from "./http";
+import { LANDING_CSP, LANDING_HTML, LOGO_SVG } from "./landing";
 import { sourceKey } from "./limits";
 export { Relay } from "./relay";
 
@@ -113,6 +114,16 @@ async function route(request: Request, env: Env): Promise<Response> {
     if (request.headers.get("Accept")?.toLowerCase().includes("application/nostr+json")) {
       return new Response(JSON.stringify(nip11(limitsFor(env.LIMITS_JSON))), {
         headers: { "content-type": "application/nostr+json" },
+      });
+    }
+    // Browsers only: a client that does not ask for text/html keeps the one-line plain answer below.
+    const path = new URL(request.url).pathname;
+    if (request.method === "GET" && path === "/logo.svg") {
+      return new Response(LOGO_SVG, { headers: { "content-type": "image/svg+xml", "cache-control": "public, max-age=3600" } });
+    }
+    if (request.method === "GET" && path === "/" && request.headers.get("Accept")?.toLowerCase().includes("text/html")) {
+      return new Response(LANDING_HTML, {
+        headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": LANDING_CSP, "cache-control": "public, max-age=300" },
       });
     }
     return new Response("Hyphae relay: connect with a Nostr client over WebSocket.\n", {
