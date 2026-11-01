@@ -26,7 +26,7 @@ const (
 const exportDescription = `Stdin protocol (secrets are never accepted on argv). Lines are read in this order:
   1. keystore password   - only with --password-stdin AND only if the keystore is encrypted
   2. backup passphrase   - only with --format ncryptsec (always from stdin, never prompted)
-Each line is terminated by LF or CRLF; the terminator is stripped, nothing else is trimmed.
+Each line MUST be terminated by LF or CRLF (an unterminated last line is rejected); only the terminator is stripped.
 If stdin is a terminal these secrets are prompted without echo instead.
 --format nsec (default) prints the plaintext nsec; --format ncryptsec prints a NIP-49 backup.
 With --out <file> the secret is written to a NEW file (mode 0600, refuses an existing path or
@@ -45,13 +45,12 @@ func exportFlags() []cli.Flag {
 // readStdinLine reads one line (LF or CRLF terminated) without trimming other whitespace.
 func readStdinLine(r *bufio.Reader, what string) (string, error) {
 	line, err := r.ReadString('\n')
-	if err != nil && (!errors.Is(err, io.EOF) || line == "") {
-		return "", fmt.Errorf("failed to read %s from stdin", what)
+	if err != nil {
+		// EOF without a terminator is rejected: an interrupted producer must not
+		// silently yield a truncated password or backup passphrase.
+		return "", fmt.Errorf("failed to read %s from stdin (a LF/CRLF-terminated line is required)", what)
 	}
-	// Strip a CR only when it belongs to a consumed CRLF terminator.
-	if strings.HasSuffix(line, "\n") {
-		line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
-	}
+	line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
 	if line == "" {
 		return "", fmt.Errorf("%s from stdin is empty", what)
 	}
@@ -70,7 +69,7 @@ func readSecretLine(r *bufio.Reader, what string) (string, error) {
 	fmt.Fprintf(os.Stderr, "%s: ", what)
 	b, err := term.ReadPassword(fd)
 	fmt.Fprintln(os.Stderr)
-	if err != nil || len(b) == 0 {
+	if err != nil || len(b) == 0 || len(b) > maxPasswordStdinBytes {
 		return "", fmt.Errorf("failed to read %s", what)
 	}
 	return string(b), nil
@@ -116,7 +115,9 @@ func writeNewSecretFile(path, secret string) error {
 	_, werr := f.WriteString(secret + "\n")
 	cerr := f.Close()
 	if werr != nil || cerr != nil {
-		_ = os.Remove(path)
+		if rerr := os.Remove(path); rerr != nil {
+			return common.NewExitError(common.ErrCodeOther, fmt.Errorf("failed to write --out file and could not remove the partial file %s: remove it manually", path))
+		}
 		return common.NewExitError(common.ErrCodeOther, errors.New("failed to write --out file"))
 	}
 	return nil

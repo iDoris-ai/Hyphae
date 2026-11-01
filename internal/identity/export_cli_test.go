@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -154,11 +155,31 @@ func TestExportInvalidFormatAndDefaultOutput(t *testing.T) {
 	}
 }
 
-func TestExportPassphraseKeepsUnterminatedCR(t *testing.T) {
+func TestExportPassphraseStripsOnlyOneCRLF(t *testing.T) {
 	home, _ := createExportFixture(t, "")
-	res := runIdentityCLI(t, home, strings.NewReader("abc\r"), nil, "identity", "export", "-n", "alice", "--json", "--format", "ncryptsec")
+	res := runIdentityCLI(t, home, strings.NewReader("abc\r\r\n"), nil, "identity", "export", "-n", "alice", "--json", "--format", "ncryptsec")
 	enc := exportData(t, res)["ncryptsec"].(string)
 	if _, err := nip49.Decrypt(enc, "abc\r"); err != nil {
-		t.Fatalf("unterminated CR must stay part of the passphrase: %v", err)
+		t.Fatalf("only the CRLF terminator may be stripped: %v", err)
+	}
+}
+
+// NIP-49 specification test vector (password "nostr").
+func TestNIP49SpecVector(t *testing.T) {
+	const ncrypt = "ncryptsec1qgg9947rlpvqu76pj5ecreduf9jxhselq2nae2kghhvd5g7dgjtcxfqtd67p9m0w57lspw8gsq6yphnm8623nsl8xn9j4jdzz84zm3frztj3z7s35vpzmqf6ksu8r89qk5z2zxfmu5gv8th8wclt0h4p"
+	sk, err := nip49.Decrypt(ncrypt, "nostr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := hex.EncodeToString(sk[:]); got != "3501454135014541350145413501453fefb02227e449e57cf4d3a3ce05378683" {
+		t.Fatalf("spec vector decrypted to %s", got)
+	}
+}
+
+func TestExportRejectsUnterminatedStdin(t *testing.T) {
+	home, _ := createExportFixture(t, "")
+	res := runIdentityCLI(t, home, strings.NewReader("truncated"), nil, "identity", "export", "-n", "alice", "--json", "--format", "ncryptsec")
+	if res.code == 0 || strings.Contains(res.stdout, "ncryptsec1") {
+		t.Fatalf("unterminated passphrase accepted: %#v", res)
 	}
 }
