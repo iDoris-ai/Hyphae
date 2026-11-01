@@ -116,6 +116,12 @@ Example: hyphae event --kind 1 --content "Hello world!"`,
 		fmt.Printf("\nPublished to %d/%d relays\n", success, len(relays))
 		fmt.Printf("Event ID: %s\n", event.ID)
 
+		// Exit non-zero when no relay accepted the event, so scripts and agents
+		// do not treat a rejected or unreachable publish as delivered. Partial
+		// success (at least one relay) stays exit 0; the n/m line says how many.
+		if success == 0 {
+			return common.NewExitError(common.ErrCodeNetwork, fmt.Errorf("event was not accepted by any of the %d relay(s)", len(relays)))
+		}
 		return nil
 	},
 }
