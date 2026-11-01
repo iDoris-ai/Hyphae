@@ -20,6 +20,15 @@ export function takeToken(b: Bucket | undefined, now: number, perMinute: number,
   return { ok: false, bucket: cur };
 }
 
+/**
+ * Gives `amount` back to a bucket (the inverse of takeToken), never above its capacity.
+ * A missing bucket, or a zero, negative or non-finite amount, changes nothing.
+ */
+export function refundToken(b: Bucket | undefined, perMinute: number, amount: number): Bucket | undefined {
+  if (!b || !(amount > 0) || !Number.isFinite(amount) || !Number.isFinite(b.tokens)) return b;
+  return { tokens: Math.min(perMinute, b.tokens + amount), last: b.last };
+}
+
 /** Cost of one EVENT for the event-weight buckets: grows with the number of tag strings and with size. */
 export const eventWeight = (tagStrings: number, bytes: number) => 1 + Math.floor(tagStrings / 32) + Math.floor(bytes / 4096);
 
@@ -72,6 +81,7 @@ export interface ConnState {
   bad?: number; // rejected frames in the current window
   badPrev?: number; // rejected frames in the window before it (weighted down as the current one ages)
   badAt?: number; // current window start
+  lastSeen?: number; // ms timestamp of the last frame the client sent (set at upgrade, refreshed per frame)
   closed?: boolean; // we initiated a close: ignore everything the client still sends
 }
 
@@ -193,6 +203,17 @@ export class Budgets {
   }
 
   /**
+   * Gives back only the source's stored-bytes charge when the relay failed to store its event (not the
+   * sender's fault). The global event weight is deliberately kept: verification and the failed
+   * transaction already used resources, so retries during an outage must still drain the shared budget.
+   * Capped at capacity; a source whose entry was evicted meanwhile is not recreated.
+   */
+  refundEvent(src: string, storedBytes: number) {
+    const s = this.sources.get(src);
+    if (s && storedBytes > 0) s.wr = refundToken(s.wr, this.lim.sourceWriteBytesPerMinute, storedBytes);
+  }
+
+  /**
    * Charges one outbound delivery to the receiving source, the global budget and the socket,
    * all or nothing. "source" and "socket" drop just this delivery, "global" ends the event's fan-out.
    */
@@ -262,4 +283,63 @@ export class Budgets {
   forget(conn: string) {
     this.sockOut.delete(conn);
   }
+}
+
+// --- idle connection reaping (pure, unit-tested; the Durable Object only closes what planReap returns)
+
+/** What the runtime knows about one socket: its attachment and when the runtime last auto-answered a "ping" (ms). */
+export interface SocketActivity {
+  st: ConnState | null;
+  auto?: number;
+}
+
+/**
+ * The sockets that have shown no sign of life for `timeoutMs`. Life = a frame that woke the object
+ * (`st.lastSeen`) or a "ping" the runtime answered on its own (`auto`). Server-to-client traffic does
+ * not count: a half-dead socket still "receives". A socket without `lastSeen` (opened before this
+ * field existed), without an attachment, or already closing is never returned. `timeoutMs` <= 0 disables.
+ */
+export function idleSockets<T>(socks: T[], read: (w: T) => SocketActivity, now: number, timeoutMs: number): T[] {
+  if (!(timeoutMs > 0)) return [];
+  const last = (w: T) => {
+    const { st, auto } = read(w);
+    return st && !st.closed && st.lastSeen !== undefined ? Math.max(st.lastSeen, auto ?? 0) : undefined;
+  };
+  // Oldest first, so a caller that needs only a few takes the longest-silent ones.
+  return socks
+    .filter((w) => {
+      const t = last(w);
+      return t !== undefined && now - t > timeoutMs;
+    })
+    .sort((a, b) => last(a)! - last(b)!);
+}
+
+export interface ReapCaps {
+  maxConnections: number;
+  maxConnsPerSource: number;
+  idleTimeoutSeconds: number;
+}
+
+/**
+ * Which sockets to close so that a new connection from `src` fits, taking no more than needed.
+ * A source at its cap frees only its OWN idle sockets, and if it is still at its cap after that the
+ * attempt will be refused (429) anyway, so nothing of anyone else's is closed - a client sitting at its
+ * cap cannot close other sources' subscribers by retrying, whether or not the relay is full. Only a
+ * source with room, on a full relay, frees other sources' idle sockets, and only as many as needed.
+ * `socks` must not contain sockets that are already closing.
+ */
+export function planReap<T>(socks: T[], read: (w: T) => SocketActivity, src: string, caps: ReapCaps, now: number): T[] {
+  const ms = caps.idleTimeoutSeconds * 1000;
+  const out: T[] = [];
+  const mine = socks.filter((w) => read(w).st?.src === src);
+  if (mine.length >= caps.maxConnsPerSource) {
+    out.push(...idleSockets(mine, read, now, ms).slice(0, mine.length - caps.maxConnsPerSource + 1));
+  }
+  if (mine.length - out.length >= caps.maxConnsPerSource) return out; // will be refused by its own cap
+  const taken = new Set(out);
+  const rest = socks.filter((w) => !taken.has(w));
+  if (rest.length >= caps.maxConnections) {
+    out.push(...idleSockets(rest, read, now, ms).slice(0, rest.length - caps.maxConnections + 1));
+  }
+  return out;
 }

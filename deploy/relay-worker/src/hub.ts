@@ -18,6 +18,8 @@ export interface Hub {
   violation(ws: WebSocket, st: ConnState): void;
   forceClose(ws: WebSocket, code: number, reason: string, st?: ConnState): void;
   sockets(): WebSocket[];
+  /** The socket of a connection id (sockets are tagged with it at accept time); undefined when unknown or untagged. */
+  socketOf?(conn: string): WebSocket | undefined;
 }
 
 /** Bytes an `["EVENT",subId,<json>]` frame costs against the outbound or history budgets. */
