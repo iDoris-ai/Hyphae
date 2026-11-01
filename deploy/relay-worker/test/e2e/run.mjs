@@ -681,8 +681,12 @@ async function runFanout(alice) {
   await burst("a");
   const recv1 = slow.msgs.filter((m) => m[0] === "EVENT").length;
   check("over its socket quota the consumer only loses deliveries (2 of 3 delivered, still connected)", recv1 === 2 && slow.closeCode === null, `received=${recv1} closeCode=${slow.closeCode}`);
-  await sleep(800);
+  // A drop only counts toward "sustained" when the gap since the previous drop is under one window (700ms), so
+  // keep each gap near 600ms (300 inside burst + 300 here) and stay over quota for more than (N-1) windows in all.
+  await sleep(300);
   await burst("b");
+  await sleep(300);
+  await burst("c");
   check("still over quota in a later window -> closed with 1013", slow.closeCode === 1013, `closeCode=${slow.closeCode}`);
 
   // R4: one source cannot use more than its share of the outbound budget (4000 bytes/min here).
