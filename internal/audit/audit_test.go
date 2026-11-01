@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"sync"
@@ -270,5 +271,37 @@ func TestLogActionConcurrentCallsDoNotCorruptOrHang(t *testing.T) {
 	// immediately, so almost everything should get through in 10s of wall time.
 	if succeeded < n*8/10 {
 		t.Errorf("expected busy_timeout to let most concurrent writes through, only %d/%d succeeded", succeeded, n)
+	}
+}
+
+// TestGetDBWaitsForLockedFreshDatabase: the first open of a fresh database
+// switches it to WAL, which needs a lock. When another process holds that lock
+// (several CLI processes starting at once), getDB must wait for it instead of
+// failing at once with SQLITE_BUSY and dropping the audit entry. This goes red
+// if busy_timeout is set after journal_mode.
+func TestGetDBWaitsForLockedFreshDatabase(t *testing.T) {
+	setupTestAudit(t)
+	dir, err := keyStoreDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder, err := sql.Open("sqlite", filepath.Join(dir, "messages.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder.SetMaxOpenConns(1)
+	defer holder.Close()
+	if _, err := holder.Exec("CREATE TABLE lock_probe (x INTEGER)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.Exec("BEGIN EXCLUSIVE"); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		_, _ = holder.Exec("ROLLBACK")
+	}()
+	if _, err := getDB(); err != nil {
+		t.Fatalf("getDB must wait for the lock holder, got: %v", err)
 	}
 }

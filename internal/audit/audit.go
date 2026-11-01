@@ -122,16 +122,19 @@ func getDB() (*sql.DB, error) {
 	// the one connection to free up) instead of relying on SQLite-side
 	// locking across multiple connections.
 	conn.SetMaxOpenConns(1)
-	if _, err := conn.Exec("PRAGMA journal_mode = WAL"); err != nil {
-		_ = conn.Close()
-		return nil, fmt.Errorf("audit: failed to enable WAL mode: %w", err)
-	}
+	// Must come BEFORE journal_mode: switching a fresh database to WAL needs a
+	// lock, and with several CLI processes opening it for the first time at once
+	// the loser would otherwise get an immediate SQLITE_BUSY and lose its entry.
 	// Belt-and-suspenders alongside SetMaxOpenConns(1): if a future change
 	// raises the pool size, callers still wait instead of failing outright.
 	// 5s comfortably covers LogAction's single short read+insert transaction.
 	if _, err := conn.Exec("PRAGMA busy_timeout = 5000"); err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("audit: failed to set busy_timeout: %w", err)
+	}
+	if _, err := conn.Exec("PRAGMA journal_mode = WAL"); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("audit: failed to enable WAL mode: %w", err)
 	}
 	if _, err := conn.Exec(schemaSQL); err != nil {
 		_ = conn.Close()
