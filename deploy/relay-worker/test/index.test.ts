@@ -85,3 +85,75 @@ describe("Worker entry: plain HTTP", () => {
     expect(txt.headers.get("content-type")).toContain("text/plain");
   });
 });
+
+describe("Worker entry: edge admission of upgrades", () => {
+  // upgradesPerMinutePerSource=1 -> the edge allows 2 per source (twice the Durable Object's budget).
+  const tight = { LIMITS_JSON: '{"upgradesPerMinutePerSource":1}' };
+  /** A namespace that counts how many requests reach the Durable Object. */
+  function counted(extra: Record<string, unknown> = {}) {
+    const calls = { n: 0 };
+    const RELAY = {
+      idFromName: () => "main",
+      get: () => ({
+        fetch: async () => {
+          calls.n++;
+          return new Response("ok", { status: 200 });
+        },
+      }),
+    };
+    return { e: { RELAY, ...extra } as never, calls };
+  }
+  const from = (ip: string) => upgrade({ "cf-connecting-ip": ip });
+
+  it("answers an upgrade flood from one source with 429 and Retry-After, without calling the Durable Object", async () => {
+    const { e, calls } = counted(tight);
+    expect((await worker.fetch(from("198.51.100.50"), e)).status).toBe(200);
+    expect((await worker.fetch(from("198.51.100.50"), e)).status).toBe(200);
+    const res = await worker.fetch(from("198.51.100.50"), e);
+    expect(res.status).toBe(429);
+    expect(Number(res.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+    expect(calls.n).toBe(2); // the refused attempt never reached the Durable Object
+    // a browser page can read why it was refused
+    expect(res.headers.get("access-control-allow-origin")).toBe("*");
+    expect(res.headers.get("access-control-expose-headers")).toContain("retry-after");
+  });
+
+  it("does not let one flooding source use up another source's allowance", async () => {
+    const { e, calls } = counted(tight);
+    for (let i = 0; i < 5; i++) await worker.fetch(from("198.51.100.51"), e);
+    expect((await worker.fetch(from("198.51.100.52"), e)).status).toBe(200);
+    expect(calls.n).toBe(3); // 2 admitted from the flooder, 1 from the other source
+  });
+
+  it("never spends upgrade tokens on /healthz, NIP-11 or plain GETs", async () => {
+    const { e } = counted(tight);
+    const ip = { "cf-connecting-ip": "198.51.100.53" };
+    for (let i = 0; i < 6; i++) {
+      await worker.fetch(new Request("https://relay.test/healthz", { headers: ip }), e);
+      await worker.fetch(new Request("https://relay.test/", { headers: { ...ip, accept: "application/nostr+json" } }), e);
+      await worker.fetch(new Request("https://relay.test/", { headers: ip }), e);
+    }
+    // the full allowance of 2 is still there, and only the third upgrade is refused
+    expect((await worker.fetch(from("198.51.100.53"), e)).status).toBe(200);
+    expect((await worker.fetch(from("198.51.100.53"), e)).status).toBe(200);
+    expect((await worker.fetch(from("198.51.100.53"), e)).status).toBe(429);
+  });
+
+  it("honours the Cloudflare rate-limit binding, and admits when the binding throws", async () => {
+    const refusing = counted({ ...tight, UPGRADE_LIMITER: { limit: async () => ({ success: false }) } });
+    const res = await worker.fetch(from("198.51.100.54"), refusing.e);
+    expect(res.status).toBe(429);
+    expect(res.headers.get("retry-after")).toBe("10");
+    expect(refusing.calls.n).toBe(0);
+
+    const broken = counted({
+      ...tight,
+      UPGRADE_LIMITER: {
+        limit: async () => {
+          throw new Error("binding down");
+        },
+      },
+    });
+    expect((await worker.fetch(from("198.51.100.55"), broken.e)).status).toBe(200); // fail open, the Durable Object still limits
+  });
+});
