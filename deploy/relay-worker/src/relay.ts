@@ -49,6 +49,7 @@ export class Relay extends DurableObject<Env> {
       violation: (ws, st) => this.violation(ws, st),
       forceClose: (ws, code, reason, st) => this.forceClose(ws, code, reason, st),
       sockets: () => ctx.getWebSockets(),
+      socketOf: (conn) => ctx.getWebSockets(conn)[0],
     };
     // A text "ping" is answered with "pong" by the runtime without waking the object from hibernation.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
@@ -96,8 +97,9 @@ export class Relay extends DurableObject<Env> {
       }
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
-      this.ctx.acceptWebSocket(server);
-      server.serializeAttachment({ id: crypto.randomUUID(), src, lastSeen: Date.now() } satisfies ConnState);
+      const id = crypto.randomUUID();
+      this.ctx.acceptWebSocket(server, [id]); // tag = connection id, so fan-out finds a socket without scanning all of them
+      server.serializeAttachment({ id, src, lastSeen: Date.now() } satisfies ConnState);
       return new Response(null, { status: 101, webSocket: client });
     } catch (err) {
       console.error("fetch failed", err);

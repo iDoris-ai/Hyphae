@@ -114,7 +114,7 @@ paid/whitelisted access. Every event is public; there is no access control.
   silent first). There is no timer or alarm, so reaping never wakes an idle object, and a relay below
   its caps keeps quiet subscribers. A text `ping` is not counted against the frame budget or violations
   (the runtime answers it without waking the object), so a client can keep an idle socket alive that way.
-  Messages the relay sends do not count as life. The close handshake of a reaped socket may take ~10 s to
+  Messages the relay sends do not count as life. Connections that were already open when this version was deployed have no `lastSeen` and are never reaped until the client closes them itself. The close handshake of a reaped socket may take ~10 s to
   finish under `wrangler dev`; the slot is free at once.
 - `GET /healthz` calls into the Durable Object and runs a SQLite query: 200 `ok` only if the object
   runs and storage answers, 503 otherwise. It is routed before NIP-11 content negotiation. Each Worker

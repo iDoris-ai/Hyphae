@@ -101,6 +101,18 @@ describe("planReap", () => {
     const socks = [sock("A", 30_000, "a1"), sock("A", 100, "a2"), sock("B", 90_000, "b1"), sock("C", 100, "c1")];
     expect(plan(socks, "A", c).map((w) => w.st.id)).toEqual(["a1"]);
   });
+  it("a source still at its cap after freeing its own sockets does not close others' on a full relay (it is refused anyway)", () => {
+    const c = { maxConnections: 3, maxConnsPerSource: 1, idleTimeoutSeconds: 1 };
+    const socks = [sock("A", 100, "a1"), sock("B", 5000, "b1"), sock("C", 100, "c1")];
+    expect(plan(socks, "A", c)).toEqual([]);
+  });
+  it("a source at its cap frees only as many of its own idle sockets as the new one needs", () => {
+    const c = { ...caps, maxConnsPerSource: 3 };
+    const a = [sock("A", 30_000, "a1"), sock("A", 20_000, "a2"), sock("A", 15_000, "a3")];
+    expect(plan(a, "A", c).map((w) => w.st.id)).toEqual(["a1"]);
+    const c2 = { ...caps, maxConnsPerSource: 2 };
+    expect(plan(a, "A", c2).map((w) => w.st.id)).toEqual(["a1", "a2"]);
+  });
   it("closes nothing when idle reaping is disabled", () => {
     expect(plan([sock("A", 99_000), sock("A", 99_000), sock("A", 99_000)], "A", { ...caps, idleTimeoutSeconds: 0 })).toEqual([]);
   });
@@ -169,9 +181,15 @@ describe("Worker routing", () => {
     expect(res.headers.get("content-type")).not.toContain("nostr+json");
     expect(res.headers.get("access-control-allow-origin")).toBe("*");
     expect(calls).toEqual(["/healthz"]);
+    // Only GET probes the object.
+    const before = calls.length;
+    const post = await worker.fetch(new Request("https://relay.test/healthz", { method: "POST" }), env as never);
+    expect(post.status).toBe(200);
+    expect(await post.text()).toContain("Hyphae relay");
+    expect(calls).toHaveLength(before);
     // NIP-11 on other paths still does not touch the object.
     const n = await worker.fetch(new Request("https://relay.test/", { headers: { Accept: "application/nostr+json" } }), env as never);
     expect(n.headers.get("content-type")).toBe("application/nostr+json");
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(before);
   });
 });

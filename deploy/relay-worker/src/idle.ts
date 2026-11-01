@@ -35,8 +35,10 @@ export interface ReapCaps {
 
 /**
  * Which sockets to close so that a new connection from `src` fits, taking no more than needed.
- * A full source frees only its OWN idle sockets (otherwise a client sitting at its cap could close
- * other sources' subscribers just by retrying). Only a full relay looks at everyone's.
+ * A source at its cap frees only its OWN idle sockets, and if it is still at its cap after that the
+ * attempt will be refused (429) anyway, so nothing of anyone else's is closed - a client sitting at its
+ * cap cannot close other sources' subscribers by retrying, whether or not the relay is full. Only a
+ * source with room, on a full relay, frees other sources' idle sockets, and only as many as needed.
  * `socks` must not contain sockets that are already closing.
  */
 export function planReap<T>(socks: T[], read: (w: T) => SocketActivity, src: string, caps: ReapCaps, now: number): T[] {
@@ -46,6 +48,7 @@ export function planReap<T>(socks: T[], read: (w: T) => SocketActivity, src: str
   if (mine.length >= caps.maxConnsPerSource) {
     out.push(...idleSockets(mine, read, now, ms).slice(0, mine.length - caps.maxConnsPerSource + 1));
   }
+  if (mine.length - out.length >= caps.maxConnsPerSource) return out; // will be refused by its own cap
   const taken = new Set(out);
   const rest = socks.filter((w) => !taken.has(w));
   if (rest.length >= caps.maxConnections) {
