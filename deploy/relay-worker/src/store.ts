@@ -68,7 +68,7 @@ function storeInTx(db: Db, e: NostrEvent): StoreResult {
     e.id, e.pubkey, e.created_at, e.kind, d, json,
   );
   for (const [name, value] of indexedTags(e.tags, db.lim.maxIndexedTags)) {
-    sql.exec("INSERT INTO event_tags (event_id, name, value) VALUES (?, ?, ?)", e.id, name, value);
+    sql.exec("INSERT INTO event_tags (event_id, name, value, created_at) VALUES (?, ?, ?, ?)", e.id, name, value, e.created_at);
   }
   return partial ? "ok_partial" : "ok";
 }
