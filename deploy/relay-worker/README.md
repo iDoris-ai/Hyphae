@@ -169,6 +169,10 @@ without queuing in the DO. NIP-11 and plain GETs are never subject to it. Two be
   than the limit), and is not visible in the dashboard. The limit is above the DO's 60-upgrade burst so
   the Go client's one-socket-per-page pattern is unaffected. `namespace_id` must be unique per account.
 
+The binding's `limit`/`period` in `wrangler.toml` are static: they do not follow the DO's
+`upgradesPerMinutePerSource` (`LIMITS_JSON`, not for production). If the DO's upgrade budget is raised,
+raise the toml `limit` too, or the edge refuses before the DO does (the isolate bucket does follow, at 2x).
+
 If the binding throws, the request is admitted and the error logged once per isolate (the DO limits
 remain). These filters do not stop traffic from being billed: a request that reaches the Worker counts,
 even when answered 429. Configure a WAF rate-limiting rule on the zone as well (see the PR description

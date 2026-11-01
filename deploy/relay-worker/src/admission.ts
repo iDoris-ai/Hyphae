@@ -44,7 +44,9 @@ export function createAdmission(opts: {
       if (buckets.size > maxKeys) buckets.delete(buckets.keys().next().value as string);
       if (!r.ok) {
         // A zero budget would divide by zero; cap at one refill window so the header is always a finite integer.
-        const wait = Math.ceil(((1 - r.bucket.tokens) / opts.perMinute) * 60);
+        // takeToken returns the OLD bucket on refusal, so add the refill since bucket.last first (same clamps as takeToken).
+        const tokens = Math.min(opts.perMinute, r.bucket.tokens + (Math.max(0, t - r.bucket.last) / 60_000) * opts.perMinute);
+        const wait = Math.ceil(((1 - tokens) / opts.perMinute) * 60);
         const retryAfter = Number.isFinite(wait) ? Math.min(60, Math.max(1, wait)) : 60;
         return { ok: false, retryAfter, by: "isolate" };
       }

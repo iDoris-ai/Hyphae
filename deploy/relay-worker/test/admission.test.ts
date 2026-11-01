@@ -30,6 +30,18 @@ describe("edge admission", () => {
     expect((await a.check("1.1.1.1")).ok).toBe(true); // refilled
   });
 
+  it("Retry-After accounts for the refill already elapsed since the last accepted attempt", async () => {
+    const c = clock();
+    const a = createAdmission({ perMinute: 2, now: c.now });
+    await a.check("k");
+    await a.check("k");
+    expect(await a.check("k")).toMatchObject({ ok: false, retryAfter: 30 });
+    c.advance(29_000);
+    expect(await a.check("k")).toMatchObject({ ok: false, retryAfter: 1 });
+    c.advance(1_000);
+    expect((await a.check("k")).ok).toBe(true);
+  });
+
   it("Retry-After stays a finite integer when the budget is zero", async () => {
     const r = await createAdmission({ perMinute: 0, now: clock().now }).check("k");
     expect(r).toEqual({ ok: false, retryAfter: 60, by: "isolate" });

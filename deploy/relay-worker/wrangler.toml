@@ -20,6 +20,9 @@ new_sqlite_classes = ["Relay"]
 # Edge admission for WebSocket upgrades (see README "Edge admission"). Per Cloudflare location,
 # eventually consistent and permissive: a first filter, NOT a strict limit. The limit is above the
 # Durable Object's own 60 upgrades/min/source so it only drops floods. Requires wrangler >= 4.36.
+# NOTE: limit/period here are static and do NOT follow the Durable Object's upgradesPerMinutePerSource
+# (LIMITS_JSON, not for production). If operators raise the DO's upgrade budget, raise `limit` below too,
+# otherwise the edge refuses before the DO does.
 # namespace_id must be unique per Cloudflare account; change it if "4801" is already used there.
 [[ratelimits]]
 name = "UPGRADE_LIMITER"
