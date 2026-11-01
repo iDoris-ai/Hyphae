@@ -53,6 +53,7 @@ export const LIMITS = {
   maxFiltersPerReq: 10,
   maxSubIdLength: 64,
   maxDeliveriesPerEvent: 5000,
+  maxFanoutWorkPerEvent: 10_000, // candidate subscriptions one live event is compared with; the rest are skipped (counted, logged)
   // --- connections and frames
   maxMessageBytes: 512_000, // UTF-8 bytes per frame (same as the old khatru relay)
   maxConnections: 2000,

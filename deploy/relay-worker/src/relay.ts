@@ -48,6 +48,7 @@ export class Relay extends DurableObject<Env> {
       violation: (ws, st) => this.violation(ws, st),
       forceClose: (ws, code, reason, st) => this.forceClose(ws, code, reason, st),
       sockets: () => ctx.getWebSockets(),
+      socketOf: (conn) => ctx.getWebSockets(conn)[0],
     };
     ctx.blockConcurrencyWhile(async () => {
       this.db.sql.exec(EVENTS_DDL + DELETION_DDL + SUBS_DDL);
@@ -86,8 +87,9 @@ export class Relay extends DurableObject<Env> {
       }
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
-      this.ctx.acceptWebSocket(server);
-      server.serializeAttachment({ id: crypto.randomUUID(), src } satisfies ConnState);
+      const id = crypto.randomUUID();
+      this.ctx.acceptWebSocket(server, [id]); // tag = connection id, so fan-out finds a socket without scanning all of them
+      server.serializeAttachment({ id, src } satisfies ConnState);
       return new Response(null, { status: 101, webSocket: client });
     } catch (err) {
       console.error("fetch failed", err);

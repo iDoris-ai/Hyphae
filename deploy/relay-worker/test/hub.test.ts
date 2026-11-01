@@ -487,3 +487,42 @@ describe("broadcast", () => {
     expect(c.fake.frames().filter((f) => f[0] === "EVENT")).toHaveLength(0);
   });
 });
+
+describe("fan-out work cap and socket lookup", () => {
+  const sub = (hub: Hub, c: { ws: WebSocket; st: ConnState }, id: string, f: object) => processReq(hub, c.ws, c.st, [id, f]);
+  it("stops examining candidates after maxFanoutWorkPerEvent, logs it, and delivers the ones already reached", () => {
+    const { hub, conn } = setup({ maxFanoutWorkPerEvent: 3 });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const cs = Array.from({ length: 6 }, (_, i) => conn("s" + i));
+    cs.forEach((c) => sub(hub, c, "s", { kinds: [20001] }));
+    broadcast(hub, signed(alice, { kind: 20001 }));
+    expect(cs.filter((c) => c.fake.frames().some((f) => f[0] === "EVENT"))).toHaveLength(3);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+  it("does not look at subscriptions of other kinds at all (work is not O(subscriptions))", () => {
+    const { hub, conn } = setup({ maxFanoutWorkPerEvent: 2 });
+    const cs = Array.from({ length: 20 }, (_, i) => conn("t" + i));
+    cs.forEach((c, i) => sub(hub, c, "s", { kinds: [i + 100] }));
+    const hit = conn("hit");
+    sub(hub, hit, "s", { kinds: [20001] });
+    broadcast(hub, signed(alice, { kind: 20001 }));
+    expect(hit.fake.frames().some((f) => f[0] === "EVENT")).toBe(true);
+  });
+  it("uses socketOf when the hub has it and falls back to scanning sockets when it returns nothing", () => {
+    const { hub, conn } = setup();
+    const a = conn("a");
+    const b = conn("b");
+    sub(hub, a, "s", { kinds: [20001] });
+    sub(hub, b, "s", { kinds: [20001] });
+    const asked: string[] = [];
+    hub.socketOf = (id) => {
+      asked.push(id);
+      return id === a.st.id ? a.ws : undefined; // b is "untagged"
+    };
+    broadcast(hub, signed(alice, { kind: 20001 }));
+    expect(asked.sort()).toEqual([a.st.id, b.st.id]);
+    expect(a.fake.frames().some((f) => f[0] === "EVENT")).toBe(true);
+    expect(b.fake.frames().some((f) => f[0] === "EVENT")).toBe(true);
+  });
+});
