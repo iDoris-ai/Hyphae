@@ -1,4 +1,4 @@
-import { type Db, W_EVENT_BASE, W_TAG_ROW, bump, counter, deleteEvent, setCounter, tagRows } from "./db";
+import { type Db, W_EVENT_BASE, W_TAG_ROW, bump, counter, deleteEvent, indexedTags, setCounter, tagRows } from "./db";
 import { HEX64, type NostrEvent, isAddressable, isReplaceable } from "./nostr";
 
 export const DELETION_DDL = `
@@ -117,7 +117,9 @@ export interface DeletionResult {
 export function applyDeletion(db: Db, req: NostrEvent): DeletionResult {
   const { sql, lim } = db;
   let targets = 0;
-  let writes = 0;
+  // The request's own rows (events row + indexes, one row per indexed tag) are inserted right after this
+  // function returns, so they are known exactly and count against the same budget.
+  let writes = W_EVENT_BASE + W_TAG_ROW * indexedTags(req.tags, lim.maxIndexedTags).length;
   let deleted = 0;
   let added = 0;
   let freed = 0;
