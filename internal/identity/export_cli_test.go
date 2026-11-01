@@ -184,25 +184,28 @@ func TestExportRejectsUnterminatedStdin(t *testing.T) {
 	}
 }
 
-// With --password-stdin the first stdin line is always the keystore password
-// slot, even when the keystore is not encrypted; otherwise a caller who sends
-// "keystore password, backup passphrase" would have the first line taken as the
-// backup passphrase.
-func TestExportPasswordStdinConsumesFirstLineOnUnencryptedKeystore(t *testing.T) {
+// On an unencrypted keystore there is no keystore-password line. A caller that
+// sends "keystore password, backup passphrase" anyway must get an explicit error
+// and no backup, never a backup silently encrypted with the first line.
+func TestExportRejectsPasswordStdinWithNcryptsecOnUnencryptedKeystore(t *testing.T) {
 	home, _ := createExportFixture(t, "")
 	args := []string{"identity", "export", "-n", "alice", "--json", "--format", "ncryptsec", "--password-stdin"}
-
-	res := runIdentityCLI(t, home, strings.NewReader("ignored keystore password\nreal backup pass\n"), nil, args...)
-	enc, _ := exportData(t, res)["ncryptsec"].(string)
+	for _, in := range []string{"keystore pw\nreal backup pass\n", "real backup pass\n"} {
+		res := runIdentityCLI(t, home, strings.NewReader(in), nil, args...)
+		decodeCLIError(t, res, common.ExitUserError, common.ErrCodeUser)
+		if strings.Contains(res.stdout+res.stderr, "ncryptsec1") {
+			t.Fatalf("a backup was produced: %#v", res)
+		}
+	}
+	// Without the flag the one-line layout still works, and --format nsec is unaffected.
+	ok := runIdentityCLI(t, home, strings.NewReader("real backup pass\n"), nil,
+		"identity", "export", "-n", "alice", "--json", "--format", "ncryptsec")
+	enc, _ := exportData(t, ok)["ncryptsec"].(string)
 	if _, err := nip49.Decrypt(enc, "real backup pass"); err != nil {
-		t.Fatalf("backup passphrase was not the second line: %v", err)
+		t.Fatalf("one-line layout broke: %v", err)
 	}
-	if _, err := nip49.Decrypt(enc, "ignored keystore password"); err == nil {
-		t.Fatal("the keystore password slot was used as the backup passphrase")
-	}
-
-	bad := runIdentityCLI(t, home, strings.NewReader("only one line\n"), nil, args...)
-	if bad.code == 0 || strings.Contains(bad.stdout+bad.stderr, "ncryptsec1") {
-		t.Fatalf("a single line was accepted as the backup passphrase: %#v", bad)
+	plain := runIdentityCLI(t, home, strings.NewReader(""), nil, "identity", "export", "-n", "alice", "--json", "--password-stdin")
+	if _, has := exportData(t, plain)["nsec"]; !has {
+		t.Fatalf("--format nsec with --password-stdin on an unencrypted keystore changed: %#v", plain)
 	}
 }

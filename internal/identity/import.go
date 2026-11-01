@@ -2,11 +2,12 @@ package identity
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"os"
 	"strings"
 	"unicode"
@@ -107,11 +108,15 @@ func validateNcryptsecStructure(s string) error {
 
 // secp256k1 group order n. A private key is valid only if 1 <= k < n; zero and
 // values >= n have no usable public key (signatures and NIP-44 fail later).
-var secp256k1Order, _ = new(big.Int).SetString("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 16)
+// Compared as raw big-endian bytes so no second copy of the key is made.
+var secp256k1Order = func() (n [32]byte) {
+	b, _ := hex.DecodeString("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141")
+	copy(n[:], b)
+	return n
+}()
 
 func secretKeyInRange(sk nostr.SecretKey) bool {
-	k := new(big.Int).SetBytes(sk[:])
-	return k.Sign() > 0 && k.Cmp(secp256k1Order) < 0
+	return sk != (nostr.SecretKey{}) && bytes.Compare(sk[:], secp256k1Order[:]) < 0
 }
 
 func importCommand() *cli.Command {
