@@ -102,6 +102,9 @@ func TestLiveWriterTempFileIsNeverRemoved(t *testing.T) {
 	child := startParkedWriter(t, common.EncodeNpub(nostr.Generate().Public()))
 	live := tempKeystores(t)
 	require.Len(t, live, 1)
+	// Age it first so only the lock (not the grace period) can protect it.
+	old := time.Now().Add(-2 * staleTempMinAge)
+	require.NoError(t, os.Chtimes(live[0], old, old))
 
 	done := make(chan error, 1)
 	go func() {
@@ -118,9 +121,6 @@ func TestLiveWriterTempFileIsNeverRemoved(t *testing.T) {
 	}
 	_, err := os.Stat(live[0])
 	require.NoError(t, err, "live writer's temp file must survive while it holds the lock")
-	// Age it so only the lock (not the grace period) protected it so far.
-	old := time.Now().Add(-2 * staleTempMinAge)
-	require.NoError(t, os.Chtimes(live[0], old, old))
 
 	require.NoError(t, child.Process.Kill())
 	_ = child.Wait()
@@ -157,12 +157,21 @@ func TestStaleCleanupOnlyTouchesExactRegularTempFiles(t *testing.T) {
 	}
 	for _, p := range keep {
 		require.NoError(t, os.WriteFile(p, []byte("x"), 0600))
+		if p != fresh {
+			require.NoError(t, os.Chtimes(p, old, old)) // age must not be what protects them
+		}
 	}
 	symlink := filepath.Join(dir, KeyStoreFile+".777.tmp")
 	require.NoError(t, os.Symlink(outside, symlink))
+	// Age the symlink itself (not its target) so only the type guard protects it.
+	require.NoError(t, exec.Command("touch", "-h", "-t", "200001010000", symlink).Run())
 	subdir := filepath.Join(dir, KeyStoreFile+".888.tmp")
 	require.NoError(t, os.Mkdir(subdir, 0700))
 	require.NoError(t, os.WriteFile(filepath.Join(subdir, "inner"), []byte("x"), 0600))
+	emptyDir := filepath.Join(dir, KeyStoreFile+".555.tmp")
+	require.NoError(t, os.Mkdir(emptyDir, 0700))
+	require.NoError(t, os.Chtimes(emptyDir, old, old))
+	require.NoError(t, os.Chtimes(subdir, old, old))
 
 	ks, err := LoadKeyStore()
 	require.NoError(t, err)
@@ -182,6 +191,8 @@ func TestStaleCleanupOnlyTouchesExactRegularTempFiles(t *testing.T) {
 	assert.Equal(t, "keep", strings.TrimSpace(string(got)))
 	_, err = os.Stat(filepath.Join(subdir, "inner"))
 	assert.NoError(t, err, "directory must be left alone")
+	_, err = os.Lstat(emptyDir)
+	assert.NoError(t, err, "empty directory must be left alone (os.Remove would delete it)")
 }
 
 func TestSaveSyncsDirectoryAfterRename(t *testing.T) {
