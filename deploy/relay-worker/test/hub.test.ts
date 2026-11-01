@@ -26,7 +26,9 @@ class FakeWs {
   sent: string[] = [];
   closed?: [number, string];
   att: unknown;
+  broken = false;
   send(t: string) {
+    if (this.broken) throw new Error("closed");
     this.sent.push(t);
   }
   serializeAttachment(v: unknown) {
@@ -53,7 +55,14 @@ function setup(over: Partial<Limits> = {}) {
     budgets: new Budgets(lim),
     subs: new SubStore(db),
     send: (ws, p) => ws.send(JSON.stringify(p)),
-    sendRaw: (ws, t) => ws.send(t),
+    sendRaw: (ws, t) => {
+      try {
+        ws.send(t);
+        return true;
+      } catch {
+        return false;
+      }
+    },
     take: (ws, st, which, perMinute) => {
       const ok = takeConn(st, which, perMinute);
       if (ok) ws.serializeAttachment(st);
@@ -640,6 +649,53 @@ describe("ephemeral events: replay window and fan-out charge", () => {
     processReq(hub, l.ws, l.st, ["a", { kinds: [20001] }]);
     processReq(hub, l.ws, l.st, ["b", { kinds: [20001] }]);
     expect(broadcast(hub, signed(alice, { kind: 20001 }))).toEqual({ delivered: 1, cut: false });
+  });
+  it("a socket that refuses the frame is not counted as delivered and the publisher is not charged for it", () => {
+    const { hub, conn } = setup({ sourceEventWeightPerMinute: 100, ephemeralDeliveriesPerWeight: 1 });
+    const l = listener(conn, hub, 3);
+    l.fake.broken = true;
+    expect(broadcast(hub, signed(alice, { kind: 20001 }))).toEqual({ delivered: 0, cut: false });
+    const p = conn("8.8.8.8");
+    processEvent(hub, p.ws, p.st, signed(alice, { kind: 20001, content: "f", created_at: now() }), 300);
+    for (let i = 0; i < 99; i++) expect(hub.budgets.chargeValidation("8.8.8.8", 1)).toBe(true); // only the validation weight was taken
+    expect(hub.budgets.chargeValidation("8.8.8.8", 1)).toBe(false);
+  });
+  it("a failed send followed by an exhausted global budget serves nobody: refused, id forgotten", () => {
+    const { hub, conn } = setup();
+    const l = listener(conn, hub, 2);
+    const p = conn();
+    const eph = signed(alice, { kind: 20001, created_at: now() });
+    const orig = hub.budgets.chargeDelivery.bind(hub.budgets);
+    let n = 0;
+    hub.budgets.chargeDelivery = (...a) => (++n === 1 ? orig(...a) : "global");
+    l.fake.broken = true;
+    processEvent(hub, p.ws, p.st, eph, 300);
+    expect(p.fake.frames()[0]).toEqual(["OK", eph.id, false, "rate-limited: relay is busy, retry later"]);
+    expect(hub.budgets.seenEphemeral(eph.id)).toBe(false);
+  });
+  it("a candidate lookup that throws before any delivery refuses the event and forgets the id; after a delivery it stays accepted", () => {
+    const { hub, conn } = setup();
+    const l = listener(conn, hub);
+    const p = conn();
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const eph = signed(alice, { kind: 20001, created_at: now() });
+    const cand = vi.spyOn(hub.subs, "candidates").mockImplementation(() => {
+      throw new Error("db down");
+    });
+    processEvent(hub, p.ws, p.st, eph, 300);
+    expect(p.fake.frames()[0]).toEqual(["OK", eph.id, false, "rate-limited: relay is busy, retry later"]);
+    expect(hub.budgets.seenEphemeral(eph.id)).toBe(false);
+    cand.mockRestore();
+    processEvent(hub, p.ws, p.st, eph, 300); // the retry goes through
+    expect(events(l)).toHaveLength(1);
+    err.mockRestore();
+    const real = hub.subs.candidates.bind(hub.subs);
+    vi.spyOn(hub.subs, "candidates").mockImplementation(function* (e) {
+      yield* real(e);
+      throw new Error("late");
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(broadcast(hub, signed(alice, { kind: 20001, content: "z" }))).toEqual({ delivered: 1, cut: false });
   });
   it("validates the new limits", () => {
     const lim = loadLimits('{"ephemeralDeliveriesPerWeight":0,"ephemeralDedupeEntries":5,"ephemeralDedupeTtlMs":-1}');

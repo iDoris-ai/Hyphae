@@ -38,7 +38,7 @@ export class Relay extends DurableObject<Env> {
       lim: this.lim,
       budgets: this.budgets,
       subs: this.subs,
-      send: (ws, payload) => this.sendRaw(ws, JSON.stringify(payload)),
+      send: (ws, payload) => void this.sendRaw(ws, JSON.stringify(payload)),
       sendRaw: (ws, text) => this.sendRaw(ws, text),
       take: (ws, st, which, perMinute) => {
         const ok = takeConn(st, which, perMinute);
@@ -207,11 +207,13 @@ export class Relay extends DurableObject<Env> {
     if (close) this.forceClose(ws, 1008, "policy violation: rate limit exceeded", st);
   }
 
-  private sendRaw(ws: WebSocket, text: string) {
+  private sendRaw(ws: WebSocket, text: string): boolean {
     try {
       ws.send(text);
+      return true;
     } catch {
       // Socket already gone; close handler will clean up.
+      return false;
     }
   }
 }

@@ -67,14 +67,15 @@ export function broadcast(hub: Hub, e: NostrEvent): { delivered: number; cut: bo
           }
           continue;
         }
-        hub.sendRaw(c.ws, `["EVENT",${idJson},${json}]`);
-        delivered++;
+        if (hub.sendRaw(c.ws, `["EVENT",${idJson},${json}]`)) delivered++; // a socket that refused the frame got nothing and is not charged for
       } catch (err) {
         console.error("broadcast failed for a subscription", err);
       }
     }
   } catch (err) {
     console.error("broadcast candidate lookup failed", err);
+    // Nobody was served and the cause may be transient (database): ask the publisher to retry. After a partial delivery the event counts as accepted.
+    if (delivered === 0) return { delivered, cut: true };
   }
   return { delivered, cut: false };
 }

@@ -11,7 +11,8 @@ export interface Hub {
   budgets: Budgets;
   subs: SubStore;
   send(ws: WebSocket, payload: unknown[]): void;
-  sendRaw(ws: WebSocket, text: string): void;
+  /** True when the frame was queued; false when the socket refused it (already gone). Callers that do not care may ignore it. */
+  sendRaw(ws: WebSocket, text: string): boolean;
   /** Takes a token from one of the connection's own buckets and persists the attachment. */
   take(ws: WebSocket, st: ConnState, which: "ev" | "rq" | "fr", perMinute: number): boolean;
   /** Counts a rejected frame; a connection that keeps misbehaving is closed with 1008. */
