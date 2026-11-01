@@ -280,7 +280,7 @@ func TestLogActionConcurrentCallsDoNotCorruptOrHang(t *testing.T) {
 // switches it to WAL, which needs a lock. When another process holds that lock
 // (several CLI processes starting at once), getDB must wait for it instead of
 // failing at once with SQLITE_BUSY and dropping the audit entry. This goes red
-// if busy_timeout is set after journal_mode.
+// without execRetryBusy; it does not pin the order of busy_timeout.
 func TestGetDBWaitsForLockedFreshDatabase(t *testing.T) {
 	setupTestAudit(t)
 	dir, err := keyStoreDir()
@@ -353,5 +353,20 @@ func TestLogActionAcrossProcesses(t *testing.T) {
 	}
 	if len(entries) != procs*25 {
 		t.Fatalf("got %d entries, want %d", len(entries), procs*25)
+	}
+}
+
+// TestGetDBRejectsQueryCharactersInPath: the driver would read "?" in the path
+// as a DSN query string and open a different file, silently dropping _txlock.
+func TestGetDBRejectsQueryCharactersInPath(t *testing.T) {
+	resetForTest()
+	t.Cleanup(resetForTest)
+	home := filepath.Join(t.TempDir(), "a?b")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	if _, err := getDB(); err == nil {
+		t.Fatal("expected getDB to refuse a keystore path containing '?'")
 	}
 }

@@ -114,6 +114,11 @@ func getDB() (*sql.DB, error) {
 	// dropping the entry. BEGIN IMMEDIATE takes the write lock first, so
 	// concurrent CLI processes queue behind busy_timeout and the hash chain
 	// stays linear.
+	// The driver parses "?" and "#" in the DSN as a query string, so a keystore
+	// directory containing them would open the wrong file (or drop _txlock).
+	if strings.ContainsAny(path, "?#") {
+		return nil, fmt.Errorf("audit: keystore path must not contain '?' or '#'")
+	}
 	conn, err := sql.Open("sqlite", path+"?_txlock=immediate")
 	if err != nil {
 		return nil, fmt.Errorf("audit: failed to open db: %w", err)
@@ -152,8 +157,10 @@ func getDB() (*sql.DB, error) {
 	return db, nil
 }
 
-// execRetryBusy runs a one-off initialisation statement, retrying for up to 5s
-// while another process holds the database. Switching a fresh database to WAL
+// execRetryBusy runs a one-off initialisation statement, retrying while another
+// process holds the database. The retry window is 5s, but an attempt started
+// just before it ends can itself wait up to busy_timeout (5s), so the worst
+// case is about 10s. Switching a fresh database to WAL
 // and creating the schema can return SQLITE_BUSY at once even with
 // busy_timeout set (SQLite will not wait where waiting could deadlock), so
 // several CLI processes starting together need an explicit retry.
