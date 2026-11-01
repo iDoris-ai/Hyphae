@@ -1,10 +1,10 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { LIMITS } from "../src/config";
+import { LIMITS, loadLimits } from "../src/config";
 import { EVENTS_DDL, migrateEventTags } from "../src/db";
 import { DELETION_DDL } from "../src/deletion";
 import { validateFilter } from "../src/filter";
-import { buildSql, runQuery } from "../src/query";
+import { buildSql, queryUnits, runQuery } from "../src/query";
 import { storeEvent } from "../src/store";
 import { alice, bob, signed } from "./helpers/keys";
 import { makeDb } from "./helpers/sqlite";
@@ -202,5 +202,19 @@ describe("bound parameters", () => {
       const unit = dk ? { ...f, [dk]: [((f as unknown as Record<string, string[]>)[dk])[0]] } : f;
       expect(buildSql(unit as never, 501).params.length).toBeLessThanOrEqual(100);
     }
+  });
+});
+
+describe("query unit budget", () => {
+  const vals = (n: number) => Array.from({ length: n }, (_, i) => "v" + i);
+  it("counts one index read per distinct driver-tag value, one for other filters, none for empty ones", () => {
+    expect(queryUnits([{ "#p": vals(89) }])).toBe(89);
+    expect(queryUnits([{ "#p": ["a", "a", "b"] }, { kinds: [1] }, { "#p": [] }, { authors: [] }])).toBe(3);
+    expect(queryUnits(Array.from({ length: 10 }, () => ({ "#p": vals(89) })))).toBe(890);
+  });
+  it("is a limit the operator can override through LIMITS_JSON, with a default one maximal filter fits in", () => {
+    expect(LIMITS.maxQueryUnits).toBeGreaterThanOrEqual(89);
+    expect(loadLimits('{"maxQueryUnits":7}').maxQueryUnits).toBe(7);
+    expect(loadLimits('{"maxQueryUnits":-1}').maxQueryUnits).toBe(LIMITS.maxQueryUnits);
   });
 });
