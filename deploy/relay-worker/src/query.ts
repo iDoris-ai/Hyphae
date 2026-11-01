@@ -77,7 +77,8 @@ function expand(f: Filter): Filter[] {
 /**
  * Stored events matching the filters, newest first, de-duplicated. Each filter is read on its own
  * with LIMIT (its limit + 1), so the rows read are bounded by the sum of the per-filter limits (a
- * multi-value driver tag costs one such read per value); a read also stops at the byte cap, and each filter keeps only its best rows (at most maxResultBytes) while units merge.
+ * multi-value driver tag costs one such read per value). A read also stops at the byte cap, and a
+ * filter keeps only its best rows (at most maxResultBytes) while its units merge.
  * The filters' rows are then merged by (created_at DESC, id ASC) and cut at maxLimit events or
  * maxResultBytes. `truncated` is true when matching history was left out because of those caps (not
  * because of the client's own `limit`).
@@ -135,6 +136,8 @@ export function runQuery(db: Db, filters: Filter[]): QueryResult {
     if (dropped && (group.length < eff || newestFirst(dropped, group[group.length - 1]) < 0)) {
       truncated = true;
       if (!boundary || newestFirst(dropped, boundary) < 0) boundary = dropped;
+    } else if (dropped && capped) {
+      truncated = true; // a matching row beyond the count cap that was also too big to read
     }
     if (capped && over) truncated = true;
     for (const r of group) all.set(r.id, r);

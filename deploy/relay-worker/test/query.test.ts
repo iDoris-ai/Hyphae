@@ -164,6 +164,19 @@ describe("multi-filter REQ", () => {
     expect(text(r)).toEqual(["a".repeat(600)]);
     expect(r.truncated).toBe(true);
   });
+  it("a too-big row beyond the count cap still reports truncation", () => {
+    const db = open({ maxLimit: 1 });
+    const A = signed(alice, { content: "a".repeat(900), created_at: 1, tags: [["p", "a"]] });
+    const B = signed(alice, { content: "b", created_at: 2, tags: [["p", "b"]] });
+    storeEvent(db, A);
+    storeEvent(db, B);
+    db.lim.maxResultBytes = JSON.stringify(A).length - 10;
+    for (const vals of [["a", "b"], ["b", "a"]]) {
+      const r = runQuery(db, [{ "#p": vals }]);
+      expect(text(r)).toEqual(["b"]);
+      expect(r.truncated).toBe(true);
+    }
+  });
   it("stops one filter at the byte cap", () => {
     const db = open({ maxResultBytes: 2500 });
     for (let i = 0; i < 8; i++) storeEvent(db, signed(alice, { content: "y".repeat(900) + i, created_at: 100 + i }));
