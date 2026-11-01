@@ -15,7 +15,7 @@ interface Copy {
   what: [string, string];
   connect: [string, string, string, string];
   sec: [string, string[]];
-  own: [string, string[]];
+  faq: [string, [string, string][]];
   foot: string;
 }
 
@@ -30,10 +30,15 @@ const COPY: Record<Lang, Copy> = {
       "<b>Can see metadata.</b> Sender and recipient public keys, timestamps, event kind, message size, and network addresses (the relay and Cloudflare see your IP address). Encryption does not hide who talks to whom, or when.",
       "<b>Can refuse, delay, drop or delete messages.</b> A relay is a courier, not a vault: it can delete everything it holds, so delivery and retention are not guaranteed.",
       "No forward secrecy: if a private key leaks, past messages encrypted to that key can be read. This software has not been independently audited."]],
-    own: ["Your data stays yours", [
-      "Your Hyphae client keeps its own copy of your messages on your device (<code>~/.hyphae/messages.db</code>), so a relay clearing its data does not erase your history.",
-      "Anyone can run their own relay (the source of this one is open) and point their client at it with <code>hyphae relay set</code>, then invite friends to use it.",
-      "Moving history to a new relay is not one command yet: the local database keeps message text, not the original signed events, so old messages cannot be republished as-is. New messages work normally."]],
+    faq: ["Questions and answers", [
+      ["Do I need an account?", "No sign-up. Your identity is a key pair made on your own device and kept in <code>~/.hyphae/keystore.json</code>, protected by a password you choose. Share only your public key (<code>npub…</code>), never the private one."],
+      ["How do I get the client?", "Download <code>hyphae</code> from the <a href=\"https://github.com/iDoris-ai/Hyphae/releases/latest\">latest release</a>: macOS (Apple Silicon) and Linux (x86-64) binaries are provided, with a <code>SHA256SUMS</code> file to check the download. Other systems can build from source (see the project README). The client already points at this relay by default."],
+      ["How do I send my first message?", "Run these in a terminal, then swap public keys with your friend and add each other:<pre>hyphae identity create --nickname me --default --password-prompt\nhyphae contact add --nickname friend --npub npub1... --role human\nhyphae agent msg --from me --to friend --encrypt --content \"Hello\" --relay wss://relay.aastar.io\nhyphae history inbox --as me</pre>To receive in the background run <code>hyphae daemon</code>; the README has the full walk-through."],
+      ["Can the relay read or change my messages?", "It cannot read them (end-to-end encrypted) and cannot change or forge them (signed). It can see who talks to whom and when. Details are in the box above."],
+      ["Can the relay delete my messages? Do I still have them?", "Yes, a relay can delete everything it holds. Your client keeps its own copy on your device (<code>~/.hyphae/messages.db</code>), so your history stays with you."],
+      ["Can I run my own relay and invite friends?", "Yes. The relay source is open. Run your own, then point each client at it with <code>hyphae relay set</code>. Moving old history to a new relay is not one command yet: the local database keeps message text, not the original signed events, so old messages cannot be republished as they were. New messages work normally."],
+      ["I lost my password or key. Can you recover it?", "No. Keys are made and kept on your device and the relay never has them, so nobody can recover them for you. Back up your keystore."],
+    ]],
     foot: "Source",
   },
   zh: {
@@ -46,10 +51,15 @@ const COPY: Record<Lang, Copy> = {
       "<b>能看到元数据。</b>发送者和接收者的公钥、时间、事件类型、消息大小和网络地址(中继和 Cloudflare 能看到你的 IP)。加密不会隐藏谁在什么时候和谁通信。",
       "<b>可以拒收、延迟、丢弃或删除消息。</b>中继是信使,不是保险箱:它可以清空自己保存的全部内容,所以不保证送达和留存。",
       "没有前向保密:私钥一旦泄露,用该密钥加密的历史消息可被解密。本软件尚未经过独立安全审计。"]],
-    own: ["你的数据属于你", [
-      "Hyphae 客户端会在你的设备上保存一份自己的消息(<code>~/.hyphae/messages.db</code>),中继清空数据不会抹掉你的历史。",
-      "任何人都可以自建中继(本中继的源码是开放的),用 <code>hyphae relay set</code> 把客户端指向它,再邀请朋友使用。",
-      "把历史迁到新中继还不是一条命令:本地数据库保存的是消息文本,没有保存原始的已签名事件,所以旧消息无法原样重新发布。新消息可正常收发。"]],
+    faq: ["常见问题", [
+      ["需要注册账号吗?", "不需要。你的身份是在自己设备上生成的一对密钥,保存在 <code>~/.hyphae/keystore.json</code>,用你自己设的密码保护。只分享公钥(<code>npub…</code>),永远不要分享私钥。"],
+      ["怎么下载客户端?", "到<a href=\"https://github.com/iDoris-ai/Hyphae/releases/latest\">最新发布页</a>下载 <code>hyphae</code>:提供 macOS(Apple 芯片)和 Linux(x86-64)的可执行文件,并附有校验用的 <code>SHA256SUMS</code>。其他系统可从源码构建(见项目 README)。客户端默认就连接本中继。"],
+      ["怎么发出第一条消息?", "在终端里运行下面的命令,再和朋友交换公钥、互相添加联系人:<pre>hyphae identity create --nickname me --default --password-prompt\nhyphae contact add --nickname friend --npub npub1... --role human\nhyphae agent msg --from me --to friend --encrypt --content \"你好\" --relay wss://relay.aastar.io\nhyphae history inbox --as me</pre>要在后台接收消息,运行 <code>hyphae daemon</code>;完整步骤见 README。"],
+      ["中继能读取或修改我的消息吗?", "不能读取(端到端加密),也不能修改或伪造(有签名)。它能看到谁在什么时候和谁通信。详见上方说明框。"],
+      ["中继会删除我的消息吗?我自己还有吗?", "中继可以删除它保存的全部内容。你的客户端会在设备上保存自己的一份(<code>~/.hyphae/messages.db</code>),所以历史仍在你手里。"],
+      ["我能自建中继并邀请朋友吗?", "可以。中继源码是开放的。自己部署一个,再用 <code>hyphae relay set</code> 把各个客户端指向它。把旧历史迁到新中继还不是一条命令:本地数据库保存的是消息文本,不是原始的已签名事件,旧消息无法原样重新发布。新消息可正常收发。"],
+      ["忘记密码或丢了密钥,你们能找回吗?", "不能。密钥在你的设备上生成和保存,中继从未拿到过,所以没人能替你找回。请备份你的 keystore。"],
+    ]],
     foot: "源码",
   },
   th: {
@@ -62,10 +72,15 @@ const COPY: Record<Lang, Copy> = {
       "<b>เห็นข้อมูลเมตา</b> เช่น กุญแจสาธารณะของผู้ส่งและผู้รับ เวลา ประเภทอีเวนต์ ขนาดข้อความ และที่อยู่เครือข่าย (รีเลย์และ Cloudflare เห็น IP ของคุณ) การเข้ารหัสไม่ได้ซ่อนว่าใครคุยกับใครและเมื่อไร",
       "<b>ปฏิเสธ หน่วง ทิ้ง หรือลบข้อความได้</b> รีเลย์เป็นเพียงผู้ส่งสาร ไม่ใช่ตู้นิรภัย ลบทุกอย่างที่เก็บไว้ได้ จึงไม่รับประกันการส่งถึงหรือการเก็บรักษา",
       "ไม่มี forward secrecy: หากกุญแจส่วนตัวรั่ว ข้อความเก่าที่เข้ารหัสด้วยกุญแจนั้นจะถูกถอดรหัสได้ ซอฟต์แวร์นี้ยังไม่ผ่านการตรวจสอบความปลอดภัยโดยหน่วยงานอิสระ"]],
-    own: ["ข้อมูลของคุณยังเป็นของคุณ", [
-      "ไคลเอนต์ Hyphae เก็บสำเนาข้อความไว้บนอุปกรณ์ของคุณเอง (<code>~/.hyphae/messages.db</code>) ต่อให้รีเลย์ล้างข้อมูล ประวัติของคุณก็ไม่หาย",
-      "ใครก็ตั้งรีเลย์ของตัวเองได้ (ซอร์สโค้ดของรีเลย์นี้เปิดเผย) ใช้ <code>hyphae relay set</code> ชี้ไคลเอนต์ไปที่รีเลย์นั้น แล้วชวนเพื่อนมาใช้",
-      "การย้ายประวัติไปรีเลย์ใหม่ยังทำด้วยคำสั่งเดียวไม่ได้ ฐานข้อมูลในเครื่องเก็บข้อความ ไม่ได้เก็บอีเวนต์ที่เซ็นไว้เดิม จึงเผยแพร่ข้อความเก่าซ้ำแบบเดิมไม่ได้ ข้อความใหม่ใช้งานได้ตามปกติ"]],
+    faq: ["คำถามที่พบบ่อย", [
+      ["ต้องสมัครบัญชีไหม?", "ไม่ต้องสมัคร ตัวตนของคุณคือคู่กุญแจที่สร้างบนอุปกรณ์ของคุณเอง เก็บไว้ที่ <code>~/.hyphae/keystore.json</code> และป้องกันด้วยรหัสผ่านที่คุณตั้ง แชร์เฉพาะกุญแจสาธารณะ (<code>npub…</code>) ห้ามแชร์กุญแจส่วนตัว"],
+      ["ดาวน์โหลดไคลเอนต์ได้อย่างไร?", "ดาวน์โหลด <code>hyphae</code> จาก<a href=\"https://github.com/iDoris-ai/Hyphae/releases/latest\">รุ่นล่าสุด</a> มีไฟล์สำหรับ macOS (Apple Silicon) และ Linux (x86-64) พร้อมไฟล์ <code>SHA256SUMS</code> สำหรับตรวจสอบไฟล์ ระบบอื่นสร้างจากซอร์สได้ (ดู README ของโปรเจกต์) ไคลเอนต์ตั้งค่าให้เชื่อมต่อรีเลย์นี้เป็นค่าเริ่มต้นอยู่แล้ว"],
+      ["ส่งข้อความแรกอย่างไร?", "รันคำสั่งเหล่านี้ในเทอร์มินัล แล้วแลกกุญแจสาธารณะกับเพื่อนและเพิ่มเป็นผู้ติดต่อซึ่งกันและกัน:<pre>hyphae identity create --nickname me --default --password-prompt\nhyphae contact add --nickname friend --npub npub1... --role human\nhyphae agent msg --from me --to friend --encrypt --content \"สวัสดี\" --relay wss://relay.aastar.io\nhyphae history inbox --as me</pre>หากต้องการรับข้อความเบื้องหลัง ให้รัน <code>hyphae daemon</code> ขั้นตอนเต็มอยู่ใน README"],
+      ["รีเลย์อ่านหรือแก้ข้อความของฉันได้ไหม?", "อ่านไม่ได้ (เข้ารหัสปลายทางถึงปลายทาง) แก้หรือปลอมไม่ได้ (มีลายเซ็น) แต่เห็นว่าใครคุยกับใครและเมื่อไร รายละเอียดอยู่ในกล่องด้านบน"],
+      ["รีเลย์ลบข้อความของฉันได้ไหม? ฉันยังมีอยู่ไหม?", "ได้ รีเลย์ลบทุกอย่างที่เก็บไว้ได้ แต่ไคลเอนต์เก็บสำเนาของคุณไว้บนอุปกรณ์ (<code>~/.hyphae/messages.db</code>) ประวัติจึงยังอยู่กับคุณ"],
+      ["ตั้งรีเลย์เองและชวนเพื่อนมาใช้ได้ไหม?", "ได้ ซอร์สโค้ดของรีเลย์เปิดเผย ตั้งรีเลย์ของคุณเอง แล้วใช้ <code>hyphae relay set</code> ชี้ไคลเอนต์ไปที่รีเลย์นั้น การย้ายประวัติเก่าไปรีเลย์ใหม่ยังทำด้วยคำสั่งเดียวไม่ได้ เพราะฐานข้อมูลในเครื่องเก็บข้อความ ไม่ได้เก็บอีเวนต์ที่เซ็นไว้เดิม จึงเผยแพร่ข้อความเก่าซ้ำแบบเดิมไม่ได้ ข้อความใหม่ใช้งานได้ตามปกติ"],
+      ["ลืมรหัสผ่านหรือกุญแจหาย กู้คืนได้ไหม?", "ไม่ได้ กุญแจถูกสร้างและเก็บบนอุปกรณ์ของคุณ รีเลย์ไม่เคยได้รับ จึงไม่มีใครกู้คืนให้ได้ โปรดสำรอง keystore ของคุณ"],
+    ]],
     foot: "ซอร์สโค้ด",
   },
 };
@@ -106,7 +121,8 @@ h1{margin:12px 0 4px;font-size:2.4rem;letter-spacing:.02em;background:linear-gra
 .tag{margin:0;color:var(--mut);font-size:1.1rem}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-top:16px}
 h2{margin:0 0 8px;font-size:1.05rem}p{margin:.4em 0}ul{margin:.3em 0;padding-left:1.2em}li{margin:.45em 0}
-code{font:14px ui-monospace,Menlo,monospace;background:rgba(127,127,127,.15);padding:2px 6px;border-radius:6px;word-break:break-all}
+code{font:14px ui-monospace,Menlo,monospace;background:rgba(127,127,127,.15);padding:2px 6px;border-radius:6px;overflow-wrap:break-word}
+details{border-top:1px solid var(--line);padding:6px 0}details:first-of-type{border-top:0}summary{cursor:pointer;font-weight:600;padding:6px 0}pre{background:rgba(127,127,127,.15);padding:10px 12px;border-radius:8px;overflow-x:auto;font:13px/1.5 ui-monospace,Menlo,monospace;margin:.6em 0}pre,code{white-space:pre-wrap}
 a{color:var(--a)}footer{margin-top:28px;text-align:center;color:var(--mut);font-size:.9rem}
 </style></head><body><main>
 <div class="lang">${nav}</div>
@@ -117,7 +133,7 @@ a{color:var(--a)}footer{margin-top:28px;text-align:center;color:var(--mut);font-
 <p>${c.connect[2]} <code>curl -H "Accept: application/nostr+json" https://relay.aastar.io</code></p>
 <p>${c.connect[3]}: <a href="/healthz">/healthz</a></p></section>
 <section class="card"><h2>${c.sec[0]}</h2><ul>${li(c.sec[1])}</ul></section>
-<section class="card"><h2>${c.own[0]}</h2><ul>${li(c.own[1])}</ul></section>
+<section class="card"><h2>${c.faq[0]}</h2>${c.faq[1].map(([q, a]) => `<details><summary>${q}</summary><p>${a}</p></details>`).join("")}</section>
 <footer>${c.foot}: <a href="https://github.com/iDoris-ai/Hyphae">github.com/iDoris-ai/Hyphae</a></footer>
 </main></body></html>`;
 }

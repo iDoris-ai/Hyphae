@@ -208,9 +208,11 @@ describe("Worker entry: landing page languages", () => {
     for (const l of ["en", "zh", "th"]) {
       const { text } = await page(`/?lang=${l}`);
       expect(text).toContain("NIP-44");
-      expect(text).toContain("messages.db");
       expect(text).toContain("hyphae relay set");
-      expect(text.match(/<li>/g)?.length).toBe(8);
+      expect(text).toContain("SHA256SUMS");
+      expect(text).toContain("hyphae identity create");
+      expect(text.match(/<li>/g)?.length).toBe(5);
+      expect(text.match(/<details>/g)?.length).toBe(7);
     }
   });
 });
