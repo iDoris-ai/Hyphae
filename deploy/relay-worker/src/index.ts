@@ -1,10 +1,13 @@
 import { type Limits, loadLimits } from "./config";
+import { type RateLimiter, createAdmission } from "./admission";
 import { createHealthCache, withCors } from "./http";
 import { sourceKey } from "./limits";
 export { Relay } from "./relay";
 
 interface Env {
   RELAY: DurableObjectNamespace;
+  // Cloudflare Workers Rate Limiting binding; optional so the Worker still runs where it is not configured.
+  UPGRADE_LIMITER?: RateLimiter;
   // Header that carries the client address. Cloudflare sets CF-Connecting-IP itself; the
   // override exists only so local tests (where the client can pick the header) can use another.
   SRC_HEADER?: string;
@@ -57,6 +60,17 @@ const limitsFor = (json: string | undefined): Limits => {
   return limitsCache.value;
 };
 
+// Edge admission: twice the Durable Object's per-source upgrade budget, so only floods are dropped here.
+// Only the WebSocket-upgrade branch of route() calls it: /healthz, NIP-11 and plain GETs never take a token
+// and are never refused by it (/healthz has its own per-isolate cache). withCors in the default export wraps
+// the edge 429 too, so a browser page can read its Retry-After.
+let admission: { perMinute: number; value: ReturnType<typeof createAdmission> } | undefined;
+const admissionFor = (lim: Limits) => {
+  const perMinute = lim.upgradesPerMinutePerSource * 2;
+  if (!admission || admission.perMinute !== perMinute) admission = { perMinute, value: createAdmission({ perMinute }) };
+  return admission.value;
+};
+
 const checkHealth = createHealthCache();
 
 async function route(request: Request, env: Env): Promise<Response> {
@@ -70,10 +84,15 @@ async function route(request: Request, env: Env): Promise<Response> {
         console.error("upgrade without a source address header");
         return new Response("source address unavailable", { status: 400 });
       }
+      const key = sourceKey(src);
+      const adm = await admissionFor(limitsFor(env.LIMITS_JSON)).check(key, env.UPGRADE_LIMITER);
+      if (!adm.ok) {
+        return new Response("too many connection attempts", { status: 429, headers: { "retry-after": String(adm.retryAfter) } });
+      }
       try {
         // Pass the client address to the Durable Object. `set` replaces any x-hyphae-src the client sent.
         const headers = new Headers(request.headers);
-        headers.set("x-hyphae-src", sourceKey(src));
+        headers.set("x-hyphae-src", key);
         return await env.RELAY.get(env.RELAY.idFromName("main")).fetch(new Request(request, { headers }));
       } catch (err) {
         console.error("relay forward failed", err);
