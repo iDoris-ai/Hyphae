@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -107,7 +108,13 @@ func getDB() (*sql.DB, error) {
 	}
 	path := filepath.Join(dir, "messages.db")
 
-	conn, err := sql.Open("sqlite", path)
+	// _txlock=immediate: LogAction reads the chain tail and then appends. With a
+	// deferred BEGIN, another process can write in between and the upgrade to a
+	// write lock fails at once with SQLITE_BUSY (busy_timeout does not apply),
+	// dropping the entry. BEGIN IMMEDIATE takes the write lock first, so
+	// concurrent CLI processes queue behind busy_timeout and the hash chain
+	// stays linear.
+	conn, err := sql.Open("sqlite", path+"?_txlock=immediate")
 	if err != nil {
 		return nil, fmt.Errorf("audit: failed to open db: %w", err)
 	}
@@ -122,9 +129,9 @@ func getDB() (*sql.DB, error) {
 	// the one connection to free up) instead of relying on SQLite-side
 	// locking across multiple connections.
 	conn.SetMaxOpenConns(1)
-	// Must come BEFORE journal_mode: switching a fresh database to WAL needs a
-	// lock, and with several CLI processes opening it for the first time at once
-	// the loser would otherwise get an immediate SQLITE_BUSY and lose its entry.
+	// Set before the first statement so every later statement can wait for a
+	// lock held by another CLI process (execRetryBusy covers the cases where
+	// SQLite refuses to wait).
 	// Belt-and-suspenders alongside SetMaxOpenConns(1): if a future change
 	// raises the pool size, callers still wait instead of failing outright.
 	// 5s comfortably covers LogAction's single short read+insert transaction.
@@ -132,17 +139,38 @@ func getDB() (*sql.DB, error) {
 		_ = conn.Close()
 		return nil, fmt.Errorf("audit: failed to set busy_timeout: %w", err)
 	}
-	if _, err := conn.Exec("PRAGMA journal_mode = WAL"); err != nil {
+	if err := execRetryBusy(conn, "PRAGMA journal_mode = WAL"); err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("audit: failed to enable WAL mode: %w", err)
 	}
-	if _, err := conn.Exec(schemaSQL); err != nil {
+	if err := execRetryBusy(conn, schemaSQL); err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("audit: failed to create schema: %w", err)
 	}
 
 	db = conn
 	return db, nil
+}
+
+// execRetryBusy runs a one-off initialisation statement, retrying for up to 5s
+// while another process holds the database. Switching a fresh database to WAL
+// and creating the schema can return SQLITE_BUSY at once even with
+// busy_timeout set (SQLite will not wait where waiting could deadlock), so
+// several CLI processes starting together need an explicit retry.
+func execRetryBusy(conn *sql.DB, query string) error {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		_, err := conn.Exec(query)
+		if err == nil {
+			return nil
+		}
+		msg := err.Error()
+		busy := strings.Contains(msg, "SQLITE_BUSY") || strings.Contains(msg, "database is locked")
+		if !busy || time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 const schemaSQL = `
