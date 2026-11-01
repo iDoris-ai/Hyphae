@@ -124,7 +124,7 @@ Hyphae stores local state under `~/.hyphae/`:
 - `messages.db` is the SQLite message-history store.
 - `outbox.json` contains pending outbound delivery records.
 
-Never share an `nsec`, an exported private key, a keystore password, or a copied keystore. An `npub` is the public value intended for contacts. Encryption is enabled per direct-message send with `--encrypt`; use it for private content.
+Never share an `nsec`, an exported private key, a keystore password, or a copied keystore. An `npub` is the public value intended for contacts. Direct messages sent with `hyphae agent msg` are NIP-44 encrypted by default (`--encrypt` defaults to true); `--encrypt=false` sends the content unencrypted, which any relay can read. Do not use it for private content.
 
 ## Development and testing
 
