@@ -1,6 +1,7 @@
 import { type Db, storageFull } from "./db";
 import { type Filter, TAG_KEY } from "./filter";
-import { utf8Length } from "./nostr";
+import { SubIndex } from "./subindex";
+import { type NostrEvent, utf8Length } from "./nostr";
 
 export const SUBS_DDL = `
   CREATE TABLE IF NOT EXISTS subs (
@@ -68,13 +69,18 @@ export type Admission = { ok: true } | { ok: false; reason: string; drop: boolea
 export class SubStore {
   private cache = new Map<string, { subs: Subscriptions; bytes: number }>();
   private cacheBytes = 0;
+  private index?: SubIndex; // built from SQL on first use (after a wake-up), then kept in step by save/remove/dropConn
 
   constructor(private db: Db) {}
 
   /** Subscriptions of one connection: from the cache when it fits, otherwise read from SQL. */
   get(conn: string): Subscriptions {
     const hit = this.cache.get(conn);
-    if (hit) return hit.subs;
+    if (hit) {
+      this.cache.delete(conn); // LRU: re-insert as most recently used
+      this.cache.set(conn, hit);
+      return hit.subs;
+    }
     const subs: Subscriptions = new Map();
     let bytes = 0;
     for (const row of this.db.sql.exec("SELECT sub_id, filters FROM subs WHERE conn = ?", conn).toArray()) {
@@ -86,11 +92,36 @@ export class SubStore {
         // corrupt row: skip
       }
     }
-    if (this.cacheBytes + bytes <= this.db.lim.subCacheBytes) {
+    if (bytes <= this.db.lim.subCacheBytes) {
+      // Evict the least recently used connections until this one fits.
+      for (const [old, v] of this.cache) {
+        if (this.cacheBytes + bytes <= this.db.lim.subCacheBytes) break;
+        this.cache.delete(old);
+        this.cacheBytes -= v.bytes;
+      }
       this.cache.set(conn, { subs, bytes });
       this.cacheBytes += bytes;
     }
     return subs;
+  }
+
+  /**
+   * Refs ("conn\0subId") of subscriptions that could match the event, from the in-memory index
+   * (built from SQL on first use). Duplicates are possible; callers re-check with matchAny.
+   */
+  candidates(e: NostrEvent): Iterable<string> {
+    if (!this.index) {
+      const idx = new SubIndex();
+      for (const row of this.db.sql.exec("SELECT conn, sub_id, filters FROM subs")) {
+        try {
+          idx.add(row.conn as string, row.sub_id as string, JSON.parse(row.filters as string) as Filter[]);
+        } catch {
+          // corrupt row: never matches
+        }
+      }
+      this.index = idx;
+    }
+    return this.index.candidates(e);
   }
 
   private invalidate(conn: string) {
@@ -104,12 +135,14 @@ export class SubStore {
   remove(conn: string, subId: string) {
     this.invalidate(conn);
     this.db.sql.exec("DELETE FROM subs WHERE conn = ? AND sub_id = ?", conn, subId);
+    this.index?.remove(conn, subId);
   }
 
   /** Forgets a connection. A failing SQL delete is thrown to the caller. */
   dropConn(conn: string) {
     this.invalidate(conn);
     this.db.sql.exec("DELETE FROM subs WHERE conn = ?", conn);
+    this.index?.removeConn(conn);
   }
 
   /**
@@ -135,6 +168,7 @@ export class SubStore {
     }
     this.invalidate(conn);
     sql.exec("INSERT OR REPLACE INTO subs (conn, sub_id, filters) VALUES (?, ?, ?)", conn, subId, fjson);
+    this.index?.add(conn, subId, JSON.parse(fjson) as Filter[]);
     return { ok: true };
   }
 }

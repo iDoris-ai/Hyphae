@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { EVENTS_DDL } from "../src/db";
 import { DELETION_DDL } from "../src/deletion";
+import { type Filter, matchAny } from "../src/filter";
 import { runQuery } from "../src/query";
 import { storeEvent } from "../src/store";
 import { SUBS_DDL, SubStore, normalizeFilter, normalizeFilters } from "../src/subs";
@@ -148,5 +149,130 @@ describe("SubStore", () => {
     expect(subs.get("c").size).toBe(1); // read from SQL every time: correct, just not cached
     db.sql.exec("DELETE FROM subs");
     expect(subs.get("c").size).toBe(0);
+  });
+});
+
+describe("SubStore candidate index", () => {
+  // deterministic PRNG so a failure is reproducible
+  const rng = (seed: number) => () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+  const hex = (i: number) => i.toString(16).padStart(64, "0");
+
+  it("candidates + matchAny equal the brute-force match over randomized filters and events", () => {
+    const r = rng(42);
+    const pick = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
+    const subs = new SubStore(open());
+    const all = new Map<string, Filter[]>();
+    const maybe = (p: number) => r() < p;
+    for (let i = 0; i < 300; i++) {
+      const filters: Filter[] = Array.from({ length: 1 + Math.floor(r() * 3) }, () => {
+        const f: Filter = {};
+        if (maybe(0.3)) f.authors = [maybe(0.8) ? hex(Math.floor(r() * 6)) : hex(Math.floor(r() * 6)).slice(0, 3 + Math.floor(r() * 5))];
+        if (maybe(0.4)) f.kinds = maybe(0.05) ? [] : maybe(0.1) ? Array.from({ length: 20 }, (_, k) => k) : [pick([1, 7, 20001, 30023]), pick([1, 7])];
+        if (maybe(0.3)) f["#p"] = [hex(Math.floor(r() * 5)), "zz"];
+        if (maybe(0.2)) f["#e"] = [hex(Math.floor(r() * 5))];
+        if (maybe(0.2)) f["#t"] = [pick(["a", "b"])];
+        if (maybe(0.1)) f.since = 50;
+        if (maybe(0.1)) f.ids = [hex(Math.floor(r() * 4)).slice(0, 8)];
+        return f;
+      });
+      const id = `c${i % 40}`;
+      const sub = `s${Math.floor(i / 40)}`;
+      expect(subs.save(id, sub, JSON.stringify(filters))).toEqual({ ok: true });
+      all.set(`${id}\0${sub}`, filters);
+    }
+    // the index is built lazily on the first lookup; later saves/removes must keep it in step
+    subs.candidates({ pubkey: "", kind: 0, tags: [] } as never);
+    subs.remove("c1", "s0");
+    all.delete("c1\0s0");
+    subs.dropConn("c2");
+    for (const k of [...all.keys()]) if (k.startsWith("c2\0")) all.delete(k);
+    expect(subs.save("c3", "s0", JSON.stringify([{ kinds: [9] }]))).toEqual({ ok: true });
+    all.set("c3\0s0", [{ kinds: [9] }]);
+    let hits = 0;
+    for (let i = 0; i < 400; i++) {
+      const tags: string[][] = [];
+      if (maybe(0.5)) tags.push(["p", hex(Math.floor(r() * 5))]);
+      if (maybe(0.3)) tags.push(["e", hex(Math.floor(r() * 5))]);
+      if (maybe(0.3)) tags.push(["t", pick(["a", "b"])]);
+      const e = { id: hex(Math.floor(r() * 4)), pubkey: hex(Math.floor(r() * 6)), kind: pick([1, 7, 9, 20001, 30023]), created_at: Math.floor(r() * 100), tags, content: "", sig: "" };
+      const brute = new Set([...all].filter(([, f]) => matchAny(f, e)).map(([k]) => k));
+      const viaIndex = new Set([...subs.candidates(e)].filter((ref) => matchAny(all.get(ref) ?? [], e)));
+      expect(viaIndex).toEqual(brute);
+      hits += brute.size;
+    }
+    expect(hits).toBeGreaterThan(100); // the generator really produces matches
+  });
+
+  it("files a filter under one dimension, so an unrelated event does not even see it as a candidate", () => {
+    const subs = new SubStore(open());
+    subs.save("c", "k", JSON.stringify([{ kinds: [7] }]));
+    subs.save("c", "a", JSON.stringify([{ authors: [hex(1)] }]));
+    subs.save("c", "w", JSON.stringify([{ since: 1 }]));
+    const e = { id: hex(9), pubkey: hex(2), kind: 1, created_at: 5, tags: [], content: "", sig: "" };
+    expect([...subs.candidates(e)]).toEqual(["c\0w"]);
+  });
+
+  it("evicts the least recently used connection when the subscription cache is full", () => {
+    const db = open({ subCacheBytes: 30 }); // each connection below is 13 bytes: room for two
+    const subs = new SubStore(db);
+    const f = JSON.stringify([{ kinds: [1] }]);
+    for (const c of ["a", "b", "c"]) subs.save(c, "s", f);
+    let reads = 0;
+    const exec = db.sql.exec.bind(db.sql);
+    (db.sql as unknown as { exec: unknown }).exec = (q: string, ...p: unknown[]) => {
+      if (q.startsWith("SELECT sub_id, filters")) reads++;
+      return exec(q, ...p);
+    };
+    subs.get("a");
+    subs.get("b");
+    subs.get("a"); // refreshes a: b is now the least recently used
+    subs.get("c"); // does not fit: evicts b, not a
+    expect(reads).toBe(3);
+    subs.get("a");
+    subs.get("c");
+    expect(reads).toBe(3); // a and c are cached
+    subs.get("b");
+    expect(reads).toBe(4); // b was evicted
+  });
+
+  it("files a subscription that needs more than 16 bucket keys under the wildcard (bounded index memory)", () => {
+    const subs = new SubStore(open());
+    subs.save("c", "few", JSON.stringify([{ kinds: Array.from({ length: 16 }, (_, k) => k) }]));
+    subs.save("c", "many", JSON.stringify([{ kinds: Array.from({ length: 17 }, (_, k) => k) }]));
+    const e = { id: hex(9), pubkey: hex(2), kind: 99, created_at: 5, tags: [], content: "", sig: "" };
+    expect([...subs.candidates(e)]).toEqual(["c\0many"]);
+    expect([...subs.candidates({ ...e, kind: 3 })].sort()).toEqual(["c\0few", "c\0many"]);
+  });
+
+  describe("index clean-up", () => {
+    const ev = { id: hex(9), pubkey: hex(2), kind: 7, created_at: 5, tags: [], content: "", sig: "" };
+    const refs = (subs: SubStore, kind = 7) => [...subs.candidates({ ...ev, kind })];
+    const fresh = () => {
+      const subs = new SubStore(open());
+      subs.candidates(ev); // build the index now, so later changes must be applied to it
+      return subs;
+    };
+    it("a removed subscription (CLOSE) is no longer a candidate", () => {
+      const subs = fresh();
+      subs.save("c", "s", JSON.stringify([{ kinds: [7] }]));
+      expect(refs(subs)).toEqual(["c\0s"]);
+      subs.remove("c", "s");
+      expect(refs(subs)).toEqual([]);
+    });
+    it("a dropped connection leaves no candidates", () => {
+      const subs = fresh();
+      subs.save("c", "a", JSON.stringify([{ kinds: [7] }]));
+      subs.save("c", "b", JSON.stringify([{ since: 1 }]));
+      subs.save("d", "a", JSON.stringify([{ kinds: [7] }]));
+      subs.dropConn("c");
+      expect(refs(subs)).toEqual(["d\0a"]);
+    });
+    it("replacing a subscription with a different filter drops its old buckets", () => {
+      const subs = fresh();
+      subs.save("c", "s", JSON.stringify([{ kinds: [7] }]));
+      subs.save("c", "s", JSON.stringify([{ kinds: [8] }]));
+      expect(refs(subs, 7)).toEqual([]);
+      expect(refs(subs, 8)).toEqual(["c\0s"]);
+    });
   });
 });
