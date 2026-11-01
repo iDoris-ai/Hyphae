@@ -51,6 +51,9 @@ export const LIMITS = {
   maxResultBytes: 4 * MB, // total size of the stored events one REQ returns
   // --- frames and fan-out
   maxFiltersPerReq: 10,
+  // Index reads one REQ may cost: a tag filter with N values is N reads of up to maxLimit+1 rows each.
+  // One filter at the 89-value maximum fits; ten of them (890 reads) do not.
+  maxQueryUnits: 100,
   maxSubIdLength: 64,
   maxDeliveriesPerEvent: 5000,
   // Distinct candidate subscriptions one live event is compared with; the rest are skipped and a warning is logged

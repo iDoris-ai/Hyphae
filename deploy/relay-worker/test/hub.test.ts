@@ -398,6 +398,18 @@ describe("processReq and processClose", () => {
       expect(frames.at(-1)).toEqual(["EOSE", id]);
     }
   });
+  it("a REQ needing more index reads than maxQueryUnits is refused before any query and keeps no subscription", () => {
+    const { hub, conn, db } = setup({ maxQueryUnits: 5 });
+    storeEvent(db, signed(alice, { tags: [["p", "v0"]] }));
+    const v = (n: number) => Array.from({ length: n }, (_, i) => "v" + i);
+    const c = conn();
+    processReq(hub, c.ws, c.st, ["ok", { "#p": v(5) }]); // exactly at the limit
+    expect(c.fake.frames().at(-1)).toEqual(["EOSE", "ok"]);
+    const before = c.fake.frames().length;
+    processReq(hub, c.ws, c.st, ["big", { "#p": v(3) }, { "#p": ["w0", "w1", "w2"] }]);
+    expect(c.fake.frames().slice(before)).toEqual([["CLOSED", "big", "invalid: too many tag values"]]);
+    expect([...hub.subs.get(c.st.id).keys()]).toEqual(["ok"]);
+  });
   it("an invalid or rate-limited REQ closes the existing subscription of that id", () => {
     const { hub, conn } = setup({ reqsPerMinute: 2 });
     const c = conn();

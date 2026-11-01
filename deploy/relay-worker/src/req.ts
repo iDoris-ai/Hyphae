@@ -2,7 +2,7 @@ import { validateFilter } from "./filter";
 import { type Hub, deliveryCost } from "./hub";
 import { utf8Length } from "./nostr";
 import type { ConnState } from "./limits";
-import { runQuery } from "./query";
+import { queryUnits, runQuery } from "./query";
 import { normalizeFilters } from "./subs";
 
 /** Every CLOSED we send means the subscription no longer exists, so drop it first (or close the socket). */
@@ -42,6 +42,7 @@ export function processReq(hub: Hub, ws: WebSocket, st: ConnState, args: unknown
     if (err) return closeSub(hub, ws, conn, subId, err);
   }
   const filters = normalizeFilters(raw as Parameters<typeof normalizeFilters>[0]);
+  if (queryUnits(filters) > hub.lim.maxQueryUnits) return closeSub(hub, ws, conn, subId, "invalid: too many tag values");
   const fjson = JSON.stringify(filters);
   try {
     const saved = hub.subs.save(conn, subId, fjson);
