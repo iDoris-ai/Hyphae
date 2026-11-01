@@ -212,6 +212,50 @@ func TestImportCLIRejections(t *testing.T) {
 			noStore: true,
 		},
 		{
+			name:    "carriage return inside a line",
+			stdin:   "ab\rcd\n",
+			args:    []string{"identity", "import", "--nickname", "alice", "--nsec-stdin", "--json"},
+			exit:    common.ExitUserError,
+			code:    common.ErrCodeUser,
+			hidden:  []string{"ab", "cd"},
+			noStore: true,
+		},
+		{
+			name:    "two carriage returns before the newline",
+			stdin:   nsec + "\r\r\n",
+			args:    []string{"identity", "import", "--nickname", "alice", "--nsec-stdin", "--json"},
+			exit:    common.ExitUserError,
+			code:    common.ErrCodeUser,
+			hidden:  []string{nsec},
+			noStore: true,
+		},
+		{
+			name:    "lone carriage return at EOF without newline",
+			stdin:   nsec + "\r",
+			args:    []string{"identity", "import", "--nickname", "alice", "--nsec-stdin", "--json"},
+			exit:    common.ExitUserError,
+			code:    common.ErrCodeUser,
+			hidden:  []string{nsec},
+			noStore: true,
+		},
+		{
+			name:    "carriage return inside the backup passphrase",
+			stdin:   "pass\rword\n" + ncrypt + "\n",
+			args:    []string{"identity", "import", "--nickname", "alice", "--ncryptsec-stdin", "--json"},
+			exit:    common.ExitUserError,
+			code:    common.ErrCodeUser,
+			hidden:  []string{ncrypt, "pass", "word"},
+			noStore: true,
+		},
+		{
+			name:    "CRLF-only line is an empty value",
+			stdin:   "\r\n",
+			args:    []string{"identity", "import", "--nickname", "alice", "--nsec-stdin", "--json"},
+			exit:    common.ExitUserError,
+			code:    common.ErrCodeUser,
+			noStore: true,
+		},
+		{
 			name:    "both key flags",
 			stdin:   nsec + "\n",
 			args:    []string{"identity", "import", "--nickname", "alice", "--ncryptsec-stdin", "--nsec-stdin", "--json"},
@@ -470,5 +514,18 @@ func TestImportDefaultIsAtomicWithImport(t *testing.T) {
 	}
 	if fresh, _ := LoadKeyStore(); fresh.DefaultIdentity != "alice" {
 		t.Fatalf("default = %q, want alice", fresh.DefaultIdentity)
+	}
+}
+
+// A single CRLF or LF terminator, or none at EOF, is accepted.
+func TestImportAcceptsSingleLineTerminators(t *testing.T) {
+	for name, term := range map[string]string{"LF": "\n", "CRLF": "\r\n", "none": ""} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			sk := nostr.Generate()
+			result := runIdentityCLI(t, home, strings.NewReader(common.EncodeNsec(sk)+term), nil,
+				"identity", "import", "--nickname", "alice", "--nsec-stdin", "--json")
+			assertExactImport(t, importData(t, result), "alice", common.EncodeNpub(sk.Public()))
+		})
 	}
 }

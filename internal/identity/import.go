@@ -52,12 +52,22 @@ func readImportLines(r io.Reader, n int) ([]string, error) {
 		if err != nil && err != io.EOF {
 			return nil, errors.New("failed to read stdin")
 		}
-		line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+		// Only one terminator ("\r\n" or "\n") is removed; any other "\r" is
+		// part of the value and is rejected below, so "ab\rcd", "ab\r\r\n" and
+		// an unterminated "ab\r" cannot smuggle a carriage return into a secret.
+		if strings.HasSuffix(line, "\r\n") {
+			line = line[:len(line)-2]
+		} else {
+			line = strings.TrimSuffix(line, "\n")
+		}
 		if line == "" {
 			if err == io.EOF {
 				return nil, fmt.Errorf("stdin must contain %d lines (see 'hyphae identity import --help')", n)
 			}
 			return nil, errors.New("stdin contains an empty line where a value is required")
+		}
+		if strings.Contains(line, "\r") {
+			return nil, errors.New("stdin value contains a carriage return; only a single trailing \\n or \\r\\n is allowed")
 		}
 		lines = append(lines, line)
 	}
