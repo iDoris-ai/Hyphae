@@ -12,7 +12,7 @@ dispatch); the work is in small modules that take their dependencies explicitly:
 | `limits.ts` | token buckets, per-source state, global and outbound budgets, `sourceKey` |
 | `db.ts`, `store.ts` | schema, size estimates, event storage, replacement, net-growth check |
 | `deletion.ts` | NIP-09 (tombstones, coordinate cutoffs, eviction, write budget) |
-| `query.ts`, `subs.ts`, `subindex.ts` | REQ queries; subscription persistence, LRU cache, size caps; in-memory candidate index (authors / #p / #e / kinds / wildcard) for live fan-out |
+| `query.ts`, `subs.ts` | REQ queries; subscription persistence, cache, size caps |
 | `events.ts`, `req.ts`, `fanout.ts`, `hub.ts` | EVENT admission, REQ/CLOSE handling, broadcast, the interface they share |
 
 ## Status and honest caveats
@@ -36,11 +36,6 @@ dispatch); the work is in small modules that take their dependencies explicitly:
   /64 (an attacker owning a /48 or larger still gets many /64 groups; there is no /48 grouping).
 - A drained global budget (EVENT weight or outbound bytes) affects every client for the rest of the
   minute; the per-source quotas exist to make that expensive, not impossible.
-
-- Live fan-out compares an event only with the subscriptions the candidate index returns, and at
-  most `maxFanoutWorkPerEvent` (default 10000, `LIMITS_JSON`) candidates per event; beyond that the
-  rest are skipped and logged. Filters with none of full-length authors, `#p`, `#e`, kinds are
-  "wildcard" and are always candidates. Not measured under load.
 
 ## Protocol support
 
