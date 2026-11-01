@@ -29,6 +29,10 @@ var importStdinIsTerminal = func() bool { return term.IsTerminal(int(os.Stdin.Fd
 
 // plaintextKeystoreWarning is written to stderr (never stdout, so --json stdout
 // stays a pure envelope) after an import into an unencrypted keystore.
+// createPlaintextKeystoreWarning is the same notice for 'identity create': the new
+// private key lands in an unencrypted keystore.json.
+const createPlaintextKeystoreWarning = "warning: the new identity's private key is stored unencrypted in the keystore; run 'hyphae identity change-password' to encrypt the keystore"
+
 const plaintextKeystoreWarning = "warning: the imported key is stored unencrypted in the keystore; run 'hyphae identity change-password' to encrypt the keystore"
 
 // ValidateNickname rejects empty nicknames and any control character

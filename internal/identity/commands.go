@@ -139,6 +139,12 @@ Identities are stored in ~/.hyphae/ with 600 permissions.`,
 				if err := audit.LogAction(nickname, audit.ActionIdentityCreated, map[string]any{"npub": identity.Npub}); err != nil {
 					fmt.Fprintf(os.Stderr, "⚠️  audit log failed: %v\n", err)
 				}
+				// stderr only, so --json stdout stays a pure envelope. ks.Encrypted is
+				// read after the create/unlock above, so a create that just encrypted a
+				// fresh keystore with --password-stdin/--password does not warn.
+				if !ks.Encrypted {
+					fmt.Fprintln(os.Stderr, createPlaintextKeystoreWarning)
+				}
 				type identityOutput struct {
 					Nickname  string `json:"nickname"`
 					Npub      string `json:"npub"`
