@@ -47,7 +47,7 @@ Example: hyphae verify '{"id":"...",...}'`,
 		if valid {
 			green := color.New(color.FgGreen).SprintFunc()
 			fmt.Printf("%s Signature is VALID\n", green("✅"))
-			fmt.Printf("   Event ID: %s\n", event.ID)
+			fmt.Printf("   Event ID: %s\n", event.ID.Hex())
 			fmt.Printf("   Author:   %s\n", common.EncodeNpub(event.PubKey))
 		} else {
 			red := color.New(color.FgRed).SprintFunc()

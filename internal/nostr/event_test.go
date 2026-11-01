@@ -56,6 +56,9 @@ func TestEventCmd_UnreachableRelayFails(t *testing.T) {
 		})
 	})
 	assert.Contains(t, out, "Published to 0/1 relays")
+	// plain 64-char hex id, not the library's debug form "id::<hex>"
+	assert.Regexp(t, `Event ID: [0-9a-f]{64}\n`, out)
+	assert.NotContains(t, out, "id::")
 	var exitErr *common.ExitError
 	require.ErrorAs(t, runErr, &exitErr)
 	assert.Equal(t, common.ErrCodeNetwork, exitErr.Code)
