@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { type Limits, loadLimits } from "./config";
 import { DELETION_DDL, reconcileCounters } from "./deletion";
-import { type Db, EVENTS_DDL } from "./db";
+import { type Db, EVENTS_DDL, migrateEventTags } from "./db";
 import { processEvent } from "./events";
 import { type Hub, peekEventId } from "./hub";
 import { planReap } from "./idle";
@@ -53,6 +53,7 @@ export class Relay extends DurableObject<Env> {
     // A text "ping" is answered with "pong" by the runtime without waking the object from hibernation.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     ctx.blockConcurrencyWhile(async () => {
+      migrateEventTags(this.db);
       this.db.sql.exec(EVENTS_DDL + DELETION_DDL + SUBS_DDL);
       reconcileCounters(this.db);
       // Drop subscriptions of connections that no longer exist. Best effort: a stale row is never
