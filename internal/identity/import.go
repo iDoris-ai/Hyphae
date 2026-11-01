@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"os"
 	"strings"
 	"unicode"
@@ -88,6 +89,7 @@ func readImportLines(r io.Reader, n int) ([]string, error) {
 // multi-gigabyte scrypt run, and only a failed authentication is a bad passphrase.
 const (
 	ncryptsecPayloadLen = 91
+	ncryptsecMinLogN    = 1  // logn 0 means scrypt N=1, which nip49.Decrypt rejects with a non-authentication error
 	ncryptsecMaxLogN    = 19 // NIP-49 scrypt uses r=8: memory = 128*8*2^logn bytes, so 19 is ~512 MiB (22 would be 4 GiB)
 )
 
@@ -97,10 +99,19 @@ func validateNcryptsecStructure(s string) error {
 		return errors.New("input is not a valid ncryptsec")
 	}
 	raw, err := bech32.ConvertBits(data, 5, 8, false)
-	if err != nil || len(raw) != ncryptsecPayloadLen || raw[0] != 0x02 || raw[1] > ncryptsecMaxLogN {
+	if err != nil || len(raw) != ncryptsecPayloadLen || raw[0] != 0x02 || raw[1] < ncryptsecMinLogN || raw[1] > ncryptsecMaxLogN {
 		return errors.New("input is not a valid ncryptsec")
 	}
 	return nil
+}
+
+// secp256k1 group order n. A private key is valid only if 1 <= k < n; zero and
+// values >= n have no usable public key (signatures and NIP-44 fail later).
+var secp256k1Order, _ = new(big.Int).SetString("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 16)
+
+func secretKeyInRange(sk nostr.SecretKey) bool {
+	k := new(big.Int).SetBytes(sk[:])
+	return k.Sign() > 0 && k.Cmp(secp256k1Order) < 0
 }
 
 func importCommand() *cli.Command {
@@ -120,7 +131,9 @@ Examples:
   printf '%s\n%s\n%s\n' "$KS_PASS" "$PASSPHRASE" "$NCRYPTSEC" | hyphae identity import -n alice --ncryptsec-stdin --password-stdin --json
 
 JSON errors use stable codes: bad_backup_password, invalid_key, nickname_exists,
-npub_exists, keystore_locked. Importing a key already present fails (npub_exists).`,
+npub_exists, keystore_locked. Importing a key already present fails (npub_exists).
+An empty backup passphrase is rejected, so a backup made with an empty passphrase
+cannot be imported. Secret keys outside 1 <= k < n are rejected (invalid_key).`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "nickname", Aliases: []string{"n"}, Usage: "Nickname for the imported identity"},
 			&cli.BoolFlag{Name: "ncryptsec-stdin", Usage: "Read backup passphrase then NIP-49 ncryptsec from stdin"},
@@ -165,16 +178,13 @@ func runImport(ctx context.Context, c *cli.Command) error {
 	}
 	keyLine := lines[0]
 
+	// Order matters: cheap validation first, then the keystore password (so a
+	// wrong keystore password fails before the expensive backup scrypt), then
+	// the decryption, then the key range check.
 	var sk nostr.SecretKey
 	if useNcrypt {
 		if err := validateNcryptsecStructure(keyLine); err != nil {
 			return common.NewExitError(common.ErrCodeInvalidKey, err)
-		}
-		sk, err = nip49.Decrypt(keyLine, backupPass)
-		if err != nil {
-			// NIP-49 gives no way to tell a wrong passphrase from a corrupted
-			// string; the AEAD tag failing is by far the common case.
-			return userErr(common.ErrCodeBadBackupPassword, "failed to decrypt ncryptsec: wrong backup passphrase or corrupted backup")
 		}
 	} else {
 		if !strings.HasPrefix(keyLine, "nsec1") {
@@ -203,6 +213,17 @@ func runImport(ctx context.Context, c *cli.Command) error {
 		if err := UnlockKeyStore(ks, password); err != nil {
 			return userErr(common.ErrCodeKeystoreLocked, "failed to unlock keystore")
 		}
+	}
+	if useNcrypt {
+		sk, err = nip49.Decrypt(keyLine, backupPass)
+		if err != nil {
+			// NIP-49 gives no way to tell a wrong passphrase from a corrupted
+			// string; the AEAD tag failing is by far the common case.
+			return userErr(common.ErrCodeBadBackupPassword, "failed to decrypt ncryptsec: wrong backup passphrase or corrupted backup")
+		}
+	}
+	if !secretKeyInRange(sk) {
+		return userErr(common.ErrCodeInvalidKey, "secret key is out of range (must be 1 <= k < n)")
 	}
 	identity, err := ImportIdentityWithPassword(ks, nickname, password, sk, c.Bool("default"))
 	if err != nil {

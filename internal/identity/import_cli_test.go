@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -197,6 +198,54 @@ func TestImportCLIRejections(t *testing.T) {
 		{
 			name:    "ncryptsec logn 20 is above the 512 MiB cap",
 			stdin:   "pw\n" + fakeNcryptsec(t, append([]byte{0x02, 20}, make([]byte, 89)...)) + "\n",
+			args:    []string{"identity", "import", "--nickname", "alice", "--ncryptsec-stdin", "--json"},
+			exit:    common.ExitUserError,
+			code:    common.ErrCodeInvalidKey,
+			noStore: true,
+		},
+		{
+			name:    "ncryptsec logn 0 (scrypt N=1) is invalid, not a bad passphrase",
+			stdin:   "pw\n" + fakeNcryptsec(t, append([]byte{0x02, 0}, make([]byte, 89)...)) + "\n",
+			args:    []string{"identity", "import", "--nickname", "alice", "--ncryptsec-stdin", "--json"},
+			exit:    common.ExitUserError,
+			code:    common.ErrCodeInvalidKey,
+			noStore: true,
+		},
+		{
+			name:    "all-zero secret key",
+			stdin:   common.EncodeNsec(nostr.SecretKey{}) + "\n",
+			args:    []string{"identity", "import", "--nickname", "alice", "--nsec-stdin", "--default", "--json"},
+			exit:    common.ExitUserError,
+			code:    common.ErrCodeInvalidKey,
+			noStore: true,
+		},
+		{
+			name:    "secret key equal to the curve order n",
+			stdin:   common.EncodeNsec(secretKeyFromHex(t, "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141")) + "\n",
+			args:    []string{"identity", "import", "--nickname", "alice", "--nsec-stdin", "--json"},
+			exit:    common.ExitUserError,
+			code:    common.ErrCodeInvalidKey,
+			noStore: true,
+		},
+		{
+			name:    "secret key n+1 (would wrap to 1)",
+			stdin:   common.EncodeNsec(secretKeyFromHex(t, "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364142")) + "\n",
+			args:    []string{"identity", "import", "--nickname", "alice", "--nsec-stdin", "--json"},
+			exit:    common.ExitUserError,
+			code:    common.ErrCodeInvalidKey,
+			noStore: true,
+		},
+		{
+			name:    "all-ff secret key",
+			stdin:   common.EncodeNsec(secretKeyFromHex(t, "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")) + "\n",
+			args:    []string{"identity", "import", "--nickname", "alice", "--nsec-stdin", "--json"},
+			exit:    common.ExitUserError,
+			code:    common.ErrCodeInvalidKey,
+			noStore: true,
+		},
+		{
+			name:    "all-zero key inside an otherwise valid ncryptsec",
+			stdin:   "backup-secret\n" + mustNcryptsec(t, nostr.SecretKey{}, "backup-secret") + "\n",
 			args:    []string{"identity", "import", "--nickname", "alice", "--ncryptsec-stdin", "--json"},
 			exit:    common.ExitUserError,
 			code:    common.ErrCodeInvalidKey,
@@ -528,4 +577,50 @@ func TestImportAcceptsSingleLineTerminators(t *testing.T) {
 			assertExactImport(t, importData(t, result), "alice", common.EncodeNpub(sk.Public()))
 		})
 	}
+}
+
+func secretKeyFromHex(t *testing.T, h string) nostr.SecretKey {
+	t.Helper()
+	b, err := hex.DecodeString(h)
+	if err != nil || len(b) != 32 {
+		t.Fatalf("bad hex key %q", h)
+	}
+	var sk nostr.SecretKey
+	copy(sk[:], b)
+	return sk
+}
+
+func TestImportDuplicateViaNcryptsec(t *testing.T) {
+	home := t.TempDir()
+	sk := nostr.Generate()
+	npub := common.EncodeNpub(sk.Public())
+	ncrypt := mustNcryptsec(t, sk, "backup-secret")
+	otherNcrypt := mustNcryptsec(t, nostr.Generate(), "backup-secret")
+	args := func(nick string) []string {
+		return []string{"identity", "import", "--nickname", nick, "--ncryptsec-stdin", "--json"}
+	}
+	first := runIdentityCLI(t, home, strings.NewReader("backup-secret\n"+ncrypt+"\n"), nil, args("alice")...)
+	assertExactImport(t, importData(t, first), "alice", npub)
+
+	dupNpub := runIdentityCLI(t, home, strings.NewReader("backup-secret\n"+ncrypt+"\n"), nil, args("bob")...)
+	decodeCLIError(t, dupNpub, common.ExitUserError, common.ErrCodeNpubExists)
+	assertHidden(t, dupNpub, ncrypt, "backup-secret")
+
+	dupName := runIdentityCLI(t, home, strings.NewReader("backup-secret\n"+otherNcrypt+"\n"), nil, args("alice")...)
+	decodeCLIError(t, dupName, common.ExitUserError, common.ErrCodeNicknameExists)
+	assertHidden(t, dupName, otherNcrypt, "backup-secret")
+	assertSingleIdentity(t, home, "alice", npub)
+}
+
+// A wrong keystore password must fail before the (expensive) backup scrypt:
+// with both passwords wrong the answer is keystore_locked, not bad_backup_password.
+func TestImportChecksKeystorePasswordBeforeBackupPassphrase(t *testing.T) {
+	home := t.TempDir()
+	runIdentityCLI(t, home, strings.NewReader("pw\n"), nil,
+		"identity", "create", "--nickname", "base", "--password-stdin", "--json")
+	ncrypt := mustNcryptsec(t, nostr.Generate(), "backup-secret")
+	res := runIdentityCLI(t, home, strings.NewReader("wrong-keystore\nwrong-backup\n"+ncrypt+"\n"), nil,
+		"identity", "import", "--nickname", "alice", "--ncryptsec-stdin", "--password-stdin", "--json")
+	decodeCLIError(t, res, common.ExitAuthError, common.ErrCodeKeystoreLocked)
+	assertHidden(t, res, ncrypt, "wrong-keystore", "wrong-backup")
 }
