@@ -1,6 +1,5 @@
 import { type Limits, loadLimits } from "./config";
-import { createHealthCache } from "./health";
-import { withCors } from "./http";
+import { createHealthCache, withCors } from "./http";
 import { sourceKey } from "./limits";
 export { Relay } from "./relay";
 
