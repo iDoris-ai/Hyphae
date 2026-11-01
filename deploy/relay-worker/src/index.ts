@@ -128,7 +128,7 @@ async function route(request: Request, env: Env): Promise<Response> {
           "content-type": "text/html; charset=utf-8",
           "content-security-policy": LANDING_CSP,
           "cache-control": "public, max-age=300",
-          vary: "Accept-Language",
+          vary: "Accept, Accept-Language",
         },
       });
     }

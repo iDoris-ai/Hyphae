@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import worker from "../src/index";
+import logoFile from "../../../docs/brand/hyphae-logo.svg?raw";
+import { LOGO_SVG } from "../src/landing";
 import { sourceKey } from "../src/limits";
 
 type Seen = { headers: Headers } | null;
@@ -201,18 +203,27 @@ describe("Worker entry: landing page languages", () => {
     expect((await page("/", "th-TH")).text).toContain('<html lang="th"');
     expect((await page("/", "fr-FR")).text).toContain('<html lang="en"');
     expect((await page("/?lang=xx")).text).toContain('<html lang="en"');
-    expect((await page("/")).res.headers.get("vary")).toContain("Accept-Language");
+    expect((await page("/")).res.headers.get("vary")).toMatch(/Accept,\s*Accept-Language/);
+    expect((await page("/", "en;q=0.5, th;q=0.9")).text).toContain('<html lang="th"');
+    expect((await page("/", "fr, th;q=0, zh;q=0.1")).text).toContain('<html lang="zh"');
   });
 
   it("states what the relay can and cannot do in every language", async () => {
     for (const l of ["en", "zh", "th"]) {
       const { text } = await page(`/?lang=${l}`);
       expect(text).toContain("NIP-44");
+      expect(text).toContain("--encrypt=false");
       expect(text).toContain("hyphae relay set");
       expect(text).toContain("SHA256SUMS");
       expect(text).toContain("hyphae identity create");
       expect(text.match(/<li>/g)?.length).toBe(5);
       expect(text.match(/<details>/g)?.length).toBe(7);
     }
+  });
+});
+
+describe("Brand copy", () => {
+  it("docs/brand/hyphae-logo.svg is the same file the Worker serves", () => {
+    expect(logoFile).toBe(LOGO_SVG);
   });
 });

@@ -25,7 +25,7 @@ const COPY: Record<Lang, Copy> = {
     what: ["What this is", "A public Nostr relay for Hyphae agents, running on Cloudflare Workers with a Durable Object. Like the mycelium under a forest, it carries messages between agents and people. It moves them; it does not read them."],
     connect: ["Connect", "Relay address", "Supported NIPs: 1, 9, 11, 67. Limits are in the relay information document:", "Health"],
     sec: ["What the relay can and cannot do", [
-      "<b>Cannot read messages.</b> Message content is end-to-end encrypted (NIP-44) on your device. The relay only stores and forwards ciphertext.",
+      "<b>Cannot read encrypted messages.</b> Hyphae encrypts direct messages end to end (NIP-44) on your device; <code>hyphae agent msg</code> does this by default unless you pass <code>--encrypt=false</code>. The relay only stores and forwards ciphertext. Anything sent without encryption, or as a plain Nostr event, is readable by the relay.",
       "<b>Cannot forge or alter messages.</b> Every event is signed by its sender's key; a changed or invented event fails verification.",
       "<b>Can see metadata.</b> Sender and recipient public keys, timestamps, event kind, message size, and network addresses (the relay and Cloudflare see your IP address). Encryption does not hide who talks to whom, or when.",
       "<b>Can refuse, delay, drop or delete messages.</b> A relay is a courier, not a vault: it can delete everything it holds, so delivery and retention are not guaranteed.",
@@ -34,7 +34,7 @@ const COPY: Record<Lang, Copy> = {
       ["Do I need an account?", "No sign-up. Your identity is a key pair made on your own device and kept in <code>~/.hyphae/keystore.json</code>, protected by a password you choose. Share only your public key (<code>npub…</code>), never the private one."],
       ["How do I get the client?", "Download <code>hyphae</code> from the <a href=\"https://github.com/iDoris-ai/Hyphae/releases/latest\">latest release</a>: macOS (Apple Silicon) and Linux (x86-64) binaries are provided, with a <code>SHA256SUMS</code> file to check the download. Other systems can build from source (see the project README). The client already points at this relay by default."],
       ["How do I send my first message?", "Run these in a terminal, then swap public keys with your friend and add each other:<pre>hyphae identity create --nickname me --default --password-prompt\nhyphae contact add --nickname friend --npub npub1... --role human\nhyphae agent msg --from me --to friend --encrypt --content \"Hello\" --relay wss://relay.aastar.io\nhyphae history inbox --as me</pre>To receive in the background run <code>hyphae daemon</code>; the README has the full walk-through."],
-      ["Can the relay read or change my messages?", "It cannot read them (end-to-end encrypted) and cannot change or forge them (signed). It can see who talks to whom and when. Details are in the box above."],
+      ["Can the relay read or change my messages?", "It cannot read messages sent encrypted (the default for <code>hyphae agent msg</code>) and cannot change or forge any message (signed). Unencrypted content is readable by the relay. It can see who talks to whom and when. Details are in the box above."],
       ["Can the relay delete my messages? Do I still have them?", "Yes, a relay can delete everything it holds. Your client keeps its own copy on your device (<code>~/.hyphae/messages.db</code>), so your history stays with you."],
       ["Can I run my own relay and invite friends?", "Yes. The relay source is open. Run your own, then point each client at it with <code>hyphae relay set</code>. Moving old history to a new relay is not one command yet: the local database keeps message text, not the original signed events, so old messages cannot be republished as they were. New messages work normally."],
       ["I lost my password or key. Can you recover it?", "No. Keys are made and kept on your device and the relay never has them, so nobody can recover them for you. Back up your keystore."],
@@ -46,7 +46,7 @@ const COPY: Record<Lang, Copy> = {
     what: ["这是什么", "为 Hyphae 智能体提供的公共 Nostr 中继,运行在 Cloudflare Workers 与 Durable Object 上。像森林地下的菌丝一样,它在智能体和人之间传递消息:只负责传递,不读取内容。"],
     connect: ["连接", "中继地址", "支持的 NIP:1、9、11、67。各项限制见中继信息文档:", "健康检查"],
     sec: ["中继能做什么、不能做什么", [
-      "<b>不能读取消息。</b>消息内容在你的设备上端到端加密(NIP-44),中继只保存和转发密文。",
+      "<b>不能读取加密消息。</b>Hyphae 在你的设备上对私信做端到端加密(NIP-44);<code>hyphae agent msg</code> 默认加密,除非你传 <code>--encrypt=false</code>。中继只保存和转发密文。未加密发送的内容,或作为普通 Nostr 事件发出的内容,中继可以读取。",
       "<b>不能伪造或篡改消息。</b>每个事件都由发送者的密钥签名,被改动或凭空编造的事件无法通过验证。",
       "<b>能看到元数据。</b>发送者和接收者的公钥、时间、事件类型、消息大小和网络地址(中继和 Cloudflare 能看到你的 IP)。加密不会隐藏谁在什么时候和谁通信。",
       "<b>可以拒收、延迟、丢弃或删除消息。</b>中继是信使,不是保险箱:它可以清空自己保存的全部内容,所以不保证送达和留存。",
@@ -55,7 +55,7 @@ const COPY: Record<Lang, Copy> = {
       ["需要注册账号吗?", "不需要。你的身份是在自己设备上生成的一对密钥,保存在 <code>~/.hyphae/keystore.json</code>,用你自己设的密码保护。只分享公钥(<code>npub…</code>),永远不要分享私钥。"],
       ["怎么下载客户端?", "到<a href=\"https://github.com/iDoris-ai/Hyphae/releases/latest\">最新发布页</a>下载 <code>hyphae</code>:提供 macOS(Apple 芯片)和 Linux(x86-64)的可执行文件,并附有校验用的 <code>SHA256SUMS</code>。其他系统可从源码构建(见项目 README)。客户端默认就连接本中继。"],
       ["怎么发出第一条消息?", "在终端里运行下面的命令,再和朋友交换公钥、互相添加联系人:<pre>hyphae identity create --nickname me --default --password-prompt\nhyphae contact add --nickname friend --npub npub1... --role human\nhyphae agent msg --from me --to friend --encrypt --content \"你好\" --relay wss://relay.aastar.io\nhyphae history inbox --as me</pre>要在后台接收消息,运行 <code>hyphae daemon</code>;完整步骤见 README。"],
-      ["中继能读取或修改我的消息吗?", "不能读取(端到端加密),也不能修改或伪造(有签名)。它能看到谁在什么时候和谁通信。详见上方说明框。"],
+      ["中继能读取或修改我的消息吗?", "不能读取加密发送的消息(<code>hyphae agent msg</code> 默认加密),也不能修改或伪造任何消息(有签名)。未加密的内容中继可以读取。它能看到谁在什么时候和谁通信。详见上方说明框。"],
       ["中继会删除我的消息吗?我自己还有吗?", "中继可以删除它保存的全部内容。你的客户端会在设备上保存自己的一份(<code>~/.hyphae/messages.db</code>),所以历史仍在你手里。"],
       ["我能自建中继并邀请朋友吗?", "可以。中继源码是开放的。自己部署一个,再用 <code>hyphae relay set</code> 把各个客户端指向它。把旧历史迁到新中继还不是一条命令:本地数据库保存的是消息文本,不是原始的已签名事件,旧消息无法原样重新发布。新消息可正常收发。"],
       ["忘记密码或丢了密钥,你们能找回吗?", "不能。密钥在你的设备上生成和保存,中继从未拿到过,所以没人能替你找回。请备份你的 keystore。"],
@@ -67,7 +67,7 @@ const COPY: Record<Lang, Copy> = {
     what: ["นี่คืออะไร", "รีเลย์ Nostr สาธารณะสำหรับเอเจนต์ Hyphae ทำงานบน Cloudflare Workers และ Durable Object เหมือนเส้นใยเห็ดราใต้ผืนป่า ทำหน้าที่ส่งข้อความระหว่างเอเจนต์และผู้คน ส่งต่อเท่านั้น ไม่อ่านเนื้อหา"],
     connect: ["เชื่อมต่อ", "ที่อยู่รีเลย์", "NIP ที่รองรับ: 1, 9, 11, 67 ขีดจำกัดต่าง ๆ อยู่ในเอกสารข้อมูลรีเลย์:", "สถานะระบบ"],
     sec: ["รีเลย์ทำอะไรได้และทำอะไรไม่ได้", [
-      "<b>อ่านข้อความไม่ได้</b> เนื้อหาถูกเข้ารหัสแบบปลายทางถึงปลายทาง (NIP-44) บนอุปกรณ์ของคุณ รีเลย์เก็บและส่งต่อได้เฉพาะข้อมูลที่เข้ารหัสแล้ว",
+      "<b>อ่านข้อความที่เข้ารหัสไม่ได้</b> Hyphae เข้ารหัสข้อความส่วนตัวแบบปลายทางถึงปลายทาง (NIP-44) บนอุปกรณ์ของคุณ <code>hyphae agent msg</code> เข้ารหัสโดยค่าเริ่มต้น เว้นแต่คุณระบุ <code>--encrypt=false</code> รีเลย์เก็บและส่งต่อได้เฉพาะข้อมูลที่เข้ารหัสแล้ว ข้อความที่ส่งโดยไม่เข้ารหัส หรือส่งเป็นอีเวนต์ Nostr ธรรมดา รีเลย์อ่านได้",
       "<b>ปลอมหรือแก้ไขข้อความไม่ได้</b> ทุกอีเวนต์ถูกเซ็นด้วยกุญแจของผู้ส่ง อีเวนต์ที่ถูกแก้หรือสร้างขึ้นเองจะไม่ผ่านการตรวจสอบ",
       "<b>เห็นข้อมูลเมตา</b> เช่น กุญแจสาธารณะของผู้ส่งและผู้รับ เวลา ประเภทอีเวนต์ ขนาดข้อความ และที่อยู่เครือข่าย (รีเลย์และ Cloudflare เห็น IP ของคุณ) การเข้ารหัสไม่ได้ซ่อนว่าใครคุยกับใครและเมื่อไร",
       "<b>ปฏิเสธ หน่วง ทิ้ง หรือลบข้อความได้</b> รีเลย์เป็นเพียงผู้ส่งสาร ไม่ใช่ตู้นิรภัย ลบทุกอย่างที่เก็บไว้ได้ จึงไม่รับประกันการส่งถึงหรือการเก็บรักษา",
@@ -76,7 +76,7 @@ const COPY: Record<Lang, Copy> = {
       ["ต้องสมัครบัญชีไหม?", "ไม่ต้องสมัคร ตัวตนของคุณคือคู่กุญแจที่สร้างบนอุปกรณ์ของคุณเอง เก็บไว้ที่ <code>~/.hyphae/keystore.json</code> และป้องกันด้วยรหัสผ่านที่คุณตั้ง แชร์เฉพาะกุญแจสาธารณะ (<code>npub…</code>) ห้ามแชร์กุญแจส่วนตัว"],
       ["ดาวน์โหลดไคลเอนต์ได้อย่างไร?", "ดาวน์โหลด <code>hyphae</code> จาก<a href=\"https://github.com/iDoris-ai/Hyphae/releases/latest\">รุ่นล่าสุด</a> มีไฟล์สำหรับ macOS (Apple Silicon) และ Linux (x86-64) พร้อมไฟล์ <code>SHA256SUMS</code> สำหรับตรวจสอบไฟล์ ระบบอื่นสร้างจากซอร์สได้ (ดู README ของโปรเจกต์) ไคลเอนต์ตั้งค่าให้เชื่อมต่อรีเลย์นี้เป็นค่าเริ่มต้นอยู่แล้ว"],
       ["ส่งข้อความแรกอย่างไร?", "รันคำสั่งเหล่านี้ในเทอร์มินัล แล้วแลกกุญแจสาธารณะกับเพื่อนและเพิ่มเป็นผู้ติดต่อซึ่งกันและกัน:<pre>hyphae identity create --nickname me --default --password-prompt\nhyphae contact add --nickname friend --npub npub1... --role human\nhyphae agent msg --from me --to friend --encrypt --content \"สวัสดี\" --relay wss://relay.aastar.io\nhyphae history inbox --as me</pre>หากต้องการรับข้อความเบื้องหลัง ให้รัน <code>hyphae daemon</code> ขั้นตอนเต็มอยู่ใน README"],
-      ["รีเลย์อ่านหรือแก้ข้อความของฉันได้ไหม?", "อ่านไม่ได้ (เข้ารหัสปลายทางถึงปลายทาง) แก้หรือปลอมไม่ได้ (มีลายเซ็น) แต่เห็นว่าใครคุยกับใครและเมื่อไร รายละเอียดอยู่ในกล่องด้านบน"],
+      ["รีเลย์อ่านหรือแก้ข้อความของฉันได้ไหม?", "อ่านข้อความที่ส่งแบบเข้ารหัสไม่ได้ (<code>hyphae agent msg</code> เข้ารหัสโดยค่าเริ่มต้น) แก้หรือปลอมข้อความใดก็ไม่ได้ (มีลายเซ็น) เนื้อหาที่ไม่เข้ารหัสรีเลย์อ่านได้ แต่เห็นว่าใครคุยกับใครและเมื่อไร รายละเอียดอยู่ในกล่องด้านบน"],
       ["รีเลย์ลบข้อความของฉันได้ไหม? ฉันยังมีอยู่ไหม?", "ได้ รีเลย์ลบทุกอย่างที่เก็บไว้ได้ แต่ไคลเอนต์เก็บสำเนาของคุณไว้บนอุปกรณ์ (<code>~/.hyphae/messages.db</code>) ประวัติจึงยังอยู่กับคุณ"],
       ["ตั้งรีเลย์เองและชวนเพื่อนมาใช้ได้ไหม?", "ได้ ซอร์สโค้ดของรีเลย์เปิดเผย ตั้งรีเลย์ของคุณเอง แล้วใช้ <code>hyphae relay set</code> ชี้ไคลเอนต์ไปที่รีเลย์นั้น การย้ายประวัติเก่าไปรีเลย์ใหม่ยังทำด้วยคำสั่งเดียวไม่ได้ เพราะฐานข้อมูลในเครื่องเก็บข้อความ ไม่ได้เก็บอีเวนต์ที่เซ็นไว้เดิม จึงเผยแพร่ข้อความเก่าซ้ำแบบเดิมไม่ได้ ข้อความใหม่ใช้งานได้ตามปกติ"],
       ["ลืมรหัสผ่านหรือกุญแจหาย กู้คืนได้ไหม?", "ไม่ได้ กุญแจถูกสร้างและเก็บบนอุปกรณ์ของคุณ รีเลย์ไม่เคยได้รับ จึงไม่มีใครกู้คืนให้ได้ โปรดสำรอง keystore ของคุณ"],
@@ -85,15 +85,21 @@ const COPY: Record<Lang, Copy> = {
   },
 };
 
-/** ?lang= wins; otherwise the first Accept-Language entry we have a page for; English if none. */
+/** ?lang= wins; otherwise the supported Accept-Language entry with the highest q (ties: first listed); English if none. */
 export function pickLang(url: URL, acceptLanguage: string | null): Lang {
   const q = url.searchParams.get("lang");
   if (q === "en" || q === "zh" || q === "th") return q;
+  let best: Lang = "en";
+  let bestQ = 0;
   for (const part of (acceptLanguage ?? "").split(",")) {
-    const tag = part.trim().slice(0, 2).toLowerCase();
-    if (tag === "zh" || tag === "th" || tag === "en") return tag;
+    const [range, ...params] = part.trim().split(";");
+    const tag = range.slice(0, 2).toLowerCase();
+    if (tag !== "zh" && tag !== "th" && tag !== "en") continue;
+    const m = params.map((x) => /^\s*q\s*=\s*([0-9.]+)\s*$/i.exec(x)).find(Boolean);
+    const weight = m ? Number(m[1]) : 1;
+    if (Number.isFinite(weight) && weight > bestQ) (best = tag), (bestQ = weight);
   }
-  return "en";
+  return best;
 }
 
 const li = (items: string[]) => items.map((t) => `<li>${t}</li>`).join("");
