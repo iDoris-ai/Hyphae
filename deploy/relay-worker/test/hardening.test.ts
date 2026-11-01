@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { CORS, createHealthCache, HEALTH_FAIL_TTL_MS, HEALTH_OK_TTL_MS, withCors } from "../src/http";
-import { idleSockets, planReap } from "../src/idle";
-import type { ConnState } from "../src/limits";
+import { type ConnState, idleSockets, planReap } from "../src/limits";
 import { LIMITS, loadLimits } from "../src/config";
 
 vi.mock("cloudflare:workers", () => ({ DurableObject: class {} }));
