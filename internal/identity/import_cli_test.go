@@ -1,13 +1,16 @@
 package identity
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"fiatjaf.com/nostr"
 	"fiatjaf.com/nostr/nip49"
@@ -47,6 +50,9 @@ func mustNcryptsec(t *testing.T, sk nostr.SecretKey, passphrase string) string {
 
 func importData(t *testing.T, result cliResult) map[string]any {
 	t.Helper()
+	// Imports into an unencrypted keystore legitimately print the plaintext
+	// warning to stderr; any other stderr output is still a failure.
+	result.stderr = strings.Replace(result.stderr, plaintextKeystoreWarning+"\n", "", 1)
 	data, ok := decodeSuccess(t, result)["data"].(map[string]any)
 	if !ok {
 		t.Fatalf("import data is not an object: %s", result.stdout)
@@ -623,4 +629,138 @@ func TestImportChecksKeystorePasswordBeforeBackupPassphrase(t *testing.T) {
 		"identity", "import", "--nickname", "alice", "--ncryptsec-stdin", "--password-stdin", "--json")
 	decodeCLIError(t, res, common.ExitAuthError, common.ErrCodeKeystoreLocked)
 	assertHidden(t, res, ncrypt, "wrong-keystore", "wrong-backup")
+}
+
+func countWarnings(stderr string) int { return strings.Count(stderr, "unencrypted") }
+
+// F5: an import that leaves the nsec in plaintext on disk says so, once, on
+// stderr only, for both import modes, and stdout stays a pure JSON envelope.
+func TestImportPlaintextKeystoreWarning(t *testing.T) {
+	sk1, sk2 := nostr.Generate(), nostr.Generate()
+	cases := []struct {
+		name  string
+		stdin string
+		flag  string
+		sk    nostr.SecretKey
+	}{
+		{"nsec-stdin", common.EncodeNsec(sk1) + "\n", "--nsec-stdin", sk1},
+		{"ncryptsec-stdin", "pp\n" + mustNcryptsec(t, sk2, "pp") + "\n", "--ncryptsec-stdin", sk2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			result := runIdentityCLI(t, home, strings.NewReader(tc.stdin), nil,
+				"identity", "import", "--nickname", "alice", tc.flag, "--json")
+			if result.code != 0 {
+				t.Fatalf("exit=%d stderr=%s", result.code, result.stderr)
+			}
+			if result.stderr != plaintextKeystoreWarning+"\n" || countWarnings(result.stderr) != 1 {
+				t.Fatalf("stderr = %q, want exactly the one-line warning", result.stderr)
+			}
+			if !strings.Contains(result.stderr, "identity change-password") {
+				t.Fatalf("warning does not name the real command: %q", result.stderr)
+			}
+			if strings.Contains(result.stdout, "unencrypted") || strings.Contains(result.stdout, "warning") {
+				t.Fatalf("warning leaked into stdout: %s", result.stdout)
+			}
+			var env map[string]any
+			if err := json.Unmarshal([]byte(result.stdout), &env); err != nil || env["ok"] != true {
+				t.Fatalf("stdout is not a pure JSON envelope: %v %s", err, result.stdout)
+			}
+			assertHidden(t, result, common.EncodeNsec(tc.sk))
+		})
+	}
+
+	t.Run("second import into the same unencrypted keystore warns once per run", func(t *testing.T) {
+		home := t.TempDir()
+		for _, nick := range []string{"a", "b"} {
+			r := runIdentityCLI(t, home, strings.NewReader(common.EncodeNsec(nostr.Generate())+"\n"), nil,
+				"identity", "import", "--nickname", nick, "--nsec-stdin", "--json")
+			if r.code != 0 || r.stderr != plaintextKeystoreWarning+"\n" {
+				t.Fatalf("%s: exit=%d stderr=%q", nick, r.code, r.stderr)
+			}
+		}
+	})
+
+	t.Run("failed import prints no warning, only the error envelope", func(t *testing.T) {
+		home := t.TempDir()
+		r := runIdentityCLI(t, home, strings.NewReader("hello\n"), nil,
+			"identity", "import", "--nickname", "alice", "--nsec-stdin", "--json")
+		decodeCLIError(t, r, common.ExitUserError, common.ErrCodeInvalidKey)
+		if countWarnings(r.stderr) != 0 {
+			t.Fatalf("warning on a failed import: %q", r.stderr)
+		}
+	})
+}
+
+// An encrypted keystore (existing, or created by this very import through
+// --password-stdin) must not get the plaintext warning.
+func TestImportNoWarningForEncryptedKeystore(t *testing.T) {
+	t.Run("existing encrypted keystore", func(t *testing.T) {
+		home := t.TempDir()
+		decodeSuccess(t, runIdentityCLI(t, home, strings.NewReader("pw\n"), nil,
+			"identity", "create", "--nickname", "base", "--password-stdin", "--json"))
+		r := runIdentityCLI(t, home, strings.NewReader("pw\n"+common.EncodeNsec(nostr.Generate())+"\n"), nil,
+			"identity", "import", "--nickname", "alice", "--nsec-stdin", "--password-stdin", "--json")
+		if r.code != 0 || r.stderr != "" {
+			t.Fatalf("exit=%d stderr=%q, want clean success", r.code, r.stderr)
+		}
+	})
+	t.Run("fresh keystore encrypted by the import itself", func(t *testing.T) {
+		home := t.TempDir()
+		r := runIdentityCLI(t, home, strings.NewReader("pw\n"+common.EncodeNsec(nostr.Generate())+"\n"), nil,
+			"identity", "import", "--nickname", "alice", "--nsec-stdin", "--password-stdin", "--json")
+		if r.code != 0 || r.stderr != "" {
+			t.Fatalf("exit=%d stderr=%q, want clean success", r.code, r.stderr)
+		}
+	})
+}
+
+// F4: on a terminal nothing is read (no echo, no wait for Ctrl-D) and the user
+// is told to pipe the values in. The terminal check is forced through the
+// package variable instead of a real pty.
+func TestImportRefusesTerminalStdin(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pr.Close()
+	defer pw.Close()
+	nsec := common.EncodeNsec(nostr.Generate())
+	if _, err := pw.WriteString(nsec + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	// Writer stays open: a read that is not guarded would block, not hit EOF.
+	oldStdin, oldCheck := os.Stdin, importStdinIsTerminal
+	os.Stdin, importStdinIsTerminal = pr, func() bool { return true }
+	defer func() { os.Stdin, importStdinIsTerminal = oldStdin, oldCheck }()
+
+	// Bounded so that a regression (a read that blocks on the open pipe) fails
+	// instead of hanging the suite.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- importCommand().Run(ctx, []string{"import", "--nickname", "alice", "--nsec-stdin"})
+	}()
+	select {
+	case err = <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("import blocked reading stdin on a terminal")
+	}
+	var exit *common.ExitError
+	if !errors.As(err, &exit) || exit.Code != common.ErrCodeUser || !strings.Contains(exit.Error(), "pipe") {
+		t.Fatalf("err = %v, want user_error telling the user to pipe", err)
+	}
+	if strings.Contains(exit.Error(), nsec) {
+		t.Fatal("error leaked the secret")
+	}
+	assertNoKeystore(t, home)
+	// Nothing was consumed from stdin.
+	buf := make([]byte, 5)
+	if n, _ := pr.Read(buf); n != 5 {
+		t.Fatalf("stdin was read before the terminal check (only %d bytes left)", n)
+	}
 }
