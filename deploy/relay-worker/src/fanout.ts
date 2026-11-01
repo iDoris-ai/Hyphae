@@ -7,8 +7,9 @@ import { type NostrEvent, utf8Length } from "./nostr";
 /**
  * Delivers an event to matching subscriptions. The JSON is built once. Only subscriptions the
  * candidate index returns are compared (full matchAny still decides), and at most
- * maxFanoutWorkPerEvent candidates are looked at per event; the rest are skipped and
- * logged. Budgets bound the delivery: per event, global bytes/min, per-source bytes/min (a source
+ * maxFanoutWorkPerEvent candidates are looked at per event (loadLimits keeps it >= maxSubRows, so
+ * normally nobody is skipped); the rest are skipped and a warning is logged (no counter).
+ * Budgets bound the delivery: per event, global bytes/min, per-source bytes/min (a source
  * gets at most a quarter of the global budget) and per-socket bytes/min. A delivery over a
  * per-source or per-socket quota is dropped (and counted); only a socket that stays over quota
  * for several windows is closed.

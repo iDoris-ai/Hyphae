@@ -243,4 +243,36 @@ describe("SubStore candidate index", () => {
     expect([...subs.candidates(e)]).toEqual(["c\0many"]);
     expect([...subs.candidates({ ...e, kind: 3 })].sort()).toEqual(["c\0few", "c\0many"]);
   });
+
+  describe("index clean-up", () => {
+    const ev = { id: hex(9), pubkey: hex(2), kind: 7, created_at: 5, tags: [], content: "", sig: "" };
+    const refs = (subs: SubStore, kind = 7) => [...subs.candidates({ ...ev, kind })];
+    const fresh = () => {
+      const subs = new SubStore(open());
+      subs.candidates(ev); // build the index now, so later changes must be applied to it
+      return subs;
+    };
+    it("a removed subscription (CLOSE) is no longer a candidate", () => {
+      const subs = fresh();
+      subs.save("c", "s", JSON.stringify([{ kinds: [7] }]));
+      expect(refs(subs)).toEqual(["c\0s"]);
+      subs.remove("c", "s");
+      expect(refs(subs)).toEqual([]);
+    });
+    it("a dropped connection leaves no candidates", () => {
+      const subs = fresh();
+      subs.save("c", "a", JSON.stringify([{ kinds: [7] }]));
+      subs.save("c", "b", JSON.stringify([{ since: 1 }]));
+      subs.save("d", "a", JSON.stringify([{ kinds: [7] }]));
+      subs.dropConn("c");
+      expect(refs(subs)).toEqual(["d\0a"]);
+    });
+    it("replacing a subscription with a different filter drops its old buckets", () => {
+      const subs = fresh();
+      subs.save("c", "s", JSON.stringify([{ kinds: [7] }]));
+      subs.save("c", "s", JSON.stringify([{ kinds: [8] }]));
+      expect(refs(subs, 7)).toEqual([]);
+      expect(refs(subs, 8)).toEqual(["c\0s"]);
+    });
+  });
 });
