@@ -61,6 +61,11 @@ func tempKeystores(t *testing.T) []string {
 
 func TestKilledWriterTempFileIsRemovedByNextWrite(t *testing.T) {
 	setupTempKeyStore(t)
+	seed, err := LoadKeyStore()
+	require.NoError(t, err)
+	ident, err := CreateIdentity(seed, "seed")
+	require.NoError(t, err)
+	require.NotEmpty(t, ident.Nsec)
 	npub := common.EncodeNpub(nostr.Generate().Public())
 	child := startParkedWriter(t, npub)
 
@@ -68,13 +73,21 @@ func TestKilledWriterTempFileIsRemovedByNextWrite(t *testing.T) {
 	require.Len(t, temps, 1)
 	data, err := os.ReadFile(temps[0])
 	require.NoError(t, err)
-	require.Contains(t, string(data), npub, "fixture must leave the secret-bearing temp file behind")
+	require.Contains(t, string(data), ident.Nsec, "fixture must leave a plaintext-nsec temp file behind")
 
 	require.NoError(t, child.Process.Kill()) // kill -9 equivalent
 	_ = child.Wait()
 	require.Len(t, tempKeystores(t), 1, "kill -9 leaves the orphan")
 
+	// Inside the grace period the file is left alone; once old it is removed.
 	ks, err := LoadKeyStore()
+	require.NoError(t, err)
+	require.NoError(t, AddContact(ks, "early", common.EncodeNpub(nostr.Generate().Public())))
+	require.Len(t, tempKeystores(t), 1, "fresh file is within the grace period")
+	old := time.Now().Add(-2 * staleTempMinAge)
+	require.NoError(t, os.Chtimes(temps[0], old, old))
+
+	ks, err = LoadKeyStore()
 	require.NoError(t, err)
 	require.NoError(t, AddContact(ks, "after", common.EncodeNpub(nostr.Generate().Public())))
 	assert.Empty(t, tempKeystores(t), "next write must delete the orphan")
@@ -105,6 +118,9 @@ func TestLiveWriterTempFileIsNeverRemoved(t *testing.T) {
 	}
 	_, err := os.Stat(live[0])
 	require.NoError(t, err, "live writer's temp file must survive while it holds the lock")
+	// Age it so only the lock (not the grace period) protected it so far.
+	old := time.Now().Add(-2 * staleTempMinAge)
+	require.NoError(t, os.Chtimes(live[0], old, old))
 
 	require.NoError(t, child.Process.Kill())
 	_ = child.Wait()
@@ -127,8 +143,13 @@ func TestStaleCleanupOnlyTouchesExactRegularTempFiles(t *testing.T) {
 
 	orphan := filepath.Join(dir, KeyStoreFile+".123456.tmp")
 	require.NoError(t, os.WriteFile(orphan, []byte("{}"), 0600))
+	old := time.Now().Add(-2 * staleTempMinAge)
+	require.NoError(t, os.Chtimes(orphan, old, old))
+	fresh := filepath.Join(dir, KeyStoreFile+".999.tmp")
+	require.NoError(t, os.WriteFile(fresh, []byte("{}"), 0600))
 
 	keep := []string{
+		fresh, // within grace period (could be a pre-lock writer)
 		filepath.Join(dir, KeyStoreFile+".abc.tmp"),    // non-numeric
 		filepath.Join(dir, KeyStoreFile+".12.tmp.bak"), // wrong suffix
 		filepath.Join(dir, "other.123.tmp"),            // wrong prefix
@@ -163,7 +184,30 @@ func TestStaleCleanupOnlyTouchesExactRegularTempFiles(t *testing.T) {
 	assert.NoError(t, err, "directory must be left alone")
 }
 
-func TestSaveSucceedsWhenDirectoryCannotBeSynced(t *testing.T) {
-	// syncDir is best effort: it must not panic or fail on a missing dir.
-	syncDir(filepath.Join(t.TempDir(), "does-not-exist"))
+func TestSaveSyncsDirectoryAfterRename(t *testing.T) {
+	setupTempKeyStore(t)
+	calls := 0
+	var seen string
+	orig := syncDirFn
+	syncDirFn = func(dir string) {
+		calls++
+		data, err := os.ReadFile(filepath.Join(dir, KeyStoreFile))
+		require.NoError(t, err, "keystore must already be renamed into place when the dir is synced")
+		seen = string(data)
+		orig(dir)
+	}
+	t.Cleanup(func() { syncDirFn = orig })
+
+	ks, err := LoadKeyStore()
+	require.NoError(t, err)
+	npub := common.EncodeNpub(nostr.Generate().Public())
+	require.NoError(t, AddContact(ks, "synced", npub))
+	assert.Equal(t, 1, calls)
+	assert.Contains(t, seen, npub)
+	assert.True(t, ks.StoreExists)
+	assert.NotEmpty(t, ks.StoreVersion)
+}
+
+func TestSyncDirIsBestEffort(t *testing.T) {
+	syncDir(filepath.Join(t.TempDir(), "does-not-exist")) // must not panic
 }

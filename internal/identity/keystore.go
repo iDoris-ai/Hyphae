@@ -221,7 +221,7 @@ func saveKeyStoreLocked(ks *types.KeyStore) error {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("rename keystore: %w", err)
 	}
-	syncDir(path)
+	syncDirFn(path)
 	ks.StoreExists = true
 	version := sha256.Sum256(data)
 	ks.StoreVersion = hex.EncodeToString(version[:])

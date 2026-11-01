@@ -4,7 +4,18 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"time"
 )
+
+// staleTempMinAge is a grace period on top of the lock argument below. Hyphae
+// before v0.26.1 (and any external tool) wrote the same temp name without the
+// flock; a file touched within this window may belong to such a live writer
+// (which finishes in milliseconds) and is left alone. A real orphan only
+// lingers this much longer before the next write removes it.
+const staleTempMinAge = 5 * time.Minute
+
+// syncDirFn is a test seam around syncDir.
+var syncDirFn = syncDir
 
 // beforeRenameHook is a test seam: it runs after the temp keystore is written
 // and synced but before it is renamed into place. Always nil in production.
@@ -23,7 +34,8 @@ var tempKeystoreName = regexp.MustCompile(`^` + regexp.QuoteMeta(KeyStoreFile) +
 // keystore temp file does so inside withKeyStoreLock and finishes (rename or
 // remove) before releasing it; flock is released by the kernel when a process
 // dies. So while we hold the lock no live writer can own a matching temp file,
-// and every match is an orphan. Only plain regular files with the exact
+// and every match written by this code is an orphan; staleTempMinAge covers
+// writers that predate or bypass the lock. Only plain regular files with the exact
 // generated name directly inside the keystore dir are removed: symlinks,
 // directories and anything else are left untouched, and nothing is followed.
 // Errors are ignored: cleanup is best effort and must not fail the real write.
@@ -34,6 +46,10 @@ func removeStaleTempKeystores(dir string) {
 	}
 	for _, e := range entries {
 		if !tempKeystoreName.MatchString(e.Name()) || !e.Type().IsRegular() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || time.Since(info.ModTime()) < staleTempMinAge {
 			continue
 		}
 		_ = os.Remove(filepath.Join(dir, e.Name()))
