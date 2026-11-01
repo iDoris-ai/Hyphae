@@ -78,7 +78,7 @@ func readImportLines(r io.Reader, n int) ([]string, error) {
 // multi-gigabyte scrypt run, and only a failed authentication is a bad passphrase.
 const (
 	ncryptsecPayloadLen = 91
-	ncryptsecMaxLogN    = 22 // scrypt N=2^22 is ~512 MiB; NIP-49 suggests 16-22
+	ncryptsecMaxLogN    = 19 // NIP-49 scrypt uses r=8: memory = 128*8*2^logn bytes, so 19 is ~512 MiB (22 would be 4 GiB)
 )
 
 func validateNcryptsecStructure(s string) error {
@@ -194,14 +194,9 @@ func runImport(ctx context.Context, c *cli.Command) error {
 			return userErr(common.ErrCodeKeystoreLocked, "failed to unlock keystore")
 		}
 	}
-	identity, err := ImportIdentityWithPassword(ks, nickname, password, sk)
+	identity, err := ImportIdentityWithPassword(ks, nickname, password, sk, c.Bool("default"))
 	if err != nil {
 		return err
-	}
-	if c.Bool("default") {
-		if err := SetDefault(ks, nickname); err != nil {
-			return err
-		}
 	}
 	if err := audit.LogAction(nickname, audit.ActionIdentityCreated, map[string]any{"npub": identity.Npub, "imported": true}); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: audit log failed: %v\n", err)

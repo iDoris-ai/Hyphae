@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"fiatjaf.com/nostr"
@@ -188,6 +189,14 @@ func TestImportCLIRejections(t *testing.T) {
 		{
 			name:    "ncryptsec logn too large (scrypt memory bomb)",
 			stdin:   "pw\n" + fakeNcryptsec(t, append([]byte{0x02, 0x40}, make([]byte, 89)...)) + "\n",
+			args:    []string{"identity", "import", "--nickname", "alice", "--ncryptsec-stdin", "--json"},
+			exit:    common.ExitUserError,
+			code:    common.ErrCodeInvalidKey,
+			noStore: true,
+		},
+		{
+			name:    "ncryptsec logn 20 is above the 512 MiB cap",
+			stdin:   "pw\n" + fakeNcryptsec(t, append([]byte{0x02, 20}, make([]byte, 89)...)) + "\n",
 			args:    []string{"identity", "import", "--nickname", "alice", "--ncryptsec-stdin", "--json"},
 			exit:    common.ExitUserError,
 			code:    common.ErrCodeInvalidKey,
@@ -378,5 +387,88 @@ func TestImportDefaultFlag(t *testing.T) {
 	entries := listIdentities(t, home)
 	if len(entries) != 2 || !identityDefault(entries, "alice") || identityDefault(entries, "base") {
 		t.Fatalf("default flag did not stick: %#v", entries)
+	}
+}
+
+// Concurrent imports serialise on the keystore lock: different keys must all
+// land (no lost update), and the same key under different nicknames must be
+// stored exactly once (no duplicate-check TOCTOU).
+func TestImportConcurrentProcesses(t *testing.T) {
+	const n = 5
+	run := func(home string, stdins, nicks []string) []cliResult {
+		results := make([]cliResult, n)
+		var wg sync.WaitGroup
+		for i := 0; i < n; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				results[i] = runIdentityCLI(t, home, strings.NewReader(stdins[i]+"\n"), nil,
+					"identity", "import", "--nickname", nicks[i], "--nsec-stdin", "--json")
+			}(i)
+		}
+		wg.Wait()
+		return results
+	}
+
+	t.Run("different keys all stored", func(t *testing.T) {
+		home := t.TempDir()
+		var stdins, nicks []string
+		for i := 0; i < n; i++ {
+			stdins = append(stdins, common.EncodeNsec(nostr.Generate()))
+			nicks = append(nicks, "id"+string(rune('a'+i)))
+		}
+		for _, r := range run(home, stdins, nicks) {
+			importData(t, r)
+		}
+		if got := len(listIdentities(t, home)); got != n {
+			t.Fatalf("stored %d identities, want %d (lost update)", got, n)
+		}
+	})
+
+	t.Run("same key stored once", func(t *testing.T) {
+		home := t.TempDir()
+		nsec := common.EncodeNsec(nostr.Generate())
+		var stdins, nicks []string
+		for i := 0; i < n; i++ {
+			stdins = append(stdins, nsec)
+			nicks = append(nicks, "dup"+string(rune('a'+i)))
+		}
+		ok := 0
+		for _, r := range run(home, stdins, nicks) {
+			if r.code == 0 {
+				ok++
+			} else {
+				decodeCLIError(t, r, common.ExitUserError, common.ErrCodeNpubExists)
+			}
+		}
+		if ok != 1 || len(listIdentities(t, home)) != 1 {
+			t.Fatalf("successes=%d stored=%d, want exactly 1", ok, len(listIdentities(t, home)))
+		}
+	})
+}
+
+// --default is committed together with the identity: a rejected import must not
+// move the default, and an accepted one must set it in the same keystore write.
+func TestImportDefaultIsAtomicWithImport(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	ks, err := LoadKeyStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CreateIdentity(ks, "base"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ImportIdentityWithPassword(ks, "base", "", nostr.Generate(), true); err == nil {
+		t.Fatal("duplicate nickname import succeeded")
+	}
+	if ks, _ = LoadKeyStore(); ks.DefaultIdentity != "base" {
+		t.Fatalf("rejected import moved default to %q", ks.DefaultIdentity)
+	}
+	if _, err := ImportIdentityWithPassword(ks, "alice", "", nostr.Generate(), true); err != nil {
+		t.Fatal(err)
+	}
+	if fresh, _ := LoadKeyStore(); fresh.DefaultIdentity != "alice" {
+		t.Fatalf("default = %q, want alice", fresh.DefaultIdentity)
 	}
 }
