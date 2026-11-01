@@ -56,6 +56,10 @@ export const LIMITS = {
   maxQueryUnits: 100,
   maxSubIdLength: 64,
   maxDeliveriesPerEvent: 5000,
+  // --- ephemeral events (never stored): replay window and fan-out charge
+  ephemeralDedupeEntries: 10_000, // recent ephemeral ids remembered (0 turns dedupe off); oldest evicted first
+  ephemeralDedupeTtlMs: 60_000, // how long an id counts as a replay
+  ephemeralDeliveriesPerWeight: 32, // the publisher pays 1 event-weight per this many deliveries its event caused
   // Distinct candidate subscriptions one live event is compared with; the rest are skipped and a warning is logged
   // (no counter). loadLimits keeps this >= maxSubRows: candidates are distinct subscriptions, so the cap then never
   // skips anyone and the work is at most the old linear scan. A smaller cap would starve later subscriptions.
@@ -70,7 +74,7 @@ export const LIMITS = {
 
 export type Limits = { [K in keyof typeof LIMITS]: number };
 
-const MINIMUM: Partial<Record<keyof Limits, number>> = { maxLimit: 1 };
+const MINIMUM: Partial<Record<keyof Limits, number>> = { maxLimit: 1, ephemeralDeliveriesPerWeight: 1 };
 
 /**
  * The defaults, with overrides from a JSON object (the e2e tests start the relay with tiny caps).

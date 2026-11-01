@@ -13,8 +13,10 @@ import { type NostrEvent, utf8Length } from "./nostr";
  * gets at most a quarter of the global budget) and per-socket bytes/min. A delivery over a
  * per-source or per-socket quota is dropped (and counted); only a socket that stays over quota
  * for several windows is closed.
+ * Returns how many deliveries were sent, and whether the global outbound budget cut the fan-out short
+ * (`cut`; the per-event work and delivery caps are fixed limits, not a budget running out, so they do not set it).
  */
-export function broadcast(hub: Hub, e: NostrEvent) {
+export function broadcast(hub: Hub, e: NostrEvent): { delivered: number; cut: boolean } {
   const json = JSON.stringify(e);
   const evBytes = utf8Length(json);
   // Live matching sees the same tags a stored query does: only the indexed subset.
@@ -39,7 +41,7 @@ export function broadcast(hub: Hub, e: NostrEvent) {
     for (const ref of hub.subs.candidates(seen)) {
       if (looked >= hub.lim.maxFanoutWorkPerEvent || ++visits > 16 * hub.lim.maxFanoutWorkPerEvent) {
         console.warn(`fan-out work cap (${looked} compared, ${visits} walked) reached for event ${e.id}; remaining candidates skipped`);
-        return;
+        return { delivered, cut: false };
       }
       if (done.has(ref)) continue;
       done.add(ref);
@@ -54,10 +56,10 @@ export function broadcast(hub: Hub, e: NostrEvent) {
         if (last?.conn !== conn) last = { conn, subs: hub.subs.get(conn) };
         const filters = last.subs.get(subId);
         if (!filters || !matchAny(filters, seen)) continue;
-        if (delivered >= hub.lim.maxDeliveriesPerEvent) return;
+        if (delivered >= hub.lim.maxDeliveriesPerEvent) return { delivered, cut: false };
         const idJson = JSON.stringify(subId);
         const charge = hub.budgets.chargeDelivery(c.st.src, c.st.id, deliveryCost(evBytes, idJson));
-        if (charge === "global") return; // global outbound budget exhausted: drop the rest of this event's delivery
+        if (charge === "global") return { delivered, cut: true }; // global outbound budget exhausted: drop the rest of this event's delivery
         if (charge === "source") continue; // this source already uses its share: drop this delivery
         if (charge === "socket") {
           if (hub.budgets.overQuota(c.st.id)) {
@@ -66,13 +68,15 @@ export function broadcast(hub: Hub, e: NostrEvent) {
           }
           continue;
         }
-        hub.sendRaw(c.ws, `["EVENT",${idJson},${json}]`);
-        delivered++;
+        if (hub.sendRaw(c.ws, `["EVENT",${idJson},${json}]`)) delivered++; // a socket that refused the frame got nothing and is not charged for
       } catch (err) {
         console.error("broadcast failed for a subscription", err);
       }
     }
   } catch (err) {
     console.error("broadcast candidate lookup failed", err);
+    // Nobody was served and the cause may be transient (database): ask the publisher to retry. After a partial delivery the event counts as accepted.
+    if (delivered === 0) return { delivered, cut: true };
   }
+  return { delivered, cut: false };
 }
