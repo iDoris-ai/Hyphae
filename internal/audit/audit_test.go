@@ -1,7 +1,10 @@
 package audit
 
 import (
+	"database/sql"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -270,5 +273,85 @@ func TestLogActionConcurrentCallsDoNotCorruptOrHang(t *testing.T) {
 	// immediately, so almost everything should get through in 10s of wall time.
 	if succeeded < n*8/10 {
 		t.Errorf("expected busy_timeout to let most concurrent writes through, only %d/%d succeeded", succeeded, n)
+	}
+}
+
+// TestGetDBWaitsForLockedFreshDatabase: the first open of a fresh database
+// switches it to WAL, which needs a lock. When another process holds that lock
+// (several CLI processes starting at once), getDB must wait for it instead of
+// failing at once with SQLITE_BUSY and dropping the audit entry. This goes red
+// if busy_timeout is set after journal_mode.
+func TestGetDBWaitsForLockedFreshDatabase(t *testing.T) {
+	setupTestAudit(t)
+	dir, err := keyStoreDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder, err := sql.Open("sqlite", filepath.Join(dir, "messages.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder.SetMaxOpenConns(1)
+	defer holder.Close()
+	if _, err := holder.Exec("CREATE TABLE lock_probe (x INTEGER)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.Exec("BEGIN EXCLUSIVE"); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		_, _ = holder.Exec("ROLLBACK")
+	}()
+	if _, err := getDB(); err != nil {
+		t.Fatalf("getDB must wait for the lock holder, got: %v", err)
+	}
+}
+
+// TestLogActionAcrossProcesses: several CLI processes append to the same chain
+// at once. Every append must succeed and the chain must stay verifiable. With a
+// deferred transaction (read the tail, then upgrade to write) a process that
+// loses the race gets SQLITE_BUSY immediately and its entry is dropped.
+func TestLogActionAcrossProcesses(t *testing.T) {
+	if os.Getenv("AUDIT_HELPER_PROCESS") == "1" {
+		for i := 0; i < 25; i++ {
+			if err := LogAction("helper", Action("x"), map[string]any{"i": i}); err != nil {
+				fmt.Fprintln(os.Stderr, "LogAction failed:", err)
+				os.Exit(3)
+			}
+		}
+		os.Exit(0)
+	}
+	setupTestAudit(t)
+	const procs = 8
+	var wg sync.WaitGroup
+	outs := make([]string, procs)
+	errs := make([]error, procs)
+	for i := 0; i < procs; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			cmd := exec.Command(os.Args[0], "-test.run=^TestLogActionAcrossProcesses$")
+			cmd.Env = append(os.Environ(), "AUDIT_HELPER_PROCESS=1")
+			b, err := cmd.CombinedOutput()
+			outs[i], errs[i] = string(b), err
+		}(i)
+	}
+	wg.Wait()
+	for i := range errs {
+		if errs[i] != nil {
+			t.Fatalf("process %d: %v\n%s", i, errs[i], outs[i])
+		}
+	}
+	ok, broken, err := VerifyChain()
+	if err != nil || !ok {
+		t.Fatalf("chain not verifiable: ok=%v broken=%d err=%v", ok, broken, err)
+	}
+	entries, err := List(1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != procs*25 {
+		t.Fatalf("got %d entries, want %d", len(entries), procs*25)
 	}
 }
