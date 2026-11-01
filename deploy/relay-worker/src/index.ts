@@ -61,9 +61,10 @@ const limitsFor = (json: string | undefined): Limits => {
 };
 
 // Edge admission: twice the Durable Object's per-source upgrade budget, so only floods are dropped here.
-// Only the WebSocket-upgrade branch of route() calls it: /healthz, NIP-11 and plain GETs never take a token
-// and are never refused by it (/healthz has its own per-isolate cache). withCors in the default export wraps
-// the edge 429 too, so a browser page can read its Retry-After.
+// Only the WebSocket-upgrade branch of route() calls it. A /healthz, NIP-11 or plain GET without an Upgrade
+// header never takes a token and is never refused by it (a GET that does send Upgrade: websocket is an upgrade,
+// and does); /healthz has its own per-isolate cache. withCors in the default export wraps the edge 429 too,
+// so a browser page can read its Retry-After.
 let admission: { perMinute: number; value: ReturnType<typeof createAdmission> } | undefined;
 const admissionFor = (lim: Limits) => {
   const perMinute = lim.upgradesPerMinutePerSource * 2;
