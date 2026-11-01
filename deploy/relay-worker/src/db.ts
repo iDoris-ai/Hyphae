@@ -24,14 +24,34 @@ export const EVENTS_DDL = `
   CREATE TABLE IF NOT EXISTS event_tags (
     event_id TEXT NOT NULL,
     name TEXT NOT NULL,
-    value TEXT NOT NULL
+    value TEXT NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT 0
   );
   DROP INDEX IF EXISTS tags_lookup;
-  CREATE INDEX IF NOT EXISTS tags_cover ON event_tags (name, value, event_id);
+  DROP INDEX IF EXISTS tags_cover;
+  -- Newest-first walk of one tag value: lets "#p" + LIMIT stop early (see query.ts buildSql).
+  CREATE INDEX IF NOT EXISTS tags_time ON event_tags (name, value, created_at DESC, event_id);
   CREATE INDEX IF NOT EXISTS tags_event ON event_tags (event_id);
   -- Row counters for tombstones / coord_cutoffs (counting rows on every write would be O(n)).
   CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, n INTEGER NOT NULL);
 `;
+
+/**
+ * Run BEFORE EVENTS_DDL on every start. A Durable Object created before event_tags had created_at
+ * gets the column added and its rows backfilled from events (one UPDATE per existing tag row, once);
+ * EVENTS_DDL then builds tags_time and drops the old tags_cover. A fresh or already migrated
+ * database is left alone, so this is idempotent.
+ */
+export function migrateEventTags(db: Db) {
+  const t = db.sql.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'event_tags'").toArray();
+  if (t.length === 0) return;
+  const cols = db.sql.exec("SELECT 1 FROM pragma_table_info('event_tags') WHERE name = 'created_at'").toArray();
+  if (cols.length > 0) return;
+  db.tx(() => {
+    db.sql.exec("ALTER TABLE event_tags ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0");
+    db.sql.exec("UPDATE event_tags SET created_at = coalesce((SELECT created_at FROM events WHERE events.id = event_tags.event_id), 0)");
+  });
+}
 
 // Rough on-disk cost model used for the "does this write grow a full database" decision.
 const ROW_OVERHEAD = 150; // events row + its indexes, besides the JSON
