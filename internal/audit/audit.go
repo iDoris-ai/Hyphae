@@ -17,6 +17,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,42 +109,32 @@ func getDB() (*sql.DB, error) {
 	}
 	path := filepath.Join(dir, "messages.db")
 
-	// _txlock=immediate: LogAction reads the chain tail and then appends. With a
-	// deferred BEGIN, another process can write in between and the upgrade to a
-	// write lock fails at once with SQLITE_BUSY (busy_timeout does not apply),
-	// dropping the entry. BEGIN IMMEDIATE takes the write lock first, so
-	// concurrent CLI processes queue behind busy_timeout and the hash chain
-	// stays linear.
-	// The driver parses "?" and "#" in the DSN as a query string, so a keystore
-	// directory containing them would open the wrong file (or drop _txlock).
-	if strings.ContainsAny(path, "?#") {
-		return nil, fmt.Errorf("audit: keystore path must not contain '?' or '#'")
-	}
-	conn, err := sql.Open("sqlite", path+"?_txlock=immediate")
+	// The path goes in as a file: URL so "?" and "#" in a home directory are
+	// escaped instead of being read as DSN syntax. Per-connection settings live
+	// in the DSN, not in one-off Exec calls, so every connection database/sql
+	// opens has them:
+	//   - _txlock=immediate: LogAction reads the chain tail and then appends.
+	//     With a deferred BEGIN, another process can write in between and the
+	//     upgrade to a write lock fails at once with SQLITE_BUSY (busy_timeout
+	//     does not apply), dropping the entry. BEGIN IMMEDIATE takes the write
+	//     lock first, so concurrent CLI processes queue behind busy_timeout and
+	//     the hash chain stays linear.
+	//   - busy_timeout(5000): wait up to 5s for a lock held by another process.
+	u := &url.URL{Scheme: "file", Path: filepath.ToSlash(path)}
+	q := url.Values{}
+	q.Set("_txlock", "immediate")
+	q.Add("_pragma", "busy_timeout(5000)")
+	u.RawQuery = q.Encode()
+	conn, err := sql.Open("sqlite", u.String())
 	if err != nil {
 		return nil, fmt.Errorf("audit: failed to open db: %w", err)
 	}
-	// database/sql pools connections; PRAGMA busy_timeout only affects the one
-	// connection it's run on, and Go would happily open a second connection
-	// for a concurrent caller instead of queueing it behind the first. That
-	// second connection has no busy_timeout, so it gets an immediate
-	// SQLITE_BUSY instead of waiting — under real concurrent LogAction calls
-	// (e.g. the daemon handling several relays at once) that meant most
-	// writes were dropped rather than delayed. Capping the pool at a single
-	// connection makes Go itself serialize callers (they block waiting for
-	// the one connection to free up) instead of relying on SQLite-side
-	// locking across multiple connections.
+	// database/sql pools connections and Go would happily open a second one for
+	// a concurrent caller instead of queueing it behind the first. Capping the
+	// pool at a single connection makes Go itself serialize callers in this
+	// process (they block waiting for the one connection) instead of relying on
+	// SQLite-side locking; other processes are handled by the settings above.
 	conn.SetMaxOpenConns(1)
-	// Set before the first statement so every later statement can wait for a
-	// lock held by another CLI process (execRetryBusy covers the cases where
-	// SQLite refuses to wait).
-	// Belt-and-suspenders alongside SetMaxOpenConns(1): if a future change
-	// raises the pool size, callers still wait instead of failing outright.
-	// 5s comfortably covers LogAction's single short read+insert transaction.
-	if _, err := conn.Exec("PRAGMA busy_timeout = 5000"); err != nil {
-		_ = conn.Close()
-		return nil, fmt.Errorf("audit: failed to set busy_timeout: %w", err)
-	}
 	if err := execRetryBusy(conn, "PRAGMA journal_mode = WAL"); err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("audit: failed to enable WAL mode: %w", err)
@@ -180,6 +171,8 @@ func execRetryBusy(conn *sql.DB, query string) error {
 	}
 }
 
+// schemaSQL is replayed as a whole by execRetryBusy, so every statement in it
+// must be safe to run twice (IF NOT EXISTS).
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS audit_log (
 	seq       INTEGER PRIMARY KEY,

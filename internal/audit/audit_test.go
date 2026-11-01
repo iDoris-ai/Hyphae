@@ -3,6 +3,7 @@ package audit
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -279,8 +280,9 @@ func TestLogActionConcurrentCallsDoNotCorruptOrHang(t *testing.T) {
 // TestGetDBWaitsForLockedFreshDatabase: the first open of a fresh database
 // switches it to WAL, which needs a lock. When another process holds that lock
 // (several CLI processes starting at once), getDB must wait for it instead of
-// failing at once with SQLITE_BUSY and dropping the audit entry. This goes red
-// without execRetryBusy; it does not pin the order of busy_timeout.
+// failing at once with SQLITE_BUSY and dropping the audit entry. It checks the
+// waiting behaviour only; TestLogActionAcrossProcesses is what pins
+// execRetryBusy and _txlock.
 func TestGetDBWaitsForLockedFreshDatabase(t *testing.T) {
 	setupTestAudit(t)
 	dir, err := keyStoreDir()
@@ -356,17 +358,35 @@ func TestLogActionAcrossProcesses(t *testing.T) {
 	}
 }
 
-// TestGetDBRejectsQueryCharactersInPath: the driver would read "?" in the path
-// as a DSN query string and open a different file, silently dropping _txlock.
-func TestGetDBRejectsQueryCharactersInPath(t *testing.T) {
-	resetForTest()
-	t.Cleanup(resetForTest)
-	home := filepath.Join(t.TempDir(), "a?b")
-	if err := os.MkdirAll(home, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("HOME", home)
-	if _, err := getDB(); err == nil {
-		t.Fatal("expected getDB to refuse a keystore path containing '?'")
+// TestLogActionWorksInPathsWithQueryCharacters: "?" and "#" in the home
+// directory must not be read as DSN syntax. The entry has to land in
+// <HOME>/.hyphae/messages.db, checked through a separately opened handle.
+func TestLogActionWorksInPathsWithQueryCharacters(t *testing.T) {
+	for _, name := range []string{"a#b", "a?b"} {
+		t.Run(name, func(t *testing.T) {
+			resetForTest()
+			t.Cleanup(resetForTest)
+			home := filepath.Join(t.TempDir(), name)
+			if err := os.MkdirAll(home, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("HOME", home)
+			if err := LogAction("t", Action("x"), nil); err != nil {
+				t.Fatalf("LogAction: %v", err)
+			}
+			dbPath := filepath.Join(home, ".hyphae", "messages.db")
+			if _, err := os.Stat(dbPath); err != nil {
+				t.Fatalf("entry did not land in %s: %v", dbPath, err)
+			}
+			check, err := sql.Open("sqlite", (&url.URL{Scheme: "file", Path: filepath.ToSlash(dbPath)}).String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer check.Close()
+			var n int
+			if err := check.QueryRow(`SELECT COUNT(*) FROM audit_log`).Scan(&n); err != nil || n != 1 {
+				t.Fatalf("audit_log rows = %d, err = %v; want 1", n, err)
+			}
+		})
 	}
 }
