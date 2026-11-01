@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"fiatjaf.com/nostr"
+	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -42,4 +43,20 @@ func TestEventCmd_InvalidSecretKey(t *testing.T) {
 	err := EventCmd.Run(context.Background(), []string{"event", "--sec", "not-a-key", "--json"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid secret key")
+}
+
+// A publish that no relay accepts must fail (non-zero exit), not print "0/1" and exit 0.
+func TestEventCmd_UnreachableRelayFails(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	sk := nostr.Generate()
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = EventCmd.Run(context.Background(), []string{
+			"event", "--sec", sk.Hex(), "--kind", "1", "--content", "hi", "--relay", "ws://127.0.0.1:1",
+		})
+	})
+	assert.Contains(t, out, "Published to 0/1 relays")
+	var exitErr *common.ExitError
+	require.ErrorAs(t, runErr, &exitErr)
+	assert.Equal(t, common.ErrCodeNetwork, exitErr.Code)
 }
