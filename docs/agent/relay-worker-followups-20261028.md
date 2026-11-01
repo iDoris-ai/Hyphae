@@ -161,6 +161,12 @@ Cutover done 2026-11-01 (user confirmed):
 - Hyphae version used: build from main (`dev`); no Go changes since v0.27.2, so the v0.27.2 lock does not need an upgrade.
 - Known client bug: `hyphae publish` / `hyphae event` exit 0 when the relay rejects the event.
 
+Backlog decided 2026-11-01 (jason; low priority, few users yet):
+
+- **History migration to another relay.** The local `messages` table stores message text, not the original signed events (no `sig`, no tags), so old messages cannot be republished as they were. To support moving to a self-run relay: keep the raw signed event in the local store, then add an export/republish command. Client change, not a relay change.
+- **`identity import` / `identity export` for non-interactive use** (issue #326, requested by Agent24): `import` from `ncryptsec` or `nsec` over stdin; `export` with `--password-stdin`, JSON or `--out`.
+- **Cloudflare plan:** stay on the Free zone plan for now; look at WAF rule usage after about a week and decide on Pro then.
+
 ## Medium, deferred
 
 | slice | file:line | severity | note |
