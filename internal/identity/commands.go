@@ -21,6 +21,7 @@ var IdentityCmd = &cli.Command{
 Identities are stored in ~/.hyphae/ with 600 permissions.`,
 	Commands: []*cli.Command{
 		checkPasswordCommand(),
+		importCommand(),
 		{
 			Name:  "create",
 			Usage: "Create a new identity",

@@ -29,6 +29,13 @@ const (
 	ErrCodeAuth          = "auth_error"
 	ErrCodeWriteConflict = "write_conflict"
 	ErrCodeOther         = "other_error"
+
+	// Stable codes for `identity import`.
+	ErrCodeBadBackupPassword = "bad_backup_password"
+	ErrCodeInvalidKey        = "invalid_key"
+	ErrCodeNicknameExists    = "nickname_exists"
+	ErrCodeNpubExists        = "npub_exists"
+	ErrCodeKeystoreLocked    = "keystore_locked"
 )
 
 // ExitError wraps an error with a machine-readable code (for --json output) and
@@ -180,11 +187,11 @@ func writeResult(w io.Writer, r Result) {
 
 func exitCodeFor(code string) int {
 	switch code {
-	case ErrCodeUser:
+	case ErrCodeUser, ErrCodeInvalidKey, ErrCodeNicknameExists, ErrCodeNpubExists:
 		return ExitUserError
 	case ErrCodeNetwork:
 		return ExitNetworkError
-	case ErrCodeAuth:
+	case ErrCodeAuth, ErrCodeBadBackupPassword, ErrCodeKeystoreLocked:
 		return ExitAuthError
 	case ErrCodeWriteConflict:
 		return ExitWriteConflict

@@ -281,10 +281,38 @@ func CreateIdentity(ks *types.KeyStore, nickname string) (*types.Identity, error
 
 // CreateIdentityWithPassword creates a new identity with optional password encryption
 func CreateIdentityWithPassword(ks *types.KeyStore, nickname, password string) (*types.Identity, error) {
+	return storeIdentity(ks, nickname, password, nil, false)
+}
+
+// ImportIdentityWithPassword stores an existing secret key under nickname with
+// the same keystore rules as CreateIdentityWithPassword. A nickname or npub that
+// is already present fails with a stable ExitError code; nothing is overwritten.
+func ImportIdentityWithPassword(ks *types.KeyStore, nickname, password string, sk nostr.SecretKey, makeDefault bool) (*types.Identity, error) {
+	if err := ValidateNickname(nickname); err != nil {
+		return nil, common.NewExitError(common.ErrCodeUser, err)
+	}
+	return storeIdentity(ks, nickname, password, &sk, makeDefault)
+}
+
+// storeIdentity generates a key when imported is nil, otherwise stores *imported.
+// makeDefault is applied in the same transaction so a failure cannot leave the
+// identity stored without the requested default.
+func storeIdentity(ks *types.KeyStore, nickname, password string, imported *nostr.SecretKey, makeDefault bool) (*types.Identity, error) {
 	var created *types.Identity
 	err := runKeyStoreTransaction(ks, func(fresh *types.KeyStore) error {
 		if _, exists := fresh.Identities[nickname]; exists {
+			if imported != nil {
+				return common.NewExitError(common.ErrCodeNicknameExists, fmt.Errorf("identity '%s' already exists", nickname))
+			}
 			return fmt.Errorf("identity '%s' already exists", nickname)
+		}
+		if imported != nil {
+			npub := common.EncodeNpub(imported.Public())
+			for _, existing := range fresh.Identities {
+				if existing.Npub == npub {
+					return common.NewExitError(common.ErrCodeNpubExists, fmt.Errorf("this key is already stored as identity '%s'", existing.Nickname))
+				}
+			}
 		}
 		if fresh.Encrypted {
 			if password == "" {
@@ -314,6 +342,9 @@ func CreateIdentityWithPassword(ks *types.KeyStore, nickname, password string) (
 		}
 
 		sk := nostr.Generate()
+		if imported != nil {
+			sk = *imported
+		}
 		nsec := common.EncodeNsec(sk)
 		if fresh.Encrypted {
 			encrypted, err := encryptWithKey(nsec, *fresh.MasterKey)
@@ -324,7 +355,7 @@ func CreateIdentityWithPassword(ks *types.KeyStore, nickname, password string) (
 		}
 		created = &types.Identity{Nickname: nickname, Npub: common.EncodeNpub(sk.Public()), Nsec: nsec, Created: int64(nostr.Now())}
 		fresh.Identities[nickname] = created
-		if fresh.DefaultIdentity == "" {
+		if fresh.DefaultIdentity == "" || makeDefault {
 			fresh.DefaultIdentity = nickname
 		}
 		return nil
