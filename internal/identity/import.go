@@ -18,9 +18,18 @@ import (
 	"github.com/iDoris-ai/hyphae/internal/audit"
 	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/urfave/cli/v3"
+	"golang.org/x/term"
 )
 
 const maxImportStdinBytes = 16 * 1024
+
+// importStdinIsTerminal reports whether stdin is an interactive terminal. It is
+// a variable so tests can force the terminal branch without a real pty.
+var importStdinIsTerminal = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
+
+// plaintextKeystoreWarning is written to stderr (never stdout, so --json stdout
+// stays a pure envelope) after an import into an unencrypted keystore.
+const plaintextKeystoreWarning = "warning: the imported key is stored unencrypted in the keystore; run 'hyphae identity change-password' to encrypt the keystore"
 
 // ValidateNickname rejects empty nicknames and any control character
 // (newlines, tabs, ESC, DEL, ...), which would corrupt logs and terminal output.
@@ -138,7 +147,9 @@ Examples:
 JSON errors use stable codes: bad_backup_password, invalid_key, nickname_exists,
 npub_exists, keystore_locked. Importing a key already present fails (npub_exists).
 An empty backup passphrase is rejected, so a backup made with an empty passphrase
-cannot be imported. Secret keys outside 1 <= k < n are rejected (invalid_key).`,
+cannot be imported. Run on a terminal, import refuses to read (pipe the values in).
+Importing into an unencrypted keystore prints one warning line to stderr.
+Secret keys outside 1 <= k < n are rejected (invalid_key).`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "nickname", Aliases: []string{"n"}, Usage: "Nickname for the imported identity"},
 			&cli.BoolFlag{Name: "ncryptsec-stdin", Usage: "Read backup passphrase then NIP-49 ncryptsec from stdin"},
@@ -161,6 +172,12 @@ func runImport(ctx context.Context, c *cli.Command) error {
 	nickname := c.String("nickname")
 	if err := ValidateNickname(nickname); err != nil {
 		return common.NewExitError(common.ErrCodeUser, err)
+	}
+
+	// Checked before anything is read: on a terminal the secrets would be echoed
+	// and the trailing-content check would block until Ctrl-D.
+	if importStdinIsTerminal() {
+		return userErr(common.ErrCodeUser, "stdin is a terminal; pipe the values in (secrets are read from stdin only, and would be echoed here), see 'hyphae identity import --help'")
 	}
 
 	want := 1
@@ -236,6 +253,10 @@ func runImport(ctx context.Context, c *cli.Command) error {
 	}
 	if err := audit.LogAction(nickname, audit.ActionIdentityCreated, map[string]any{"npub": identity.Npub, "imported": true}); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: audit log failed: %v\n", err)
+	}
+
+	if !ks.Encrypted {
+		fmt.Fprintln(os.Stderr, plaintextKeystoreWarning)
 	}
 
 	type importOutput struct {
