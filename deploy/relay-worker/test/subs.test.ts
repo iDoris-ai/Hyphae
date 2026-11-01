@@ -167,7 +167,7 @@ describe("SubStore candidate index", () => {
       const filters: Filter[] = Array.from({ length: 1 + Math.floor(r() * 3) }, () => {
         const f: Filter = {};
         if (maybe(0.3)) f.authors = [maybe(0.8) ? hex(Math.floor(r() * 6)) : hex(Math.floor(r() * 6)).slice(0, 3 + Math.floor(r() * 5))];
-        if (maybe(0.4)) f.kinds = maybe(0.05) ? [] : [pick([1, 7, 20001, 30023]), pick([1, 7])];
+        if (maybe(0.4)) f.kinds = maybe(0.05) ? [] : maybe(0.1) ? Array.from({ length: 20 }, (_, k) => k) : [pick([1, 7, 20001, 30023]), pick([1, 7])];
         if (maybe(0.3)) f["#p"] = [hex(Math.floor(r() * 5)), "zz"];
         if (maybe(0.2)) f["#e"] = [hex(Math.floor(r() * 5))];
         if (maybe(0.2)) f["#t"] = [pick(["a", "b"])];
@@ -233,5 +233,14 @@ describe("SubStore candidate index", () => {
     expect(reads).toBe(3); // a and c are cached
     subs.get("b");
     expect(reads).toBe(4); // b was evicted
+  });
+
+  it("files a subscription that needs more than 16 bucket keys under the wildcard (bounded index memory)", () => {
+    const subs = new SubStore(open());
+    subs.save("c", "few", JSON.stringify([{ kinds: Array.from({ length: 16 }, (_, k) => k) }]));
+    subs.save("c", "many", JSON.stringify([{ kinds: Array.from({ length: 17 }, (_, k) => k) }]));
+    const e = { id: hex(9), pubkey: hex(2), kind: 99, created_at: 5, tags: [], content: "", sig: "" };
+    expect([...subs.candidates(e)]).toEqual(["c\0many"]);
+    expect([...subs.candidates({ ...e, kind: 3 })].sort()).toEqual(["c\0few", "c\0many"]);
   });
 });

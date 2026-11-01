@@ -7,7 +7,7 @@ import { type NostrEvent, utf8Length } from "./nostr";
 /**
  * Delivers an event to matching subscriptions. The JSON is built once. Only subscriptions the
  * candidate index returns are compared (full matchAny still decides), and at most
- * maxFanoutWorkPerEvent candidates are looked at per event; the rest are skipped, counted and
+ * maxFanoutWorkPerEvent candidates are looked at per event; the rest are skipped and
  * logged. Budgets bound the delivery: per event, global bytes/min, per-source bytes/min (a source
  * gets at most a quarter of the global budget) and per-socket bytes/min. A delivery over a
  * per-source or per-socket quota is dropped (and counted); only a socket that stays over quota
@@ -19,7 +19,8 @@ export function broadcast(hub: Hub, e: NostrEvent) {
   // Live matching sees the same tags a stored query does: only the indexed subset.
   const seen = { ...e, tags: indexedTags(e.tags, hub.lim.maxIndexedTags) };
   let delivered = 0;
-  let looked = 0;
+  let looked = 0; // distinct candidate subscriptions compared: this is what the work cap limits
+  let visits = 0; // index references walked, duplicates included (a separate, larger bound)
   const done = new Set<string>();
   const conns = new Map<string, { ws: WebSocket; st: ConnState; subs: Map<string, Filter[]> } | null>();
   let byId: Map<string, WebSocket> | undefined; // fallback for sockets that carry no connection-id tag
@@ -34,13 +35,13 @@ export function broadcast(hub: Hub, e: NostrEvent) {
   };
   try {
     for (const ref of hub.subs.candidates(seen)) {
-      if (looked >= hub.lim.maxFanoutWorkPerEvent) {
-        console.warn(`fan-out work cap (${looked}) reached for event ${e.id}; remaining candidates skipped`);
+      if (looked >= hub.lim.maxFanoutWorkPerEvent || ++visits > 8 * hub.lim.maxFanoutWorkPerEvent) {
+        console.warn(`fan-out work cap (${looked} compared, ${visits} walked) reached for event ${e.id}; remaining candidates skipped`);
         return;
       }
-      looked++;
       if (done.has(ref)) continue;
       done.add(ref);
+      looked++;
       const cut = ref.indexOf("\0");
       const conn = ref.slice(0, cut);
       const subId = ref.slice(cut + 1);

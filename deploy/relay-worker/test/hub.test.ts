@@ -500,6 +500,17 @@ describe("fan-out work cap and socket lookup", () => {
     expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();
   });
+  it("counts a subscription reached through several buckets once against the work cap", () => {
+    const { hub, conn } = setup({ maxFanoutWorkPerEvent: 10 });
+    const ps = ["1", "2", "3", "4"].map((x) => x.repeat(64));
+    const cs = Array.from({ length: 4 }, (_, i) => conn("d" + i));
+    cs.forEach((c) => sub(hub, c, "s", { "#p": ps }));
+    const wild = conn("w");
+    sub(hub, wild, "s", { since: 1 });
+    // 16 references to 4 subscriptions, then the wildcard one: 5 distinct candidates, under the cap of 10
+    broadcast(hub, signed(alice, { kind: 20001, tags: ps.map((p) => ["p", p]) }));
+    expect(wild.fake.frames().some((f) => f[0] === "EVENT")).toBe(true);
+  });
   it("does not look at subscriptions of other kinds at all (work is not O(subscriptions))", () => {
     const { hub, conn } = setup({ maxFanoutWorkPerEvent: 2 });
     const cs = Array.from({ length: 20 }, (_, i) => conn("t" + i));

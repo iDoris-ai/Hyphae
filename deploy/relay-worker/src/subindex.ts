@@ -2,6 +2,8 @@ import { type Filter, filterIsEmpty } from "./filter";
 import type { NostrEvent } from "./nostr";
 
 const WILDCARD = "*";
+/** A subscription needing more bucket keys than this is filed once under the wildcard, which bounds index memory (20 000 rows x 16 refs at most). */
+const MAX_KEYS_PER_SUB = 16;
 
 /**
  * The bucket keys a filter is filed under: ONE constraining dimension (one key per value), or the
@@ -33,7 +35,8 @@ export class SubIndex {
   add(conn: string, subId: string, filters: Filter[]) {
     this.remove(conn, subId);
     const ref = conn + "\0" + subId;
-    const keys = [...new Set(filters.flatMap(keysOfFilter))];
+    let keys = [...new Set(filters.flatMap(keysOfFilter))];
+    if (keys.length > MAX_KEYS_PER_SUB) keys = [WILDCARD]; // still found as a candidate; matchAny decides
     for (const k of keys) {
       let b = this.buckets.get(k);
       if (!b) this.buckets.set(k, (b = new Set()));
