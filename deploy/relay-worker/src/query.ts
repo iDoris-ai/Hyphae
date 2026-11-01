@@ -86,6 +86,7 @@ export function runQuery(db: Db, filters: Filter[]): QueryResult {
   const maxLimit = db.lim.maxLimit;
   const all = new Map<string, Row>();
   let truncated = false;
+  let boundary: Row | undefined; // newest row any filter could not fit: the merged result stops before it
   for (const f of filters) {
     if (filterIsEmpty(f)) continue; // an empty list can never match
     const eff = Math.max(0, Math.min(f.limit ?? maxLimit, maxLimit));
@@ -104,10 +105,12 @@ export function runQuery(db: Db, filters: Filter[]): QueryResult {
       const { sql, params } = buildSql(unit, eff + 1);
       const got = new Map<string, Row>(group.map((r) => [r.id, r]));
       let bytes = 0;
+      let n = 0;
       for (const r of db.sql.exec(sql, ...params)) {
         const json = r.json as string;
         const row = { id: r.id as string, created_at: r.created_at as number, json, size: utf8Length(json) };
-        if (bytes + row.size > db.lim.maxResultBytes) {
+        // The (eff+1)th row is only a probe for "more exists": it is never sent, so it has no byte check.
+        if (n++ < eff && bytes + row.size > db.lim.maxResultBytes) {
           noteDrop(row); // nothing at or past this row can fit in the response
           break;
         }
@@ -129,13 +132,17 @@ export function runQuery(db: Db, filters: Filter[]): QueryResult {
       }
     }
     // The dropped row only matters if it would have been among the filter's newest `eff`.
-    if (dropped && (group.length < eff || newestFirst(dropped, group[group.length - 1]) < 0)) truncated = true;
+    if (dropped && (group.length < eff || newestFirst(dropped, group[group.length - 1]) < 0)) {
+      truncated = true;
+      if (!boundary || newestFirst(dropped, boundary) < 0) boundary = dropped;
+    }
     if (capped && over) truncated = true;
     for (const r of group) all.set(r.id, r);
   }
   const events: string[] = [];
   let bytes = 0;
   for (const r of [...all.values()].sort(newestFirst)) {
+    if (boundary && newestFirst(r, boundary) >= 0) return { events, truncated: true };
     if (events.length >= maxLimit || bytes + r.size > db.lim.maxResultBytes) return { events, truncated: true };
     events.push(r.json);
     bytes += r.size;

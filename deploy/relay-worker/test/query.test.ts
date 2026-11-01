@@ -142,6 +142,28 @@ describe("multi-filter REQ", () => {
     expect(text(r)).toEqual(["c".repeat(100), "d".repeat(100)]);
     expect(r.truncated).toBe(false);
   });
+  it("the count cap is reported even when the extra row alone would not fit the byte budget", () => {
+    const db = open({ maxLimit: 1 });
+    const A = signed(alice, { content: "a".repeat(600), created_at: 200 });
+    const B = signed(alice, { content: "b".repeat(600), created_at: 100 });
+    storeEvent(db, A);
+    storeEvent(db, B);
+    db.lim.maxResultBytes = JSON.stringify(A).length + 10;
+    const r = runQuery(db, [{}]);
+    expect(r.events).toHaveLength(1);
+    expect(r.truncated).toBe(true);
+  });
+  it("a row one filter could not fit stops the merged result: older rows of other filters are not admitted", () => {
+    const db = open();
+    const A = signed(alice, { kind: 1, content: "a".repeat(600), created_at: 300 });
+    const B = signed(alice, { kind: 1, content: "b".repeat(600), created_at: 200 });
+    const C = signed(alice, { kind: 2, content: "c".repeat(100), created_at: 100 });
+    for (const e of [A, B, C]) storeEvent(db, e);
+    db.lim.maxResultBytes = JSON.stringify(A).length + JSON.stringify(C).length + 10; // A+C fit, A+B do not
+    const r = runQuery(db, [{ kinds: [1], limit: 2 }, { kinds: [2], limit: 1 }]);
+    expect(text(r)).toEqual(["a".repeat(600)]);
+    expect(r.truncated).toBe(true);
+  });
   it("stops one filter at the byte cap", () => {
     const db = open({ maxResultBytes: 2500 });
     for (let i = 0; i < 8; i++) storeEvent(db, signed(alice, { content: "y".repeat(900) + i, created_at: 100 + i }));
