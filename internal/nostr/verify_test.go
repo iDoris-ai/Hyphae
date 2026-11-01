@@ -32,6 +32,10 @@ func TestVerifyCmd_ValidSignature(t *testing.T) {
 		require.NoError(t, VerifyCmd.Run(context.Background(), []string{"verify", string(data)}))
 	})
 	assert.Contains(t, out, "Signature is VALID")
+	// The printed id must be the plain 64-char hex id, not the library's
+	// debug form "id::<hex>", so it can be pasted into other tools.
+	assert.Contains(t, out, "Event ID: "+event.ID.Hex()+"\n")
+	assert.NotContains(t, out, "id::")
 }
 
 // TestVerifyCmd_TamperedContentIsInvalid covers the round-trip case the
