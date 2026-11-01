@@ -6,7 +6,7 @@ This list holds what was **not** fixed: every remaining Medium (also summarised 
 
 ## Production-readiness register for relay.aastar.io (read this first)
 
-Status: **not production-ready.** The stack is code-complete and unit/e2e tested, but nothing below the
+Status (updated 2026-11-01): **live at wss://relay.aastar.io** since the cutover described in section H. The text below was written before the cutover; rows marked there supersede it. The stack is code-complete and unit/e2e tested, but nothing below the
 "Verified" line has been run against a real Durable Object at production scale. Items are labelled
 `[read]` (checked in code on this branch), `[review]` (taken from a PR review, not re-run by the author
 of this doc) or `[unverified]`.
@@ -132,6 +132,34 @@ Cutover and migration hazards (for the person who binds `relay.aastar.io`) [revi
 - If the old tunnel hostname is a CNAME, creating a Custom Domain on it conflicts. Deleting the record first and then failing the deploy means downtime.
 - Old and new relays must not both accept writes while connections drain, or the stores diverge; rolling back loses what was written to the new one in between. Plan the history copy, the drain, and the write copy-back.
 - Binding the domain needs the user's explicit confirmation; the non-interactive deploy can overwrite an existing DNS record.
+
+### H. Hardening and cutover outcomes (2026-11-01)
+
+Merged after section G: #312, #313, #315–#323 (fan-out candidate index, query cost and tag-value cap, write budgets and refunds, heartbeat/idle reap/CORS/`/healthz`, ephemeral de-duplication, edge admission, entry-point tests).
+
+| # | status now |
+| --- | --- |
+| G1 | **Mitigated, not closed.** On real Cloudflare the in-Worker admission (#313: per-isolate bucket plus `UPGRADE_LIMITER` binding) never refused anything in 150–1500 upgrade attempts from one IP (~107/s): every 429 came from the Durable Object quota (Retry-After 60 per-source upgrade, 30 per-source concurrency), admitting about 66–72 per minute. Isolates and binding instances count separately and Cloudflare documents the binding as approximate. A zone rate-limiting rule is now in place (Free plan: `http.host eq "relay.aastar.io"`, 30 requests / 10 s per IP per colo, block 10 s; Free cannot match on the `Upgrade` header). A 200-request parallel burst got 70 x 200 and 130 x 429; 60 sequential requests were not limited. The Durable Object stayed responsive to a second IP during a single-machine flood (REQ to EOSE 220–525 ms against 270–640 ms baseline). A distributed flood was **not** tested. |
+| G2 | Fixed in #314, #318 (candidate index, work cap, LRU, `created_at` tag index, ephemeral dedupe). Residual notes: floor-based fan-out fee, dedupe set eviction, persisted rows above a lowered `maxSubRows`, last-connection memo thrash, migration time on a large table (only tested on tiny staging data). |
+| G3 | Open (README Known limits). |
+| G4 | Fixed in the hardening PRs for source write bytes (`refundEvent`) and kind-5 seeding; the global weight is deliberately not refunded. |
+| G5 | Open. |
+| G6 | Partly fixed: `/healthz` added (#316). No metrics or persistent logs yet. |
+| G7 | Fixed (#316): ping/pong auto-response, idle reap when a cap is full, CORS on all non-101 responses. Idle-reap wiring has no test; suggest an e2e with `idleTimeoutSeconds=1`, `maxConnsPerSource=1`. `/healthz` SQLite claim is not covered by tests. |
+| G8 | Open: no load or soak test. Real-client checks only. |
+
+Production gates to keep:
+
+- `SRC_HEADER` must never be set in production (it replaces `CF-Connecting-IP` and is client-controlled). It is only for the local e2e harness.
+- Upgrade the zone to Pro (or add Advanced Rate Limiting) if Upgrade-header matching or a longer block time is needed.
+- Reviewer Lows still open: line references in comments should use symbol names; a few test gaps.
+
+Cutover done 2026-11-01 (user confirmed):
+
+- Production Worker `hyphae-relay` deployed from main (version `ee86abe4`); the old `relay.aastar.io` CNAME to the dead tunnel was deleted (it returned 530, so no downtime) and the Workers Custom Domain was attached. The old record was archived outside the repo for rollback.
+- Verified on `wss://relay.aastar.io`: `/healthz` 200, NIP-11, NIP-44 DM alice to bob decrypted correctly. Earlier on staging `hyphae-relay-v2`: DM both ways and a 168 KB message.
+- Hyphae version used: build from main (`dev`); no Go changes since v0.27.2, so the v0.27.2 lock does not need an upgrade.
+- Known client bug: `hyphae publish` / `hyphae event` exit 0 when the relay rejects the event.
 
 ## Medium, deferred
 
