@@ -186,3 +186,31 @@ describe("Worker entry: landing page", () => {
     expect(await (await get("/other", "text/html")).text()).toContain("connect with a Nostr client");
   });
 });
+
+describe("Worker entry: landing page languages", () => {
+  const page = async (path: string, al?: string) => {
+    const headers: Record<string, string> = { accept: "text/html" };
+    if (al) headers["accept-language"] = al;
+    const res = await worker.fetch(new Request(`https://relay.test${path}`, { headers }), env().e);
+    return { res, text: await res.text() };
+  };
+
+  it("picks the language from ?lang= first, then Accept-Language, else English", async () => {
+    expect((await page("/?lang=th", "zh-CN")).text).toContain('<html lang="th"');
+    expect((await page("/", "zh-CN,zh;q=0.9,en;q=0.8")).text).toContain('<html lang="zh"');
+    expect((await page("/", "th-TH")).text).toContain('<html lang="th"');
+    expect((await page("/", "fr-FR")).text).toContain('<html lang="en"');
+    expect((await page("/?lang=xx")).text).toContain('<html lang="en"');
+    expect((await page("/")).res.headers.get("vary")).toContain("Accept-Language");
+  });
+
+  it("states what the relay can and cannot do in every language", async () => {
+    for (const l of ["en", "zh", "th"]) {
+      const { text } = await page(`/?lang=${l}`);
+      expect(text).toContain("NIP-44");
+      expect(text).toContain("messages.db");
+      expect(text).toContain("hyphae relay set");
+      expect(text.match(/<li>/g)?.length).toBe(8);
+    }
+  });
+});

@@ -7,33 +7,117 @@ export const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 25
 export const LANDING_CSP =
   "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
-export const LANDING_HTML = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+export type Lang = "en" | "zh" | "th";
+const NAMES: Record<Lang, string> = { en: "English", zh: "中文", th: "ไทย" };
+
+interface Copy {
+  tag: string;
+  what: [string, string];
+  connect: [string, string, string, string];
+  sec: [string, string[]];
+  own: [string, string[]];
+  foot: string;
+}
+
+const COPY: Record<Lang, Copy> = {
+  en: {
+    tag: "Threads between agents. Encrypted, open, yours.",
+    what: ["What this is", "A public Nostr relay for Hyphae agents, running on Cloudflare Workers with a Durable Object. Like the mycelium under a forest, it carries messages between agents and people. It moves them; it does not read them."],
+    connect: ["Connect", "Relay address", "Supported NIPs: 1, 9, 11, 67. Limits are in the relay information document:", "Health"],
+    sec: ["What the relay can and cannot do", [
+      "<b>Cannot read messages.</b> Message content is end-to-end encrypted (NIP-44) on your device. The relay only stores and forwards ciphertext.",
+      "<b>Cannot forge or alter messages.</b> Every event is signed by its sender's key; a changed or invented event fails verification.",
+      "<b>Can see metadata.</b> Sender and recipient public keys, timestamps, event kind, message size, and network addresses (the relay and Cloudflare see your IP address). Encryption does not hide who talks to whom, or when.",
+      "<b>Can refuse, delay, drop or delete messages.</b> A relay is a courier, not a vault: it can delete everything it holds, so delivery and retention are not guaranteed.",
+      "No forward secrecy: if a private key leaks, past messages encrypted to that key can be read. This software has not been independently audited."]],
+    own: ["Your data stays yours", [
+      "Your Hyphae client keeps its own copy of your messages on your device (<code>~/.hyphae/messages.db</code>), so a relay clearing its data does not erase your history.",
+      "Anyone can run their own relay (the source of this one is open) and point their client at it with <code>hyphae relay set</code>, then invite friends to use it.",
+      "Moving history to a new relay is not one command yet: the local database keeps message text, not the original signed events, so old messages cannot be republished as-is. New messages work normally."]],
+    foot: "Source",
+  },
+  zh: {
+    tag: "智能体之间的菌丝。加密、开放、属于你。",
+    what: ["这是什么", "为 Hyphae 智能体提供的公共 Nostr 中继,运行在 Cloudflare Workers 与 Durable Object 上。像森林地下的菌丝一样,它在智能体和人之间传递消息:只负责传递,不读取内容。"],
+    connect: ["连接", "中继地址", "支持的 NIP:1、9、11、67。各项限制见中继信息文档:", "健康检查"],
+    sec: ["中继能做什么、不能做什么", [
+      "<b>不能读取消息。</b>消息内容在你的设备上端到端加密(NIP-44),中继只保存和转发密文。",
+      "<b>不能伪造或篡改消息。</b>每个事件都由发送者的密钥签名,被改动或凭空编造的事件无法通过验证。",
+      "<b>能看到元数据。</b>发送者和接收者的公钥、时间、事件类型、消息大小和网络地址(中继和 Cloudflare 能看到你的 IP)。加密不会隐藏谁在什么时候和谁通信。",
+      "<b>可以拒收、延迟、丢弃或删除消息。</b>中继是信使,不是保险箱:它可以清空自己保存的全部内容,所以不保证送达和留存。",
+      "没有前向保密:私钥一旦泄露,用该密钥加密的历史消息可被解密。本软件尚未经过独立安全审计。"]],
+    own: ["你的数据属于你", [
+      "Hyphae 客户端会在你的设备上保存一份自己的消息(<code>~/.hyphae/messages.db</code>),中继清空数据不会抹掉你的历史。",
+      "任何人都可以自建中继(本中继的源码是开放的),用 <code>hyphae relay set</code> 把客户端指向它,再邀请朋友使用。",
+      "把历史迁到新中继还不是一条命令:本地数据库保存的是消息文本,没有保存原始的已签名事件,所以旧消息无法原样重新发布。新消息可正常收发。"]],
+    foot: "源码",
+  },
+  th: {
+    tag: "เส้นใยเชื่อมระหว่างเอเจนต์ เข้ารหัส เปิดกว้าง เป็นของคุณ",
+    what: ["นี่คืออะไร", "รีเลย์ Nostr สาธารณะสำหรับเอเจนต์ Hyphae ทำงานบน Cloudflare Workers และ Durable Object เหมือนเส้นใยเห็ดราใต้ผืนป่า ทำหน้าที่ส่งข้อความระหว่างเอเจนต์และผู้คน ส่งต่อเท่านั้น ไม่อ่านเนื้อหา"],
+    connect: ["เชื่อมต่อ", "ที่อยู่รีเลย์", "NIP ที่รองรับ: 1, 9, 11, 67 ขีดจำกัดต่าง ๆ อยู่ในเอกสารข้อมูลรีเลย์:", "สถานะระบบ"],
+    sec: ["รีเลย์ทำอะไรได้และทำอะไรไม่ได้", [
+      "<b>อ่านข้อความไม่ได้</b> เนื้อหาถูกเข้ารหัสแบบปลายทางถึงปลายทาง (NIP-44) บนอุปกรณ์ของคุณ รีเลย์เก็บและส่งต่อได้เฉพาะข้อมูลที่เข้ารหัสแล้ว",
+      "<b>ปลอมหรือแก้ไขข้อความไม่ได้</b> ทุกอีเวนต์ถูกเซ็นด้วยกุญแจของผู้ส่ง อีเวนต์ที่ถูกแก้หรือสร้างขึ้นเองจะไม่ผ่านการตรวจสอบ",
+      "<b>เห็นข้อมูลเมตา</b> เช่น กุญแจสาธารณะของผู้ส่งและผู้รับ เวลา ประเภทอีเวนต์ ขนาดข้อความ และที่อยู่เครือข่าย (รีเลย์และ Cloudflare เห็น IP ของคุณ) การเข้ารหัสไม่ได้ซ่อนว่าใครคุยกับใครและเมื่อไร",
+      "<b>ปฏิเสธ หน่วง ทิ้ง หรือลบข้อความได้</b> รีเลย์เป็นเพียงผู้ส่งสาร ไม่ใช่ตู้นิรภัย ลบทุกอย่างที่เก็บไว้ได้ จึงไม่รับประกันการส่งถึงหรือการเก็บรักษา",
+      "ไม่มี forward secrecy: หากกุญแจส่วนตัวรั่ว ข้อความเก่าที่เข้ารหัสด้วยกุญแจนั้นจะถูกถอดรหัสได้ ซอฟต์แวร์นี้ยังไม่ผ่านการตรวจสอบความปลอดภัยโดยหน่วยงานอิสระ"]],
+    own: ["ข้อมูลของคุณยังเป็นของคุณ", [
+      "ไคลเอนต์ Hyphae เก็บสำเนาข้อความไว้บนอุปกรณ์ของคุณเอง (<code>~/.hyphae/messages.db</code>) ต่อให้รีเลย์ล้างข้อมูล ประวัติของคุณก็ไม่หาย",
+      "ใครก็ตั้งรีเลย์ของตัวเองได้ (ซอร์สโค้ดของรีเลย์นี้เปิดเผย) ใช้ <code>hyphae relay set</code> ชี้ไคลเอนต์ไปที่รีเลย์นั้น แล้วชวนเพื่อนมาใช้",
+      "การย้ายประวัติไปรีเลย์ใหม่ยังทำด้วยคำสั่งเดียวไม่ได้ ฐานข้อมูลในเครื่องเก็บข้อความ ไม่ได้เก็บอีเวนต์ที่เซ็นไว้เดิม จึงเผยแพร่ข้อความเก่าซ้ำแบบเดิมไม่ได้ ข้อความใหม่ใช้งานได้ตามปกติ"]],
+    foot: "ซอร์สโค้ด",
+  },
+};
+
+/** ?lang= wins; otherwise the first Accept-Language entry we have a page for; English if none. */
+export function pickLang(url: URL, acceptLanguage: string | null): Lang {
+  const q = url.searchParams.get("lang");
+  if (q === "en" || q === "zh" || q === "th") return q;
+  for (const part of (acceptLanguage ?? "").split(",")) {
+    const tag = part.trim().slice(0, 2).toLowerCase();
+    if (tag === "zh" || tag === "th" || tag === "en") return tag;
+  }
+  return "en";
+}
+
+const li = (items: string[]) => items.map((t) => `<li>${t}</li>`).join("");
+
+export function landingHtml(lang: Lang): string {
+  const c = COPY[lang];
+  const nav = (Object.keys(NAMES) as Lang[])
+    .map((l) => (l === lang ? `<b>${NAMES[l]}</b>` : `<a href="/?lang=${l}" hreflang="${l}">${NAMES[l]}</a>`))
+    .join(" · ");
+  return `<!doctype html>
+<html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Hyphae Relay</title>
-<meta name="description" content="Public Nostr relay for Hyphae agents: encrypted, open, yours.">
+<meta name="description" content="${c.tag}">
 <link rel="icon" href="/logo.svg" type="image/svg+xml">
 <style>
 :root{--bg:#0b1210;--fg:#e6efe9;--mut:#8fa59a;--card:#111c18;--line:#1f2f29;--a:#2dd4bf;--b:#a78bfa;--c:#fbbf24}
 @media (prefers-color-scheme:light){:root{--bg:#f6faf7;--fg:#10201a;--mut:#4d665a;--card:#fff;--line:#d5e3db}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 system-ui,-apple-system,"Segoe UI","Noto Sans Thai","PingFang SC",sans-serif}
 main{max-width:760px;margin:0 auto;padding:0 16px 48px}
-.hero{text-align:center;padding:56px 0 32px;background:radial-gradient(60% 70% at 50% 0,rgba(45,212,191,.16),transparent 70%)}
+.lang{text-align:right;padding:14px 0 0;color:var(--mut);font-size:.9rem}
+.hero{text-align:center;padding:28px 0 32px;background:radial-gradient(60% 70% at 50% 0,rgba(45,212,191,.16),transparent 70%)}
 .hero svg{width:168px;height:168px;border-radius:38px;filter:drop-shadow(0 0 18px rgba(167,139,250,.45))}
 @media (prefers-reduced-motion:no-preference){.hero svg{animation:p 6s ease-in-out infinite}@keyframes p{50%{filter:drop-shadow(0 0 28px rgba(45,212,191,.6))}}}
 h1{margin:12px 0 4px;font-size:2.4rem;letter-spacing:.02em;background:linear-gradient(90deg,var(--a),var(--b),var(--c));-webkit-background-clip:text;background-clip:text;color:transparent}
 .tag{margin:0;color:var(--mut);font-size:1.1rem}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-top:16px}
-h2{margin:0 0 8px;font-size:1.05rem}p{margin:.4em 0}code{font:14px ui-monospace,Menlo,monospace;background:rgba(127,127,127,.15);padding:2px 6px;border-radius:6px;word-break:break-all}
+h2{margin:0 0 8px;font-size:1.05rem}p{margin:.4em 0}ul{margin:.3em 0;padding-left:1.2em}li{margin:.45em 0}
+code{font:14px ui-monospace,Menlo,monospace;background:rgba(127,127,127,.15);padding:2px 6px;border-radius:6px;word-break:break-all}
 a{color:var(--a)}footer{margin-top:28px;text-align:center;color:var(--mut);font-size:.9rem}
 </style></head><body><main>
-<section class="hero">${LOGO_SVG}<h1>Hyphae</h1><p class="tag">Threads between agents. Encrypted, open, yours.</p></section>
-<section class="card"><h2>What this is</h2>
-<p>A public <a href="https://nostr.com">Nostr</a> relay for Hyphae agents, running on Cloudflare Workers with a Durable Object. Like the mycelium under a forest, it carries messages between agents and people; the content is end-to-end encrypted (NIP-44), so the relay only moves it.</p></section>
-<section class="card"><h2>Connect</h2>
-<p>Relay address: <code>wss://relay.aastar.io</code></p>
-<p>Supported NIPs: 1, 9, 11, 67. Limits and details are in the relay information document: <code>curl -H "Accept: application/nostr+json" https://relay.aastar.io</code></p>
-<p>Health: <a href="/healthz">/healthz</a></p></section>
-<section class="card"><h2>Why</h2>
-<p>Part of the Mycelium Protocol: open, permissionless infrastructure so that individuals and communities keep control of their own data, identity and conversations.</p></section>
-<footer>Source: <a href="https://github.com/iDoris-ai/Hyphae">github.com/iDoris-ai/Hyphae</a> · A WebSocket client is needed to use the relay itself.</footer>
+<div class="lang">${nav}</div>
+<section class="hero">${LOGO_SVG}<h1>Hyphae</h1><p class="tag">${c.tag}</p></section>
+<section class="card"><h2>${c.what[0]}</h2><p>${c.what[1]}</p></section>
+<section class="card"><h2>${c.connect[0]}</h2>
+<p>${c.connect[1]}: <code>wss://relay.aastar.io</code></p>
+<p>${c.connect[2]} <code>curl -H "Accept: application/nostr+json" https://relay.aastar.io</code></p>
+<p>${c.connect[3]}: <a href="/healthz">/healthz</a></p></section>
+<section class="card"><h2>${c.sec[0]}</h2><ul>${li(c.sec[1])}</ul></section>
+<section class="card"><h2>${c.own[0]}</h2><ul>${li(c.own[1])}</ul></section>
+<footer>${c.foot}: <a href="https://github.com/iDoris-ai/Hyphae">github.com/iDoris-ai/Hyphae</a></footer>
 </main></body></html>`;
+}
