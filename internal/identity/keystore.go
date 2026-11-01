@@ -194,6 +194,7 @@ func saveKeyStoreLocked(ks *types.KeyStore) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal keystore: %w", err)
 	}
+	removeStaleTempKeystores(path)
 	f, err := os.CreateTemp(path, KeyStoreFile+".*.tmp")
 	if err != nil {
 		return fmt.Errorf("open temp keystore: %w", err)
@@ -213,10 +214,14 @@ func saveKeyStoreLocked(ks *types.KeyStore) error {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("close temp keystore: %w", err)
 	}
+	if beforeRenameHook != nil {
+		beforeRenameHook()
+	}
 	if err := os.Rename(tmp, file); err != nil {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("rename keystore: %w", err)
 	}
+	syncDirFn(path)
 	ks.StoreExists = true
 	version := sha256.Sum256(data)
 	ks.StoreVersion = hex.EncodeToString(version[:])
