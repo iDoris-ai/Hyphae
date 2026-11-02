@@ -3,7 +3,7 @@ module github.com/iDoris-ai/hyphae
 go 1.26.0
 
 require (
-	fiatjaf.com/nostr v0.0.0-20260928115942-58e4c715304e
+	fiatjaf.com/nostr v0.0.0-20261026145325-252a038facda
 	github.com/btcsuite/btcd/btcutil v1.2.0
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
