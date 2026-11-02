@@ -8,7 +8,7 @@
 
 ## 固定版本
 
-第一轮独立复测必须使用 Agent24 的生产 lock：源码 `a4aa606eb81d5c040d94c51cdf94553e646d8674`、Go `go1.26.4`、`CGO_ENABLED=0`、`-trimpath -buildvcs=false -ldflags=-buildid=`；分别构建 `./cmd/hyphae` 和 `./cmd/hyphae-relay`。不注入版本 ldflags，不用新 lock 替代旧轮次。
+第一轮独立复测必须使用 Agent24 的生产 lock：源码 `a4aa606eb81d5c040d94c51cdf94553e646d8674`、Go `go1.26.4`、`CGO_ENABLED=0`、`-trimpath -buildvcs=false -ldflags=-buildid=`；分别构建 `./cmd/hyphae` 和 `./cmd/hyphae-relay`。不注入版本 ldflags（默认构建；`--stamp-version` 是仅供签名发布使用的可选开关，不影响此基线），不用新 lock 替代旧轮次。
 
 | 平台 | Hyphae SHA-256 | relay SHA-256 |
 |---|---|---|

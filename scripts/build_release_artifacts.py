@@ -23,17 +23,18 @@ GO_VERSION = "go1.26.4"
 REPOSITORY = "iDoris-ai/hyphae"
 RECIPE = (
     "GOTOOLCHAIN=go1.26.4 CGO_ENABLED=0 GOOS=<os> GOARCH=<arch> go build "
-    "-trimpath -buildvcs=false -ldflags='-buildid= -X main.version=<release_tag>' -o hyphae ./cmd/hyphae"
+    "-trimpath -buildvcs=false -ldflags='-buildid=' -o hyphae ./cmd/hyphae"
 )
 RELAY_RECIPE = (
     "GOTOOLCHAIN=go1.26.4 CGO_ENABLED=0 GOOS=<os> GOARCH=<arch> go build "
     "-trimpath -buildvcs=false -ldflags='-buildid=' -o hyphae-relay ./cmd/hyphae-relay"
 )
+TAG_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._-]*"
+DEFAULT_LDFLAGS = "-ldflags=-buildid="
 PLATFORMS = (
     {"os": "darwin", "arch": "arm64", "lock_key": "darwin-arm64"},
     {"os": "linux", "arch": "amd64", "lock_key": "linux-x64"},
 )
-TAG_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 LOCK_PLATFORM_KEYS = ("darwin-arm64", "linux-x64", "darwin-x64", "linux-arm64")
 
 
@@ -149,10 +150,17 @@ def go_environment(*, toolchain: str, home: Path, cache: Path, platform: dict[st
 
 
 def version_ldflags(release_tag: str) -> str:
-    """Linker flags that stamp the CLI version; the tag must not be able to add flags."""
+    """Opt-in CLI version stamp; the tag must not be able to add linker flags (Go splits on whitespace)."""
     if not re.fullmatch(TAG_PATTERN, release_tag):
         raise BuildError("release tag contains characters unsafe for linker flags")
-    return f"-ldflags=-buildid= -X main.version={release_tag}"
+    return f"{DEFAULT_LDFLAGS} -X main.version={release_tag}"
+
+
+def cli_recipe(release_tag: str | None = None) -> str:
+    """RECIPE unchanged by default; with a tag, the faithful recipe with the concrete tag substituted."""
+    if release_tag is None:
+        return RECIPE
+    return RECIPE.replace("-ldflags='-buildid='", f"-ldflags='{version_ldflags(release_tag)[len('-ldflags='):]}'")
 
 
 def build_binary(
@@ -163,7 +171,7 @@ def build_binary(
     target: str,
     name: str,
     base_env: dict[str, str],
-    ldflags: str = "-ldflags=-buildid=",
+    ldflags: str = DEFAULT_LDFLAGS,
 ) -> None:
     env = base_env.copy()
     env.update({"GOTOOLCHAIN": GO_VERSION, "CGO_ENABLED": "0", "GOOS": platform["os"], "GOARCH": platform["arch"]})
@@ -219,7 +227,7 @@ def write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def build_bundle(source: Path, source_sha: str, output: Path, release_tag: str) -> None:
+def build_bundle(source: Path, source_sha: str, output: Path, release_tag: str, stamp_version: bool = False) -> None:
     source = source.resolve(strict=True)
     output = output.expanduser().absolute()
     if not output.parent.is_dir():
@@ -231,6 +239,8 @@ def build_bundle(source: Path, source_sha: str, output: Path, release_tag: str) 
         raise BuildError("output and source checkout must not overlap")
 
     head = validate_source(source, source_sha)
+    recipe = cli_recipe(release_tag if stamp_version else None)
+    cli_ldflags = version_ldflags(release_tag) if stamp_version else DEFAULT_LDFLAGS
     with tempfile.TemporaryDirectory(prefix=".hyphae-artifacts-", dir=output.parent) as temporary:
         staging = Path(temporary)
         build_home = staging / "home"
@@ -249,7 +259,7 @@ def build_bundle(source: Path, source_sha: str, output: Path, release_tag: str) 
             raw_relay_name = f"hyphae-relay-{suffix}"
             cli = artifacts / raw_cli_name
             relay = artifacts / raw_relay_name
-            build_binary(go, source, cli, platform, "./cmd/hyphae", "hyphae", base_env, version_ldflags(release_tag))
+            build_binary(go, source, cli, platform, "./cmd/hyphae", "hyphae", base_env, cli_ldflags)
             build_binary(go, source, relay, platform, "./cmd/hyphae-relay", "hyphae-relay", base_env)
             archive_name = f"hyphae-{suffix}.tar.gz"
             archive = artifacts / archive_name
@@ -275,7 +285,7 @@ def build_bundle(source: Path, source_sha: str, output: Path, release_tag: str) 
             "publication_status": "intended; not published by this tool",
             "source": {"sha": head, "clean": True},
             "go": go_version,
-            "recipe": RECIPE,
+            "recipe": recipe,
             "relay_recipe": RELAY_RECIPE,
             "platforms": records,
             "intended_urls": {
@@ -299,7 +309,7 @@ def build_bundle(source: Path, source_sha: str, output: Path, release_tag: str) 
         for platform in PLATFORMS:
             lock_key = platform["lock_key"]
             lock_binaries[lock_key] = records[lock_key]["binaries"]["hyphae"]["sha256"]
-        lock = {"schema": 1, "source_sha": head, "go": go_version, "recipe": RECIPE, "binaries": lock_binaries}
+        lock = {"schema": 1, "source_sha": head, "go": go_version, "recipe": recipe, "binaries": lock_binaries}
         write_json(artifacts / "hyphae.lock.json", lock)
         hashes["artifact-manifest.json"] = sha256_file(artifacts / "artifact-manifest.json")
         hashes["hyphae.lock.json"] = sha256_file(artifacts / "hyphae.lock.json")
@@ -337,6 +347,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--source-sha", required=True)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--release-tag", required=True)
+    parser.add_argument(
+        "--stamp-version",
+        action="store_true",
+        help="build ./cmd/hyphae with -X main.version=<release-tag>; default builds stay byte-identical to the locked baseline",
+    )
     args = parser.parse_args(argv)
     if not re.fullmatch(r"[0-9a-f]{40}", args.source_sha):
         parser.error("--source-sha must be a full lowercase Git commit SHA")
@@ -348,7 +363,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
-        build_bundle(args.source_dir, args.source_sha, args.output, args.release_tag)
+        build_bundle(args.source_dir, args.source_sha, args.output, args.release_tag, args.stamp_version)
     except (BuildError, OSError, tarfile.TarError, subprocess.SubprocessError) as exc:
         print(f"artifact build failed: {exc}", file=sys.stderr)
         return 1

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import gzip
+import importlib.util
+import shutil
 import hashlib
 import json
 import os
@@ -17,7 +19,7 @@ import unittest
 SCRIPT = Path(__file__).with_name("build_release_artifacts.py").resolve()
 EXPECTED_RECIPE = (
     "GOTOOLCHAIN=go1.26.4 CGO_ENABLED=0 GOOS=<os> GOARCH=<arch> go build "
-    "-trimpath -buildvcs=false -ldflags='-buildid= -X main.version=<release_tag>' -o hyphae ./cmd/hyphae"
+    "-trimpath -buildvcs=false -ldflags='-buildid=' -o hyphae ./cmd/hyphae"
 )
 
 
@@ -110,6 +112,7 @@ output.write_bytes((os.environ["GOOS"] + "/" + os.environ["GOARCH"] + ":" + targ
         source_sha: str | None = None,
         env: dict[str, str] | None = None,
         tag: str = "v9.8.7-test",
+        extra: tuple[str, ...] = (),
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [
@@ -123,6 +126,7 @@ output.write_bytes((os.environ["GOOS"] + "/" + os.environ["GOARCH"] + ":" + targ
                 str(output),
                 "--release-tag",
                 tag,
+                *extra,
             ],
             check=False,
             capture_output=True,
@@ -213,8 +217,7 @@ output.write_bytes((os.environ["GOOS"] + "/" + os.environ["GOARCH"] + ":" + targ
         for row in builds:
             args = row["args"]
             env = row["env"]
-            expected_flags = "-ldflags=-buildid= -X main.version=v9.8.7-test" if args[-1] == "./cmd/hyphae" else "-ldflags=-buildid="
-            self.assertEqual(args[1:4], ["-trimpath", "-buildvcs=false", expected_flags])
+            self.assertEqual(args[1:4], ["-trimpath", "-buildvcs=false", "-ldflags=-buildid="])
             self.assertEqual(env["GOTOOLCHAIN"], "go1.26.4")
             self.assertEqual(env["GOENV"], "off")
             self.assertEqual(env["GOWORK"], "off")
@@ -235,26 +238,60 @@ output.write_bytes((os.environ["GOOS"] + "/" + os.environ["GOARCH"] + ":" + targ
                 self.assertIsNone(env[forbidden])
         self.assertEqual(self.commit, subprocess.check_output(["git", "-C", str(self.source), "rev-parse", "HEAD"], text=True).strip())
 
-    def test_different_tags_give_different_cli_bytes_but_same_relay(self) -> None:
-        one, two = self.base / "tag-one", self.base / "tag-two"
-        self.assertEqual(self.run_builder(one, tag="v1.0.0").returncode, 0)
-        self.assertEqual(self.run_builder(two, tag="v1.0.1").returncode, 0)
-        for suffix in ("darwin-arm64", "linux-amd64"):
-            self.assertNotEqual((one / f"hyphae-{suffix}").read_bytes(), (two / f"hyphae-{suffix}").read_bytes())
-            self.assertEqual((one / f"hyphae-relay-{suffix}").read_bytes(), (two / f"hyphae-relay-{suffix}").read_bytes())
+    def test_default_recipe_is_the_locked_baseline_recipe(self) -> None:
+        spec = importlib.util.spec_from_file_location("verify_artifact_bundle", SCRIPT.with_name("verify_artifact_bundle.py"))
+        verifier = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(verifier)
+        builder = self.load_builder()
+        self.assertEqual(builder.RECIPE, EXPECTED_RECIPE)
+        self.assertEqual(builder.RECIPE, verifier.RECIPE)
+        self.assertEqual(builder.cli_recipe(), verifier.RECIPE)
+        self.assertEqual(builder.RELAY_RECIPE, verifier.RELAY_RECIPE)
+        output = self.base / "default"
+        self.assertEqual(self.run_builder(output).returncode, 0)
+        for name in ("artifact-manifest.json", "hyphae.lock.json"):
+            self.assertEqual(json.loads((output / name).read_text())["recipe"], verifier.RECIPE)
+        self.assertNotIn(b"main.version", (output / "hyphae-linux-amd64").read_bytes())
 
-    def test_unsafe_tags_cannot_reach_linker_flags(self) -> None:
-        import importlib.util
-
+    def load_builder(self):
         spec = importlib.util.spec_from_file_location("build_release_artifacts", SCRIPT)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        for bad in ("v1 -X main.other=x", "v1'x", 'v1"x', "v1\\x", "v1=x", "", "-v1", "v1\nx", "v1\tx"):
+        return module
+
+    def test_stamp_version_is_opt_in_and_changes_only_the_cli(self) -> None:
+        default, one, two = self.base / "d", self.base / "t1", self.base / "t2"
+        self.assertEqual(self.run_builder(default, tag="v1.0.0").returncode, 0)
+        self.assertEqual(self.run_builder(one, tag="v1.0.0", extra=("--stamp-version",)).returncode, 0)
+        self.assertEqual(self.run_builder(two, tag="v1.0.1", extra=("--stamp-version",)).returncode, 0)
+        for suffix in ("darwin-arm64", "linux-amd64"):
+            cli = f"hyphae-{suffix}"
+            relay = f"hyphae-relay-{suffix}"
+            self.assertNotEqual((default / cli).read_bytes(), (one / cli).read_bytes())
+            self.assertNotEqual((one / cli).read_bytes(), (two / cli).read_bytes())
+            self.assertEqual((default / relay).read_bytes(), (one / relay).read_bytes())
+            self.assertEqual((one / relay).read_bytes(), (two / relay).read_bytes())
+        stamped_recipe = EXPECTED_RECIPE.replace("-ldflags='-buildid='", "-ldflags='-buildid= -X main.version=v1.0.0'")
+        for name in ("artifact-manifest.json", "hyphae.lock.json"):
+            self.assertEqual(json.loads((one / name).read_text())["recipe"], stamped_recipe)
+            self.assertEqual(json.loads((default / name).read_text())["recipe"], EXPECTED_RECIPE)
+        self.assertNotIn("<release_tag>", stamped_recipe)
+        builds = [r["args"] for r in self.log_rows() if r["args"][0] == "build" and r["args"][-1] == "./cmd/hyphae"]
+        self.assertIn("-ldflags=-buildid= -X main.version=v1.0.0", [a[3] for a in builds])
+        self.assertIn("-ldflags=-buildid=", [a[3] for a in builds])
+        stamped_relay = [r["args"] for r in self.log_rows() if r["args"][-1] == "./cmd/hyphae-relay"]
+        self.assertTrue(all(a[3] == "-ldflags=-buildid=" for a in stamped_relay))
+
+    def test_unsafe_tags_cannot_reach_linker_flags(self) -> None:
+        module = self.load_builder()
+        for bad in ("v1 -X main.other=x", "v1 -s", "v1 x", "v1'x", 'v1"x', "v1\\x", "v1=x", "", "-v1", "v1\nx", "v1\tx"):
             with self.subTest(tag=bad):
                 with self.assertRaises(module.BuildError):
                     module.version_ldflags(bad)
+                with self.assertRaises(module.BuildError):
+                    module.cli_recipe(bad)
         self.assertEqual(module.version_ldflags("v1.2.3-rc.1_x"), "-ldflags=-buildid= -X main.version=v1.2.3-rc.1_x")
-        refused = self.run_builder(self.base / "bad-tag", tag="v1 -X main.other=x")
+        refused = self.run_builder(self.base / "bad-tag", tag="v1 -s", extra=("--stamp-version",))
         self.assertNotEqual(refused.returncode, 0)
         self.assertEqual(self.log_rows(), [])
 
@@ -353,12 +390,23 @@ output.write_bytes((os.environ["GOOS"] + "/" + os.environ["GOARCH"] + ":" + targ
         self.assertFalse(mutated_output.exists())
 
 
-GO_BIN = Path.home() / "go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.4.darwin-arm64/bin"
+def find_go() -> Path | None:
+    """go1.26.4 from PATH first, then the module-cache toolchain for this OS/arch."""
+    for candidate in (shutil.which("go"),):
+        if candidate and subprocess.run([candidate, "version"], capture_output=True, text=True, env={**os.environ, "GOTOOLCHAIN": "local"}).stdout.split()[2:3] == ["go1.26.4"]:
+            return Path(candidate).parent
+    goos = {"darwin": "darwin", "linux": "linux"}.get(sys.platform, sys.platform)
+    machine = {"x86_64": "amd64", "AMD64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(os.uname().machine, os.uname().machine)
+    cached = Path.home() / f"go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.4.{goos}-{machine}/bin"
+    return cached if (cached / "go").exists() else None
 
 
-@unittest.skipUnless((GO_BIN / "go").exists(), "real go1.26.4 toolchain not found; stamping is only fake-tested")
+GO_BIN = find_go()
+
+
+@unittest.skipUnless(GO_BIN, "go1.26.4 not on PATH and no cached toolchain for this OS/arch; stamping is only fake-tested")
 class RealGoStampTests(unittest.TestCase):
-    def test_real_build_stamps_version_reproducibly(self) -> None:
+    def test_real_build_stamps_version_only_when_asked(self) -> None:
         with tempfile.TemporaryDirectory(prefix="hyphae-realgo-") as raw:
             base = Path(raw)
             source = base / "src"
@@ -376,18 +424,26 @@ class RealGoStampTests(unittest.TestCase):
             sha = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
             env["PATH"] = f"{GO_BIN}{os.pathsep}{env['PATH']}"
 
-            def build(name: str, tag: str) -> Path:
+            def build(name: str, tag: str, *extra: str) -> Path:
                 out = base / name
                 subprocess.run([sys.executable, str(SCRIPT), "--source-dir", str(source), "--source-sha", sha,
-                                "--output", str(out), "--release-tag", tag], check=True, env=env, capture_output=True)
+                                "--output", str(out), "--release-tag", tag, *extra], check=True, env=env, capture_output=True)
                 return out
 
-            a1, a2, b = build("a1", "v1.2.3"), build("a2", "v1.2.3"), build("b", "v1.2.4")
+            d1, d2, d3 = build("d1", "v1.2.3"), build("d2", "v1.2.3"), build("d3", "v1.2.4")
+            self.assertEqual((d1 / "SHA256SUMS").read_bytes(), (d2 / "SHA256SUMS").read_bytes())
+            self.assertEqual((d1 / "hyphae-linux-amd64").read_bytes(), (d3 / "hyphae-linux-amd64").read_bytes())  # default ignores the tag
+            a1, a2, b = build("a1", "v1.2.3", "--stamp-version"), build("a2", "v1.2.3", "--stamp-version"), build("b", "v1.2.4", "--stamp-version")
             self.assertEqual((a1 / "SHA256SUMS").read_bytes(), (a2 / "SHA256SUMS").read_bytes())
+            self.assertNotEqual((a1 / "hyphae-linux-amd64").read_bytes(), (d1 / "hyphae-linux-amd64").read_bytes())
             self.assertNotEqual((a1 / "hyphae-linux-amd64").read_bytes(), (b / "hyphae-linux-amd64").read_bytes())
             self.assertIn(b"v1.2.3", (a1 / "hyphae-linux-amd64").read_bytes())
-            self.assertIn(b"v1.2.4", (b / "hyphae-linux-amd64").read_bytes())
+            self.assertNotIn(b"v1.2.3", (d1 / "hyphae-linux-amd64").read_bytes())
             self.assertEqual((a1 / "hyphae-relay-linux-amd64").read_bytes(), (b / "hyphae-relay-linux-amd64").read_bytes())
+            self.assertEqual((a1 / "hyphae-relay-linux-amd64").read_bytes(), (d1 / "hyphae-relay-linux-amd64").read_bytes())
+            if sys.platform == "linux":  # run the stamped binary: it must report the tag
+                run = subprocess.run([str(a1 / "hyphae-linux-amd64")], capture_output=True, text=True)
+                self.assertEqual(run.stdout, "v1.2.3")
 
 
 if __name__ == "__main__":
