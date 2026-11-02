@@ -13,9 +13,9 @@ import (
 )
 
 // ContractVersion is "major.minor". Removing, renaming or changing the
-// semantics of anything in `hyphae contract`/`health` output or any command,
-// flag or error code bumps major; only ADDING a subcommand, flag or error code
-// bumps minor.
+// semantics of a command, flag, error code or `hyphae contract` output key
+// bumps major; only ADDING a subcommand, flag or error code bumps minor. This is
+// a release policy for maintainers; no code enforces it.
 const ContractVersion = "1.0"
 
 // provides is the capability table; keep sorted.
