@@ -28,6 +28,18 @@ The runner writes its full diagnostic evidence only under the ephemeral runner t
 
 The reusable workflow is called by the ordinary CI workflow and also has scheduled/manual entry points. It runs pinned-production and candidate modes on native Linux x64 and macOS ARM64, including on Dependabot PRs (there are no path filters that can skip dependency changes). Each producer and consumer asserts its OS/architecture, Go target, and binary format; normalized evidence names include mode and platform. The main CI stable `ci-ok` job requires `test`, joint acceptance, and the macOS cleanup stress job to have the literal result `success`; skipped, neutral, failed, or cancelled jobs fail the stable gate. The cleanup stress repeats the pipe-holding descendant regression 50 times under Python 3.14.7 on macOS and depends on the separately owned #130 fixture/runner repair.
 
+## Schema 2 lock, skipped stages and the positive control
+
+The scripts accept the Hyphae lock of `schema` 1 and 2 and dispatch on that field; any other schema is rejected. Schema 2 (published from v0.30.0, platforms `darwin-arm64` and `linux-x64` only) is validated with exact key sets, hash formats, `signing.macos_team_id == HYAP444FN9` and `signing.notarized == true`. Until the baseline file is moved (a separate change) the pinned lock is still schema 1; the schema 2 tests use the real v0.30.0 asset at `scripts/fixtures/hyphae.lock.v0.30.0.json` (SHA-256 `55c4d493…e1cf`).
+
+| Case | Rule |
+|---|---|
+| pinned-production, linux-x64 | built from source; compared with `assets.linux-x64.sha256` (= `reproducible.unsigned_sha256.linux-x64`) |
+| pinned-production, darwin-arm64 | the signed release binary is downloaded and must equal `assets.darwin-arm64.sha256`; a source rebuild is compared with `reproducible.unsigned_sha256.darwin-arm64` instead |
+| candidate | the derived lock replaces only `source.commit`, `version`, `assets.<platform>.sha256`, `reproducible.unsigned_sha256.<platform>`; `signing` stays byte-identical |
+
+The darwin candidate is an unsigned CI build. Its evidence may only PASS `download-and-hash` and the control; every other stage must be `SKIPPED` with the reason `unsigned candidate; signing verified in pinned-production`. The control stage (`signature-gate-positive-control`) records `expected: rejected`, `observed`, `reason_code` and passes only with `observed: rejected` and `reason_code: signature_rejected` (Agent24 host view `components[id=hyphae].state == "failed"`); it is mandatory in that evidence and not allowed anywhere else. `normalize-evidence` fails closed on a skipped stage without the exact reason, a skipped stage outside that case, a missing, duplicated or failed control, or a PASS for any other stage. Summaries report `passed`/`skipped`/`blocked` separately and a run with skipped stages has result `PASS_WITH_SKIPPED`, never a clean `PASS`. There is no flag that skips signature verification.
+
 ## Limits and next steps
 
 - The scheduled workflow checks the pinned baseline and the Hyphae source at the workflow’s triggering commit. It does not automatically detect a new commit in the separate Agent24 repository. An Agent24 lock/source change must update this repository’s tracked pin configuration or explicitly dispatch a reviewed run; do not claim cross-repository automation that is not present.

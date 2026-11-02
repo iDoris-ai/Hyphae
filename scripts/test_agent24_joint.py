@@ -194,12 +194,21 @@ def check_inputs(args: argparse.Namespace) -> dict[str, str]:
     except (UnicodeError, json.JSONDecodeError):
         raise SafeFailure("production-lock-invalid") from None
     require(isinstance(lock, dict), "production-lock-invalid")
-    require(lock.get("source_sha") == args.hyphae_sha, "production-lock-source-mismatch")
-    binary_map = lock.get("binaries")
-    require(isinstance(binary_map, dict), "production-lock-binaries-missing")
+    schema = lock.get("schema")
+    require(type(schema) is int and schema in (1, 2), "production-lock-schema-unsupported")
     plat = host_platform()
     require(plat != "unsupported", "unsupported-platform")
-    require(binary_map.get(plat) == expected["hyphae"], "production-lock-hyphae-hash-mismatch")
+    if schema == 1:
+        require(lock.get("source_sha") == args.hyphae_sha, "production-lock-source-mismatch")
+        binary_map = lock.get("binaries")
+        require(isinstance(binary_map, dict), "production-lock-binaries-missing")
+        pinned = binary_map.get(plat)
+    else:
+        source, assets = lock.get("source"), lock.get("assets")
+        require(isinstance(source, dict) and source.get("commit") == args.hyphae_sha, "production-lock-source-mismatch")
+        require(isinstance(assets, dict) and isinstance(assets.get(plat), dict), "production-lock-binaries-missing")
+        pinned = assets[plat].get("sha256")
+    require(pinned == expected["hyphae"], "production-lock-hyphae-hash-mismatch")
     return actual
 
 
