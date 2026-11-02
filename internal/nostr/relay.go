@@ -87,13 +87,19 @@ func relayInfo(ctx context.Context, c *cli.Command) error {
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, time.Duration(seconds)*time.Second)
 	defer cancel()
-	relay, err := nostr.RelayConnect(probeCtx, url, nostr.RelayOptions{})
-	if relay != nil {
-		defer relay.Close()
-	}
-	if err != nil {
+	if err := ProbeRelay(probeCtx, url); err != nil {
 		return common.NewExitError(common.ErrCodeNetwork, fmt.Errorf("failed to connect: %w", err))
 	}
 	common.Emit(common.JSONMode(c), map[string]any{"url": url, "connected": true}, func() { fmt.Printf("Connected to %s\n", url) })
 	return nil
+}
+
+// ProbeRelay opens and closes one WebSocket connection to url; ctx bounds it.
+// Shared by `relay info` and `health`.
+func ProbeRelay(ctx context.Context, url string) error {
+	relay, err := nostr.RelayConnect(ctx, url, nostr.RelayOptions{})
+	if relay != nil {
+		defer relay.Close()
+	}
+	return err
 }
