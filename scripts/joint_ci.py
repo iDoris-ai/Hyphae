@@ -40,6 +40,13 @@ if (not isinstance(AGENT24_BASE_SHA, str)
 GO_RECIPE = "GOTOOLCHAIN=go1.26.4 CGO_ENABLED=0 GOOS=<os> GOARCH=<arch> go build -trimpath -buildvcs=false -ldflags='-buildid=' -o hyphae ./cmd/hyphae"
 PLATFORM_KEYS = {"darwin-arm64", "linux-x64", "darwin-x64", "linux-arm64"}
 ARTIFACTS = ("hyphae", "relay", "agent24", "agent24d")
+LOCK2_PLATFORMS = {"darwin-arm64", "linux-x64"}
+LOCK2_KEYS = {"schema", "id", "version", "source", "contract", "release_url_base", "assets", "signing",
+              "reproducible", "stop_grace_ms", "provides", "requires", "assurance"}
+MACOS_TEAM_ID = "HYAP444FN9"
+SKIP_REASON = "unsigned candidate; signing verified in pinned-production"
+CONTROL_STAGE = "signature-gate-positive-control"
+DARWIN_CANDIDATE_PASS_STAGES = {"download-and-hash", CONTROL_STAGE}
 
 
 class GateError(Exception):
@@ -156,38 +163,101 @@ def parse_json(data: bytes, label: str) -> Any:
         raise GateError(label) from None
 
 
+def lock_schema(lock: Any) -> int:
+    """Dispatch on the lock's own schema field; anything but 1 or 2 is rejected."""
+    schema = lock.get("schema") if type(lock) is dict else None
+    require(type(schema) is int and schema in (1, 2), "production-lock-schema-unsupported")
+    return schema
+
+
+def validate_lock2(lock: dict[str, Any]) -> None:
+    """Exact-shape check of the schema 2 production lock (same strictness as schema 1)."""
+    def hex64(value: Any) -> bool:
+        return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+    def shape(value: Any, keys: set[str], label: str) -> dict[str, Any]:
+        require(type(value) is dict and set(value) == keys, label)
+        return value
+
+    shape(lock, LOCK2_KEYS, "production-lock-keys")
+    require(lock["id"] == "hyphae" and isinstance(lock["version"], str) and lock["version"], "production-lock-identity")
+    source = shape(lock["source"], {"repo", "commit"}, "production-lock-source")
+    require(source["commit"] == PRODUCTION_HYPHAE_SHA, "production-lock-baseline")
+    assets = shape(lock["assets"], LOCK2_PLATFORMS, "production-lock-platform-set")
+    require(isinstance(source["repo"], str), "production-lock-source")
+    for item in assets.values():
+        require(hex64(shape(item, {"name", "sha256", "files", "executables"}, "production-lock-asset")["sha256"]),
+                "production-lock-asset-hash")
+        require(isinstance(item["name"], str) and all(type(item[k]) is list and all(isinstance(x, str) for x in item[k])
+                                                      for k in ("files", "executables")), "production-lock-asset")
+    repro = shape(lock["reproducible"], {"toolchain", "recipe", "unsigned_sha256"}, "production-lock-reproducible")
+    unsigned = shape(repro["unsigned_sha256"], LOCK2_PLATFORMS, "production-lock-platform-set")
+    require(all(hex64(v) for v in unsigned.values()) and repro["toolchain"] == GO_VERSION,
+            "production-lock-reproducible")
+    require(assets["linux-x64"]["sha256"] == unsigned["linux-x64"], "production-lock-linux-unsigned-mismatch")
+    signing = shape(lock["signing"], {"macos_team_id", "notarized"}, "production-lock-signing")
+    require(signing["macos_team_id"] == MACOS_TEAM_ID and signing["notarized"] is True, "production-lock-signing")
+
+
+def lock_view(lock: dict[str, Any], schema: int, platform: str) -> tuple[Any, Any]:
+    """Return (source commit, pinned hyphae digest for platform) for either schema."""
+    if schema == 1:
+        return lock.get("source_sha"), (lock.get("binaries") or {}).get(platform)
+    asset = (lock.get("assets") or {}).get(platform)
+    return (lock.get("source") or {}).get("commit"), asset.get("sha256") if type(asset) is dict else None
+
+
 def derive_lock(production_bytes: bytes, *, platform: str, hyphae_sha: str,
-                hyphae_binary_sha256: str) -> bytes:
-    """Change only source_sha and one current-platform binary digest."""
+                hyphae_binary_sha256: str, version: str | None = None,
+                unsigned_sha256: str | None = None) -> bytes:
+    """Schema 1: change only source_sha and one platform digest.
+
+    Schema 2: change only source.commit, version, assets.<platform>.sha256 and
+    reproducible.unsigned_sha256.<platform>; the signing block stays untouched.
+    """
     require(sha256(production_bytes) == PRODUCTION_LOCK_SHA256, "production-lock-hash")
-    require(platform in PLATFORM_KEYS, "unsupported-platform")
+    original = parse_json(production_bytes, "production-lock-json")
+    schema = lock_schema(original)
+    require(platform in (PLATFORM_KEYS if schema == 1 else LOCK2_PLATFORMS), "unsupported-platform")
     require(re.fullmatch(r"[0-9a-f]{40}", hyphae_sha) is not None, "hyphae-source-sha")
     require(re.fullmatch(r"[0-9a-f]{64}", hyphae_binary_sha256) is not None, "hyphae-binary-sha")
-    original = parse_json(production_bytes, "production-lock-json")
-    require(type(original) is dict and original.get("source_sha") == PRODUCTION_HYPHAE_SHA, "production-lock-baseline")
-    binaries = original.get("binaries")
-    require(type(binaries) is dict and set(binaries) == PLATFORM_KEYS, "production-lock-platform-set")
     derived = json.loads(json.dumps(original))
-    derived["source_sha"] = hyphae_sha
-    derived["binaries"][platform] = hyphae_binary_sha256
+    if schema == 1:
+        require(original.get("source_sha") == PRODUCTION_HYPHAE_SHA, "production-lock-baseline")
+        binaries = original.get("binaries")
+        require(type(binaries) is dict and set(binaries) == PLATFORM_KEYS, "production-lock-platform-set")
+        derived["source_sha"] = hyphae_sha
+        derived["binaries"][platform] = hyphae_binary_sha256
+    else:
+        unsigned = hyphae_binary_sha256 if unsigned_sha256 is None else unsigned_sha256
+        require(re.fullmatch(r"[0-9a-f]{64}", unsigned) is not None, "hyphae-binary-sha")
+        require(isinstance(version, str) and re.fullmatch(r"v?[0-9A-Za-z][0-9A-Za-z.+-]{0,63}", version) is not None
+                and version != original.get("version"), "candidate-version")
+        validate_lock2(original)
+        derived["source"]["commit"] = hyphae_sha
+        derived["version"] = version
+        derived["assets"][platform]["sha256"] = hyphae_binary_sha256
+        derived["reproducible"]["unsigned_sha256"][platform] = unsigned
+        require(derived["signing"] == original["signing"], "derived-lock-signing-changed")
     result = (json.dumps(derived, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode()
     return result
 
 
 def validate_derived_lock(production_bytes: bytes, derived_bytes: bytes, *, platform: str,
                           hyphae_sha: str, hyphae_binary_sha256: str,
-                          declared_production_sha256: str, declared_derived_sha256: str) -> None:
+                          declared_production_sha256: str, declared_derived_sha256: str,
+                          version: str | None = None) -> None:
     require(sha256(production_bytes) == PRODUCTION_LOCK_SHA256 == declared_production_sha256,
             "production-lock-provenance")
     require(sha256(derived_bytes) == declared_derived_sha256, "derived-lock-hash")
     expected = derive_lock(production_bytes, platform=platform, hyphae_sha=hyphae_sha,
-                           hyphae_binary_sha256=hyphae_binary_sha256)
+                           hyphae_binary_sha256=hyphae_binary_sha256, version=version)
     require(derived_bytes == expected, "derived-lock-diff")
 
 
 def make_manifest(*, mode: str, platform: str, hyphae_sha: str, agent24_sha: str,
                   production_lock_sha256: str, derived_lock_sha256: str,
-                  hashes: dict[str, str]) -> dict[str, Any]:
+                  hashes: dict[str, str], candidate_version: str | None = None) -> dict[str, Any]:
     require(mode in ("candidate", "pinned-production"), "validation-mode")
     require(platform in PLATFORM_KEYS, "unsupported-platform")
     require(set(hashes) == set(ARTIFACTS), "binary-set")
@@ -205,6 +275,8 @@ def make_manifest(*, mode: str, platform: str, hyphae_sha: str, agent24_sha: str
         "go_recipe": GO_RECIPE,
         "binary_sha256": dict(sorted(hashes.items())),
     }
+    if candidate_version is not None:
+        result["candidate_version"] = candidate_version
     return result
 
 
@@ -246,6 +318,7 @@ def validate_manifest(path: Path, artifact_dir: Path, production_lock: Path) -> 
             hyphae_binary_sha256=hashes["hyphae"],
             declared_production_sha256=manifest.get("production_lock_sha256"),
             declared_derived_sha256=manifest.get("derived_lock_sha256"),
+            version=manifest.get("candidate_version"),
         )
     else:
         require(sha256(prod) == PRODUCTION_LOCK_SHA256 == manifest.get("production_lock_sha256"),
@@ -253,8 +326,13 @@ def validate_manifest(path: Path, artifact_dir: Path, production_lock: Path) -> 
         require(derived == prod and manifest.get("derived_lock_sha256") == PRODUCTION_LOCK_SHA256,
                 "production-lock-not-preserved")
         lock = parse_json(prod, "production-lock-json")
-        require(lock.get("source_sha") == manifest.get("hyphae_source_sha"), "production-source-mismatch")
-        require(lock.get("binaries", {}).get(platform) == hashes["hyphae"], "production-binary-mismatch")
+        schema = lock_schema(lock)
+        if schema == 2:
+            validate_lock2(lock)
+            require(platform in LOCK2_PLATFORMS, "production-lock-platform-set")
+        source, pinned = lock_view(lock, schema, platform)
+        require(source == manifest.get("hyphae_source_sha"), "production-source-mismatch")
+        require(pinned == hashes["hyphae"], "production-binary-mismatch")
     require(manifest.get("agent24_base_sha") == AGENT24_BASE_SHA, "manifest-agent24-base")
     require(manifest.get("agent24_built_sha") == AGENT24_BASE_SHA, "manifest-agent24-built-source")
     require(manifest.get("go_version") == GO_VERSION and manifest.get("go_recipe") == GO_RECIPE, "manifest-go-recipe")
@@ -330,8 +408,35 @@ def verify_consumer_bundle(manifest_path: Path, artifact_dir: Path, production_l
     return manifest
 
 
-def normalized_evidence(path: Path, manifest: dict[str, Any]) -> dict[str, Any]:
-    """Drop all runner details except safe stage labels and outcome metadata."""
+def normalize_stage(row: dict[str, Any], stage: str, strict: bool) -> dict[str, Any]:
+    """One stage record. PASS, SKIPPED (with reason) or the control stage; never a blurred mix."""
+    outcome = row.get("result")
+    if row.get("kind") == "control":
+        # Positive control: PASS only when the signature gate was observed rejecting the unsigned candidate.
+        require(strict and stage == CONTROL_STAGE and outcome in (None, "PASS"), "control-unexpected")
+        reason_code = row.get("reason_code")
+        require(row.get("expected") == "rejected" and row.get("observed") == "rejected"
+                and reason_code == "signature_rejected", "control-not-rejected")
+        return {"stage": stage, "result": "PASS", "kind": "control", "expected": "rejected",
+                "observed": "rejected", "reason_code": reason_code}
+    if outcome == "SKIPPED":
+        reason = row.get("reason")
+        require(isinstance(reason, str) and reason.strip() != "", "skipped-reason-missing")
+        require(strict and reason == SKIP_REASON, "skipped-reason-invalid")
+        return {"stage": stage, "result": "SKIPPED", "reason": reason}
+    require(outcome in (None, "PASS", "BLOCKED"), "runner-evidence-result")
+    require(not strict or outcome == "BLOCKED" or stage in DARWIN_CANDIDATE_PASS_STAGES,
+            "stage-not-skipped-in-unsigned-candidate")
+    return {"stage": stage, "result": "BLOCKED" if outcome == "BLOCKED" else "PASS"}
+
+
+def normalized_evidence(path: Path, manifest: dict[str, Any], *, lock_schema_id: int = 1) -> dict[str, Any]:
+    """Drop all runner details except safe stage labels and outcome metadata.
+
+    ``lock_schema_id`` 2 + darwin candidate = unsigned candidate: only download/hash and the
+    positive control may PASS, every other stage must be SKIPPED, and the control is mandatory.
+    """
+    strict = lock_schema_id == 2 and manifest["validation_mode"] == "candidate" and manifest["platform"] == "darwin-arm64"
     raw = parse_json(path.read_bytes(), "runner-evidence-json")
     require(type(raw) is dict and raw.get("result") in ("PASS", "FAIL", "BLOCKED"), "runner-evidence-shape")
     assertions = raw.get("assertions")
@@ -341,7 +446,18 @@ def normalized_evidence(path: Path, manifest: dict[str, Any]) -> dict[str, Any]:
         require(type(row) is dict and isinstance(row.get("stage"), str), "runner-evidence-stage")
         stage = row["stage"]
         require(re.fullmatch(r"[a-z0-9-]{1,100}", stage) is not None, "runner-evidence-stage-label")
-        stages.append({"stage": stage, "result": "BLOCKED" if row.get("result") == "BLOCKED" else "PASS"})
+        stages.append(normalize_stage(row, stage, strict))
+    controls = [item for item in stages if item.get("kind") == "control"]
+    require(len(controls) == (1 if strict else 0) and len({item["stage"] for item in stages}) == len(stages),
+            "control-stage-missing" if strict else "control-unexpected")
+    names = {item["stage"] for item in stages if item["result"] == "PASS"}
+    require(not strict or ("download-and-hash" in names
+                           and any(item["result"] == "SKIPPED" for item in stages)
+                           and not any(item["result"] == "BLOCKED" for item in stages)),
+            "unsigned-candidate-evidence-incomplete")
+    summary = {"passed": sum(1 for item in stages if item["result"] == "PASS"),
+               "skipped": sum(1 for item in stages if item["result"] == "SKIPPED"),
+               "blocked": sum(1 for item in stages if item["result"] == "BLOCKED")}
     def safe_label(value: Any) -> str | None:
         return value if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,100}", value) else None
 
@@ -366,8 +482,10 @@ def normalized_evidence(path: Path, manifest: dict[str, Any]) -> dict[str, Any]:
         "production_lock_sha256": manifest["production_lock_sha256"],
         "derived_lock_sha256": manifest["derived_lock_sha256"],
         "binary_sha256": manifest["binary_sha256"],
-        "result": raw["result"],
+        # A run with skipped stages is never a clean PASS.
+        "result": "PASS_WITH_SKIPPED" if raw["result"] == "PASS" and summary["skipped"] else raw["result"],
         "stages": stages,
+        "summary": summary,
     }
     for field in ("failure", "primary_failure"):
         label = safe_label(raw.get(field))
@@ -409,6 +527,7 @@ def main(argv: list[str] | None = None) -> int:
     derive.add_argument("--platform", choices=sorted(PLATFORM_KEYS), required=True)
     derive.add_argument("--hyphae-sha", required=True)
     derive.add_argument("--hyphae-sha256", required=True)
+    derive.add_argument("--version")
     derive.add_argument("--output", type=Path, required=True)
     verify = commands.add_parser("verify-candidate")
     verify.add_argument("--manifest", type=Path, required=True)
@@ -424,6 +543,7 @@ def main(argv: list[str] | None = None) -> int:
     manifest_cmd.add_argument("--hyphae-sha", required=True)
     manifest_cmd.add_argument("--artifact-dir", type=Path, required=True)
     manifest_cmd.add_argument("--production-lock", type=Path, required=True)
+    manifest_cmd.add_argument("--candidate-version")
     manifest_cmd.add_argument("--output", type=Path, required=True)
     normalize = commands.add_parser("normalize-evidence")
     normalize.add_argument("--evidence", type=Path, required=True)
@@ -436,7 +556,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "derive-lock":
             result = derive_lock(args.production_lock.read_bytes(), platform=args.platform,
-                                 hyphae_sha=args.hyphae_sha, hyphae_binary_sha256=args.hyphae_sha256)
+                                 hyphae_sha=args.hyphae_sha, hyphae_binary_sha256=args.hyphae_sha256, version=args.version)
             args.output.write_bytes(result)
             return 0
         if args.command == "write-manifest":
@@ -447,14 +567,18 @@ def main(argv: list[str] | None = None) -> int:
             manifest = make_manifest(
                 mode=args.mode, platform=args.platform, hyphae_sha=args.hyphae_sha,
                 agent24_sha=AGENT24_BASE_SHA, production_lock_sha256=sha256(prod),
-                derived_lock_sha256=sha256(derived), hashes=hashes)
+                derived_lock_sha256=sha256(derived), hashes=hashes,
+                candidate_version=args.candidate_version)
             args.output.write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n", encoding="utf-8")
             return 0
         if args.command == "normalize-evidence":
             manifest = parse_json(args.manifest.read_bytes(), "manifest-json")
-            safe = normalized_evidence(args.evidence, manifest)
+            lock = read_regular(args.manifest.parent / "hyphae.lock.json", 64 * 1024)
+            require(sha256(lock) == manifest.get("derived_lock_sha256"), "derived-lock-hash")
+            safe = normalized_evidence(args.evidence, manifest,
+                                       lock_schema_id=lock_schema(parse_json(lock, "derived-lock-json")))
             args.output.write_text(json.dumps(safe, sort_keys=True, indent=2) + "\n", encoding="utf-8")
-            return 0 if safe["result"] == "PASS" else 1
+            return 0 if safe["result"] in ("PASS", "PASS_WITH_SKIPPED") else 1
         if args.command == "verify-platform":
             verify_binary_platform(args.binary, args.platform)
             return 0

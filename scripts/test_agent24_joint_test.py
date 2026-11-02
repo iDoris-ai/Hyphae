@@ -65,6 +65,28 @@ class JointRunnerTests(unittest.TestCase):
             self.assertEqual(args.hyphae_sha, "a" * 40)
             self.assertEqual(args.agent24_sha, "b" * 40)
 
+    def test_schema2_lock_checks_source_commit_and_asset_hash_and_unknown_schema_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            args = self.args(root)
+            def write(lock: dict) -> None:
+                args.lock.write_text(json.dumps(lock), encoding="utf-8")
+                args.expected_lock_sha256 = joint.sha256_file(args.lock)
+            digest = args.expected_hyphae_sha256
+            platform = joint.host_platform()
+            good = {"schema": 2, "source": {"commit": "a" * 40}, "assets": {platform: {"sha256": digest}}}
+            write(good)
+            joint.check_inputs(args)
+            for label, lock in (
+                ("production-lock-source-mismatch", {**good, "source": {"commit": "c" * 40}}),
+                ("production-lock-hyphae-hash-mismatch", {**good, "assets": {platform: {"sha256": "0" * 64}}}),
+                ("production-lock-binaries-missing", {**good, "assets": {}}),
+                ("production-lock-schema-unsupported", {**good, "schema": 3}),
+            ):
+                write(lock)
+                with self.subTest(label), self.assertRaisesRegex(joint.SafeFailure, f"^{label}$"):
+                    joint.check_inputs(args)
+
     def test_missing_binary_and_wrong_hash_fail_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
