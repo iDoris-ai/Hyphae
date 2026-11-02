@@ -1,9 +1,9 @@
 {
   "schema": 1,
   "agent24_repository": "iDoris-ai/Agent24",
-  "agent24_base_sha": "025dc3ad2efc7812e7754c7ffa8cae9481132b9f",
+  "agent24_base_sha": "e8b58246c5ee3a62b2583e27fc32989e3f6cbed7",
   "production_lock_path": "rust/crates/agent24-comm/hyphae.lock.json",
-  "production_lock_sha256": "ea40d2e99afc1b1a9f74d145a0a46b34ff3f78346132359cec05d2cc28bd034e",
-  "production_hyphae_sha": "076a5205f0f45539082538c8f10ea3db69b7a8f1",
+  "production_lock_sha256": "55c4d493dacf60ecbfc4f42571aa5f140ab80c30dad4013acf6340eab8e2e1cf",
+  "production_hyphae_sha": "0e0d4ea46d78675ed3f5c9e02ddc146398860edb",
   "go_version": "1.26.4"
 }

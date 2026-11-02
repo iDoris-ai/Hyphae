@@ -81,6 +81,17 @@ class RunRecorder:
 
 _ACTIVE_RECORDER: RunRecorder | None = None
 UNLOCK_ROUTE = "/api/v1/comm/unlock"
+CONTROL_STAGE = "signature-gate-positive-control"
+PRECHECK_STAGE = "codesign-precheck"
+CODESIGN = "/usr/bin/codesign"
+SKIP_REASON = "unsigned candidate; signing verified in pinned-production"
+# Execution order of the full runner's ten stages (scripts/joint_ci.py pins the same set).
+STAGES = (
+    "verified-artifacts-isolated-homes-real-relay", "memory-password-unlock-initial",
+    "authenticated-http-and-cli-positive-control", "hyphae-real-relay-pre-unlock-positive-control",
+    "bidirectional-event-id-and-body", "offline-retry-same-id-exactly-one",
+    "daemon-offline-125-recovery-and-restart-zero", "config-restart-generation",
+    "memory-password-unlock-after-agent24d-restart", "sigterm-sigkill-and-process-group-cleanup")
 
 
 def utc_now() -> str:
@@ -841,8 +852,69 @@ def write_evidence(path: Path, records: dict[str, Any]) -> None:
         raise
 
 
+def codesign_precheck() -> None:
+    """codesign must be able to verify a known-good Apple binary, so a later rejection is not a missing tool."""
+    argv = [CODESIGN, "--verify", "--strict", "/usr/bin/true"]
+    started_at = utc_now()
+    try:
+        code = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL, timeout=30).returncode
+    except (OSError, subprocess.TimeoutExpired):
+        code = None
+    if _ACTIVE_RECORDER is not None:
+        _ACTIVE_RECORDER.note_process(PRECHECK_STAGE, argv, started_at, code, "not-applicable",
+                                      None if code == 0 else "codesign-unavailable")
+    require(code == 0, "codesign-precheck-failed")
+
+
+def control_rejected(base: str, token: str) -> None:
+    """Agent24 must publish a signature rejection of the unsigned candidate on both routes."""
+    status, listing = http_json(base + "/api/v1/components", token)
+    require(status == 200 and isinstance(listing, dict) and isinstance(listing.get("components"), list),
+            "control-components-unreadable")
+    hyphae = [row for row in listing["components"] if isinstance(row, dict) and row.get("id") == "hyphae"]
+    require(len(hyphae) == 1 and hyphae[0].get("state") == "failed"
+            and hyphae[0].get("reason") == "signature_rejected", "control-components-not-rejected")
+    status, daemon = http_json(base + "/api/v1/comm/daemon", token)
+    data = daemon.get("data") if isinstance(daemon, dict) else None
+    process = data.get("process") if isinstance(data, dict) else None
+    require(status == 200 and isinstance(process, dict) and data.get("rejection") == "signature_rejected"
+            and process.get("reason") == "binary_rejected", "control-daemon-not-rejected")
+
+
+def execute_unsigned_candidate(args: argparse.Namespace, hashes: dict[str, str],
+                               records: dict[str, Any], evidence: list[dict[str, Any]]) -> None:
+    """Unsigned darwin candidate: hash proof, then the signature gate must reject it. No other stage can run."""
+    stage("download-and-hash", evidence, hyphae_sha256=hashes["hyphae"])
+    set_stage(PRECHECK_STAGE)
+    codesign_precheck()
+    stage(PRECHECK_STAGE, evidence)
+    for name in STAGES:
+        evidence.append({"stage": name, "result": "SKIPPED", "reason": SKIP_REASON})
+        print("SKIPPED " + name, flush=True)
+    with tempfile.TemporaryDirectory(prefix="agent24-joint-") as tmpname:
+        tmp = Path(tmpname)
+        host_home = tmp / "host-home"
+        host_home.mkdir(mode=0o700)
+        daemon = Agent24d(args.agent24d_bin, host_home, tmp, args.hyphae_bin)
+        records["binaries"] = hashes
+        try:
+            set_stage(CONTROL_STAGE)
+            daemon.start(args.readiness_timeout)
+            token, base, _ = bearer_state(host_home, daemon)
+            control_rejected(base, token)
+            evidence.append({"stage": CONTROL_STAGE, "kind": "control", "expected": "rejected",
+                             "observed": "rejected", "reason_code": "signature_rejected"})
+            print("PASS " + CONTROL_STAGE, flush=True)
+        finally:
+            daemon.stop(force=True)
+
+
 def execute(args: argparse.Namespace, hashes: dict[str, str], run_dir: Path,
             records: dict[str, Any], evidence: list[dict[str, Any]]) -> None:
+    if args.mode == "candidate" and host_platform() == "darwin-arm64":
+        execute_unsigned_candidate(args, hashes, records, evidence)
+        return
     with tempfile.TemporaryDirectory(prefix="agent24-joint-") as tmpname:
         tmp = Path(tmpname)
         host_home, peer_home, relay_home, relay_data = (tmp / name for name in ("host-home", "peer-home", "relay-home", "relay-data"))
@@ -1296,6 +1368,8 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--lock", type=Path, required=True, help="production Hyphae lock JSON")
     p.add_argument("--expected-lock-sha256", required=True, help="exact SHA-256 of production lock")
     p.add_argument("--output-dir", type=Path, required=True, help="directory where a new private evidence folder is created")
+    p.add_argument("--mode", choices=("pinned-production", "candidate"), default="pinned-production",
+                   help="candidate on darwin-arm64 = unsigned build: only the signature-gate control runs")
     p.add_argument("--timeout", type=float, default=30.0, help="per CLI invocation timeout")
     p.add_argument("--readiness-timeout", type=float, default=15.0, help="bounded relay/agent24d startup timeout")
     p.add_argument("--deadline", type=float, default=45.0, help="bounded daemon recovery/configuration deadline")

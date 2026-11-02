@@ -46,7 +46,17 @@ LOCK2_KEYS = {"schema", "id", "version", "source", "contract", "release_url_base
 MACOS_TEAM_ID = "HYAP444FN9"
 SKIP_REASON = "unsigned candidate; signing verified in pinned-production"
 CONTROL_STAGE = "signature-gate-positive-control"
-DARWIN_CANDIDATE_PASS_STAGES = {"download-and-hash", CONTROL_STAGE}
+PRECHECK_STAGE = "codesign-precheck"
+# The ten acceptance stages of the full runner. An unsigned darwin candidate must report exactly these as
+# SKIPPED (no more, no fewer), so dropping a real stage cannot hide behind a remaining SKIPPED one.
+STAGE_NAMES = frozenset({
+    "verified-artifacts-isolated-homes-real-relay", "memory-password-unlock-initial",
+    "authenticated-http-and-cli-positive-control", "hyphae-real-relay-pre-unlock-positive-control",
+    "bidirectional-event-id-and-body", "offline-retry-same-id-exactly-one",
+    "daemon-offline-125-recovery-and-restart-zero", "config-restart-generation",
+    "memory-password-unlock-after-agent24d-restart", "sigterm-sigkill-and-process-group-cleanup"})
+DARWIN_CANDIDATE_PASS_STAGES = frozenset({"download-and-hash", PRECHECK_STAGE, CONTROL_STAGE})
+RELEASE_URL_BASE = "https://github.com/iDoris-ai/Hyphae/releases/download"
 
 
 class GateError(Exception):
@@ -205,6 +215,33 @@ def lock_view(lock: dict[str, Any], schema: int, platform: str) -> tuple[Any, An
         return lock.get("source_sha"), (lock.get("binaries") or {}).get(platform)
     asset = (lock.get("assets") or {}).get(platform)
     return (lock.get("source") or {}).get("commit"), asset.get("sha256") if type(asset) is dict else None
+
+
+def release_info(production_bytes: bytes, *, platform: str, hyphae_sha: str | None = None) -> dict[str, str]:
+    """Facts the producer needs from the schema 2 lock; the build recipe must match the lock text exactly."""
+    require(sha256(production_bytes) == PRODUCTION_LOCK_SHA256, "production-lock-hash")
+    lock = parse_json(production_bytes, "production-lock-json")
+    require(lock_schema(lock) == 2, "production-lock-schema-unsupported")
+    validate_lock2(lock)
+    require(platform in LOCK2_PLATFORMS, "unsupported-platform")
+    version = lock["version"]
+    require(re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", version) is not None, "production-lock-identity")
+    ldflags = f"-buildid= -X main.version={version}"
+    recipe = ("GOTOOLCHAIN=" + GO_VERSION + " CGO_ENABLED=0 GOOS=<os> GOARCH=<arch> go build -trimpath "
+              f"-buildvcs=false -ldflags='{ldflags}' -o hyphae ./cmd/hyphae")
+    require(lock["reproducible"]["recipe"] == recipe, "production-lock-recipe")
+    require(lock["release_url_base"] == RELEASE_URL_BASE, "production-lock-release-url")
+    asset = lock["assets"][platform]
+    require(re.fullmatch(r"[A-Za-z0-9._-]{1,100}", asset["name"]) is not None, "production-lock-asset")
+    info = {"version": version, "ldflags": ldflags, "asset_name": asset["name"], "asset_sha256": asset["sha256"],
+            "unsigned_sha256": lock["reproducible"]["unsigned_sha256"][platform],
+            "download_url": f"{RELEASE_URL_BASE}/{version}/{asset['name']}"}
+    if hyphae_sha is not None:
+        require(re.fullmatch(r"[0-9a-f]{40}", hyphae_sha) is not None, "hyphae-source-sha")
+        candidate = f"{version}-joint.{hyphae_sha[:12]}"
+        info["candidate_version"] = candidate
+        info["candidate_ldflags"] = f"-buildid= -X main.version={candidate}"
+    return info
 
 
 def derive_lock(production_bytes: bytes, *, platform: str, hyphae_sha: str,
@@ -450,10 +487,9 @@ def normalized_evidence(path: Path, manifest: dict[str, Any], *, lock_schema_id:
     controls = [item for item in stages if item.get("kind") == "control"]
     require(len(controls) == (1 if strict else 0) and len({item["stage"] for item in stages}) == len(stages),
             "control-stage-missing" if strict else "control-unexpected")
-    names = {item["stage"] for item in stages if item["result"] == "PASS"}
-    require(not strict or ("download-and-hash" in names
-                           and any(item["result"] == "SKIPPED" for item in stages)
-                           and not any(item["result"] == "BLOCKED" for item in stages)),
+    require(not strict or (not any(item["result"] == "BLOCKED" for item in stages)
+                           and {i["stage"] for i in stages if i["result"] == "PASS"} == DARWIN_CANDIDATE_PASS_STAGES
+                           and {i["stage"] for i in stages if i["result"] == "SKIPPED"} == STAGE_NAMES),
             "unsigned-candidate-evidence-incomplete")
     summary = {"passed": sum(1 for item in stages if item["result"] == "PASS"),
                "skipped": sum(1 for item in stages if item["result"] == "SKIPPED"),
@@ -549,6 +585,13 @@ def main(argv: list[str] | None = None) -> int:
     normalize.add_argument("--evidence", type=Path, required=True)
     normalize.add_argument("--manifest", type=Path, required=True)
     normalize.add_argument("--output", type=Path, required=True)
+    info = commands.add_parser("release-info")
+    info.add_argument("--production-lock", type=Path, required=True)
+    info.add_argument("--platform", choices=sorted(LOCK2_PLATFORMS), required=True)
+    info.add_argument("--hyphae-sha")
+    check = commands.add_parser("check-file-sha256")
+    check.add_argument("--file", type=Path, required=True)
+    check.add_argument("--expected", required=True)
     verify_platform = commands.add_parser("verify-platform")
     verify_platform.add_argument("--platform", choices=sorted(PLATFORM_KEYS), required=True)
     verify_platform.add_argument("--binary", type=Path, required=True)
@@ -578,7 +621,16 @@ def main(argv: list[str] | None = None) -> int:
             safe = normalized_evidence(args.evidence, manifest,
                                        lock_schema_id=lock_schema(parse_json(lock, "derived-lock-json")))
             args.output.write_text(json.dumps(safe, sort_keys=True, indent=2) + "\n", encoding="utf-8")
-            return 0 if safe["result"] in ("PASS", "PASS_WITH_SKIPPED") else 1
+            return 0 if safe["result"] in ("PASS", "PASS_WITH_SKIPPED") and not safe["summary"]["blocked"] else 1
+        if args.command == "release-info":
+            for key, value in release_info(read_regular(args.production_lock, 64 * 1024), platform=args.platform,
+                                           hyphae_sha=args.hyphae_sha).items():
+                print(f"{key}={value}")
+            return 0
+        if args.command == "check-file-sha256":
+            require(re.fullmatch(r"[0-9a-f]{64}", args.expected) is not None and file_sha(args.file) == args.expected,
+                    "file-sha256-mismatch")
+            return 0
         if args.command == "verify-platform":
             verify_binary_platform(args.binary, args.platform)
             return 0

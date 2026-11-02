@@ -940,5 +940,167 @@ class JointRunnerTests(unittest.TestCase):
             self.assertNotIn('"holder_pid"', saved)
 
 
+class UnsignedCandidateControlTests(unittest.TestCase):
+    """darwin candidate path: hash proof, codesign precheck, ten SKIPPED stages, signature-gate control."""
+
+    GOOD_COMPONENTS = {"components": [{"id": "other", "state": "ready"},
+                                       {"id": "hyphae", "state": "failed", "reason": "signature_rejected"}]}
+    GOOD_DAEMON = {"ok": True, "data": {"rejection": "signature_rejected",
+                                        "process": {"state": "not_configured", "reason": "binary_rejected"}}}
+
+    def serve(self, components=None, daemon=None):
+        replies = {"/api/v1/components": (200, self.GOOD_COMPONENTS if components is None else components),
+                   "/api/v1/comm/daemon": (200, self.GOOD_DAEMON if daemon is None else daemon)}
+        seen = []
+
+        def fake(url, token, *args, **kwargs):
+            seen.append((url.split("9999", 1)[1], token))
+            return replies[url.split("9999", 1)[1]]
+        return fake, seen
+
+    def run_control(self, **kwargs):
+        from unittest import mock
+        fake, seen = self.serve(**kwargs)
+        with mock.patch.object(joint, "http_json", fake):
+            joint.control_rejected("http://127.0.0.1:9999", "host-token")
+        return seen
+
+    def test_stage_names_match_the_gate_and_the_runner(self):
+        import re
+        sys.path.insert(0, str(SCRIPT.parent))
+        try:
+            import joint_ci
+        finally:
+            sys.path.pop(0)
+        self.assertEqual(set(joint.STAGES), joint_ci.STAGE_NAMES)
+        self.assertEqual(len(joint.STAGES), len(set(joint.STAGES)))
+        self.assertEqual((joint.CONTROL_STAGE, joint.PRECHECK_STAGE, joint.SKIP_REASON),
+                         (joint_ci.CONTROL_STAGE, joint_ci.PRECHECK_STAGE, joint_ci.SKIP_REASON))
+        self.assertEqual(set(re.findall(r'\bstage\(\s*"([a-z0-9-]+)"', inspect.getsource(joint.execute))),
+                         joint_ci.STAGE_NAMES, "a real stage was renamed, added or removed without updating the gate")
+
+    def test_control_accepts_only_the_exact_rejection_on_both_routes_with_the_host_token(self):
+        seen = self.run_control()
+        self.assertEqual(seen, [("/api/v1/components", "host-token"), ("/api/v1/comm/daemon", "host-token")])
+
+    def test_control_rejects_every_other_outcome(self):
+        good_hyphae = self.GOOD_COMPONENTS["components"][1]
+        components = {
+            "ready": {"components": [dict(good_hyphae, state="ready")]},
+            "other reason": {"components": [dict(good_hyphae, reason="hash_mismatch")]},
+            "no reason": {"components": [{"id": "hyphae", "state": "failed"}]},
+            "no hyphae item": {"components": [{"id": "other", "state": "failed", "reason": "signature_rejected"}]},
+            "duplicate item": {"components": [good_hyphae, good_hyphae]},
+            "not a list": {"components": {}},
+        }
+        for name, value in components.items():
+            with self.subTest(name), self.assertRaises(joint.SafeFailure):
+                self.run_control(components=value)
+        data = self.GOOD_DAEMON["data"]
+        daemons = {
+            "no rejection": {"data": dict(data, rejection=None)},
+            "hash mismatch": {"data": dict(data, rejection="hash_mismatch")},
+            "process reason": {"data": dict(data, process={"reason": "something_else"})},
+            "no process": {"data": {"rejection": "signature_rejected"}},
+            "not an object": [],
+        }
+        for name, value in daemons.items():
+            with self.subTest(name), self.assertRaises(joint.SafeFailure):
+                self.run_control(daemon=value)
+
+    def test_control_rejects_non_200(self):
+        from unittest import mock
+        with mock.patch.object(joint, "http_json", return_value=(503, self.GOOD_COMPONENTS)):
+            with self.assertRaises(joint.SafeFailure):
+                joint.control_rejected("http://127.0.0.1:9999", "t")
+
+    def test_precheck_needs_a_working_codesign(self):
+        from unittest import mock
+        with mock.patch.object(joint, "CODESIGN", "/usr/bin/true"):
+            joint.codesign_precheck()
+        for tool in ("/usr/bin/false", "/nonexistent/codesign"):
+            with mock.patch.object(joint, "CODESIGN", tool), self.assertRaisesRegex(joint.SafeFailure, "codesign-precheck-failed"):
+                joint.codesign_precheck()
+
+    def run_flow(self, precheck=None, control=None):
+        from unittest import mock
+        daemon = mock.MagicMock()
+        daemon.start.return_value = {}
+        evidence: list = []
+        with mock.patch.object(joint, "Agent24d", return_value=daemon), \
+                mock.patch.object(joint, "bearer_state", return_value=("host-token", "http://127.0.0.1:9999", 9999)), \
+                mock.patch.object(joint, "codesign_precheck", side_effect=precheck), \
+                mock.patch.object(joint, "control_rejected", side_effect=control) as control_mock:
+            try:
+                joint.execute_unsigned_candidate(
+                    SimpleNamespace(agent24d_bin=Path("x"), hyphae_bin=Path("y"), readiness_timeout=1.0),
+                    {"hyphae": "a" * 64}, {}, evidence)
+            finally:
+                self.last = (daemon, control_mock)
+        return evidence
+
+    def test_flow_records_hash_precheck_ten_skipped_and_control_in_order(self):
+        evidence = self.run_flow()
+        names = [row["stage"] for row in evidence]
+        self.assertEqual(names, ["download-and-hash", joint.PRECHECK_STAGE, *joint.STAGES, joint.CONTROL_STAGE])
+        skipped = evidence[2:-1]
+        self.assertTrue(all(row == {"stage": row["stage"], "result": "SKIPPED", "reason": joint.SKIP_REASON}
+                            for row in skipped))
+        self.assertEqual(evidence[-1], {"stage": joint.CONTROL_STAGE, "kind": "control", "expected": "rejected",
+                                        "observed": "rejected", "reason_code": "signature_rejected"})
+        daemon, control = self.last
+        control.assert_called_once_with("http://127.0.0.1:9999", "host-token")
+        daemon.stop.assert_called_once_with(force=True)
+
+    def test_unobserved_rejection_fails_and_still_stops_agent24d(self):
+        with self.assertRaises(joint.SafeFailure):
+            self.run_flow(control=joint.SafeFailure("control-components-not-rejected"))
+        daemon, _ = self.last
+        daemon.stop.assert_called_once_with(force=True)
+
+    def test_missing_codesign_stops_before_agent24d_starts(self):
+        with self.assertRaisesRegex(joint.SafeFailure, "codesign-unavailable"):
+            self.run_flow(precheck=joint.SafeFailure("codesign-unavailable"))
+        self.last[0].start.assert_not_called()
+
+    def test_control_row_is_absent_when_the_rejection_was_not_observed(self):
+        from unittest import mock
+        evidence: list = []
+        with mock.patch.object(joint, "Agent24d", return_value=mock.MagicMock()), \
+                mock.patch.object(joint, "bearer_state", return_value=("t", "http://x", 1)), \
+                mock.patch.object(joint, "codesign_precheck"), \
+                mock.patch.object(joint, "control_rejected", side_effect=joint.SafeFailure("x")):
+            with self.assertRaises(joint.SafeFailure):
+                joint.execute_unsigned_candidate(
+                    SimpleNamespace(agent24d_bin=Path("x"), hyphae_bin=Path("y"), readiness_timeout=1.0),
+                    {"hyphae": "a" * 64}, {}, evidence)
+        self.assertNotIn(joint.CONTROL_STAGE, [row["stage"] for row in evidence])
+
+    def test_only_candidate_mode_on_darwin_takes_the_unsigned_path(self):
+        from unittest import mock
+        cases = [("candidate", "darwin-arm64", True), ("pinned-production", "darwin-arm64", False),
+                 ("candidate", "linux-x64", False)]
+        for mode, platform, expected in cases:
+            with self.subTest(mode=mode, platform=platform), \
+                    mock.patch.object(joint, "host_platform", return_value=platform), \
+                    mock.patch.object(joint, "execute_unsigned_candidate") as unsigned, \
+                    mock.patch.object(joint, "Relay", side_effect=RuntimeError("full runner reached")):
+                try:
+                    joint.execute(SimpleNamespace(mode=mode, relay_bin=Path("r"), agent24d_bin=Path("d"),
+                                                  hyphae_bin=Path("h")), {}, Path("."), {}, [])
+                except RuntimeError:
+                    pass
+                self.assertEqual(unsigned.called, expected)
+
+    def test_mode_option_defaults_to_pinned_production_and_rejects_unknown_values(self):
+        args = ["--hyphae-bin", "h", "--expected-hyphae-sha256", "0", "--agent24-bin", "a", "--expected-agent24-sha256", "0",
+                "--agent24d-bin", "d", "--expected-agent24d-sha256", "0", "--relay-bin", "r", "--expected-relay-sha256", "0",
+                "--hyphae-sha", "0", "--agent24-sha", "0", "--lock", "l", "--expected-lock-sha256", "0", "--output-dir", "o"]
+        self.assertEqual(joint.parser().parse_args(args).mode, "pinned-production")
+        self.assertEqual(joint.parser().parse_args(args + ["--mode", "candidate"]).mode, "candidate")
+        with self.assertRaises(SystemExit):
+            joint.parser().parse_args(args + ["--mode", "skip-signature"])
+
+
 if __name__ == "__main__":
     unittest.main()

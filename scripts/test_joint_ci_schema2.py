@@ -193,15 +193,14 @@ class EvidenceTests(Schema2Base):
         return {"stage": name, "result": "SKIPPED", "reason": joint_ci.SKIP_REASON, **override}
 
     def good_rows(self) -> list:
-        return [{"stage": "download-and-hash"}, self.skipped("start-daemon"), self.skipped("send-message"),
-                self.control()]
+        return ([{"stage": "download-and-hash"}, {"stage": joint_ci.PRECHECK_STAGE}]
+                + [self.skipped(name) for name in sorted(joint_ci.STAGE_NAMES)] + [self.control()])
 
     def test_darwin_candidate_reports_skipped_separately_and_is_not_clean(self):
         safe = self.normalize(self.good_rows())
-        self.assertEqual(safe["summary"], {"passed": 2, "skipped": 2, "blocked": 0})
+        self.assertEqual(safe["summary"], {"passed": 3, "skipped": 10, "blocked": 0})
         self.assertEqual(safe["result"], "PASS_WITH_SKIPPED")
-        self.assertEqual([s["result"] for s in safe["stages"]], ["PASS", "SKIPPED", "SKIPPED", "PASS"])
-        self.assertEqual(safe["stages"][1]["reason"], "unsigned candidate; signing verified in pinned-production")
+        self.assertEqual(safe["stages"][2]["reason"], "unsigned candidate; signing verified in pinned-production")
 
     def test_skipped_without_reason_or_with_other_reason_is_rejected(self):
         for reason in (None, "", "   ", "because"):
@@ -235,9 +234,14 @@ class EvidenceTests(Schema2Base):
     def test_unsigned_candidate_evidence_must_be_complete_and_unblocked(self):
         incomplete = {
             "control only": [self.control()],
-            "no skipped": [{"stage": "download-and-hash"}, self.control()],
-            "no download": [self.skipped("start-daemon"), self.control()],
+            "no skipped": [{"stage": "download-and-hash"}, {"stage": joint_ci.PRECHECK_STAGE}, self.control()],
+            "no download": self.good_rows()[1:],
+            "no precheck": self.good_rows()[:1] + self.good_rows()[2:],
             "blocked": self.good_rows() + [{"stage": "x", "result": "BLOCKED"}],
+            "real stage dropped, one SKIPPED left": [r for r in self.good_rows() if r["stage"] != "config-restart-generation"],
+            "unknown skipped stage added": self.good_rows() + [self.skipped("invented-stage")],
+            "real stage renamed": [dict(r, stage="renamed") if r["stage"] == "config-restart-generation" else r
+                                   for r in self.good_rows()],
         }
         for name, rows in incomplete.items():
             with self.subTest(name), self.assertRaisesRegex(joint_ci.GateError, "unsigned-candidate-evidence-incomplete"):
@@ -281,14 +285,95 @@ class CliTests(Schema2Base):
                                       "--manifest", str(root / "manifest.json"), "--output", str(out)])
             control = {"stage": joint_ci.CONTROL_STAGE, "kind": "control", "expected": "rejected",
                        "observed": "rejected", "reason_code": "signature_rejected"}
-            good = [{"stage": "download-and-hash"}, control,
-                    {"stage": "start-daemon", "result": "SKIPPED", "reason": joint_ci.SKIP_REASON}]
+            good = ([{"stage": "download-and-hash"}, {"stage": joint_ci.PRECHECK_STAGE}]
+                    + [{"stage": n, "result": "SKIPPED", "reason": joint_ci.SKIP_REASON} for n in sorted(joint_ci.STAGE_NAMES)]
+                    + [control])
             self.assertEqual(run(good), 0)
+            self.assertEqual(run(good[:-1]), 1)  # control removed
             self.assertEqual(run([control]), 1)  # control alone is incomplete
             self.assertEqual(json.loads(out.read_text())["result"], "PASS_WITH_SKIPPED")
             self.assertEqual(run([{"stage": "download-and-hash"}]), 1)  # no control -> fail closed
+            # Linux-style evidence: a BLOCKED stage next to an overall PASS must still exit 1 (review L1).
+            manifest["platform"] = "linux-x64"
+            (root / "manifest.json").write_text(json.dumps(manifest))
+            self.assertEqual(run([{"stage": "a"}, {"stage": "b", "result": "BLOCKED"}]), 1)
+            self.assertEqual(run([{"stage": "a"}]), 0)
+            manifest["platform"] = "darwin-arm64"
+            (root / "manifest.json").write_text(json.dumps(manifest))
             (root / "hyphae.lock.json").write_bytes(derived + b" ")
             self.assertEqual(run(good), 1)  # lock bytes no longer match manifest hash
+
+
+class ReleaseInfoTests(Schema2Base):
+    def info(self, **kwargs) -> dict:
+        return joint_ci.release_info(self.prod, platform="darwin-arm64", **kwargs)
+
+    def test_values_come_from_the_lock(self):
+        info = self.info(hyphae_sha="a" * 40)
+        self.assertEqual(info["ldflags"], "-buildid= -X main.version=v0.30.0")
+        self.assertEqual(info["candidate_ldflags"], "-buildid= -X main.version=v0.30.0-joint.aaaaaaaaaaaa")
+        self.assertEqual(info["download_url"],
+                         "https://github.com/iDoris-ai/Hyphae/releases/download/v0.30.0/hyphae-darwin-arm64")
+        self.assertEqual(info["asset_sha256"], self.lock["assets"]["darwin-arm64"]["sha256"])
+        self.assertEqual(info["unsigned_sha256"], self.lock["reproducible"]["unsigned_sha256"]["darwin-arm64"])
+        linux = joint_ci.release_info(self.prod, platform="linux-x64")
+        self.assertEqual(linux["asset_sha256"], linux["unsigned_sha256"])
+        self.assertNotIn("candidate_version", linux)
+
+    def test_candidate_version_is_accepted_by_derive_lock(self):
+        candidate = self.info(hyphae_sha="a" * 40)["candidate_version"]
+        joint_ci.derive_lock(self.prod, platform="darwin-arm64", hyphae_sha="a" * 40,
+                             hyphae_binary_sha256="b" * 64, version=candidate)
+
+    def test_lock_text_that_does_not_match_the_recipe_is_rejected(self):
+        for mutate, label in (
+            (lambda l: l["reproducible"].update(recipe=l["reproducible"]["recipe"].replace("v0.30.0", "v9.9.9")),
+             "production-lock-recipe"),
+            (lambda l: l["reproducible"].update(recipe=l["reproducible"]["recipe"].replace("-trimpath", "")),
+             "production-lock-recipe"),
+            (lambda l: l.update(release_url_base="http://example.com/releases"), "production-lock-release-url"),
+            (lambda l: l["assets"]["darwin-arm64"].update(name="../evil"), "production-lock-asset"),
+            (lambda l: l.update(version="v0.30.0\nx=1"), "production-lock-identity"),
+        ):
+            lock = copy.deepcopy(self.lock)
+            mutate(lock)
+            with self.subTest(label), self.assertRaisesRegex(joint_ci.GateError, label):
+                joint_ci.release_info(self.rebase(lock), platform="darwin-arm64")
+
+    def test_wrong_bytes_schema_platform_and_sha_are_rejected(self):
+        with self.assertRaisesRegex(joint_ci.GateError, "production-lock-hash"):
+            joint_ci.release_info(self.prod + b" ", platform="darwin-arm64")
+        with self.assertRaisesRegex(joint_ci.GateError, "unsupported-platform"):
+            joint_ci.release_info(self.prod, platform="linux-arm64")
+        with self.assertRaisesRegex(joint_ci.GateError, "hyphae-source-sha"):
+            self.info(hyphae_sha="zz")
+        with self.assertRaisesRegex(joint_ci.GateError, "production-lock-schema-unsupported"):
+            joint_ci.release_info(self.rebase({"schema": 1}), platform="linux-x64")
+
+    def test_check_file_sha256_cli(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "f"
+            path.write_bytes(b"signed bytes")
+            digest = hashlib.sha256(b"signed bytes").hexdigest()
+            self.assertEqual(joint_ci.main(["check-file-sha256", "--file", str(path), "--expected", digest]), 0)
+            for expected in ("0" * 64, digest.upper(), "x"):
+                self.assertEqual(joint_ci.main(["check-file-sha256", "--file", str(path), "--expected", expected]), 1)
+
+
+class BaselineTests(unittest.TestCase):
+    """The tracked baseline must describe the schema 2 production lock the fixture is a copy of."""
+
+    def test_baseline_pins_the_schema2_release_lock(self):
+        baseline = json.loads(joint_ci.BASELINE_CONFIG_PATH.read_text())
+        lock = json.loads(FIXTURE.read_bytes())
+        self.assertEqual(baseline["schema"], 1)
+        self.assertEqual(baseline["agent24_base_sha"], "e8b58246c5ee3a62b2583e27fc32989e3f6cbed7")
+        self.assertEqual(baseline["production_lock_sha256"], FIXTURE_SHA)
+        self.assertEqual(baseline["production_hyphae_sha"], lock["source"]["commit"])
+        self.assertEqual("go" + baseline["go_version"], lock["reproducible"]["toolchain"])
+        self.assertEqual(baseline["production_lock_path"], "rust/crates/agent24-comm/hyphae.lock.json")
+        self.assertEqual((joint_ci.AGENT24_BASE_SHA, joint_ci.PRODUCTION_LOCK_SHA256, joint_ci.PRODUCTION_HYPHAE_SHA),
+                         (baseline["agent24_base_sha"], FIXTURE_SHA, baseline["production_hyphae_sha"]))
 
 
 if __name__ == "__main__":
