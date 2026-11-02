@@ -38,6 +38,17 @@ const (
 	ErrCodeKeystoreLocked    = "keystore_locked"
 )
 
+// StableErrorCodes lists every ErrCode* constant above. `hyphae contract`
+// publishes it; TestStableErrorCodesCoverConstants fails when a constant is
+// added without being listed here.
+var StableErrorCodes = []string{
+	ErrCodeUser, ErrCodeNetwork, ErrCodeAuth, ErrCodeWriteConflict, ErrCodeOther,
+	ErrCodeBadBackupPassword, ErrCodeInvalidKey, ErrCodeNicknameExists, ErrCodeNpubExists, ErrCodeKeystoreLocked,
+}
+
+// ExitCodeFor returns the process exit code an error code maps to.
+func ExitCodeFor(code string) int { return exitCodeFor(code) }
+
 // ExitError wraps an error with a machine-readable code (for --json output) and
 // process exit code. Commands that want a non-default exit code in --json mode
 // should return one of these instead of a plain error.
