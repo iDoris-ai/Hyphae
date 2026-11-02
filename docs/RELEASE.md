@@ -73,3 +73,9 @@ spctl --assess --type install -vv /tmp/hyphae-check/hyphae-darwin-arm64
 
 The linux asset sha256 in `hyphae.lock.json` must equal `reproducible.unsigned_sha256.linux-x64`
 (linux is never signed).
+
+## Trust model and known limits of `finalize_signed_release.py`
+
+- There is no content binding between the signed and the unsigned bytes: Mach-O signing changes the file, and `codesign --remove-signature` does not restore the unsigned hash. The trust for the macOS asset rests on the signer's machine and on the Team ID, Hardened Runtime and notarization checks above. `reproducible.unsigned_sha256` records the unsigned hash so a third party can compare it with their own rebuild, but it is not proof that the signed file was built from the same source.
+- The tool is run by a maintainer on their own machine; its inputs (unsigned bundle, signed directory) are treated as trusted. Hardening against a tampered input bundle is deliberately not attempted. Three known gaps from review of #341, all low: the staged copy of an unsigned relay is not re-hashed against the verified manifest hash; the unsigned bundle's own `SHA256SUMS` is not cross-checked against its manifest; a crafted manifest could give a binary and an archive the same file name. Do not run the tool on a bundle you did not build yourself.
+- If only the CLI is signed, the relay inside `hyphae-darwin-arm64.tar.gz` and the raw `hyphae-relay-darwin-arm64` are unsigned; `signed_binaries` in `artifact-manifest.json` lists exactly which files are signed.
