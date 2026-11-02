@@ -23,7 +23,7 @@ GO_VERSION = "go1.26.4"
 REPOSITORY = "iDoris-ai/hyphae"
 RECIPE = (
     "GOTOOLCHAIN=go1.26.4 CGO_ENABLED=0 GOOS=<os> GOARCH=<arch> go build "
-    "-trimpath -buildvcs=false -ldflags='-buildid=' -o hyphae ./cmd/hyphae"
+    "-trimpath -buildvcs=false -ldflags='-buildid= -X main.version=<release_tag>' -o hyphae ./cmd/hyphae"
 )
 RELAY_RECIPE = (
     "GOTOOLCHAIN=go1.26.4 CGO_ENABLED=0 GOOS=<os> GOARCH=<arch> go build "
@@ -33,6 +33,7 @@ PLATFORMS = (
     {"os": "darwin", "arch": "arm64", "lock_key": "darwin-arm64"},
     {"os": "linux", "arch": "amd64", "lock_key": "linux-x64"},
 )
+TAG_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 LOCK_PLATFORM_KEYS = ("darwin-arm64", "linux-x64", "darwin-x64", "linux-arm64")
 
 
@@ -147,7 +148,23 @@ def go_environment(*, toolchain: str, home: Path, cache: Path, platform: dict[st
     return env
 
 
-def build_binary(go: str, source: Path, output: Path, platform: dict[str, str], target: str, name: str, base_env: dict[str, str]) -> None:
+def version_ldflags(release_tag: str) -> str:
+    """Linker flags that stamp the CLI version; the tag must not be able to add flags."""
+    if not re.fullmatch(TAG_PATTERN, release_tag):
+        raise BuildError("release tag contains characters unsafe for linker flags")
+    return f"-ldflags=-buildid= -X main.version={release_tag}"
+
+
+def build_binary(
+    go: str,
+    source: Path,
+    output: Path,
+    platform: dict[str, str],
+    target: str,
+    name: str,
+    base_env: dict[str, str],
+    ldflags: str = "-ldflags=-buildid=",
+) -> None:
     env = base_env.copy()
     env.update({"GOTOOLCHAIN": GO_VERSION, "CGO_ENABLED": "0", "GOOS": platform["os"], "GOARCH": platform["arch"]})
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -156,7 +173,7 @@ def build_binary(go: str, source: Path, output: Path, platform: dict[str, str], 
         "build",
         "-trimpath",
         "-buildvcs=false",
-        "-ldflags=-buildid=",
+        ldflags,
         "-o",
         str(output),
         target,
@@ -232,7 +249,7 @@ def build_bundle(source: Path, source_sha: str, output: Path, release_tag: str) 
             raw_relay_name = f"hyphae-relay-{suffix}"
             cli = artifacts / raw_cli_name
             relay = artifacts / raw_relay_name
-            build_binary(go, source, cli, platform, "./cmd/hyphae", "hyphae", base_env)
+            build_binary(go, source, cli, platform, "./cmd/hyphae", "hyphae", base_env, version_ldflags(release_tag))
             build_binary(go, source, relay, platform, "./cmd/hyphae-relay", "hyphae-relay", base_env)
             archive_name = f"hyphae-{suffix}.tar.gz"
             archive = artifacts / archive_name
@@ -323,7 +340,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if not re.fullmatch(r"[0-9a-f]{40}", args.source_sha):
         parser.error("--source-sha must be a full lowercase Git commit SHA")
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", args.release_tag):
+    if not re.fullmatch(TAG_PATTERN, args.release_tag):
         parser.error("--release-tag contains unsupported characters")
     return args
 

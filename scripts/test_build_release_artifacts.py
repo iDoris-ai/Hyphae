@@ -17,7 +17,7 @@ import unittest
 SCRIPT = Path(__file__).with_name("build_release_artifacts.py").resolve()
 EXPECTED_RECIPE = (
     "GOTOOLCHAIN=go1.26.4 CGO_ENABLED=0 GOOS=<os> GOARCH=<arch> go build "
-    "-trimpath -buildvcs=false -ldflags='-buildid=' -o hyphae ./cmd/hyphae"
+    "-trimpath -buildvcs=false -ldflags='-buildid= -X main.version=<release_tag>' -o hyphae ./cmd/hyphae"
 )
 
 
@@ -60,7 +60,7 @@ if {mutate!r}:
 target = args[-1]
 output = pathlib.Path(args[args.index("-o") + 1])
 output.parent.mkdir(parents=True, exist_ok=True)
-output.write_bytes((os.environ["GOOS"] + "/" + os.environ["GOARCH"] + ":" + target).encode())
+output.write_bytes((os.environ["GOOS"] + "/" + os.environ["GOARCH"] + ":" + target + ":" + " ".join(a for a in args if a.startswith("-ldflags"))).encode())
 """
         self.fake_go.write_text(script, encoding="utf-8")
         self.fake_go.chmod(0o755)
@@ -109,6 +109,7 @@ output.write_bytes((os.environ["GOOS"] + "/" + os.environ["GOARCH"] + ":" + targ
         *,
         source_sha: str | None = None,
         env: dict[str, str] | None = None,
+        tag: str = "v9.8.7-test",
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [
@@ -121,7 +122,7 @@ output.write_bytes((os.environ["GOOS"] + "/" + os.environ["GOARCH"] + ":" + targ
                 "--output",
                 str(output),
                 "--release-tag",
-                "v9.8.7-test",
+                tag,
             ],
             check=False,
             capture_output=True,
@@ -212,7 +213,8 @@ output.write_bytes((os.environ["GOOS"] + "/" + os.environ["GOARCH"] + ":" + targ
         for row in builds:
             args = row["args"]
             env = row["env"]
-            self.assertEqual(args[1:4], ["-trimpath", "-buildvcs=false", "-ldflags=-buildid="])
+            expected_flags = "-ldflags=-buildid= -X main.version=v9.8.7-test" if args[-1] == "./cmd/hyphae" else "-ldflags=-buildid="
+            self.assertEqual(args[1:4], ["-trimpath", "-buildvcs=false", expected_flags])
             self.assertEqual(env["GOTOOLCHAIN"], "go1.26.4")
             self.assertEqual(env["GOENV"], "off")
             self.assertEqual(env["GOWORK"], "off")
@@ -232,6 +234,29 @@ output.write_bytes((os.environ["GOOS"] + "/" + os.environ["GOARCH"] + ":" + targ
             for forbidden in ("GOFLAGS", "GOEXPERIMENT", "GOROOT"):
                 self.assertIsNone(env[forbidden])
         self.assertEqual(self.commit, subprocess.check_output(["git", "-C", str(self.source), "rev-parse", "HEAD"], text=True).strip())
+
+    def test_different_tags_give_different_cli_bytes_but_same_relay(self) -> None:
+        one, two = self.base / "tag-one", self.base / "tag-two"
+        self.assertEqual(self.run_builder(one, tag="v1.0.0").returncode, 0)
+        self.assertEqual(self.run_builder(two, tag="v1.0.1").returncode, 0)
+        for suffix in ("darwin-arm64", "linux-amd64"):
+            self.assertNotEqual((one / f"hyphae-{suffix}").read_bytes(), (two / f"hyphae-{suffix}").read_bytes())
+            self.assertEqual((one / f"hyphae-relay-{suffix}").read_bytes(), (two / f"hyphae-relay-{suffix}").read_bytes())
+
+    def test_unsafe_tags_cannot_reach_linker_flags(self) -> None:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("build_release_artifacts", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        for bad in ("v1 -X main.other=x", "v1'x", 'v1"x', "v1\\x", "v1=x", "", "-v1", "v1\nx", "v1\tx"):
+            with self.subTest(tag=bad):
+                with self.assertRaises(module.BuildError):
+                    module.version_ldflags(bad)
+        self.assertEqual(module.version_ldflags("v1.2.3-rc.1_x"), "-ldflags=-buildid= -X main.version=v1.2.3-rc.1_x")
+        refused = self.run_builder(self.base / "bad-tag", tag="v1 -X main.other=x")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertEqual(self.log_rows(), [])
 
     def test_rejects_source_sha_mismatch_before_go_and_output_creation(self) -> None:
         output = self.base / "no-output"
@@ -326,6 +351,43 @@ output.write_bytes((os.environ["GOOS"] + "/" + os.environ["GOARCH"] + ":" + targ
         self.assertNotEqual(mutated.returncode, 0)
         self.assertIn("tracked or untracked changes", mutated.stderr)
         self.assertFalse(mutated_output.exists())
+
+
+GO_BIN = Path.home() / "go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.4.darwin-arm64/bin"
+
+
+@unittest.skipUnless((GO_BIN / "go").exists(), "real go1.26.4 toolchain not found; stamping is only fake-tested")
+class RealGoStampTests(unittest.TestCase):
+    def test_real_build_stamps_version_reproducibly(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="hyphae-realgo-") as raw:
+            base = Path(raw)
+            source = base / "src"
+            for target in ("hyphae", "hyphae-relay"):
+                (source / "cmd" / target).mkdir(parents=True)
+            (source / "go.mod").write_text("module example.invalid/m\n\ngo 1.26\n")
+            (source / "cmd/hyphae/main.go").write_text('package main\n\nimport "fmt"\n\nvar version = "dev"\n\nfunc main() { fmt.Print(version) }\n')
+            (source / "cmd/hyphae-relay/main.go").write_text("package main\n\nfunc main() {}\n")
+            (source / "LICENSE").write_text("l\n")
+            (source / "NOTICE").write_text("n\n")
+            env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@e.invalid", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@e.invalid"}
+            subprocess.run(["git", "init", "-q", str(source)], check=True)
+            subprocess.run(["git", "-C", str(source), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(source), "commit", "-q", "-m", "x"], check=True, env=env)
+            sha = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
+            env["PATH"] = f"{GO_BIN}{os.pathsep}{env['PATH']}"
+
+            def build(name: str, tag: str) -> Path:
+                out = base / name
+                subprocess.run([sys.executable, str(SCRIPT), "--source-dir", str(source), "--source-sha", sha,
+                                "--output", str(out), "--release-tag", tag], check=True, env=env, capture_output=True)
+                return out
+
+            a1, a2, b = build("a1", "v1.2.3"), build("a2", "v1.2.3"), build("b", "v1.2.4")
+            self.assertEqual((a1 / "SHA256SUMS").read_bytes(), (a2 / "SHA256SUMS").read_bytes())
+            self.assertNotEqual((a1 / "hyphae-linux-amd64").read_bytes(), (b / "hyphae-linux-amd64").read_bytes())
+            self.assertIn(b"v1.2.3", (a1 / "hyphae-linux-amd64").read_bytes())
+            self.assertIn(b"v1.2.4", (b / "hyphae-linux-amd64").read_bytes())
+            self.assertEqual((a1 / "hyphae-relay-linux-amd64").read_bytes(), (b / "hyphae-relay-linux-amd64").read_bytes())
 
 
 if __name__ == "__main__":
