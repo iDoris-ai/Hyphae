@@ -116,6 +116,10 @@ hyphae profile publish --as alice --name "Alice" --capability "ops:incident resp
 
 Append `--json` to commands that support automation. In JSON mode, successful output is a JSON envelope on stdout; errors are JSON on stderr and the exit code remains meaningful.
 
+### Health check (`hyphae health`)
+
+`hyphae health --json` reports whether this install is usable: `status` is `ok` (keystore readable and every configured relay reachable), `degraded` (keystore readable, some but not all relays reachable) or `failed` (no relay reachable, or `keystore.json` exists but cannot be parsed). `checks.keystore` gives `exists`, `encrypted` and the identity count only (read from `keystore.json` without a password, without the write lock, creating nothing; a missing keystore is not a failure). `checks.relays.items` lists every configured relay (sorted, at most 16, `truncated: true` if more), with `latency_ms` when reachable or a fixed-vocabulary `error` (`timeout`, `refused`, `dns`, `tls`, `other`) when not. Relays are checked in parallel, 3 s each, 5 s total. The exit code is `0` whenever a report was produced, including `degraded` and `failed`; read `status` from the output. There is deliberately no daemon check: determining it needs the daemon lock, and probing that lock could make a daemon that starts at that moment fail to start.
+
 ## Data and security
 
 Hyphae stores local state under `~/.hyphae/`:
