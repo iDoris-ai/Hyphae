@@ -116,6 +116,12 @@ hyphae profile publish --as alice --name "Alice" --capability "ops:incident resp
 
 Append `--json` to commands that support automation. In JSON mode, successful output is a JSON envelope on stdout; errors are JSON on stderr and the exit code remains meaningful.
 
+### Component contract (`hyphae contract`)
+
+`hyphae contract --json` prints a machine-readable description of this binary for integrators such as Agent24: `name` (`hyphae-cli`), `contract_version`, `binary_version`, `provides` (capability ids), `commands` (every visible command path with its `--flag` names, generated from the live command tree, so new subcommands appear automatically) and `error_codes` (every stable error code with the exit code it maps to). Output is deterministic: the same binary prints byte-identical output.
+
+`contract_version` is `"major.minor"`. Removing, renaming or changing the semantics of a command, flag or error code bumps major; only adding a subcommand, flag or error code bumps minor. `binary_version` is `dev` until release builds stamp `-ldflags "-X main.version=..."`.
+
 ## Data and security
 
 Hyphae stores local state under `~/.hyphae/`:

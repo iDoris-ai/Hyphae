@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/iDoris-ai/hyphae/internal/common"
+	"github.com/iDoris-ai/hyphae/internal/contract"
 	"github.com/iDoris-ai/hyphae/internal/daemon"
 	"github.com/iDoris-ai/hyphae/internal/group"
 	"github.com/iDoris-ai/hyphae/internal/groupchat"
@@ -66,6 +67,7 @@ func main() {
 			tui.TUICmd,
 			// Daemon
 			daemon.DaemonCmd,
+			contract.Cmd,
 		},
 	}
 	if common.JSONModeFromArgs(os.Args) {
