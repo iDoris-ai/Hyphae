@@ -324,7 +324,9 @@ class ReleaseInfoTests(Schema2Base):
     def test_values_come_from_the_lock(self):
         info = self.info(hyphae_sha="a" * 40)
         self.assertEqual(info["ldflags"], "-buildid= -X main.version=v0.30.0")
-        self.assertEqual(info["candidate_ldflags"], "-buildid= -X main.version=v0.30.0-joint.aaaaaaaaaaaa")
+        self.assertEqual(info["candidate_version"], "v0.30.10000")
+        self.assertRegex(info["candidate_version"], r"^v[0-9]+\.[0-9]+\.[0-9]+$")  # Agent24 rejects pre-release tags
+        self.assertEqual(info["candidate_ldflags"], "-buildid= -X main.version=v0.30.10000")
         self.assertEqual(info["download_url"],
                          "https://github.com/iDoris-ai/Hyphae/releases/download/v0.30.0/hyphae-darwin-arm64")
         self.assertEqual(info["asset_sha256"], self.lock["assets"]["darwin-arm64"]["sha256"])
