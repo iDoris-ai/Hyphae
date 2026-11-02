@@ -91,7 +91,7 @@ class FinalizeTests(unittest.TestCase):
             for name in (cli, relay, archive):
                 hashes[name] = build.sha256_file(self.unsigned / name)
         manifest = {"schema": 1, "release_tag": TAG, "publication_status": "intended; not published by this tool",
-                    "source": {"sha": self.commit, "clean": True}, "go": build.GO_VERSION, "recipe": build.RECIPE,
+                    "source": {"sha": self.commit, "clean": True}, "go": build.GO_VERSION, "recipe": build.cli_recipe(TAG),
                     "platforms": records, "intended_urls": {"release": "r", "assets": {}}}
         build.write_json(self.unsigned / "artifact-manifest.json", manifest)
         build.write_json(self.unsigned / "hyphae.lock.json", {"schema": 1})
@@ -133,7 +133,7 @@ class FinalizeTests(unittest.TestCase):
             "darwin-arm64": {"name": "hyphae-darwin-arm64", "sha256": signed_sha, "files": ["hyphae"], "executables": ["hyphae"]},
             "linux-x64": {"name": "hyphae-linux-amd64", "sha256": linux_sha, "files": ["hyphae"], "executables": ["hyphae"]}})
         self.assertEqual(lock["signing"], {"macos_team_id": "HYAP444FN9", "notarized": True})
-        self.assertEqual(lock["reproducible"], {"toolchain": "go1.26.4", "recipe": build.RECIPE,
+        self.assertEqual(lock["reproducible"], {"toolchain": "go1.26.4", "recipe": build.cli_recipe(TAG),
                                                  "unsigned_sha256": {"darwin-arm64": unsigned_cli, "linux-x64": linux_sha}})
         self.assertEqual(lock["stop_grace_ms"], 15000)
         self.assertEqual(lock["provides"], [{"id": i} for i in ("nostr-dm", "nostr-group", "nostr-identity", "nostr-relay")])
@@ -237,6 +237,15 @@ class FinalizeTests(unittest.TestCase):
         self.assert_no_output(code)
         self.assertIn("does not contain the recorded", err)
 
+    def test_refuses_bundle_built_without_stamp_version(self) -> None:
+        manifest = json.loads((self.unsigned / "artifact-manifest.json").read_text())
+        manifest["recipe"] = build.RECIPE
+        build.write_json(self.unsigned / "artifact-manifest.json", manifest)
+        code, err = self.run_main()
+        self.assert_no_output(code)
+        self.assertIn("--stamp-version", err)
+        self.assertIn("-X main.version=" + TAG, build.cli_recipe(TAG))
+
     def test_refuses_non_macho(self) -> None:
         (self.signed / "hyphae-darwin-arm64").write_bytes(b"#!/bin/sh\n")
         code, err = self.run_main()
@@ -288,10 +297,12 @@ class FinalizeTests(unittest.TestCase):
         if not go_file.exists():
             self.skipTest("internal/contract/contract.go not present on this base (PR #338)")
         text = go_file.read_text()
-        tested = re.search(r'(?i)tested\w*\s*=\s*"([^"]+)"', text)
+        tested = re.search(r'ContractVersion\s*=\s*"([^"]+)"', text)
         self.assertIsNotNone(tested)
         self.assertEqual(tested.group(1), fin.CONTRACT_TESTED)
-        self.assertEqual(set(re.findall(r'"(nostr-[a-z]+)"', text)), set(fin.PROVIDES))
+        provides = re.search(r"var provides = \[\]string\{([^}]*)\}", text)
+        self.assertIsNotNone(provides)
+        self.assertEqual(tuple(re.findall(r'"([^"]+)"', provides.group(1))), fin.PROVIDES)
 
 
 if __name__ == "__main__":

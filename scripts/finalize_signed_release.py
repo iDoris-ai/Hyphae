@@ -23,7 +23,7 @@ from typing import Any, Callable
 from build_release_artifacts import (
     GO_VERSION,
     REPOSITORY,
-    RECIPE,
+    cli_recipe,
     TAG_PATTERN,
     BuildError,
     sha256_file,
@@ -87,6 +87,8 @@ def load_unsigned(bundle: Path) -> dict[str, Any]:
     manifest = json.loads((bundle / "artifact-manifest.json").read_text(encoding="utf-8"))
     if manifest.get("schema") != 1 or not re.fullmatch(TAG_PATTERN, str(manifest.get("release_tag", ""))):
         raise BuildError("unsigned bundle manifest has an unexpected schema or release tag")
+    if manifest.get("recipe") != cli_recipe(manifest["release_tag"]):
+        raise BuildError("unsigned bundle was not built with --stamp-version for its release tag")
     expected = set(METADATA)
     for record in manifest["platforms"].values():
         for item in (*record["binaries"].values(), record["archive"]):
@@ -177,7 +179,7 @@ def finalize(unsigned: Path, signed_dir: Path, source: Path, output: Path, verif
             "signing": {"macos_team_id": TEAM_ID, "notarized": verifier is not None},
             "reproducible": {
                 "toolchain": GO_VERSION,
-                "recipe": RECIPE,
+                "recipe": manifest["recipe"],  # the stamped recipe from the unsigned bundle
                 "unsigned_sha256": {"darwin-arm64": unsigned_sha, "linux-x64": linux_cli_sha},
             },
             "stop_grace_ms": 15000,
