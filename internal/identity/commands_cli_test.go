@@ -141,6 +141,9 @@ func decodeSuccess(t *testing.T, result cliResult) map[string]any {
 	if result.code != 0 {
 		t.Fatalf("CLI exit=%d\nstdout: %s\nstderr: %s", result.code, result.stdout, result.stderr)
 	}
+	// 'identity create' into an unencrypted keystore legitimately prints the
+	// plaintext warning once; any other stderr output is still a failure.
+	result.stderr = strings.Replace(result.stderr, createPlaintextKeystoreWarning+"\n", "", 1)
 	if strings.TrimSpace(result.stderr) != "" {
 		t.Fatalf("unexpected stderr: %s", result.stderr)
 	}
@@ -472,4 +475,53 @@ func TestPasswordCreateRefusesPartiallyEncryptingExistingKeystore(t *testing.T) 
 	if entry["nickname"] != "original" || entry["npub"] != original["npub"] || entry["encrypted"] != false {
 		t.Fatalf("existing identity changed after refusal: %#v", entry)
 	}
+}
+
+// 'identity create' into an unencrypted keystore warns once, on stderr only; an
+// encrypted keystore, and a create that fails, do not.
+func TestIdentityCreatePlaintextKeystoreWarning(t *testing.T) {
+	count := func(s string) int { return strings.Count(s, createPlaintextKeystoreWarning) }
+
+	t.Run("unencrypted keystore warns once on stderr only", func(t *testing.T) {
+		home := t.TempDir()
+		for i, nick := range []string{"alice", "bob"} { // second create into the same plaintext store warns again
+			res := runIdentityCLI(t, home, nil, nil, "identity", "create", "--nickname", nick, "--json")
+			if res.code != 0 {
+				t.Fatalf("create %d failed: %#v", i, res)
+			}
+			if count(res.stderr) != 1 || strings.TrimSpace(strings.Replace(res.stderr, createPlaintextKeystoreWarning, "", 1)) != "" {
+				t.Fatalf("create %d stderr = %q, want exactly one warning line", i, res.stderr)
+			}
+			if count(res.stdout) != 0 || !json.Valid([]byte(res.stdout)) {
+				t.Fatalf("create %d stdout must be a pure JSON envelope: %q", i, res.stdout)
+			}
+		}
+	})
+
+	t.Run("create that encrypts the keystore does not warn", func(t *testing.T) {
+		home := t.TempDir()
+		res := runIdentityCLI(t, home, strings.NewReader("pw\n"), nil,
+			"identity", "create", "--nickname", "alice", "--password-stdin", "--json")
+		if res.code != 0 || count(res.stderr)+count(res.stdout) != 0 {
+			t.Fatalf("encrypted create warned or failed: %#v", res)
+		}
+	})
+
+	t.Run("create into an already encrypted keystore does not warn", func(t *testing.T) {
+		home := t.TempDir()
+		runIdentityCLI(t, home, strings.NewReader("pw\n"), nil, "identity", "create", "--nickname", "alice", "--password-stdin", "--json")
+		res := runIdentityCLI(t, home, strings.NewReader("pw\n"), nil, "identity", "create", "--nickname", "bob", "--password-stdin", "--json")
+		if res.code != 0 || count(res.stderr)+count(res.stdout) != 0 {
+			t.Fatalf("create into encrypted keystore warned or failed: %#v", res)
+		}
+	})
+
+	t.Run("failed create does not warn", func(t *testing.T) {
+		home := t.TempDir()
+		runIdentityCLI(t, home, nil, nil, "identity", "create", "--nickname", "alice", "--json")
+		res := runIdentityCLI(t, home, nil, nil, "identity", "create", "--nickname", "alice", "--json")
+		if res.code == 0 || count(res.stderr)+count(res.stdout) != 0 {
+			t.Fatalf("duplicate create: want failure without a warning, got %#v", res)
+		}
+	})
 }
