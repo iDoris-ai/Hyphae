@@ -5,9 +5,11 @@ import (
 	"os"
 
 	"github.com/iDoris-ai/hyphae/internal/common"
+	"github.com/iDoris-ai/hyphae/internal/contract"
 	"github.com/iDoris-ai/hyphae/internal/daemon"
 	"github.com/iDoris-ai/hyphae/internal/group"
 	"github.com/iDoris-ai/hyphae/internal/groupchat"
+	"github.com/iDoris-ai/hyphae/internal/health"
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/internal/messaging"
 	"github.com/iDoris-ai/hyphae/internal/nostr"
@@ -62,10 +64,12 @@ func main() {
 			groupchat.Cmd,
 			// Agent Profile
 			profile.ProfileCmd,
+			health.Cmd,
 			// TUI
 			tui.TUICmd,
 			// Daemon
 			daemon.DaemonCmd,
+			contract.Cmd,
 		},
 	}
 	if common.JSONModeFromArgs(os.Args) {
