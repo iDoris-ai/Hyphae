@@ -256,11 +256,22 @@ class EvidenceTests(Schema2Base):
         with self.assertRaisesRegex(joint_ci.GateError, "stage-not-skipped-in-unsigned-candidate"):
             self.normalize([{"stage": "start-daemon"}, self.control()])
 
+    def full_rows(self) -> list:
+        return [{"stage": name} for name in sorted(joint_ci.STAGE_NAMES)]
+
     def test_schema1_and_pinned_evidence_unchanged_and_clean(self):
         for kwargs in ({"schema": 1}, {"mode": "pinned-production"}, {"platform": "linux-x64"}):
-            safe = self.normalize([{"stage": "start-daemon"}, {"stage": "x", "result": "BLOCKED"}], **kwargs)
-            self.assertEqual(safe["summary"], {"passed": 1, "skipped": 0, "blocked": 1})
+            safe = self.normalize(self.full_rows() + [{"stage": "x", "result": "BLOCKED"}], **kwargs)
+            self.assertEqual(safe["summary"], {"passed": 10, "skipped": 0, "blocked": 1})
             self.assertEqual(safe["result"], "PASS")
+
+    def test_full_run_pass_must_contain_exactly_the_ten_stages(self):
+        for kwargs in ({"mode": "pinned-production"}, {"platform": "linux-x64"}, {"mode": "pinned-production", "platform": "linux-x64"}):
+            for name, rows in {"empty": [], "one stage dropped": self.full_rows()[1:],
+                               "unknown stage instead": self.full_rows()[1:] + [{"stage": "invented"}]}.items():
+                with self.subTest(name, **kwargs), self.assertRaisesRegex(joint_ci.GateError, "full-run-stage-set-incomplete"):
+                    self.normalize(rows, **kwargs)
+            self.assertEqual(self.normalize(self.full_rows(), **kwargs)["summary"]["passed"], 10)
 
     def test_unknown_stage_result_is_not_silently_pass(self):
         with self.assertRaisesRegex(joint_ci.GateError, "runner-evidence-result"):
@@ -296,8 +307,10 @@ class CliTests(Schema2Base):
             # Linux-style evidence: a BLOCKED stage next to an overall PASS must still exit 1 (review L1).
             manifest["platform"] = "linux-x64"
             (root / "manifest.json").write_text(json.dumps(manifest))
-            self.assertEqual(run([{"stage": "a"}, {"stage": "b", "result": "BLOCKED"}]), 1)
-            self.assertEqual(run([{"stage": "a"}]), 0)
+            full = [{"stage": n} for n in sorted(joint_ci.STAGE_NAMES)]
+            self.assertEqual(run(full + [{"stage": "b", "result": "BLOCKED"}]), 1)
+            self.assertEqual(run(full), 0)
+            self.assertEqual(run(full[1:]), 1)  # an incomplete full run is no PASS (round 1 correctness finding)
             manifest["platform"] = "darwin-arm64"
             (root / "manifest.json").write_text(json.dumps(manifest))
             (root / "hyphae.lock.json").write_bytes(derived + b" ")

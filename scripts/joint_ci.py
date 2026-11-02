@@ -491,6 +491,9 @@ def normalized_evidence(path: Path, manifest: dict[str, Any], *, lock_schema_id:
                            and {i["stage"] for i in stages if i["result"] == "PASS"} == DARWIN_CANDIDATE_PASS_STAGES
                            and {i["stage"] for i in stages if i["result"] == "SKIPPED"} == STAGE_NAMES),
             "unsigned-candidate-evidence-incomplete")
+    # A full run (schema 2, everything but the unsigned darwin candidate) that reports PASS must have run all ten stages.
+    require(strict or lock_schema_id != 2 or raw["result"] != "PASS"
+            or {i["stage"] for i in stages if i["result"] == "PASS"} == STAGE_NAMES, "full-run-stage-set-incomplete")
     summary = {"passed": sum(1 for item in stages if item["result"] == "PASS"),
                "skipped": sum(1 for item in stages if item["result"] == "SKIPPED"),
                "blocked": sum(1 for item in stages if item["result"] == "BLOCKED")}
