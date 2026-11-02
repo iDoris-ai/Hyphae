@@ -184,9 +184,12 @@ def validate_lock2(lock: dict[str, Any]) -> None:
     source = shape(lock["source"], {"repo", "commit"}, "production-lock-source")
     require(source["commit"] == PRODUCTION_HYPHAE_SHA, "production-lock-baseline")
     assets = shape(lock["assets"], LOCK2_PLATFORMS, "production-lock-platform-set")
+    require(isinstance(source["repo"], str), "production-lock-source")
     for item in assets.values():
         require(hex64(shape(item, {"name", "sha256", "files", "executables"}, "production-lock-asset")["sha256"]),
                 "production-lock-asset-hash")
+        require(isinstance(item["name"], str) and all(type(item[k]) is list and all(isinstance(x, str) for x in item[k])
+                                                      for k in ("files", "executables")), "production-lock-asset")
     repro = shape(lock["reproducible"], {"toolchain", "recipe", "unsigned_sha256"}, "production-lock-reproducible")
     unsigned = shape(repro["unsigned_sha256"], LOCK2_PLATFORMS, "production-lock-platform-set")
     require(all(hex64(v) for v in unsigned.values()) and repro["toolchain"] == GO_VERSION,
@@ -447,6 +450,11 @@ def normalized_evidence(path: Path, manifest: dict[str, Any], *, lock_schema_id:
     controls = [item for item in stages if item.get("kind") == "control"]
     require(len(controls) == (1 if strict else 0) and len({item["stage"] for item in stages}) == len(stages),
             "control-stage-missing" if strict else "control-unexpected")
+    names = {item["stage"] for item in stages if item["result"] == "PASS"}
+    require(not strict or ("download-and-hash" in names
+                           and any(item["result"] == "SKIPPED" for item in stages)
+                           and not any(item["result"] == "BLOCKED" for item in stages)),
+            "unsigned-candidate-evidence-incomplete")
     summary = {"passed": sum(1 for item in stages if item["result"] == "PASS"),
                "skipped": sum(1 for item in stages if item["result"] == "SKIPPED"),
                "blocked": sum(1 for item in stages if item["result"] == "BLOCKED")}

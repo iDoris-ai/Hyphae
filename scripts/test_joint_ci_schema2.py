@@ -100,8 +100,11 @@ class Schema2LockTests(Schema2Base):
                                              lambda v: v["assets"].pop("linux-x64")],
             "production-lock-asset-hash": [lambda v: v["assets"]["linux-x64"].update(sha256=None),
                                            lambda v: v["assets"]["linux-x64"].update(sha256="ABC")],
-            "production-lock-asset": [lambda v: v["assets"]["linux-x64"].update(extra=1)],
-            "production-lock-source": [lambda v: v["source"].update(extra=1)],
+            "production-lock-asset": [lambda v: v["assets"]["linux-x64"].update(extra=1),
+                                      lambda v: v["assets"]["linux-x64"].update(files=None),
+                                      lambda v: v["assets"]["linux-x64"].update(name=1)],
+            "production-lock-source": [lambda v: v["source"].update(extra=1),
+                                       lambda v: v["source"].update(repo=123)],
             "production-lock-baseline": [lambda v: v["source"].update(commit="d" * 40)],
             "production-lock-linux-unsigned-mismatch": [
                 lambda v: v["reproducible"]["unsigned_sha256"].update({"linux-x64": "e" * 64})],
@@ -229,6 +232,17 @@ class EvidenceTests(Schema2Base):
         with self.assertRaisesRegex(joint_ci.GateError, "control-stage-missing"):
             self.normalize([self.control(), self.control()])
 
+    def test_unsigned_candidate_evidence_must_be_complete_and_unblocked(self):
+        incomplete = {
+            "control only": [self.control()],
+            "no skipped": [{"stage": "download-and-hash"}, self.control()],
+            "no download": [self.skipped("start-daemon"), self.control()],
+            "blocked": self.good_rows() + [{"stage": "x", "result": "BLOCKED"}],
+        }
+        for name, rows in incomplete.items():
+            with self.subTest(name), self.assertRaisesRegex(joint_ci.GateError, "unsigned-candidate-evidence-incomplete"):
+                self.normalize(rows)
+
     def test_control_elsewhere_is_unexpected(self):
         for kwargs in ({"mode": "pinned-production"}, {"platform": "linux-x64"}, {"schema": 1}):
             with self.subTest(kwargs), self.assertRaisesRegex(joint_ci.GateError, "control-unexpected"):
@@ -267,11 +281,14 @@ class CliTests(Schema2Base):
                                       "--manifest", str(root / "manifest.json"), "--output", str(out)])
             control = {"stage": joint_ci.CONTROL_STAGE, "kind": "control", "expected": "rejected",
                        "observed": "rejected", "reason_code": "signature_rejected"}
-            self.assertEqual(run([control]), 0)
-            self.assertEqual(json.loads(out.read_text())["result"], "PASS")
+            good = [{"stage": "download-and-hash"}, control,
+                    {"stage": "start-daemon", "result": "SKIPPED", "reason": joint_ci.SKIP_REASON}]
+            self.assertEqual(run(good), 0)
+            self.assertEqual(run([control]), 1)  # control alone is incomplete
+            self.assertEqual(json.loads(out.read_text())["result"], "PASS_WITH_SKIPPED")
             self.assertEqual(run([{"stage": "download-and-hash"}]), 1)  # no control -> fail closed
             (root / "hyphae.lock.json").write_bytes(derived + b" ")
-            self.assertEqual(run([control]), 1)  # lock bytes no longer match manifest hash
+            self.assertEqual(run(good), 1)  # lock bytes no longer match manifest hash
 
 
 if __name__ == "__main__":
