@@ -9,12 +9,12 @@ calls `codesign --sign` or `notarytool`.
 From a clean checkout of the release commit (Go `go1.26.4` installed locally):
 
 ```sh
-python3 scripts/build_release_artifacts.py --source-dir . --source-sha <full-sha> --release-tag vX.Y.Z --output /tmp/hyphae-a
-python3 scripts/build_release_artifacts.py --source-dir . --source-sha <full-sha> --release-tag vX.Y.Z --output /tmp/hyphae-b
+python3 scripts/build_release_artifacts.py --source-dir . --source-sha <full-sha> --release-tag vX.Y.Z --stamp-version --output /tmp/hyphae-a
+python3 scripts/build_release_artifacts.py --source-dir . --source-sha <full-sha> --release-tag vX.Y.Z --stamp-version --output /tmp/hyphae-b
 diff /tmp/hyphae-a/SHA256SUMS /tmp/hyphae-b/SHA256SUMS   # must be identical
 ```
 
-The CLI is built with `-X main.version=<tag>`, so `hyphae contract` reports `binary_version` = the tag.
+Release builds pass `--stamp-version`, which builds the CLI with `-X main.version=<tag>` and records the concrete-tag recipe in the manifest and lock (default builds, used for the locked baseline CI, are unchanged). `finalize_signed_release.py` refuses a bundle whose recipe is not the stamped one for its tag, and copies that recipe into `hyphae.lock.json`. So `hyphae contract` reports `binary_version` = the tag.
 A different tag produces different CLI bytes by design.
 
 ## 2. Create the draft release with the raw unsigned assets
