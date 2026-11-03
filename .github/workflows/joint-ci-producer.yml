@@ -14,6 +14,9 @@ on:
       production_outputs:
         description: Independent pinned-production manifest and binary hashes.
         value: ${{ jobs.produce.outputs.production_outputs }}
+      bundle_artifact:
+        description: Exact name of the uploaded bundle artifact (consumers must not rebuild it).
+        value: ${{ jobs.produce.outputs.bundle_artifact }}
 
 permissions:
   contents: read
@@ -26,6 +29,7 @@ jobs:
     outputs:
       candidate_outputs: ${{ steps.provenance.outputs.candidate_outputs }}
       production_outputs: ${{ steps.provenance.outputs.production_outputs }}
+      bundle_artifact: ${{ steps.artifact.outputs.name }}
     steps:
       - name: Checkout Hyphae tools and candidate source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -216,10 +220,14 @@ jobs:
             print(f'{key}={json.dumps(outputs, sort_keys=True, separators=(",", ":"))}')
           PY
 
+      - name: Name the bundle artifact once
+        id: artifact
+        run: echo "name=joint-bundles-${{ inputs.platform }}-${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
+
       - name: Upload producer bundles for this platform
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: joint-bundles-${{ inputs.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ steps.artifact.outputs.name }}
           path: ${{ steps.build.outputs.bundle_dir }}/
           if-no-files-found: error
           retention-days: 2

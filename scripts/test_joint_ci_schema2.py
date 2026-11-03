@@ -382,7 +382,7 @@ class BaselineTests(unittest.TestCase):
         baseline = json.loads(joint_ci.BASELINE_CONFIG_PATH.read_text())
         lock = json.loads(FIXTURE.read_bytes())
         self.assertEqual(baseline["schema"], 1)
-        self.assertEqual(baseline["agent24_base_sha"], "e8b58246c5ee3a62b2583e27fc32989e3f6cbed7")
+        self.assertEqual(baseline["agent24_base_sha"], "74f0127066e1bcd4216c11006074c44684a085bd")
         self.assertEqual(baseline["production_lock_sha256"], FIXTURE_SHA)
         self.assertEqual(baseline["production_hyphae_sha"], lock["source"]["commit"])
         self.assertEqual("go" + baseline["go_version"], lock["reproducible"]["toolchain"])

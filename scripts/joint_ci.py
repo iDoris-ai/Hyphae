@@ -238,6 +238,8 @@ def release_info(production_bytes: bytes, *, platform: str, hyphae_sha: str | No
             "download_url": f"{RELEASE_URL_BASE}/{version}/{asset['name']}"}
     if hyphae_sha is not None:
         require(re.fullmatch(r"[0-9a-f]{40}", hyphae_sha) is not None, "hyphae-source-sha")
+        # Collision assumption: a candidate lock must never equal a real release, so the patch is pushed 10000 past
+        # the locked one; real releases stay far below that, and the candidate is never downloaded (A24_HYPHAE_BIN).
         # Agent24 only accepts a plain vX.Y.Z in a lock (no pre-release / build suffix), so the synthetic
         # candidate version bumps the patch far past any real release and is never downloaded.
         major, minor, patch = (int(part) for part in version[1:].split("."))
