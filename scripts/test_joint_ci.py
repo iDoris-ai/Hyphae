@@ -432,7 +432,12 @@ class JointCIGateTests(unittest.TestCase):
         self.assertIn("needs.produce_darwin.outputs.candidate_outputs", workflow)
         self.assertIn("needs.produce_darwin.outputs.production_outputs", workflow)
         self.assertIn("joint-bundles-${{ inputs.platform }}-${{ github.run_id }}", producer)
-        self.assertIn("joint-bundles-${{ matrix.platform }}-${{ github.run_id }}", workflow)
+        # The consumer must take the name from the producer outputs, never rebuild it (re-run failed jobs, M1).
+        self.assertIn("needs.produce_linux.outputs.bundle_artifact", workflow)
+        self.assertIn("needs.produce_darwin.outputs.bundle_artifact", workflow)
+        self.assertNotIn("joint-bundles-${{ matrix.platform }}", workflow.split("Download same-run producer bundle")[1])
+        self.assertIn("bundle_artifact: ${{ steps.artifact.outputs.name }}", producer)
+        self.assertIn("name: ${{ steps.artifact.outputs.name }}", producer)
         self.assertIn("joint-evidence-${{ matrix.mode }}-${{ matrix.platform }}-${{ github.run_id }}", workflow)
         self.assertIn("linux-x64:Linux:x86_64", producer)
         self.assertIn("darwin-arm64:Darwin:arm64", producer)

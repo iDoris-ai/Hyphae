@@ -14,6 +14,9 @@ on:
       production_outputs:
         description: Independent pinned-production manifest and binary hashes.
         value: ${{ jobs.produce.outputs.production_outputs }}
+      bundle_artifact:
+        description: Exact name of the uploaded bundle artifact (consumers must not rebuild it).
+        value: ${{ jobs.produce.outputs.bundle_artifact }}
 
 permissions:
   contents: read
@@ -26,6 +29,7 @@ jobs:
     outputs:
       candidate_outputs: ${{ steps.provenance.outputs.candidate_outputs }}
       production_outputs: ${{ steps.provenance.outputs.production_outputs }}
+      bundle_artifact: ${{ steps.artifact.outputs.name }}
     steps:
       - name: Checkout Hyphae tools and candidate source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -107,6 +111,11 @@ jobs:
           p = pathlib.Path(sys.argv[1])
           assert hashlib.sha256(p.read_bytes()).hexdigest() == os.environ['PRODUCTION_LOCK_SHA256']
           PY
+          # Build recipe, version and release asset come from the schema 2 lock, validated fail-closed.
+          info="$RUNNER_TEMP/release-info"
+          python3 tools/scripts/joint_ci.py release-info --production-lock "$prod_lock" \
+            --platform "$TARGET_PLATFORM" --hyphae-sha "$CANDIDATE_SHA" > "$info"
+          field() { sed -n "s/^$1=//p" "$info"; }
 
           for mode in pinned-production candidate; do
             work="$RUNNER_TEMP/$mode"
@@ -114,9 +123,11 @@ jobs:
             if [ "$mode" = pinned-production ]; then
               cp -a hyphae-production/. "$work/hyphae/"
               source_sha="$PRODUCTION_HYPHAE_SHA"
+              ldflags="$(field ldflags)"
             else
               cp -a tools/. "$work/hyphae/"
               source_sha="$CANDIDATE_SHA"
+              ldflags="$(field candidate_ldflags)"
             fi
             git -C "$work/hyphae" cat-file -e "$source_sha^{commit}"
             test "$(git -C "$work/hyphae" rev-parse HEAD)" = "$source_sha"
@@ -127,9 +138,30 @@ jobs:
             test "$actual_target" = "$expected_target"
             (
               cd "$work/hyphae"
-              GOTOOLCHAIN="go$GO_VERSION" CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -buildvcs=false -ldflags='-buildid=' -o "$build/hyphae" ./cmd/hyphae
+              GOTOOLCHAIN="go$GO_VERSION" CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -buildvcs=false -ldflags="$ldflags" -o "$build/hyphae" ./cmd/hyphae
               GOTOOLCHAIN="go$GO_VERSION" CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build -trimpath -buildvcs=false -ldflags='-buildid=' -o "$build/relay" ./cmd/hyphae-relay
             )
+            if [ "$mode" = pinned-production ]; then
+              if [ "$TARGET_PLATFORM" = linux-x64 ]; then
+                # Linux is reproducible from source: the rebuild must equal the locked release digest.
+                python3 tools/scripts/joint_ci.py check-file-sha256 --file "$build/hyphae" --expected "$(field asset_sha256)"
+              else
+                # Signed bytes cannot be rebuilt. Rebuild is only a best-effort check against the unsigned digest.
+                python3 tools/scripts/joint_ci.py check-file-sha256 --file "$build/hyphae" --expected "$(field unsigned_sha256)" \
+                  || echo "::warning::darwin-arm64 source rebuild differs from reproducible.unsigned_sha256 (best-effort check)"
+                # The pinned bytes are the signed release asset; its digest is the lock's assets sha256.
+                curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+                  --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 20 --max-time 300 \
+                  --output "$build/hyphae.download" "$(field download_url)"
+                python3 tools/scripts/joint_ci.py check-file-sha256 --file "$build/hyphae.download" --expected "$(field asset_sha256)"
+                mv "$build/hyphae.download" "$build/hyphae"
+                chmod 755 "$build/hyphae"
+                {
+                  echo "## codesign -dv --verbose=4"; codesign -dv --verbose=4 "$build/hyphae" 2>&1; echo "exit=$?"
+                  echo "## spctl --assess --type install -vv"; spctl --assess --type install -vv "$build/hyphae" 2>&1; echo "exit=$?"
+                } 2>&1 | tee "$out/pinned-production-signature-evidence.txt" || true
+              fi
+            fi
             if [ "$mode" = candidate ]; then
               hyphae_hash="$(python3 - "$build/hyphae" <<'PY'
           import hashlib, pathlib, sys
@@ -138,7 +170,7 @@ jobs:
           )"
               python3 tools/scripts/joint_ci.py derive-lock --production-lock "$prod_lock" \
                 --platform "$TARGET_PLATFORM" --hyphae-sha "$source_sha" \
-                --hyphae-sha256 "$hyphae_hash" --output "$build/hyphae.lock.json"
+                --hyphae-sha256 "$hyphae_hash" --version "$(field candidate_version)" --output "$build/hyphae.lock.json"
             else
               cp "$prod_lock" "$build/hyphae.lock.json"
             fi
@@ -154,9 +186,11 @@ jobs:
             done
             chmod 755 "$build"/*
             cp "$build"/* "$out/$mode/"
+            version_args=()
+            if [ "$mode" = candidate ]; then version_args=(--candidate-version "$(field candidate_version)"); fi
             python3 tools/scripts/joint_ci.py write-manifest --mode "$mode" --platform "$TARGET_PLATFORM" \
               --hyphae-sha "$source_sha" --artifact-dir "$out/$mode" --production-lock "$prod_lock" \
-              --output "$out/$mode/manifest.json"
+              ${version_args[@]+"${version_args[@]}"} --output "$out/$mode/manifest.json"
           done
           echo "bundle_dir=$out" >> "$GITHUB_OUTPUT"
 
@@ -186,10 +220,14 @@ jobs:
             print(f'{key}={json.dumps(outputs, sort_keys=True, separators=(",", ":"))}')
           PY
 
+      - name: Name the bundle artifact once
+        id: artifact
+        run: echo "name=joint-bundles-${{ inputs.platform }}-${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
+
       - name: Upload producer bundles for this platform
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: joint-bundles-${{ inputs.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ steps.artifact.outputs.name }}
           path: ${{ steps.build.outputs.bundle_dir }}/
           if-no-files-found: error
           retention-days: 2

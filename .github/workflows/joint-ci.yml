@@ -93,10 +93,19 @@ jobs:
           persist-credentials: false
           submodules: false
 
+      - name: Require the producer-reported bundle artifact name
+        env:
+          TARGET_PLATFORM: ${{ matrix.platform }}
+          BUNDLE_ARTIFACT: ${{ matrix.platform == 'linux-x64' && needs.produce_linux.outputs.bundle_artifact || needs.produce_darwin.outputs.bundle_artifact }}
+        run: |
+          set -euo pipefail
+          # An empty name would make download-artifact fetch every artifact of the run.
+          case "$BUNDLE_ARTIFACT" in joint-bundles-"$TARGET_PLATFORM"-*) ;; *) echo "bundle-artifact-name-missing" >&2; exit 1 ;; esac
+
       - name: Download same-run producer bundle for this platform
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: joint-bundles-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ matrix.platform == 'linux-x64' && needs.produce_linux.outputs.bundle_artifact || needs.produce_darwin.outputs.bundle_artifact }}
           path: ${{ runner.temp }}/joint-download
           digest-mismatch: error
 
@@ -170,7 +179,7 @@ jobs:
             cmd += [f'--{name}-bin', str(a / name), f'--expected-{name}-sha256', i['hashes'][name]]
           cmd += ['--hyphae-sha', i['hyphae_sha'], '--agent24-sha', i['agent24_sha'],
             '--lock', str(a / 'hyphae.lock.json'), '--expected-lock-sha256', i['lock_sha'],
-            '--output-dir', os.environ['RUNNER_TEMP'] + '/joint-evidence']
+            '--mode', os.environ['MODE'], '--output-dir', os.environ['RUNNER_TEMP'] + '/joint-evidence']
           raise SystemExit(subprocess.run(cmd, cwd=root).returncode)
           PY
           runner_status=$?
