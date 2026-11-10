@@ -1,0 +1,557 @@
+{
+  "kind": "intent_session",
+  "description": "Intent session state machine (direction 1).",
+  "cases": [
+    {
+      "name": "happy path to Matched",
+      "setup": {
+        "intent": {"id": "0000000000000000000000000000000000000000000000000000000000000100", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+        "responder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "steps": [
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001135", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000010, "content": "{\"v\":1,\"type\":\"respond\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"fields\":{\"age\":\"30\"}}"},
+          "now": 1700000010,
+          "expect": "ok",
+          "state_after": "Responded"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001136", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000020, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":1,\"fields\":{\"r\":\"1\"}}"},
+          "now": 1700000020,
+          "expect": "ok",
+          "state_after": "Disclosing"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001137", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000030, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":1,\"fields\":{\"r\":\"1\"}}"},
+          "now": 1700000030,
+          "expect": "ok",
+          "state_after": "Disclosing"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001138", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000040, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+          "now": 1700000040,
+          "expect": "ok",
+          "state_after": "Disclosing",
+          "note": "One accept alone does not match."
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001139", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000050, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+          "now": 1700000050,
+          "expect": "ok",
+          "state_after": "Matched"
+        }
+      ]
+    },
+    {
+      "name": "match straight after respond",
+      "setup": {
+        "intent": {"id": "0000000000000000000000000000000000000000000000000000000000000100", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+        "responder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "steps": [
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000113a", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000010, "content": "{\"v\":1,\"type\":\"respond\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"fields\":{\"age\":\"30\"}}"},
+          "now": 1700000010,
+          "expect": "ok",
+          "state_after": "Responded"
+        },
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000113b", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000011, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+          "now": 1700000011,
+          "expect": "ok",
+          "state_after": "Responded"
+        },
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000113c", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000012, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+          "now": 1700000012,
+          "expect": "ok",
+          "state_after": "Matched"
+        }
+      ]
+    },
+    {
+      "name": "responder may open round 1",
+      "setup": {
+        "intent": {"id": "0000000000000000000000000000000000000000000000000000000000000100", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+        "responder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "steps": [
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000113d", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000010, "content": "{\"v\":1,\"type\":\"respond\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"fields\":{\"age\":\"30\"}}"},
+          "now": 1700000010,
+          "expect": "ok",
+          "state_after": "Responded"
+        },
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000113e", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000020, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":1,\"fields\":{\"r\":\"1\"}}"},
+          "now": 1700000020,
+          "expect": "ok",
+          "state_after": "Disclosing"
+        },
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000113f", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000021, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":2,\"fields\":{\"r\":\"2\"}}"},
+          "now": 1700000021,
+          "expect": "reject",
+          "state_after": "Disclosing",
+          "note": "B must wait for A's round 1."
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001140", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000030, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":1,\"fields\":{\"r\":\"1\"}}"},
+          "now": 1700000030,
+          "expect": "ok",
+          "state_after": "Disclosing"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001141", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000040, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":2,\"fields\":{\"r\":\"2\"}}"},
+          "now": 1700000040,
+          "expect": "ok",
+          "state_after": "Disclosing"
+        }
+      ]
+    },
+    {
+      "name": "alternation violations",
+      "setup": {
+        "intent": {"id": "0000000000000000000000000000000000000000000000000000000000000100", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+        "responder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "steps": [
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001142", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000010, "content": "{\"v\":1,\"type\":\"respond\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"fields\":{\"age\":\"30\"}}"},
+          "now": 1700000010,
+          "expect": "ok",
+          "state_after": "Responded"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001143", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000020, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":1,\"fields\":{\"r\":\"1\"}}"},
+          "now": 1700000020,
+          "expect": "ok",
+          "state_after": "Disclosing"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001144", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000021, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":2,\"fields\":{\"r\":\"2\"}}"},
+          "now": 1700000021,
+          "expect": "reject",
+          "state_after": "Disclosing",
+          "note": "A cannot run ahead of B."
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001145", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000022, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":2,\"fields\":{\"r\":\"2\"}}"},
+          "now": 1700000022,
+          "expect": "reject",
+          "state_after": "Disclosing",
+          "note": "B cannot skip round 1."
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001146", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000023, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":1,\"fields\":{\"r\":\"1\"}}"},
+          "now": 1700000023,
+          "expect": "reject",
+          "state_after": "Disclosing",
+          "note": "A cannot send round 1 twice."
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001147", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000030, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":1,\"fields\":{\"r\":\"1\"}}"},
+          "now": 1700000030,
+          "expect": "ok",
+          "state_after": "Disclosing"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001148", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000031, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":1,\"fields\":{\"r\":\"1\"}}"},
+          "now": 1700000031,
+          "expect": "reject",
+          "state_after": "Disclosing",
+          "note": "B cannot send round 1 twice."
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001149", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000040, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":2,\"fields\":{\"r\":\"2\"}}"},
+          "now": 1700000040,
+          "expect": "ok",
+          "state_after": "Disclosing"
+        },
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000114a", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000041, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":3,\"fields\":{\"r\":\"3\"}}"},
+          "now": 1700000041,
+          "expect": "reject",
+          "state_after": "Disclosing"
+        },
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000114b", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000050, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":2,\"fields\":{\"r\":\"2\"}}"},
+          "now": 1700000050,
+          "expect": "ok",
+          "state_after": "Disclosing"
+        }
+      ]
+    },
+    {
+      "name": "round cap: rounds 1..4 then 5 rejected",
+      "setup": {
+        "intent": {"id": "0000000000000000000000000000000000000000000000000000000000000100", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+        "responder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "steps": [
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000114c", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000010, "content": "{\"v\":1,\"type\":\"respond\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"fields\":{\"age\":\"30\"}}"},
+          "now": 1700000010,
+          "expect": "ok",
+          "state_after": "Responded"
+        },
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000114d", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000020, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":1,\"fields\":{\"r\":\"1\"}}"},
+          "now": 1700000020,
+          "expect": "ok",
+          "state_after": "Disclosing"
+        },
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000114e", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000021, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":1,\"fields\":{\"r\":\"1\"}}"},
+          "now": 1700000021,
+          "expect": "ok",
+          "state_after": "Disclosing"
+        },
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000114f", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000030, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":2,\"fields\":{\"r\":\"2\"}}"},
+          "now": 1700000030,
+          "expect": "ok",
+          "state_after": "Disclosing"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001150", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000031, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":2,\"fields\":{\"r\":\"2\"}}"},
+          "now": 1700000031,
+          "expect": "ok",
+          "state_after": "Disclosing"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001151", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000040, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":3,\"fields\":{\"r\":\"3\"}}"},
+          "now": 1700000040,
+          "expect": "ok",
+          "state_after": "Disclosing"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001152", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000041, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":3,\"fields\":{\"r\":\"3\"}}"},
+          "now": 1700000041,
+          "expect": "ok",
+          "state_after": "Disclosing"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001153", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000050, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":4,\"fields\":{\"r\":\"4\"}}"},
+          "now": 1700000050,
+          "expect": "ok",
+          "state_after": "Disclosing"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001154", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000051, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":4,\"fields\":{\"r\":\"4\"}}"},
+          "now": 1700000051,
+          "expect": "ok",
+          "state_after": "Disclosing"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001155", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000060, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":5,\"fields\":{\"r\":\"5\"}}"},
+          "now": 1700000060,
+          "expect": "reject",
+          "state_after": "Disclosing",
+          "note": "round 5 is invalid: at most rounds 0..4."
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001156", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000061, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":5,\"fields\":{\"r\":\"5\"}}"},
+          "now": 1700000061,
+          "expect": "reject",
+          "state_after": "Disclosing"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001157", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000062, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+          "now": 1700000062,
+          "expect": "ok",
+          "state_after": "Disclosing"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001158", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000063, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+          "now": 1700000063,
+          "expect": "ok",
+          "state_after": "Matched"
+        }
+      ]
+    },
+    {
+      "name": "accept before respond is not allowed yet and applies when retried",
+      "setup": {
+        "intent": {"id": "0000000000000000000000000000000000000000000000000000000000000100", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+        "responder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "steps": [
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001159", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000005, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+          "now": 1700000005,
+          "expect": "reject",
+          "state_after": "Open"
+        },
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000115a", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000006, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+          "now": 1700000006,
+          "expect": "reject",
+          "state_after": "Open"
+        },
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000115b", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000007, "content": "{\"v\":1,\"type\":\"decline\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+          "now": 1700000007,
+          "expect": "reject",
+          "state_after": "Open"
+        },
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000115c", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000010, "content": "{\"v\":1,\"type\":\"respond\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"fields\":{\"age\":\"30\"}}"},
+          "now": 1700000010,
+          "expect": "ok",
+          "state_after": "Responded"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001159", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000005, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+          "now": 1700000011,
+          "expect": "ok",
+          "state_after": "Responded",
+          "note": "Not allowed yet rather than wrong: nothing is remembered, so the same event applies once its prerequisite has arrived."
+        },
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000115a", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000006, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+          "now": 1700000012,
+          "expect": "ok",
+          "state_after": "Matched",
+          "note": "B's early accept applies too; both sides have now accepted."
+        }
+      ],
+      "note": "A relay does not guarantee order. A message that is only early is rejected for now and may be offered again."
+    },
+    {
+      "name": "disclose before respond applies when retried after respond",
+      "setup": {
+        "intent": {"id": "0000000000000000000000000000000000000000000000000000000000000100", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+        "responder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "steps": [
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000115d", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000005, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":1,\"fields\":{\"r\":\"1\"}}"},
+          "now": 1700000005,
+          "expect": "reject",
+          "state_after": "Open"
+        },
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000115e", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000010, "content": "{\"v\":1,\"type\":\"respond\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"fields\":{\"age\":\"30\"}}"},
+          "now": 1700000010,
+          "expect": "ok",
+          "state_after": "Responded"
+        },
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000115d", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000005, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":1,\"fields\":{\"r\":\"1\"}}"},
+          "now": 1700000011,
+          "expect": "ok",
+          "state_after": "Disclosing",
+          "note": "Not allowed yet rather than wrong: nothing is remembered, so the same event applies once its prerequisite has arrived."
+        },
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000115f", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000012, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":1,\"fields\":{\"r\":\"1\"}}"},
+          "now": 1700000012,
+          "expect": "reject",
+          "state_after": "Disclosing",
+          "note": "A has already sent round 1; a second round-1 disclose is out of turn."
+        }
+      ]
+    },
+    {
+      "name": "no disclosure after any accept",
+      "setup": {
+        "intent": {"id": "0000000000000000000000000000000000000000000000000000000000000100", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+        "responder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "steps": [
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001160", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000010, "content": "{\"v\":1,\"type\":\"respond\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"fields\":{\"age\":\"30\"}}"},
+          "now": 1700000010,
+          "expect": "ok",
+          "state_after": "Responded"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001161", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000020, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+          "now": 1700000020,
+          "expect": "ok",
+          "state_after": "Responded"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001162", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000021, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":1,\"fields\":{\"r\":\"1\"}}"},
+          "now": 1700000021,
+          "expect": "reject",
+          "state_after": "Responded"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001163", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000022, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":1,\"fields\":{\"r\":\"1\"}}"},
+          "now": 1700000022,
+          "expect": "reject",
+          "state_after": "Responded"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001164", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000023, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+          "now": 1700000023,
+          "expect": "reject",
+          "state_after": "Responded",
+          "note": "Ambiguity: a second accept from the same side is rejected."
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001165", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000030, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+          "now": 1700000030,
+          "expect": "ok",
+          "state_after": "Matched"
+        }
+      ]
+    },
+    {
+      "name": "respond rules",
+      "setup": {
+        "intent": {"id": "0000000000000000000000000000000000000000000000000000000000000100", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+        "responder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "steps": [
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001166", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000005, "content": "{\"v\":1,\"type\":\"respond\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"fields\":{\"age\":\"30\"}}"},
+          "now": 1700000005,
+          "expect": "reject",
+          "state_after": "Open",
+          "note": "Only the responder responds."
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001167", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000006, "content": "{\"v\":1,\"type\":\"respond\",\"intent\":\"00000000000000000000000000000000000000000000000000000000000001ff\",\"fields\":{\"age\":\"30\"}}"},
+          "now": 1700000006,
+          "expect": "reject",
+          "state_after": "Open",
+          "note": "References another intent."
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001168", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000010, "content": "{\"v\":1,\"type\":\"respond\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"fields\":{\"age\":\"30\"}}"},
+          "now": 1700000010,
+          "expect": "ok",
+          "state_after": "Responded"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001169", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000011, "content": "{\"v\":1,\"type\":\"respond\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"fields\":{\"age\":\"30\"}}"},
+          "now": 1700000011,
+          "expect": "reject",
+          "state_after": "Responded",
+          "note": "Only once."
+        },
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000116a", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000012, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+          "now": 1700000012,
+          "expect": "reject",
+          "state_after": "Responded",
+          "note": "A second intent is not part of this session."
+        }
+      ]
+    },
+    {
+      "name": "respond that predates the intent",
+      "note": "Ambiguity: the spec is silent; implementations reject any message dated before the intent it answers.",
+      "setup": {
+        "intent": {"id": "0000000000000000000000000000000000000000000000000000000000000100", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+        "responder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "steps": [
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000116b", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1699999999, "content": "{\"v\":1,\"type\":\"respond\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"fields\":{\"age\":\"30\"}}"},
+          "now": 1700000010,
+          "expect": "reject",
+          "state_after": "Open"
+        },
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000116c", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"respond\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"fields\":{\"age\":\"30\"}}"},
+          "now": 1700000010,
+          "expect": "ok",
+          "state_after": "Responded",
+          "note": "Same second as the intent is fine."
+        }
+      ]
+    },
+    {
+      "name": "outsider messages are rejected and cannot expire the session",
+      "setup": {
+        "intent": {"id": "0000000000000000000000000000000000000000000000000000000000000100", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+        "responder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "steps": [
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000116d", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000005, "content": "{\"v\":1,\"type\":\"respond\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"fields\":{\"age\":\"30\"}}"},
+          "now": 1700000005,
+          "expect": "reject",
+          "state_after": "Open"
+        },
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000116e", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000010, "content": "{\"v\":1,\"type\":\"respond\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"fields\":{\"age\":\"30\"}}"},
+          "now": 1700000010,
+          "expect": "ok",
+          "state_after": "Responded"
+        },
+        {
+          "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000116f", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000011, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":1,\"fields\":{\"r\":\"1\"}}"},
+          "now": 1700000011,
+          "expect": "reject",
+          "state_after": "Responded"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001170", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000012, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+          "now": 1700000012,
+          "expect": "reject",
+          "state_after": "Responded"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001171", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000013, "content": "{\"v\":1,\"type\":\"withdraw\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+          "now": 1700000013,
+          "expect": "reject",
+          "state_after": "Responded"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001172", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700003800, "content": "{\"v\":1,\"type\":\"decline\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+          "now": 1700003550,
+          "expect": "reject",
+          "state_after": "Responded",
+          "note": "Dated after expires_at, within clock skew: the author check comes first, so no early expiry."
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001173", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700003560, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+          "now": 1700003560,
+          "expect": "ok",
+          "state_after": "Responded"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001174", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700003570, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+          "now": 1700003570,
+          "expect": "ok",
+          "state_after": "Matched"
+        }
+      ]
+    },
+    {
+      "name": "party message dated after expires_at is rejected without expiring the session",
+      "note": "created_at is chosen by the sender, so only the trusted clock expires a session. A message dated after expires_at is itself rejected, every time.",
+      "setup": {
+        "intent": {"id": "0000000000000000000000000000000000000000000000000000000000000100", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+        "responder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "steps": [
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001175", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000010, "content": "{\"v\":1,\"type\":\"respond\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"fields\":{\"age\":\"30\"}}"},
+          "now": 1700000010,
+          "expect": "ok",
+          "state_after": "Responded"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001176", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700003800, "content": "{\"v\":1,\"type\":\"disclose\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"round\":1,\"fields\":{\"r\":\"1\"}}"},
+          "now": 1700003550,
+          "expect": "reject",
+          "state_after": "Responded",
+          "note": "The session stays usable."
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001177", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700003560, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+          "now": 1700003560,
+          "expect": "ok",
+          "state_after": "Responded",
+          "note": "Still before expires_at by the trusted clock: the accept applies."
+        }
+      ]
+    }
+  ]
+}

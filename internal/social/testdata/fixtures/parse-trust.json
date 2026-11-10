@@ -1,0 +1,246 @@
+{
+  "kind": "parse",
+  "description": "Direction 2 message bodies: invite, invite_accept, rating.",
+  "cases": [
+    {
+      "name": "invite baseline",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000110e", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"invite\",\"invitee\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}"},
+      "expect": "accept",
+      "type": "invite"
+    },
+    {
+      "name": "invite self",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000110f", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"invite\",\"invitee\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"},
+      "expect": "reject",
+      "type": "invite",
+      "note": "Inviting yourself is invalid and uses no quota."
+    },
+    {
+      "name": "invite invitee uppercase",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001110", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"invite\",\"invitee\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\"}"},
+      "expect": "reject",
+      "type": "invite"
+    },
+    {
+      "name": "invite invitee 65 chars",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001111", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"invite\",\"invitee\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}"},
+      "expect": "reject",
+      "type": "invite"
+    },
+    {
+      "name": "invite invitee missing",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001112", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"invite\"}"},
+      "expect": "reject",
+      "type": "invite"
+    },
+    {
+      "name": "invite extra field",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001113", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"invite\",\"invitee\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"note\":\"hi\"}"},
+      "expect": "reject",
+      "type": "invite"
+    },
+    {
+      "name": "invite_accept baseline",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001114", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"invite_accept\",\"invite\":\"0000000000000000000000000000000000000000000000000000000000000400\"}"},
+      "expect": "accept",
+      "type": "invite_accept"
+    },
+    {
+      "name": "invite_accept invite bad hex",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001115", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"invite_accept\",\"invite\":\"IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII\"}"},
+      "expect": "reject",
+      "type": "invite_accept"
+    },
+    {
+      "name": "invite_accept invite missing",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001116", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"invite_accept\"}"},
+      "expect": "reject",
+      "type": "invite_accept"
+    },
+    {
+      "name": "invite_accept extra invitee",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001117", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"invite_accept\",\"invite\":\"0000000000000000000000000000000000000000000000000000000000000400\",\"invitee\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}"},
+      "expect": "reject",
+      "type": "invite_accept"
+    },
+    {
+      "name": "rating baseline",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001118", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"0000000000000000000000000000000000000000000000000000000000000402\"],\"score\":4}"},
+      "expect": "accept",
+      "type": "rating"
+    },
+    {
+      "name": "rating score 1",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001119", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"0000000000000000000000000000000000000000000000000000000000000402\"],\"score\":1}"},
+      "expect": "accept",
+      "type": "rating"
+    },
+    {
+      "name": "rating score 5",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000111a", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"0000000000000000000000000000000000000000000000000000000000000402\"],\"score\":5}"},
+      "expect": "accept",
+      "type": "rating"
+    },
+    {
+      "name": "rating score 0",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000111b", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"0000000000000000000000000000000000000000000000000000000000000402\"],\"score\":0}"},
+      "expect": "reject",
+      "type": "rating"
+    },
+    {
+      "name": "rating score 6",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000111c", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"0000000000000000000000000000000000000000000000000000000000000402\"],\"score\":6}"},
+      "expect": "reject",
+      "type": "rating"
+    },
+    {
+      "name": "rating score 3.5",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000111d", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"0000000000000000000000000000000000000000000000000000000000000402\"],\"score\":3.5}"},
+      "expect": "reject",
+      "type": "rating"
+    },
+    {
+      "name": "rating score string",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000111e", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"0000000000000000000000000000000000000000000000000000000000000402\"],\"score\":\"5\"}"},
+      "expect": "reject",
+      "type": "rating"
+    },
+    {
+      "name": "rating score missing",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000111f", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"0000000000000000000000000000000000000000000000000000000000000402\"]}"},
+      "expect": "reject",
+      "type": "rating"
+    },
+    {
+      "name": "rating match descending order",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001120", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000402\", \"0000000000000000000000000000000000000000000000000000000000000401\"],\"score\":4}"},
+      "expect": "accept",
+      "type": "rating",
+      "note": "Order inside match is not significant."
+    },
+    {
+      "name": "rating match one id",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001121", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\"],\"score\":4}"},
+      "expect": "reject",
+      "type": "rating"
+    },
+    {
+      "name": "rating match three ids",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001122", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"0000000000000000000000000000000000000000000000000000000000000402\", \"0000000000000000000000000000000000000000000000000000000000000403\"],\"score\":4}"},
+      "expect": "reject",
+      "type": "rating"
+    },
+    {
+      "name": "rating match empty",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001123", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[],\"score\":4}"},
+      "expect": "reject",
+      "type": "rating"
+    },
+    {
+      "name": "rating match same id twice",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001124", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"0000000000000000000000000000000000000000000000000000000000000401\"],\"score\":4}"},
+      "expect": "reject",
+      "type": "rating"
+    },
+    {
+      "name": "rating match bad hex",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001125", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\"],\"score\":4}"},
+      "expect": "reject",
+      "type": "rating"
+    },
+    {
+      "name": "rating match as string",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001126", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":\"0000000000000000000000000000000000000000000000000000000000000401\",\"score\":4}"},
+      "expect": "reject",
+      "type": "rating"
+    },
+    {
+      "name": "rating match missing",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001127", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"score\":4}"},
+      "expect": "reject",
+      "type": "rating"
+    },
+    {
+      "name": "rating self",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001128", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"0000000000000000000000000000000000000000000000000000000000000402\"],\"score\":4}"},
+      "expect": "reject",
+      "type": "rating",
+      "note": "Rater is the author; a self-rating is invalid."
+    },
+    {
+      "name": "rating subject bad hex",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001129", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"0000000000000000000000000000000000000000000000000000000000000402\"],\"score\":4}"},
+      "expect": "reject",
+      "type": "rating"
+    },
+    {
+      "name": "rating subject missing",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000112a", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"0000000000000000000000000000000000000000000000000000000000000402\"],\"score\":4}"},
+      "expect": "reject",
+      "type": "rating"
+    },
+    {
+      "name": "rating tags empty array",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000112b", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"0000000000000000000000000000000000000000000000000000000000000402\"],\"score\":4,\"tags\":[]}"},
+      "expect": "accept",
+      "type": "rating"
+    },
+    {
+      "name": "rating 8 tags",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000112c", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"0000000000000000000000000000000000000000000000000000000000000402\"],\"score\":4,\"tags\":[\"t0\", \"t1\", \"t2\", \"t3\", \"t4\", \"t5\", \"t6\", \"t7\"]}"},
+      "expect": "accept",
+      "type": "rating",
+      "note": "Ambiguity: the spec says tags are optional with no bounds; implementations allow 8 tags of 1..64."
+    },
+    {
+      "name": "rating 9 tags",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000112d", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"0000000000000000000000000000000000000000000000000000000000000402\"],\"score\":4,\"tags\":[\"t0\", \"t1\", \"t2\", \"t3\", \"t4\", \"t5\", \"t6\", \"t7\", \"t8\"]}"},
+      "expect": "reject",
+      "type": "rating",
+      "note": "See rating 8 tags."
+    },
+    {
+      "name": "rating tag 64 ASCII",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000112e", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"0000000000000000000000000000000000000000000000000000000000000402\"],\"score\":4,\"tags\":[\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"]}"},
+      "expect": "accept",
+      "type": "rating",
+      "note": "ASCII only: bytes vs code points is unresolved (see README)."
+    },
+    {
+      "name": "rating tag 65 ASCII",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000112f", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"0000000000000000000000000000000000000000000000000000000000000402\"],\"score\":4,\"tags\":[\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"]}"},
+      "expect": "reject",
+      "type": "rating"
+    },
+    {
+      "name": "rating tag empty",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001130", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"0000000000000000000000000000000000000000000000000000000000000402\"],\"score\":4,\"tags\":[\"\"]}"},
+      "expect": "reject",
+      "type": "rating"
+    },
+    {
+      "name": "rating tag number",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001131", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"0000000000000000000000000000000000000000000000000000000000000402\"],\"score\":4,\"tags\":[1]}"},
+      "expect": "reject",
+      "type": "rating"
+    },
+    {
+      "name": "rating tags null",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001132", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"0000000000000000000000000000000000000000000000000000000000000402\"],\"score\":4,\"tags\":null}"},
+      "expect": "reject",
+      "type": "rating"
+    },
+    {
+      "name": "rating tags null element",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001133", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"0000000000000000000000000000000000000000000000000000000000000402\"],\"score\":4,\"tags\":[\"a\",null]}"},
+      "expect": "reject",
+      "type": "rating"
+    },
+    {
+      "name": "rating extra field",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001134", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"0000000000000000000000000000000000000000000000000000000000000402\"],\"score\":4,\"comment\":\"ok\"}"},
+      "expect": "reject",
+      "type": "rating"
+    }
+  ]
+}
