@@ -330,10 +330,13 @@ func TestExpiry(t *testing.T) {
 	}
 }
 
-func TestOrdering(t *testing.T) {
+func TestForwarderClockBehindRequestIsAccepted(t *testing.T) {
+	// The forwarder's clock is behind the requester's: its forward is dated
+	// before the request it carries and must still apply.
 	f := newFlow(t)
-	mustFail(t, f, ev(20, f1, t0-1, fwdBody(1)), f2, "event predating the request")
-	mustApply(t, f, ev(20, f1, t0, fwdBody(1)), f2) // same second is fine
+	if err := f.Apply(ev(20, f1, t0-50, fwdBody(1)), f2, t0); err != nil || f.State(t0) != Forwarded {
+		t.Fatalf("forward dated before the request: %v", err)
+	}
 }
 
 // flowN builds an independent flow (distinct request ID) from req via f1 to
@@ -407,10 +410,6 @@ func TestSenderTimestampsDoNotOrderAuthors(t *testing.T) {
 	}
 	if err := f.Apply(ev(103, req, 501, rcptBody(f1, "10", hx(102))), "", 501); err != nil || f.State(501) != Settled {
 		t.Fatalf("receipt dated before the accept: %v", err)
-	}
-	g := flowN(t, 2, Forwarded)
-	if err := g.Apply(ev(290, tgt, t0-1, replyBody("referral_accept", hx(201))), "", 500); err == nil {
-		t.Fatal("an event dated before the request itself must be rejected")
 	}
 }
 
