@@ -235,13 +235,22 @@ func TestExpiry(t *testing.T) {
 	}
 }
 
-func TestPredatingIntentRejected(t *testing.T) {
+func TestResponderClockBehindIntentIsAccepted(t *testing.T) {
+	// A's clock runs MaxClockSkew ahead of B's. B's respond is dated before
+	// the intent it answers and must still apply: clocks of different authors
+	// are not comparable.
 	h := newHarness(t)
-	h.bad(pkB, t0-1, respond(), nil)
-	h.ok(pkB, respond(), Responded)
-	m := h.msg(pkB, t0, accept) // same second as the intent is fine
-	if err := h.s.apply(m); err != nil {
-		t.Fatal(err)
+	m := h.msg(pkB, t0-social.MaxClockSkew+1, respond())
+	if err := h.s.Apply(m, t0-social.MaxClockSkew+1); err != nil || h.s.State() != Responded {
+		t.Fatalf("respond dated before the intent: %v, state %d", err, h.s.State())
+	}
+}
+
+func TestWrongIntentReference(t *testing.T) {
+	h := newHarness(t)
+	other := strings.Replace(respond(), intentID, id(77), 1)
+	if err := h.s.apply(h.msg(pkB, t0+1, other)); !errors.Is(err, ErrWrongIntent) || h.s.State() != Open {
+		t.Fatalf("respond to another intent: %v, state %d", err, h.s.State())
 	}
 }
 
