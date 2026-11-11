@@ -29,6 +29,8 @@ var (
 	ErrTerminal = errors.New("intent: session is in a terminal state")
 	ErrExpired  = errors.New("intent: message is after expires_at")
 	ErrNotParty = errors.New("intent: author is not a party to this session")
+	// ErrWrongIntent means the message references a different intent.
+	ErrWrongIntent = errors.New("intent: message does not reference this intent")
 	// ErrRejected means the message is not allowed in the current state. It
 	// may become applicable after other messages arrive.
 	ErrRejected = errors.New("intent: message not allowed now")
@@ -46,7 +48,6 @@ type Key struct{ Intent, Responder string }
 type Session struct {
 	key      Key
 	author   string
-	created  int64 // intent created_at
 	expires  int64 // intent expires_at
 	state    State
 	round    [2]int // highest round each side has sent (B's counts once engaged)
@@ -71,8 +72,7 @@ func NewSession(intent Message, responder string, now int64) (*Session, error) {
 	}
 	// The public intent counts as A's round 0, so after respond (B's round 0)
 	// either side may open round 1.
-	return &Session{key: Key{e.ID, responder}, author: e.Author, created: e.CreatedAt,
-		expires: b.ExpiresAt, applied: map[string]bool{e.ID: true}}, nil
+	return &Session{key: Key{e.ID, responder}, author: e.Author, expires: b.ExpiresAt, applied: map[string]bool{e.ID: true}}, nil
 }
 
 // Key returns the session's identity.
@@ -112,9 +112,11 @@ func (s *Session) Apply(m Message, now int64) error {
 		s.state = Expired
 		return ErrExpired
 	}
-	// Stricter than the draft: nothing may predate the intent it answers.
-	if m.Ref != s.key.Intent || e.CreatedAt < s.created {
-		return errors.New("intent: message does not reference this intent or predates it")
+	// No floor on created_at: the responder's clock is not comparable with the
+	// intent author's, and an intent up to MaxClockSkew ahead is accepted, so
+	// an honest respond may be dated before the intent it answers.
+	if m.Ref != s.key.Intent {
+		return ErrWrongIntent
 	}
 	side := 0
 	if e.Author == s.key.Responder {
