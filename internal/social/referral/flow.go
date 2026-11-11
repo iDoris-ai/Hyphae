@@ -27,7 +27,6 @@ type Flow struct {
 	chain            []string // recipients in order; last is the current holder
 	forwarder        string   // author of the last forward: the payee
 	fwdID, acceptID  string
-	created          int64 // request created_at
 	acceptAt         int64 // trusted time the accept was observed
 	hops             int
 	state            State
@@ -49,7 +48,7 @@ func NewFlow(env social.Envelope, firstHolder string, now int64) (*Flow, error) 
 	}
 	return &Flow{
 		req: r, reqID: env.ID, requester: env.Author, chain: []string{firstHolder},
-		created: env.CreatedAt, hops: *r.HopsLeft, seen: map[string]struct{}{env.ID: {}},
+		hops: *r.HopsLeft, seen: map[string]struct{}{env.ID: {}},
 	}, nil
 }
 
@@ -109,11 +108,12 @@ func (f *Flow) Apply(env social.Envelope, to string, now int64) error {
 
 func (f *Flow) step(env social.Envelope, typ, to string, now int64) error {
 	// Timestamps of different authors are not comparable, so order comes from
-	// the state machine, not from created_at. After acceptance the debt
-	// stands, so a receipt may land past expires_at; otherwise the debtor
-	// could escape by waiting out the expiry.
-	if env.CreatedAt < f.created || (f.state < Accepted && env.CreatedAt > f.req.ExpiresAt) {
-		return errors.New("event predates the request or is after expires_at")
+	// the state machine and there is no floor on created_at (a forwarder's
+	// clock may be behind the requester's). After acceptance the debt stands,
+	// so a receipt may land past expires_at; otherwise the debtor could
+	// escape by waiting out the expiry.
+	if f.state < Accepted && env.CreatedAt > f.req.ExpiresAt {
+		return errors.New("event is dated after expires_at")
 	}
 	switch typ {
 	case "referral_forward":
