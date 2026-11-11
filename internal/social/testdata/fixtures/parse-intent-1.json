@@ -1,0 +1,366 @@
+{
+  "kind": "parse",
+  "description": "Direction 1 message bodies: intent, respond, disclose, accept, decline, withdraw.",
+  "cases": [
+    {
+      "name": "intent baseline",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000105e", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "accept",
+      "type": "intent"
+    },
+    {
+      "name": "category 1 char",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000105f", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"a\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "accept",
+      "type": "intent"
+    },
+    {
+      "name": "category 32 chars",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001060", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "accept",
+      "type": "intent"
+    },
+    {
+      "name": "category 33 chars",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001061", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "category charset a-z 0-9 -",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001062", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"night-out-2\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "accept",
+      "type": "intent"
+    },
+    {
+      "name": "category only hyphen",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001063", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"-\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "accept",
+      "type": "intent",
+      "note": "The spec restricts the charset only."
+    },
+    {
+      "name": "category empty",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001064", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "category uppercase",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001065", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"Meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "category underscore",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001066", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal_out\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent",
+      "note": "Underscore is a key char, not a category char."
+    },
+    {
+      "name": "category space",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001067", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal out\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "category non-ASCII",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001068", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"餐\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "category missing",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001069", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "category number",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000106a", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":1,\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "summary 1 char",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000106b", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"x\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "accept",
+      "type": "intent"
+    },
+    {
+      "name": "summary 280 ASCII",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000106c", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "accept",
+      "type": "intent"
+    },
+    {
+      "name": "summary 281 ASCII",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000106d", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "summary 280 CJK",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000106e", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "accept",
+      "type": "intent",
+      "note": "Characters are Unicode code points, not bytes."
+    },
+    {
+      "name": "summary 281 CJK",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000106f", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火火\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "summary 280 astral code points",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001070", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "accept",
+      "type": "intent",
+      "note": "Each emoji is one code point (two UTF-16 units)."
+    },
+    {
+      "name": "summary 281 astral code points",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001071", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "summary 280 escaped surrogate pairs",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001072", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\ud83d\\ude00\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "accept",
+      "type": "intent",
+      "note": "A \\uD83D\\uDE00 escape pair is one code point."
+    },
+    {
+      "name": "summary empty",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001073", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "summary whitespace only",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001074", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"   \",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "note": "Blank text is not content: the minimum of 1 character means a non-blank string."
+    },
+    {
+      "name": "summary missing",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001075", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "summary lone surrogate escape",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001076", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"a\\ud800b\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "note": "An unpaired surrogate escape is not a character. Decoders that substitute U+FFFD and decoders that fail must agree, so any string containing U+FFFD is rejected."
+    },
+    {
+      "name": "area 1 char",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001077", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"x\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "accept",
+      "type": "intent"
+    },
+    {
+      "name": "area 64 CJK",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001078", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "accept",
+      "type": "intent"
+    },
+    {
+      "name": "area 65 CJK",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001079", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区区\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "area 64 ASCII",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000107a", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "accept",
+      "type": "intent"
+    },
+    {
+      "name": "area 65 ASCII",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000107b", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "area empty",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000107c", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "area whitespace only",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000107d", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"\\t \",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "note": "Blank text is not content: the minimum of 1 character means a non-blank string."
+    },
+    {
+      "name": "area missing",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000107e", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "window from = to - 1",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000107f", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1,\"to\":2},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "accept",
+      "type": "intent"
+    },
+    {
+      "name": "window from = to",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001080", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":5,\"to\":5},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "window from > to",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001081", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":6,\"to\":5},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "window from 0",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001082", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":0,\"to\":5},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "note": "window.from must be a positive Unix time."
+    },
+    {
+      "name": "window negative from",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001083", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":-5,\"to\":5},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "note": "window.from must be a positive Unix time."
+    },
+    {
+      "name": "window missing",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001084", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "window missing to",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001085", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "window extra key",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001086", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1,\"to\":2,\"tz\":8},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "window duplicate key",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001087", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1,\"to\":2,\"to\":3},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "window uppercase key",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001088", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"From\":1,\"to\":2},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "window as array",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001089", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":[1,2],\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "window float",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000108a", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1.5,\"to\":2},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "party 1..1",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000108b", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":1,\"max\":1},\"expires_at\":1700003600}"},
+      "expect": "accept",
+      "type": "intent"
+    },
+    {
+      "name": "party 1..20",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000108c", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":1,\"max\":20},\"expires_at\":1700003600}"},
+      "expect": "accept",
+      "type": "intent"
+    },
+    {
+      "name": "party 20..20",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000108d", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":20,\"max\":20},\"expires_at\":1700003600}"},
+      "expect": "accept",
+      "type": "intent"
+    },
+    {
+      "name": "party max 21",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000108e", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":1,\"max\":21},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "party min 0",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000108f", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":0,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "party min > max",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001090", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":5,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "party negative",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001091", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":-1,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "party missing min",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001092", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "party missing",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001093", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "party float",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001094", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2.0,\"max\":4},\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "intent",
+      "note": "Integers only; 2.0 is not an integer token."
+    },
+    {
+      "name": "expires_at created_at + 1",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001095", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700000001}"},
+      "expect": "accept",
+      "type": "intent"
+    },
+    {
+      "name": "expires_at created_at + 30 days",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001096", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1702592000}"},
+      "expect": "accept",
+      "type": "intent"
+    },
+    {
+      "name": "expires_at created_at + 30 days + 1",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001097", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1702592001}"},
+      "expect": "reject",
+      "type": "intent"
+    },
+    {
+      "name": "expires_at equals created_at",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001098", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700000000}"},
+      "expect": "reject",
+      "type": "intent"
+    }
+  ]
+}
