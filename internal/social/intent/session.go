@@ -127,10 +127,8 @@ func (s *Session) Apply(m Message, now int64) error {
 	if e.CreatedAt > now+social.MaxClockSkew {
 		return ErrTooEarly
 	}
-	// Reference and party are checked first so an outsider cannot force
-	// expiry with a future-dated event. Exactly expires_at is still valid.
-	// A late sender timestamp only rejects that message: just the trusted
-	// clock above may expire the session.
+	// Exactly expires_at is still valid. A later sender timestamp rejects
+	// that one message; only the trusted clock above expires the session.
 	if e.CreatedAt > s.expires {
 		return ErrExpired
 	}
