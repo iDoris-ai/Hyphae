@@ -465,6 +465,15 @@
         "expect": "defer"
       },
       "steps": []
+    },
+    {
+      "name": "request exactly 300 s ahead opens",
+      "setup": {
+        "request": {"id": "0000000000000000000000000000000000000000000000000000000000000200", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":3,\"expires_at\":1700003600}"},
+        "first_holder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "now": 1699999700
+      },
+      "steps": []
     }
   ]
 }
