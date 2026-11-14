@@ -67,6 +67,13 @@ func ParseAttest(e social.Envelope) (Attestation, error) {
 // issuer, event ID, and the caller decides how to weigh conflicts. More than
 // MaxPresented envelopes is an error for the whole call. rejected is keyed by
 // event ID; a superseded attestation is reported there too.
+//
+// presented must already be signature- and ID-verified envelopes: the issuer
+// is taken from e.Author, and of two envelopes with one ID the first wins.
+// Supersession is not revocation: the presenter picks what to show, so it can
+// withhold a newer attestation, and an expired or future-dated newer one does
+// not displace a still-valid older one. MaxAttestLife bounds how long a stale
+// attestation can be shown.
 func Verify(presented []social.Envelope, presenter string, trusted func(issuer string) bool, now int64) (accepted []Attestation, rejected map[string]error, err error) {
 	if len(presented) > MaxPresented {
 		return nil, nil, fmt.Errorf("attest: %d envelopes presented, limit %d", len(presented), MaxPresented)
