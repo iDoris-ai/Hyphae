@@ -1,0 +1,381 @@
+{
+  "kind": "referral_flow",
+  "description": "Referral flow state machine (direction 3).",
+  "cases": [
+    {
+      "name": "accepted flow never expires; late receipt settles",
+      "setup": {
+        "request": {"id": "0000000000000000000000000000000000000000000000000000000000000200", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":3,\"expires_at\":1700003600}"},
+        "first_holder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "steps": [
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011d8", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000010, "content": "{\"v\":1,\"type\":\"referral_forward\",\"request\":\"0000000000000000000000000000000000000000000000000000000000000200\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"hops_left\":2}"},
+          "to": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "now": 1700000010,
+          "expect": "ok",
+          "state_after": "Forwarded"
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011d9", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000020, "content": "{\"v\":1,\"type\":\"referral_accept\",\"forward\":\"00000000000000000000000000000000000000000000000000000000000011d8\"}"},
+          "now": 1700000020,
+          "expect": "ok",
+          "state_after": "Accepted"
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011d9", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000020, "content": "{\"v\":1,\"type\":\"referral_accept\",\"forward\":\"00000000000000000000000000000000000000000000000000000000000011d8\"}"},
+          "now": 1700003700,
+          "expect": "ok",
+          "state_after": "Accepted",
+          "note": "Redelivery used as a probe: still Accepted after expires_at."
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011da", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700004100, "content": "{\"v\":1,\"type\":\"receipt\",\"to\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"amount\":10,\"ref\":\"00000000000000000000000000000000000000000000000000000000000011d9\"}"},
+          "now": 1700004200,
+          "expect": "ok",
+          "state_after": "Settled",
+          "note": "Dated and observed after expires_at: the debt still stands."
+        }
+      ]
+    },
+    {
+      "name": "clock expiry then backdated accept",
+      "setup": {
+        "request": {"id": "0000000000000000000000000000000000000000000000000000000000000200", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":3,\"expires_at\":1700003600}"},
+        "first_holder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "steps": [
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011db", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000010, "content": "{\"v\":1,\"type\":\"referral_forward\",\"request\":\"0000000000000000000000000000000000000000000000000000000000000200\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"hops_left\":2}"},
+          "to": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "now": 1700000010,
+          "expect": "ok",
+          "state_after": "Forwarded"
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011dc", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000050, "content": "{\"v\":1,\"type\":\"referral_accept\",\"forward\":\"00000000000000000000000000000000000000000000000000000000000011db\"}"},
+          "now": 1700003601,
+          "expect": "reject",
+          "state_after": "Expired"
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011dd", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000060, "content": "{\"v\":1,\"type\":\"referral_accept\",\"forward\":\"00000000000000000000000000000000000000000000000000000000000011db\"}"},
+          "now": 1700003602,
+          "expect": "reject",
+          "state_after": "Expired",
+          "note": "Backdated: cannot revive."
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011de", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000070, "content": "{\"v\":1,\"type\":\"referral_accept\",\"forward\":\"00000000000000000000000000000000000000000000000000000000000011db\"}"},
+          "now": 1700003500,
+          "expect": "reject",
+          "state_after": "Expired",
+          "note": "Expired is recorded: an earlier now does not undo it."
+        }
+      ]
+    },
+    {
+      "name": "event dated after expires_at does not expire the flow early",
+      "setup": {
+        "request": {"id": "0000000000000000000000000000000000000000000000000000000000000200", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":3,\"expires_at\":1700003600}"},
+        "first_holder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "steps": [
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011df", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000010, "content": "{\"v\":1,\"type\":\"referral_forward\",\"request\":\"0000000000000000000000000000000000000000000000000000000000000200\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"hops_left\":2}"},
+          "to": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "now": 1700000010,
+          "expect": "ok",
+          "state_after": "Forwarded"
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011e0", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700003700, "content": "{\"v\":1,\"type\":\"referral_accept\",\"forward\":\"00000000000000000000000000000000000000000000000000000000000011df\"}"},
+          "now": 1700003500,
+          "expect": "reject",
+          "state_after": "Forwarded",
+          "note": "Rejected, but the flow stays open."
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011e1", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700003550, "content": "{\"v\":1,\"type\":\"referral_accept\",\"forward\":\"00000000000000000000000000000000000000000000000000000000000011df\"}"},
+          "now": 1700003560,
+          "expect": "ok",
+          "state_after": "Accepted",
+          "note": "Per-author time order is the sender's job; this later-delivered event is dated earlier but after the forward."
+        }
+      ]
+    },
+    {
+      "name": "future-dated accept is deferred, then applied",
+      "setup": {
+        "request": {"id": "0000000000000000000000000000000000000000000000000000000000000200", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":3,\"expires_at\":1700003600}"},
+        "first_holder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "steps": [
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011e2", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000010, "content": "{\"v\":1,\"type\":\"referral_forward\",\"request\":\"0000000000000000000000000000000000000000000000000000000000000200\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"hops_left\":2}"},
+          "to": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "now": 1700000010,
+          "expect": "ok",
+          "state_after": "Forwarded"
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011e3", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700001000, "content": "{\"v\":1,\"type\":\"referral_accept\",\"forward\":\"00000000000000000000000000000000000000000000000000000000000011e2\"}"},
+          "now": 1700000699,
+          "expect": "defer",
+          "state_after": "Forwarded",
+          "note": "301 s ahead."
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011e3", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700001000, "content": "{\"v\":1,\"type\":\"referral_accept\",\"forward\":\"00000000000000000000000000000000000000000000000000000000000011e2\"}"},
+          "now": 1700000701,
+          "expect": "ok",
+          "state_after": "Accepted",
+          "note": "299 s ahead: applied."
+        }
+      ]
+    },
+    {
+      "name": "event exactly 300 s ahead is applied",
+      "note": "Deferral needs created_at > now + 300; exactly 300 s ahead is within the allowed skew.",
+      "setup": {
+        "request": {"id": "0000000000000000000000000000000000000000000000000000000000000200", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":3,\"expires_at\":1700003600}"},
+        "first_holder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "steps": [
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011e4", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000010, "content": "{\"v\":1,\"type\":\"referral_forward\",\"request\":\"0000000000000000000000000000000000000000000000000000000000000200\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"hops_left\":2}"},
+          "to": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "now": 1700000010,
+          "expect": "ok",
+          "state_after": "Forwarded"
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011e5", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700001000, "content": "{\"v\":1,\"type\":\"referral_accept\",\"forward\":\"00000000000000000000000000000000000000000000000000000000000011e4\"}"},
+          "now": 1700000700,
+          "expect": "ok",
+          "state_after": "Accepted",
+          "note": "Exactly 300 s ahead."
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011e5", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700001000, "content": "{\"v\":1,\"type\":\"referral_accept\",\"forward\":\"00000000000000000000000000000000000000000000000000000000000011e4\"}"},
+          "now": 1700000701,
+          "expect": "ok",
+          "state_after": "Accepted",
+          "note": "Redelivery of an applied event."
+        }
+      ]
+    },
+    {
+      "name": "idempotent redelivery of applied events",
+      "setup": {
+        "request": {"id": "0000000000000000000000000000000000000000000000000000000000000200", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":3,\"expires_at\":1700003600}"},
+        "first_holder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "steps": [
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011e6", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000010, "content": "{\"v\":1,\"type\":\"referral_forward\",\"request\":\"0000000000000000000000000000000000000000000000000000000000000200\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"hops_left\":2}"},
+          "to": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "now": 1700000010,
+          "expect": "ok",
+          "state_after": "Forwarded"
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011e6", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000010, "content": "{\"v\":1,\"type\":\"referral_forward\",\"request\":\"0000000000000000000000000000000000000000000000000000000000000200\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"hops_left\":2}"},
+          "to": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "now": 1700000011,
+          "expect": "ok",
+          "state_after": "Forwarded",
+          "note": "Same ID: no second hop."
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011e7", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000020, "content": "{\"v\":1,\"type\":\"referral_accept\",\"forward\":\"00000000000000000000000000000000000000000000000000000000000011e6\"}"},
+          "now": 1700000020,
+          "expect": "ok",
+          "state_after": "Accepted"
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011e6", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000010, "content": "{\"v\":1,\"type\":\"referral_forward\",\"request\":\"0000000000000000000000000000000000000000000000000000000000000200\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"hops_left\":2}"},
+          "to": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "now": 1700000021,
+          "expect": "ok",
+          "state_after": "Accepted"
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011e8", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000030, "content": "{\"v\":1,\"type\":\"receipt\",\"to\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"amount\":10,\"ref\":\"00000000000000000000000000000000000000000000000000000000000011e7\"}"},
+          "now": 1700000030,
+          "expect": "ok",
+          "state_after": "Settled"
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011e7", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000020, "content": "{\"v\":1,\"type\":\"referral_accept\",\"forward\":\"00000000000000000000000000000000000000000000000000000000000011e6\"}"},
+          "now": 1700000031,
+          "expect": "ok",
+          "state_after": "Settled",
+          "note": "Ambiguity: redelivery returns the first result even in a terminal state."
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000000200", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":3,\"expires_at\":1700003600}"},
+          "now": 1700000032,
+          "expect": "ok",
+          "state_after": "Settled",
+          "note": "The request itself counts as applied."
+        }
+      ]
+    },
+    {
+      "name": "sender timestamps do not order different authors",
+      "note": "Clocks of different authors are not comparable. Order comes from the state machine; there is no floor on created_at.",
+      "setup": {
+        "request": {"id": "0000000000000000000000000000000000000000000000000000000000000200", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":3,\"expires_at\":1700003600}"},
+        "first_holder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "steps": [
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011e9", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000100, "content": "{\"v\":1,\"type\":\"referral_forward\",\"request\":\"0000000000000000000000000000000000000000000000000000000000000200\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"hops_left\":2}"},
+          "to": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "now": 1700000100,
+          "expect": "ok",
+          "state_after": "Forwarded"
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011ea", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000050, "content": "{\"v\":1,\"type\":\"referral_accept\",\"forward\":\"00000000000000000000000000000000000000000000000000000000000011e9\"}"},
+          "now": 1700000110,
+          "expect": "ok",
+          "state_after": "Accepted",
+          "note": "Dated before the forward it answers, by the target's own clock: still applies."
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011eb", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000100, "content": "{\"v\":1,\"type\":\"referral_accept\",\"forward\":\"00000000000000000000000000000000000000000000000000000000000011e9\"}"},
+          "now": 1700000111,
+          "expect": "reject",
+          "state_after": "Accepted",
+          "note": "The forward has already been answered."
+        }
+      ]
+    },
+    {
+      "name": "rejection of a not-yet participant is not sticky",
+      "note": "Ambiguity: the permanent-rejection rule covers 当事人 (participants). C is not on the chain when its accept first arrives, so the rejection is not recorded and a redelivery after the forward applies.",
+      "setup": {
+        "request": {"id": "0000000000000000000000000000000000000000000000000000000000000200", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":3,\"expires_at\":1700003600}"},
+        "first_holder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "steps": [
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011ec", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000020, "content": "{\"v\":1,\"type\":\"referral_accept\",\"forward\":\"0000000000000000000000000000000000000000000000000000000000005b5b\"}"},
+          "now": 1700000020,
+          "expect": "reject",
+          "state_after": "Requested"
+        },
+        {
+          "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000005b5b", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000010, "content": "{\"v\":1,\"type\":\"referral_forward\",\"request\":\"0000000000000000000000000000000000000000000000000000000000000200\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"hops_left\":2}"},
+          "to": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "now": 1700000021,
+          "expect": "ok",
+          "state_after": "Forwarded"
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011ec", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000020, "content": "{\"v\":1,\"type\":\"referral_accept\",\"forward\":\"0000000000000000000000000000000000000000000000000000000000005b5b\"}"},
+          "now": 1700000022,
+          "expect": "ok",
+          "state_after": "Accepted"
+        }
+      ]
+    },
+    {
+      "name": "participant rejection is sticky",
+      "setup": {
+        "request": {"id": "0000000000000000000000000000000000000000000000000000000000000200", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":3,\"expires_at\":1700003600}"},
+        "first_holder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "steps": [
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011ed", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000010, "content": "{\"v\":1,\"type\":\"referral_forward\",\"request\":\"0000000000000000000000000000000000000000000000000000000000000200\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"hops_left\":2}"},
+          "to": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "now": 1700000010,
+          "expect": "ok",
+          "state_after": "Forwarded"
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011ee", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000020, "content": "{\"v\":1,\"type\":\"referral_accept\",\"forward\":\"00000000000000000000000000000000000000000000000000000000000002fe\"}"},
+          "now": 1700000020,
+          "expect": "reject",
+          "state_after": "Forwarded",
+          "note": "Cites no forward."
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011ee", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000020, "content": "{\"v\":1,\"type\":\"referral_accept\",\"forward\":\"00000000000000000000000000000000000000000000000000000000000002fe\"}"},
+          "now": 1700000021,
+          "expect": "reject",
+          "state_after": "Forwarded"
+        }
+      ]
+    },
+    {
+      "name": "outsider events change nothing",
+      "setup": {
+        "request": {"id": "0000000000000000000000000000000000000000000000000000000000000200", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":3,\"expires_at\":1700003600}"},
+        "first_holder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "steps": [
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011ef", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000010, "content": "{\"v\":1,\"type\":\"referral_forward\",\"request\":\"0000000000000000000000000000000000000000000000000000000000000200\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"hops_left\":2}"},
+          "to": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "now": 1700000010,
+          "expect": "ok",
+          "state_after": "Forwarded"
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011f0", "author": "9999999999999999999999999999999999999999999999999999999999999999", "created_at": 1700000020, "content": "{\"v\":1,\"type\":\"referral_accept\",\"forward\":\"00000000000000000000000000000000000000000000000000000000000011ef\"}"},
+          "now": 1700000020,
+          "expect": "reject",
+          "state_after": "Forwarded"
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011f1", "author": "9999999999999999999999999999999999999999999999999999999999999999", "created_at": 1700000021, "content": "{\"v\":1,\"type\":\"referral_forward\",\"request\":\"0000000000000000000000000000000000000000000000000000000000000200\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"hops_left\":1}"},
+          "to": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "now": 1700000021,
+          "expect": "reject",
+          "state_after": "Forwarded"
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011f2", "author": "9999999999999999999999999999999999999999999999999999999999999999", "created_at": 1700000022, "content": "{\"v\":1,\"type\":\"receipt\",\"to\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"amount\":10,\"ref\":\"00000000000000000000000000000000000000000000000000000000000011ef\"}"},
+          "now": 1700000022,
+          "expect": "reject",
+          "state_after": "Forwarded"
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011f3", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000023, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":2,\"expires_at\":1700003600}"},
+          "now": 1700000023,
+          "expect": "reject",
+          "state_after": "Forwarded",
+          "note": "A second request is not part of this flow."
+        },
+        {
+          "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000011f4", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000030, "content": "{\"v\":1,\"type\":\"referral_accept\",\"forward\":\"00000000000000000000000000000000000000000000000000000000000011ef\"}"},
+          "now": 1700000030,
+          "expect": "ok",
+          "state_after": "Accepted"
+        }
+      ]
+    },
+    {
+      "name": "first holder cannot be the requester",
+      "setup": {
+        "request": {"id": "0000000000000000000000000000000000000000000000000000000000000200", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":3,\"expires_at\":1700003600}"},
+        "first_holder": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expect": "reject"
+      },
+      "steps": []
+    },
+    {
+      "name": "first holder must be hex",
+      "setup": {
+        "request": {"id": "0000000000000000000000000000000000000000000000000000000000000200", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":3,\"expires_at\":1700003600}"},
+        "first_holder": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        "expect": "reject"
+      },
+      "steps": []
+    }
+  ]
+}
