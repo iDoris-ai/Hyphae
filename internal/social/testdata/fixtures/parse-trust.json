@@ -1,6 +1,6 @@
 {
   "kind": "parse",
-  "description": "Direction 2 message bodies: invite, invite_accept, rating.",
+  "description": "Direction 2 message bodies: invite, invite_accept, rating, attest.",
   "cases": [
     {
       "name": "invite baseline",
@@ -241,6 +241,67 @@
       "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001134", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"rating\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"match\":[\"0000000000000000000000000000000000000000000000000000000000000401\", \"0000000000000000000000000000000000000000000000000000000000000402\"],\"score\":4,\"comment\":\"ok\"}"},
       "expect": "reject",
       "type": "rating"
+    },
+    {
+      "name": "attest baseline",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001331", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"attest\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"claim\":\"age_range\",\"value\":\"25-30\",\"expires_at\":1700003600}"},
+      "expect": "accept",
+      "type": "attest"
+    },
+    {
+      "name": "attest lifetime exactly 366 days",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001332", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"attest\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"claim\":\"c\",\"value\":\"x\",\"expires_at\":1731622400}"},
+      "expect": "accept",
+      "type": "attest"
+    },
+    {
+      "name": "attest lifetime over 366 days",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001333", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"attest\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"claim\":\"c\",\"value\":\"x\",\"expires_at\":1731622401}"},
+      "expect": "reject",
+      "type": "attest"
+    },
+    {
+      "name": "attest expires_at equal to created_at",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001334", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"attest\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"claim\":\"c\",\"value\":\"x\",\"expires_at\":1700000000}"},
+      "expect": "reject",
+      "type": "attest"
+    },
+    {
+      "name": "attest self",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001335", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"attest\",\"subject\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"claim\":\"c\",\"value\":\"x\",\"expires_at\":1700000001}"},
+      "expect": "reject",
+      "type": "attest",
+      "note": "The issuer cannot attest about itself."
+    },
+    {
+      "name": "attest subject uppercase",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001336", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"attest\",\"subject\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"claim\":\"c\",\"value\":\"x\",\"expires_at\":1700000001}"},
+      "expect": "reject",
+      "type": "attest"
+    },
+    {
+      "name": "attest claim uppercase",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001337", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"attest\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"claim\":\"Age\",\"value\":\"x\",\"expires_at\":1700000001}"},
+      "expect": "reject",
+      "type": "attest"
+    },
+    {
+      "name": "attest value 128 characters",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001338", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"attest\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"claim\":\"c\",\"value\":\"\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\",\"expires_at\":1700000001}"},
+      "expect": "accept",
+      "type": "attest"
+    },
+    {
+      "name": "attest value 129 characters",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001339", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"attest\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"claim\":\"c\",\"value\":\"\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\\u597d\",\"expires_at\":1700000001}"},
+      "expect": "reject",
+      "type": "attest"
+    },
+    {
+      "name": "attest value blank",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000133a", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"attest\",\"subject\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"claim\":\"c\",\"value\":\" \\t \",\"expires_at\":1700000001}"},
+      "expect": "reject",
+      "type": "attest"
     }
   ]
 }

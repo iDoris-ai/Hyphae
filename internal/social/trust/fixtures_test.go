@@ -21,7 +21,7 @@ import (
 
 const fxDir = "../testdata/fixtures"
 
-// --- shared fixture loader (kept identical across the four fixtures_test.go files) ---
+// --- shared fixture loader (the same in all four fixtures_test.go files; a copy may add helpers) ---
 
 type fxEnvelope struct {
 	ID         string            `json:"id"`
@@ -163,6 +163,8 @@ func TestFixturesParseTrust(t *testing.T) {
 			_, err = trust.ParseAccept(e)
 		case "rating":
 			_, err = trust.ParseRating(e)
+		case "attest":
+			_, err = trust.ParseAttest(e)
 		default:
 			err = fmt.Errorf("not a trust type: %q", h.Type)
 		}

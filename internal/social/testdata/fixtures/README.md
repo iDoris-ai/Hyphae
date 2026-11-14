@@ -9,6 +9,11 @@ When the spec and the Go code disagree, the fixture follows the spec. The case i
 `known_gap` (see [Known gaps](#known-gaps)). When the spec is silent, the fixture pins the Go
 behaviour and its `note` starts with `Ambiguity:`.
 
+The expected values were written by hand from the spec, and the Go code passing them shows
+only that the two agree. A case can still encode a misreading of the spec that the Go code
+shares. A second implementation that disagrees with a case should check the spec before
+assuming its own code is wrong.
+
 ## Files
 
 Every file is a UTF-8 JSON object:
@@ -75,7 +80,7 @@ times (`s` is non-empty, `n >= 0`). Repetition counts the whole string `s`, not 
   need it.
 - `scope` is optional. It defaults to `message`.
   - `message`: parse a complete message. **Accept** means that the envelope is valid, the
-    body passes every shared rule, the body's `type` is one of the 14 implemented types, and
+    body passes every shared rule, the body's `type` is one of the 15 implemented types, and
     the body satisfies that type's schema and field constraints. Anything else is **reject**.
   - `shape`: apply only the envelope checks and the shared body rules below, without a type
     schema. The `type` only has to be a non-empty string. These cases (all in
@@ -84,9 +89,8 @@ times (`s` is non-empty, `n >= 0`). Repetition counts the whole string `s`, not 
     strict decoder, or skip the `shape` cases if you cannot.
 
 Implemented types: `intent`, `respond`, `disclose`, `accept`, `decline`, `withdraw` (intent);
-`invite`, `invite_accept`, `rating` (trust); `referral_request`, `referral_forward`,
-`referral_accept`, `referral_decline`, `receipt` (referral). `attest` appears in the spec but
-is not implemented; it is rejected as an unknown type.
+`invite`, `invite_accept`, `rating`, `attest` (trust); `referral_request`, `referral_forward`,
+`referral_accept`, `referral_decline`, `receipt` (referral).
 
 ### Rules exercised
 
@@ -192,16 +196,19 @@ accepted.
 ```
 
 Setup:
-- `intent_session`: `{"intent": <envelope>, "responder": "<pubkey>", "expect": "ok"|"reject"}`.
+- `intent_session`: `{"intent": <envelope>, "responder": "<pubkey>", "now": 1700000000, "expect": "ok"|"reject"|"defer"}`.
   Parse the intent envelope as a message (it is an `intent`). Then open the session between
   the intent's author A and the responder B. The session starts in `Open`. The responder must
   be 64 lowercase hex and must not be A.
-- `referral_flow`: `{"request": <envelope>, "first_holder": "<pubkey>", "expect": "ok"|"reject"}`.
+- `referral_flow`: `{"request": <envelope>, "first_holder": "<pubkey>", "now": 1700000000, "expect": "ok"|"reject"|"defer"}`.
   Parse the `referral_request`. Its author is the requester, and `first_holder` is the
   recipient (routing is not in any body). The flow starts in `Requested`. The first holder
   must be 64 lowercase hex and must not be the requester.
+- `setup.now` is the trusted clock at which the setup event was observed. It defaults to the
+  event's `created_at`.
 - `setup.expect` defaults to `ok`. When it is `reject`, creating the session or flow must
-  fail, and `steps` is empty.
+  fail. When it is `defer`, the setup event is dated more than 300 s ahead of `setup.now`, so
+  nothing is created yet. In both cases `steps` is empty.
 
 The setup event itself counts as already applied. Redelivering it as a step returns `ok`.
 
@@ -396,6 +403,7 @@ These cases follow Go where the spec is silent. Their notes start with `Ambiguit
 ## Not covered
 
 - Reputation scoring and the points ledger (`Balances`, `Exposure`, `CanRequest`).
-- `attest`, which has no implementation.
+- `attest` beyond parsing: issuer trust, expiry and supersession in `Verify` take a trusted-issuer
+  predicate and a clock that the fixture format does not express.
 - Bodies that are not valid UTF-8 at the byte level. `content` is a JSON string, so the
   fixtures cannot express such bodies.
