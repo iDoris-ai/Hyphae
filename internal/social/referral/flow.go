@@ -76,10 +76,12 @@ var ErrNotNow = errors.New("event not allowed in the current state")
 func notNow(why string) error { return fmt.Errorf("%w: %s", ErrNotNow, why) }
 
 // Apply feeds one verified event in. to is the recipient of a referral_forward
-// (ignored otherwise). now is the trusted local time at which the caller first
-// observed the event (persist it and pass the same value when rebuilding from
-// a log): created_at is chosen by the sender, so only now can expire a flow,
-// and a backdated accept cannot revive an expired one.
+// (ignored otherwise). now is the trusted local time of this attempt. When
+// Apply returns nil, persist that now with the event and pass the same value
+// when rebuilding from a log. An event refused with ErrTooEarly or ErrNotNow
+// was not applied, so retry it with the clock at the time of the retry, not
+// the time it first arrived. created_at is chosen by the sender, so only now
+// can expire a flow, and a backdated accept cannot revive an expired one.
 //
 // Redelivering an applied event ID is a no-op. Nothing else is remembered;
 // see ErrNotNow and ErrTooEarly. Terminal states reject everything.
