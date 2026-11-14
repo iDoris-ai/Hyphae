@@ -20,7 +20,8 @@ const (
 	Expired
 )
 
-// Flow is the state machine for one request (not concurrency-safe).
+// Flow is the state machine for one request (not concurrency-safe). Do not
+// copy a Flow by value: the copy shares the seen map with the original.
 type Flow struct {
 	req              Request
 	reqID, requester string
