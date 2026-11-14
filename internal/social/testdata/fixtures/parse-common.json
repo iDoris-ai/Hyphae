@@ -1,0 +1,562 @@
+{
+  "kind": "parse",
+  "description": "Shared body rules (section 共同约定) and envelope checks.",
+  "cases": [
+    {
+      "name": "baseline intent accept body",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001001", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "accept",
+      "type": "accept"
+    },
+    {
+      "name": "JSON whitespace around the object",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001002", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": " \n\t\r{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"} \n\t\r"},
+      "expect": "accept",
+      "type": "accept"
+    },
+    {
+      "name": "keys in any order",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001003", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"type\":\"accept\",\"v\":1}"},
+      "expect": "accept",
+      "type": "accept"
+    },
+    {
+      "name": "escaped key spelling of v",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001004", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"\\u0076\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "accept",
+      "type": "accept",
+      "note": "Keys are compared after JSON unescaping: \\u0076 is the key v."
+    },
+    {
+      "name": "escaped string value",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001005", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"\\u0061ccept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "accept",
+      "type": "accept"
+    },
+    {
+      "name": "body exactly 16384 bytes",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001006", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content_gen": ["{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"", {"repeat": " ", "count": 16285}, "}"]},
+      "expect": "accept",
+      "type": "accept",
+      "note": "Whitespace padding inside the object; 16 KiB is the inclusive limit."
+    },
+    {
+      "name": "body 16385 bytes",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001007", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content_gen": ["{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"", {"repeat": " ", "count": 16286}, "}"]},
+      "expect": "reject",
+      "type": "accept",
+      "note": "One byte over 16 KiB, rejected before any other check."
+    },
+    {
+      "name": "body far over 16 KiB",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001008", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content_gen": ["{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"", {"repeat": " ", "count": 40000}, "}"]},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "v 0",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001009", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":0,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "v 2",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000100a", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":2,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "v -1",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000100b", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":-1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "v as string",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000100c", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":\"1\",\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "v as float 1.0",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000100d", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1.0,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "v as exponent 1e0",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000100e", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1e0,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "v as bool",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000100f", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":true,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "v as object",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001010", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":{},\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "v missing",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001011", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "v null",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001012", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":null,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "type missing",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001013", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject"
+    },
+    {
+      "name": "type empty",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001014", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject"
+    },
+    {
+      "name": "type unknown",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001015", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"acceptx\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject"
+    },
+    {
+      "name": "type wrong case",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001016", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"Accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "note": "Type names are exact, lowercase strings."
+    },
+    {
+      "name": "type attest is not implemented",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001017", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"attest\",\"subject\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"},
+      "expect": "reject",
+      "note": "attest is in the spec's trust table but has no parser yet; see README."
+    },
+    {
+      "name": "type as number",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001018", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":5,\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject"
+    },
+    {
+      "name": "type null",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001019", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":null,\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject"
+    },
+    {
+      "name": "uppercase V instead of v",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000101a", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"V\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "case-variant duplicate Intent",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000101b", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"Intent\":\"00000000000000000000000000000000000000000000000000000000000001ff\"}"},
+      "expect": "reject",
+      "type": "accept",
+      "note": "Case-insensitive decoders would let Intent overwrite intent."
+    },
+    {
+      "name": "case-variant key only",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000101c", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"accept\",\"INTENT\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "unknown field",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000101d", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"extra\":1}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "author field in body",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000101e", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"author\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"},
+      "expect": "reject",
+      "type": "accept",
+      "note": "The author is the signing key; bodies cannot carry or override it."
+    },
+    {
+      "name": "duplicate type",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000101f", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"accept\",\"type\":\"decline\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "duplicate key with identical value",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001020", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "duplicate v via escape",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001021", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"\\u0076\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept",
+      "note": "v and \\u0076 are the same key after unescaping."
+    },
+    {
+      "name": "null field value",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001022", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":null}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "body is array",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001023", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "[{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}]"},
+      "expect": "reject",
+      "note": "Not exactly one JSON object."
+    },
+    {
+      "name": "body is empty array",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001024", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "[]"},
+      "expect": "reject",
+      "note": "Not exactly one JSON object."
+    },
+    {
+      "name": "body is string",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001025", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "\"accept\""},
+      "expect": "reject",
+      "note": "Not exactly one JSON object."
+    },
+    {
+      "name": "body is number",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001026", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "1"},
+      "expect": "reject",
+      "note": "Not exactly one JSON object."
+    },
+    {
+      "name": "body is true",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001027", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "true"},
+      "expect": "reject",
+      "note": "Not exactly one JSON object."
+    },
+    {
+      "name": "body is null",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001028", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "null"},
+      "expect": "reject",
+      "note": "Not exactly one JSON object."
+    },
+    {
+      "name": "body is empty",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001029", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": ""},
+      "expect": "reject",
+      "note": "Not exactly one JSON object."
+    },
+    {
+      "name": "body is only whitespace",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000102a", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "   \n"},
+      "expect": "reject",
+      "note": "Not exactly one JSON object."
+    },
+    {
+      "name": "trailing object",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000102b", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}{}"},
+      "expect": "reject",
+      "note": "Not exactly one JSON object."
+    },
+    {
+      "name": "trailing garbage",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000102c", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"} x"},
+      "expect": "reject",
+      "note": "Not exactly one JSON object."
+    },
+    {
+      "name": "trailing close bracket",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000102d", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}]"},
+      "expect": "reject",
+      "note": "Not exactly one JSON object."
+    },
+    {
+      "name": "trailing comma",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000102e", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"},"},
+      "expect": "reject",
+      "note": "Not exactly one JSON object."
+    },
+    {
+      "name": "two objects separated by newline",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000102f", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}\n{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject"
+    },
+    {
+      "name": "truncated",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001030", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\""},
+      "expect": "reject"
+    },
+    {
+      "name": "single quotes",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001031", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{'v':1,'type':'accept','intent':'0000000000000000000000000000000000000000000000000000000000000100'}"},
+      "expect": "reject"
+    },
+    {
+      "name": "trailing comma inside object",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001032", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",}"},
+      "expect": "reject",
+      "note": "Not exactly one JSON object."
+    },
+    {
+      "name": "comment",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001033", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "/*c*/{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject"
+    },
+    {
+      "name": "leading zero number",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001034", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":01,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject"
+    },
+    {
+      "name": "NaN",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001035", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":NaN,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject"
+    },
+    {
+      "name": "byte order mark",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001036", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "﻿{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject"
+    },
+    {
+      "name": "unquoted key",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001037", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{v:1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject"
+    },
+    {
+      "name": "deep nesting at message scope",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001038", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"d\":[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "envelope id uppercase hex",
+      "envelope": {"id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "envelope id 63 chars",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000000", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "envelope id 65 chars",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000000000", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "envelope id non-hex",
+      "envelope": {"id": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "envelope id empty",
+      "envelope": {"id": "", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "envelope author uppercase hex",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000103f", "author": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "envelope author 63 chars",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001040", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "envelope author non-hex",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001041", "author": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept"
+    },
+    {
+      "name": "envelope created_at 0",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001042", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 0, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept",
+      "note": "created_at must be a positive Unix time."
+    },
+    {
+      "name": "envelope created_at negative",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001043", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": -1, "content": "{\"v\":1,\"type\":\"accept\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "accept",
+      "note": "created_at must be a positive Unix time."
+    },
+    {
+      "name": "shape: unknown type passes the shared rules",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001044", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\"}"},
+      "expect": "accept",
+      "type": "probe",
+      "scope": "shape"
+    },
+    {
+      "name": "shape: depth 16 (object + 15 arrays)",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001045", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"d\":[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]}"},
+      "expect": "accept",
+      "type": "probe",
+      "scope": "shape",
+      "note": "The body object is level 1."
+    },
+    {
+      "name": "shape: depth 17 (object + 16 arrays)",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001046", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"d\":[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]}"},
+      "expect": "reject",
+      "scope": "shape"
+    },
+    {
+      "name": "shape: depth 16 of objects",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001047", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"d\":{\"d\":{\"d\":{\"d\":{\"d\":{\"d\":{\"d\":{\"d\":{\"d\":{\"d\":{\"d\":{\"d\":{\"d\":{\"d\":{\"d\":{}}}}}}}}}}}}}}}}"},
+      "expect": "accept",
+      "type": "probe",
+      "scope": "shape"
+    },
+    {
+      "name": "shape: depth 17 of objects",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001048", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"d\":{\"d\":{\"d\":{\"d\":{\"d\":{\"d\":{\"d\":{\"d\":{\"d\":{\"d\":{\"d\":{\"d\":{\"d\":{\"d\":{\"d\":{\"d\":{}}}}}}}}}}}}}}}}}"},
+      "expect": "reject",
+      "scope": "shape"
+    },
+    {
+      "name": "shape: deep nesting far over the limit",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001049", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"d\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}"},
+      "expect": "reject",
+      "scope": "shape"
+    },
+    {
+      "name": "shape: key of 32 chars",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000104a", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\":1}"},
+      "expect": "accept",
+      "type": "probe",
+      "scope": "shape"
+    },
+    {
+      "name": "shape: key of 33 chars",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000104b", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\":1}"},
+      "expect": "reject",
+      "scope": "shape"
+    },
+    {
+      "name": "shape: key with digits and underscore",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000104c", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"a_0_9\":1}"},
+      "expect": "accept",
+      "type": "probe",
+      "scope": "shape"
+    },
+    {
+      "name": "shape: empty key",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000104d", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"\":1}"},
+      "expect": "reject",
+      "scope": "shape"
+    },
+    {
+      "name": "shape: key with hyphen",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000104e", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"a-b\":1}"},
+      "expect": "reject",
+      "scope": "shape"
+    },
+    {
+      "name": "shape: uppercase key",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000104f", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"A\":1}"},
+      "expect": "reject",
+      "scope": "shape"
+    },
+    {
+      "name": "shape: key with space",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001050", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"a b\":1}"},
+      "expect": "reject",
+      "scope": "shape"
+    },
+    {
+      "name": "shape: key with dot",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001051", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"a.b\":1}"},
+      "expect": "reject",
+      "scope": "shape"
+    },
+    {
+      "name": "shape: non-ASCII key",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001052", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"é\":1}"},
+      "expect": "reject",
+      "scope": "shape"
+    },
+    {
+      "name": "shape: Kelvin sign key",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001053", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"K\":1}"},
+      "expect": "reject",
+      "scope": "shape"
+    },
+    {
+      "name": "shape: escaped uppercase key",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001054", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"\\u0056\":1}"},
+      "expect": "reject",
+      "scope": "shape"
+    },
+    {
+      "name": "shape: escaped NUL in key",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001055", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"a\\u0000\":1}"},
+      "expect": "reject",
+      "scope": "shape"
+    },
+    {
+      "name": "shape: invalid key inside nested object",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001056", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"x\":{\"Bad\":1}}"},
+      "expect": "reject",
+      "scope": "shape"
+    },
+    {
+      "name": "shape: invalid key inside array of objects",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001057", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"x\":[{\"ok\":1},{\"Bad\":1}]}"},
+      "expect": "reject",
+      "scope": "shape"
+    },
+    {
+      "name": "shape: duplicate key in nested object",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001058", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"x\":{\"k\":1,\"k\":2}}"},
+      "expect": "reject",
+      "scope": "shape"
+    },
+    {
+      "name": "shape: duplicate key in array element",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001059", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"x\":[{\"k\":1},{\"k\":1,\"k\":2}]}"},
+      "expect": "reject",
+      "scope": "shape"
+    },
+    {
+      "name": "shape: same key in sibling objects",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000105a", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"x\":[{\"k\":1},{\"k\":2}],\"y\":{\"k\":3}}"},
+      "expect": "accept",
+      "type": "probe",
+      "scope": "shape",
+      "note": "Duplicate detection is per object."
+    },
+    {
+      "name": "shape: null nested in array",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000105b", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"x\":{\"k\":[null]}}"},
+      "expect": "reject",
+      "scope": "shape"
+    },
+    {
+      "name": "shape: null as array element at top",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000105c", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"x\":[1,null]}"},
+      "expect": "reject",
+      "scope": "shape"
+    },
+    {
+      "name": "shape: empty containers allowed",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000105d", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"probe\",\"x\":{},\"y\":[]}"},
+      "expect": "accept",
+      "type": "probe",
+      "scope": "shape"
+    }
+  ]
+}

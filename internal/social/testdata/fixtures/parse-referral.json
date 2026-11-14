@@ -1,0 +1,360 @@
+{
+  "kind": "parse",
+  "description": "Direction 3 message bodies.",
+  "cases": [
+    {
+      "name": "referral_request baseline",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010d4", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":2,\"expires_at\":1700003600}"},
+      "expect": "accept",
+      "type": "referral_request"
+    },
+    {
+      "name": "request offer 1",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010d5", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":1,\"hops_left\":2,\"expires_at\":1700003600}"},
+      "expect": "accept",
+      "type": "referral_request"
+    },
+    {
+      "name": "request offer 1000000",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010d6", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":1000000,\"hops_left\":2,\"expires_at\":1700003600}"},
+      "expect": "accept",
+      "type": "referral_request",
+      "note": "Single-amount cap 1,000,000 is inclusive."
+    },
+    {
+      "name": "request offer 1000001",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010d7", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":1000001,\"hops_left\":2,\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "referral_request"
+    },
+    {
+      "name": "request offer 0",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010d8", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":0,\"hops_left\":2,\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "referral_request",
+      "note": "Ambiguity: spec gives no minimum; a zero offer is meaningless."
+    },
+    {
+      "name": "request offer negative",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010d9", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":-5,\"hops_left\":2,\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "referral_request"
+    },
+    {
+      "name": "request offer float",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010da", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10.0,\"hops_left\":2,\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "referral_request"
+    },
+    {
+      "name": "request offer string",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010db", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":\"10\",\"hops_left\":2,\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "referral_request"
+    },
+    {
+      "name": "request offer huge",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010dc", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":9223372036854775808,\"hops_left\":2,\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "referral_request"
+    },
+    {
+      "name": "request offer missing",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010dd", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"hops_left\":2,\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "referral_request"
+    },
+    {
+      "name": "request hops_left 0",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010de", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":0,\"expires_at\":1700003600}"},
+      "expect": "accept",
+      "type": "referral_request"
+    },
+    {
+      "name": "request hops_left 3",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010df", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":3,\"expires_at\":1700003600}"},
+      "expect": "accept",
+      "type": "referral_request"
+    },
+    {
+      "name": "request hops_left 4",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010e0", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":4,\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "referral_request"
+    },
+    {
+      "name": "request hops_left -1",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010e1", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":-1,\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "referral_request"
+    },
+    {
+      "name": "request hops_left missing",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010e2", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "referral_request",
+      "note": "Missing is not 0."
+    },
+    {
+      "name": "request hops_left float",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010e3", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":1.0,\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "referral_request"
+    },
+    {
+      "name": "request expires_at created_at + 1",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010e4", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":2,\"expires_at\":1700000001}"},
+      "expect": "accept",
+      "type": "referral_request"
+    },
+    {
+      "name": "request expires_at created_at + 30 days",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010e5", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":2,\"expires_at\":1702592000}"},
+      "expect": "accept",
+      "type": "referral_request",
+      "note": "Ambiguity: the spec gives no horizon; implementations reuse the intent's 30 days."
+    },
+    {
+      "name": "request expires_at created_at + 30 days + 1",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010e6", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":2,\"expires_at\":1702592001}"},
+      "expect": "reject",
+      "type": "referral_request",
+      "note": "See request expires_at created_at + 30 days."
+    },
+    {
+      "name": "request expires_at equals created_at",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010e7", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":2,\"expires_at\":1700000000}"},
+      "expect": "reject",
+      "type": "referral_request"
+    },
+    {
+      "name": "request expires_at missing",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010e8", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":2}"},
+      "expect": "reject",
+      "type": "referral_request"
+    },
+    {
+      "name": "request intent missing",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010e9", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"offer\":10,\"hops_left\":2,\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "referral_request"
+    },
+    {
+      "name": "request intent uppercase",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010ea", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"ABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB\",\"offer\":10,\"hops_left\":2,\"expires_at\":1700003600}"},
+      "expect": "reject",
+      "type": "referral_request"
+    },
+    {
+      "name": "request extra to",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010eb", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":2,\"expires_at\":1700003600,\"to\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}"},
+      "expect": "reject",
+      "type": "referral_request",
+      "note": "Routing is not in the body."
+    },
+    {
+      "name": "request case-variant Offer",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010ec", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_request\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"offer\":10,\"hops_left\":2,\"expires_at\":1700003600,\"Offer\":1}"},
+      "expect": "reject",
+      "type": "referral_request"
+    },
+    {
+      "name": "referral_forward baseline",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010ed", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_forward\",\"request\":\"0000000000000000000000000000000000000000000000000000000000000200\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"hops_left\":1}"},
+      "expect": "accept",
+      "type": "referral_forward"
+    },
+    {
+      "name": "forward hops_left 0",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010ee", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_forward\",\"request\":\"0000000000000000000000000000000000000000000000000000000000000200\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"hops_left\":0}"},
+      "expect": "accept",
+      "type": "referral_forward"
+    },
+    {
+      "name": "forward hops_left 3",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010ef", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_forward\",\"request\":\"0000000000000000000000000000000000000000000000000000000000000200\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"hops_left\":3}"},
+      "expect": "accept",
+      "type": "referral_forward"
+    },
+    {
+      "name": "forward hops_left 4",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010f0", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_forward\",\"request\":\"0000000000000000000000000000000000000000000000000000000000000200\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"hops_left\":4}"},
+      "expect": "reject",
+      "type": "referral_forward"
+    },
+    {
+      "name": "forward hops_left -1",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010f1", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_forward\",\"request\":\"0000000000000000000000000000000000000000000000000000000000000200\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"hops_left\":-1}"},
+      "expect": "reject",
+      "type": "referral_forward"
+    },
+    {
+      "name": "forward hops_left missing",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010f2", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_forward\",\"request\":\"0000000000000000000000000000000000000000000000000000000000000200\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\"}"},
+      "expect": "reject",
+      "type": "referral_forward"
+    },
+    {
+      "name": "forward request missing",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010f3", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_forward\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"hops_left\":1}"},
+      "expect": "reject",
+      "type": "referral_forward"
+    },
+    {
+      "name": "forward request bad hex",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010f4", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_forward\",\"request\":\"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"hops_left\":1}"},
+      "expect": "reject",
+      "type": "referral_forward"
+    },
+    {
+      "name": "forward intent missing",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010f5", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_forward\",\"request\":\"0000000000000000000000000000000000000000000000000000000000000200\",\"hops_left\":1}"},
+      "expect": "reject",
+      "type": "referral_forward"
+    },
+    {
+      "name": "forward intent short",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010f6", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_forward\",\"request\":\"0000000000000000000000000000000000000000000000000000000000000200\",\"intent\":\"000000000000000000000000000000000000000000000000000000000000010\",\"hops_left\":1}"},
+      "expect": "reject",
+      "type": "referral_forward"
+    },
+    {
+      "name": "forward extra offer",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010f7", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_forward\",\"request\":\"0000000000000000000000000000000000000000000000000000000000000200\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"hops_left\":1,\"offer\":10}"},
+      "expect": "reject",
+      "type": "referral_forward"
+    },
+    {
+      "name": "forward extra to",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010f8", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_forward\",\"request\":\"0000000000000000000000000000000000000000000000000000000000000200\",\"intent\":\"0000000000000000000000000000000000000000000000000000000000000100\",\"hops_left\":1,\"to\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}"},
+      "expect": "reject",
+      "type": "referral_forward"
+    },
+    {
+      "name": "referral_accept baseline",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010f9", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_accept\",\"forward\":\"0000000000000000000000000000000000000000000000000000000000000201\"}"},
+      "expect": "accept",
+      "type": "referral_accept"
+    },
+    {
+      "name": "accept forward missing",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010fa", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_accept\"}"},
+      "expect": "reject",
+      "type": "referral_accept"
+    },
+    {
+      "name": "accept forward bad hex",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010fb", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_accept\",\"forward\":\"0x00000000000000000000000000000000000000000000000000000000000000\"}"},
+      "expect": "reject",
+      "type": "referral_accept"
+    },
+    {
+      "name": "accept extra reason",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010fc", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_accept\",\"forward\":\"0000000000000000000000000000000000000000000000000000000000000201\",\"reason\":\"no\"}"},
+      "expect": "reject",
+      "type": "referral_accept"
+    },
+    {
+      "name": "referral_decline baseline",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010fd", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_decline\",\"forward\":\"0000000000000000000000000000000000000000000000000000000000000201\"}"},
+      "expect": "accept",
+      "type": "referral_decline"
+    },
+    {
+      "name": "decline forward missing",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010fe", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_decline\"}"},
+      "expect": "reject",
+      "type": "referral_decline"
+    },
+    {
+      "name": "decline forward bad hex",
+      "envelope": {"id": "00000000000000000000000000000000000000000000000000000000000010ff", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_decline\",\"forward\":\"0x00000000000000000000000000000000000000000000000000000000000000\"}"},
+      "expect": "reject",
+      "type": "referral_decline"
+    },
+    {
+      "name": "decline extra reason",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001100", "author": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"referral_decline\",\"forward\":\"0000000000000000000000000000000000000000000000000000000000000201\",\"reason\":\"no\"}"},
+      "expect": "reject",
+      "type": "referral_decline"
+    },
+    {
+      "name": "receipt baseline",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001101", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"receipt\",\"to\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"amount\":10,\"ref\":\"0000000000000000000000000000000000000000000000000000000000000300\"}"},
+      "expect": "accept",
+      "type": "receipt"
+    },
+    {
+      "name": "receipt amount 1",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001102", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"receipt\",\"to\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"amount\":1,\"ref\":\"0000000000000000000000000000000000000000000000000000000000000300\"}"},
+      "expect": "accept",
+      "type": "receipt"
+    },
+    {
+      "name": "receipt amount 1000000",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001103", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"receipt\",\"to\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"amount\":1000000,\"ref\":\"0000000000000000000000000000000000000000000000000000000000000300\"}"},
+      "expect": "accept",
+      "type": "receipt"
+    },
+    {
+      "name": "receipt amount 1000001",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001104", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"receipt\",\"to\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"amount\":1000001,\"ref\":\"0000000000000000000000000000000000000000000000000000000000000300\"}"},
+      "expect": "reject",
+      "type": "receipt"
+    },
+    {
+      "name": "receipt amount 0",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001105", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"receipt\",\"to\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"amount\":0,\"ref\":\"0000000000000000000000000000000000000000000000000000000000000300\"}"},
+      "expect": "reject",
+      "type": "receipt"
+    },
+    {
+      "name": "receipt amount negative",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001106", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"receipt\",\"to\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"amount\":-10,\"ref\":\"0000000000000000000000000000000000000000000000000000000000000300\"}"},
+      "expect": "reject",
+      "type": "receipt"
+    },
+    {
+      "name": "receipt amount float",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001107", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"receipt\",\"to\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"amount\":1.5,\"ref\":\"0000000000000000000000000000000000000000000000000000000000000300\"}"},
+      "expect": "reject",
+      "type": "receipt"
+    },
+    {
+      "name": "receipt amount missing",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001108", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"receipt\",\"to\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"ref\":\"0000000000000000000000000000000000000000000000000000000000000300\"}"},
+      "expect": "reject",
+      "type": "receipt"
+    },
+    {
+      "name": "receipt to bad hex",
+      "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001109", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"receipt\",\"to\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\",\"amount\":10,\"ref\":\"0000000000000000000000000000000000000000000000000000000000000300\"}"},
+      "expect": "reject",
+      "type": "receipt"
+    },
+    {
+      "name": "receipt to missing",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000110a", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"receipt\",\"amount\":10,\"ref\":\"0000000000000000000000000000000000000000000000000000000000000300\"}"},
+      "expect": "reject",
+      "type": "receipt"
+    },
+    {
+      "name": "receipt ref bad hex",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000110b", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"receipt\",\"to\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"amount\":10,\"ref\":\"rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr\"}"},
+      "expect": "reject",
+      "type": "receipt"
+    },
+    {
+      "name": "receipt ref missing",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000110c", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"receipt\",\"to\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"amount\":10}"},
+      "expect": "reject",
+      "type": "receipt"
+    },
+    {
+      "name": "receipt extra offer",
+      "envelope": {"id": "000000000000000000000000000000000000000000000000000000000000110d", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"receipt\",\"to\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"amount\":10,\"ref\":\"0000000000000000000000000000000000000000000000000000000000000300\",\"offer\":10}"},
+      "expect": "reject",
+      "type": "receipt"
+    }
+  ]
+}
