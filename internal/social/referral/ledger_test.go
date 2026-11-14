@@ -115,6 +115,36 @@ func TestStaleCopyCannotHideObligation(t *testing.T) {
 			t.Errorf("debt %d, want 10", d)
 		}
 	}
+	// A shallow copy shares the seen map, so applied-event counts tie; the
+	// accepted copy must still win in either order (PR #355 review M1).
+	live := flowN(t, 3, Forwarded)
+	snap := *live
+	mustApply(t, live, ev(302, tgt, 130, replyBody("referral_accept", hx(301))), "")
+	for _, flows := range [][]*Flow{{&snap, live}, {live, &snap}} {
+		if e := Exposure(flows, req, expires+1); e != 10 {
+			t.Errorf("shallow copy: exposure %d, want 10", e)
+		}
+	}
+	// The stale copy sees an event after expires_at and stores Expired; the
+	// accepted copy still wins.
+	if err := snap.Apply(ev(399, f1, 150, fwdBody(0)), tgt, expires+1); err == nil || snap.state != Expired {
+		t.Fatalf("stale copy should store Expired: %v, state %d", err, snap.state)
+	}
+	for _, flows := range [][]*Flow{{&snap, live}, {live, &snap}} {
+		if e := Exposure(flows, req, expires+1); e != 10 {
+			t.Errorf("expired copy: exposure %d, want 10", e)
+		}
+	}
+	// Two Forwarded copies (shared seen map): the longer chain is further along.
+	two := newFlow(t)
+	mustApply(t, two, ev(20, f1, 110, fwdBody(1)), f2)
+	one := *two
+	mustApply(t, two, ev(21, f2, 120, fwdBody(0)), tgt)
+	for _, flows := range [][]*Flow{{&one, two}, {two, &one}} {
+		if u := unique(flows); len(u) != 1 || u[0] != two {
+			t.Errorf("forwarded copies: kept the one-hop copy")
+		}
+	}
 	paid := flowN(t, 2, Settled)
 	if b := Balances([]*Flow{flowN(t, 2, Forwarded), paid}); b[req] != -10 {
 		t.Errorf("balances %v, want req -10", b)

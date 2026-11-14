@@ -8,10 +8,11 @@ const DefaultDebtLimit = 100
 
 // unique drops nil entries and repeated representations of one request (same
 // request event ID), so no obligation or settlement is counted twice. Of
-// several copies it keeps the one that has applied the most events: a flow's
-// history is linear, so that copy is the furthest along, and a stale copy
-// cannot hide an accepted or settled obligation. The caller should still hold
-// one canonical Flow per request.
+// several copies it keeps the one furthest along by progress, so a stale copy
+// cannot hide an accepted or settled obligation, whatever the input order.
+// Progress uses only per-copy fields: a shallow copy of a Flow shares its seen
+// map, so the number of applied events cannot tell such copies apart. The
+// caller should still hold one canonical Flow per request.
 func unique(flows []*Flow) []*Flow {
 	at := map[string]int{}
 	var out []*Flow
@@ -22,11 +23,19 @@ func unique(flows []*Flow) []*Flow {
 		if i, dup := at[f.reqID]; !dup {
 			at[f.reqID] = len(out)
 			out = append(out, f)
-		} else if len(f.seen) > len(out[i].seen) {
+		} else if progress(f) > progress(out[i]) {
 			out[i] = f
 		}
 	}
 	return out
+}
+
+// progress ranks how far a flow has gone: by state, obligations above dead
+// ends (one history never holds both, but if copies diverge the one that
+// carries debt wins), then by chain length among open flows.
+func progress(f *Flow) int {
+	rank := map[State]int{Requested: 0, Forwarded: 1, Declined: 2, Expired: 2, Accepted: 3, Settled: 4}[f.state]
+	return rank<<16 + len(f.chain)
 }
 
 // Balances derives received - paid from settled flows (a per-viewer balance).

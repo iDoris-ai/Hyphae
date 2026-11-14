@@ -73,7 +73,10 @@ type Match struct {
 	Accepts, Parties [2]string
 }
 
-// ScoreConfig holds the prior. Zero fields mean the defaults.
+// ScoreConfig holds the prior. Zero fields mean the defaults, so a zero prior
+// or zero weight cannot be requested. The values are trusted as given: a
+// negative or NaN weight is not rejected, so validate them before this config
+// ever comes from user input.
 type ScoreConfig struct {
 	Prior, PriorWeight float64
 }
