@@ -20,7 +20,7 @@ import (
 
 const fxDir = "../testdata/fixtures"
 
-// --- shared fixture loader (kept identical across the four fixtures_test.go files) ---
+// --- shared fixture loader (the same in all four fixtures_test.go files; a copy may add helpers) ---
 
 type fxEnvelope struct {
 	ID         string            `json:"id"`
@@ -217,9 +217,10 @@ func fxRunIntent(t *testing.T, c fxIntentCase, known map[string]bool) (string, b
 		s, err = intent.NewSession(m, c.Setup.Responder, cmp.Or(c.Setup.Now, m.Envelope.CreatedAt))
 	}
 	switch want := cmp.Or(c.Setup.Expect, "ok"); {
-	case want == "reject" && err == nil:
-		return "setup: got ok, want reject", true
-	case want == "reject":
+	case want == "reject" || want == "defer":
+		if got := fxOutcome(err, intent.ErrTooEarly); got != want {
+			return fmt.Sprintf("setup: got %s (err %v), want %s", got, err, want), true
+		}
 		return "", false
 	case want != "ok":
 		t.Fatalf("bad setup expect %q", want)

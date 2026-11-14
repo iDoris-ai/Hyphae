@@ -20,7 +20,7 @@ import (
 
 const fxDir = "../testdata/fixtures"
 
-// --- shared fixture loader (kept identical across the four fixtures_test.go files) ---
+// --- shared fixture loader (the same in all four fixtures_test.go files; a copy may add helpers) ---
 
 type fxEnvelope struct {
 	ID         string            `json:"id"`
@@ -230,11 +230,11 @@ func fxRunFlow(t *testing.T, c fxFlowCase, known map[string]bool) (string, bool)
 	req := c.Setup.Request.build(t)
 	f, err := referral.NewFlow(req, c.Setup.FirstHolder, cmp.Or(c.Setup.Now, req.CreatedAt))
 	switch want := cmp.Or(c.Setup.Expect, "ok"); {
-	case want != "ok" && want != "reject":
+	case want != "ok" && want != "reject" && want != "defer":
 		t.Fatalf("bad setup expect %q", want)
-	case want == "reject":
-		if err == nil {
-			return "setup: got ok, want reject", true
+	case want != "ok":
+		if got := fxOutcome(err, referral.ErrTooEarly); got != want {
+			return fmt.Sprintf("setup: got %s (err %v), want %s", got, err, want), true
 		}
 		return "", false
 	case err != nil:

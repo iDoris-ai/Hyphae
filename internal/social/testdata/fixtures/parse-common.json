@@ -135,10 +135,10 @@
       "note": "Type names are exact, lowercase strings."
     },
     {
-      "name": "type attest is not implemented",
+      "name": "attest missing required fields",
       "envelope": {"id": "0000000000000000000000000000000000000000000000000000000000001017", "author": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"attest\",\"subject\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"},
       "expect": "reject",
-      "note": "attest is in the spec's trust table but has no parser yet; see README."
+      "note": "attest without claim, value and expires_at."
     },
     {
       "name": "type as number",
