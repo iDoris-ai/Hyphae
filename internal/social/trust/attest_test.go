@@ -186,6 +186,13 @@ func TestVerifyConflictingIssuersAndOrder(t *testing.T) {
 			t.Fatalf("order[%d]=%s, want %s", i, acc[i].ID, w)
 		}
 	}
+	// Claim sorts before issuer: issuer order alone would put city/issuer1 first.
+	city1 := att(1, 5, "city", "Paris", aAt)
+	age2 := att(2, 5, "age_range", "40-45", aAt)
+	acc, _ = verify(t, []social.Envelope{city1, age2}, trust(1, 2))
+	if len(acc) != 2 || acc[0].ID != age2.ID || acc[1].ID != city1.ID {
+		t.Fatalf("claim-first order: %+v", acc)
+	}
 }
 
 func TestVerifyBound(t *testing.T) {
