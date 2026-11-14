@@ -392,6 +392,25 @@
         "expect": "reject"
       },
       "steps": []
+    },
+    {
+      "name": "future-dated intent is deferred",
+      "setup": {
+        "intent": {"id": "0000000000000000000000000000000000000000000000000000000000000100", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+        "responder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "now": 1699999699,
+        "expect": "defer"
+      },
+      "steps": []
+    },
+    {
+      "name": "intent exactly 300 s ahead opens",
+      "setup": {
+        "intent": {"id": "0000000000000000000000000000000000000000000000000000000000000100", "author": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "created_at": 1700000000, "content": "{\"v\":1,\"type\":\"intent\",\"category\":\"meal\",\"summary\":\"hotpot tonight\",\"window\":{\"from\":1700007200,\"to\":1700010800},\"area\":\"Chaoyang\",\"party\":{\"min\":2,\"max\":4},\"expires_at\":1700003600}"},
+        "responder": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "now": 1699999700
+      },
+      "steps": []
     }
   ]
 }
