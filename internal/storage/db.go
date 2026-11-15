@@ -127,7 +127,10 @@ func migrate(db *sql.DB) error {
 		}
 	}
 
-	return migrateRelations(db)
+	if err := migrateRelations(db); err != nil {
+		return err
+	}
+	return migrateCardSetting(db)
 }
 
 // MigrateFromJSON migrates existing JSON data to SQLite
