@@ -7,6 +7,7 @@
 | [analysis-20261110.md](analysis-20261110.md) | 方向分析:relay 适合什么、当前代码的差距、四个方向、已定的决策 |
 | [protocol-draft.md](protocol-draft.md) | 协议草案:意图、信任、引荐三组消息的字段和状态机 |
 | [plan.md](plan.md) | 开发计划:切片、PR 顺序、与 T01 契约收口的关系 |
+| [discover-friends.md](discover-friends.md) | 发现同一 relay 上的人:公开/隐藏名片、按标签搜索、陌生人消息上限、`friend` 命令和 Agent24 接口(设计稿) |
 
 ## 状态
 
