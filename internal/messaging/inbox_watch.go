@@ -12,6 +12,7 @@ import (
 	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/internal/relayquery"
+	"github.com/iDoris-ai/hyphae/internal/social/contact"
 	"github.com/iDoris-ai/hyphae/internal/storage"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 )
@@ -39,6 +40,9 @@ type ReceivedAgentMessage struct {
 	Content     string
 	IsEncrypted bool
 	Decrypted   bool
+	// StrangerSeq is the sender's message count while a stranger (1 means a
+	// stranger request); zero for friends.
+	StrangerSeq int
 }
 
 // WatchAgentInbox consumes historical and live kind-30078 messages for one
@@ -101,6 +105,7 @@ func WatchAgentInboxWithStore(ctx context.Context, nickname string, relays []str
 	// One cache per watch call. Relay workers share it. Return discards it,
 	// so a restarted watch replays persisted rows through the full path.
 	cache := newWatchValidatedCache(store, recipient.Npub)
+	emit = strangerFilteredEmit(ks, recipient.Npub, emit)
 
 	var workers sync.WaitGroup
 	for _, relayURL := range relays {
@@ -461,4 +466,20 @@ func watchRowFence(store *storage.MessageStore, event *nostr.Event, recipient st
 		msg.Content == event.Content &&
 		msg.IsEncrypted == encrypted &&
 		msg.IsIncoming
+}
+
+// strangerFilteredEmit applies the stranger rules to every first-arrival
+// message: suppressed and blocked messages are stored but not emitted. A
+// failed check still emits, so a database problem never hides mail.
+func strangerFilteredEmit(ks *types.KeyStore, recipientNpub string, emit func(AgentInboxWatchUpdate)) func(AgentInboxWatchUpdate) {
+	return func(u AgentInboxWatchUpdate) {
+		if u.Message != nil {
+			r, err := ClassifyIncoming(ks, recipientNpub, u.Message.SenderNpub, u.Message.EventID)
+			if err == nil && (r.Disposition == contact.Suppress || r.Disposition == contact.Drop) {
+				return
+			}
+			u.Message.StrangerSeq = r.Seq
+		}
+		emit(u)
+	}
 }

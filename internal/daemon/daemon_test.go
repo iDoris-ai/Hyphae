@@ -384,6 +384,8 @@ func TestWatchInbox_ReceivesEventMarksSeenAndAutoReplies(t *testing.T) {
 	require.NoError(t, err)
 
 	senderSK := nostr.Generate()
+	// Auto-reply only answers friends (docs/search/discover-friends.md).
+	ks.Contacts["sender"] = &types.Contact{Nickname: "sender", Npub: common.EncodeNpub(senderSK.Public())}
 	plaintext := "hello there"
 	compressed, err := messaging.CompressText(plaintext)
 	require.NoError(t, err)

@@ -25,6 +25,8 @@ import (
 	"github.com/iDoris-ai/hyphae/internal/notify"
 	"github.com/iDoris-ai/hyphae/internal/relayconfig"
 	"github.com/iDoris-ai/hyphae/internal/relayquery"
+	"github.com/iDoris-ai/hyphae/internal/social/contact"
+	"github.com/iDoris-ai/hyphae/internal/storage"
 	"github.com/iDoris-ai/hyphae/pkg/crypto"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/urfave/cli/v3"
@@ -654,6 +656,9 @@ func watchOneRelayResult(
 	var deferredReplies []replyRequest
 	result, err := watchOneRelayWithHooksResult(ctx, url, filter, ks, recipientSK, seen, useNotify, autoReply, myIdentity, relays, incomingReceiveHooks{
 		store: messaging.StoreIncomingMessageOnce,
+		classify: func(senderNpub, eventID string) (storage.Receipt, error) {
+			return messaging.ClassifyIncoming(ks, myIdentity.Npub, senderNpub, eventID)
+		},
 		notify: func(title, message string) {
 			notify.DesktopNotification(title, message)
 			notify.PlaySound()
@@ -699,6 +704,8 @@ type incomingReceiveHooks struct {
 	notify func(title, message string)
 	reply  func(senderNpub, content string)
 	logf   func(string, ...any)
+	// classify applies the stranger rules; nil shows everything (tests).
+	classify func(senderNpub, eventID string) (storage.Receipt, error)
 }
 
 func watchOneRelayWithHooks(
@@ -853,21 +860,39 @@ func processIncomingEvent(
 
 	senderNpub := common.EncodeNpub(event.PubKey)
 	senderName := safePrefix(senderNpub, 16) + "..."
-	for _, contact := range identity.ListContacts(ks) {
-		if contact.Npub == senderNpub {
-			senderName = contact.Nickname
+	for _, c := range identity.ListContacts(ks) {
+		if c.Npub == senderNpub {
+			senderName = c.Nickname
 			break
 		}
 	}
-	if hooks.logf != nil {
-		hooks.logf("\n📨 New message from %s: %s\n", senderName, common.TruncateString(content, 40))
-	} else {
-		fmt.Printf("\n📨 New message from %s: %s\n", senderName, common.TruncateString(content, 40))
+	logf := hooks.logf
+	if logf == nil {
+		logf = func(f string, a ...any) { fmt.Printf(f, a...) }
 	}
+	var receipt storage.Receipt
+	if hooks.classify != nil {
+		if receipt, err = hooks.classify(senderNpub, eventID); err != nil {
+			// Still shown, but treated as a stranger: no auto-reply.
+			logf("\n⚠️  stranger check failed for %s: %v\n", senderName, err)
+			receipt = storage.Receipt{Stranger: true}
+		}
+	}
+	switch receipt.Disposition {
+	case contact.Suppress, contact.Drop:
+		// Stored for the record; neither shown nor notified (no content in the log).
+		logf("\n🔇 %s message from %s not shown\n", receipt.Disposition, senderName)
+		return true, nil
+	case contact.Request:
+		senderName = "陌生人请求 / stranger request: " + senderName
+	}
+	logf("\n📨 New message from %s: %s\n", senderName, common.TruncateString(content, 40))
 	if useNotify && hooks.notify != nil {
 		hooks.notify("Hyphae - "+senderName, common.TruncateString(content, 100))
 	}
-	if shouldAutoReply(autoReply, true, content) && hooks.reply != nil {
+	// Auto-reply never answers strangers: two daemons would spend each
+	// other's two messages without anyone reading them.
+	if !receipt.Stranger && shouldAutoReply(autoReply, true, content) && hooks.reply != nil {
 		hooks.reply(senderNpub, content)
 	}
 	return true, nil

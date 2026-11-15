@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"fiatjaf.com/nostr"
+	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/internal/relay"
 	"github.com/iDoris-ai/hyphae/internal/relayquery"
@@ -250,6 +251,10 @@ func TestWatchAgentInboxWalksPastFirstPageWithSameSecondEvents(t *testing.T) {
 	})
 	relayURL := "ws" + strings.TrimPrefix(server.URL, "http")
 	sender := nostr.Generate()
+	// A friend, so all 120 messages are shown (strangers stop at two).
+	ks, err := identity.LoadKeyStore()
+	require.NoError(t, err)
+	require.NoError(t, identity.AddContact(ks, "sender", common.EncodeNpub(sender.Public())))
 	createdAt := nostr.Now()
 	events := make([]nostr.Event, 120)
 	publishCtx, cancelPublish := context.WithTimeout(context.Background(), 10*time.Second)

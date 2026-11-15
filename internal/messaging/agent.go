@@ -19,6 +19,7 @@ import (
 	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/internal/relayquery"
+	"github.com/iDoris-ai/hyphae/internal/social/contact"
 	"github.com/iDoris-ai/hyphae/internal/wireevent"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 	"github.com/klauspost/compress/zstd"
@@ -608,9 +609,17 @@ var AgentInboxCmd = &cli.Command{
 				}
 			}
 
+			receipt, err := ClassifyIncoming(ks, recipient.Npub, senderNpub, evt.ID.Hex())
+			if err != nil {
+				eventErrors = append(eventErrors, fmt.Sprintf("event %s: stranger check: %v", evt.ID.Hex(), err))
+			} else if receipt.Disposition == contact.Suppress || receipt.Disposition == contact.Drop {
+				continue // stored for the record, not listed
+			}
+			relation := map[bool]string{true: "stranger", false: "friend"}[receipt.Stranger]
 			entries = append(entries, agentInboxEntry{
 				Time: evt.CreatedAt.Time().Format("15:04"), From: senderName, Content: content,
 				Encrypted: isEncrypted, Decrypted: decrypted, EventID: evt.ID.Hex(), SenderNpub: senderNpub,
+				Relation: relation, StrangerSeq: receipt.Seq,
 			})
 		}
 
@@ -663,6 +672,9 @@ type agentInboxEntry struct {
 	Decrypted  bool   `json:"decrypted"`
 	EventID    string `json:"event_id"`
 	SenderNpub string `json:"sender_npub"`
+	// Relation is friend or stranger; StrangerSeq is 1 for a stranger request.
+	Relation    string `json:"relation"`
+	StrangerSeq int    `json:"stranger_seq,omitempty"`
 }
 
 func validateInboxEvent(event nostr.Event, recipientHex string) error {
