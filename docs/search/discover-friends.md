@@ -1,11 +1,11 @@
 # 发现同一 relay 上的人，以及陌生人消息
 
-状态：设计稿，尚未实现。基线是 main `b3226480`。「待确认的决定」一节里的每一条，都要作者拍板后才开工。
+状态：设计已定（2026-11-15 作者拍板，见文末「已定的决定」），按 F1～F8 实现中。基线是 main `b3226480`。
 
 ## 目标
 
 1. **发现**：找到同一个 relay 上的其他人。
-2. **可见性**：每个身份可以选**公开**（能被搜到）或**隐藏**（搜不到）。默认隐藏。
+2. **可见性**：每个身份可以选**公开**（能被搜到）或**隐藏**（搜不到）。**默认公开**，CLI 和 TUI 都有一个切换开关。
 3. **搜索**：现阶段只按标签（关键词）搜。默认标签是 `友好`。以后改成同时匹配诉求（intent）和标签，复用 `internal/social/intent`。
 4. **陌生人消息**：搜到人以后可以直接发消息。对方第一次看到时，可以选择加为好友。不加的话，双方仍是陌生人，**每一方最多给对方发 2 条**。
 5. **每日上限**：每个身份**在任意 24 小时内，最多和 10 个新的陌生人开启对话**。
@@ -35,7 +35,8 @@ T01 关卡规定：wire 格式冻结前，新的高层行为不进生产路径�
 
 - **标签规则**：先 trim，再做 Unicode NFKC（全角 `Ｆ` 和半角 `F` 归为同一个），再用 `golang.org/x/text/cases.Fold` 做大小写折叠（不用 `strings.ToLower`，它处理不了 `ß` 这类字符）。`x/text` 已经是间接依赖。形近字（confusables）不处理。每个标签 1～32 个字符，不能含空白、逗号、`#` 或控制字符。规范化之后去重，最多 10 个。公开时如果没给标签，就用 `["友好"]`。`t` 标签必须和 content 里的 `tags` 数组完全一致，否则读取方丢弃这张名片。
 - **名字**：1～64 个字符。默认用身份的昵称，可以改。
-- **过期**：`expiration` 设在 30 天后（NIP-40），daemon 运行期间每 7 天刷新一次。长期不上线的人会从结果里消失，死账号不会越积越多。读取方也自己丢弃过期名片，不依赖 relay。
+- **过期**：`expiration` 设在 30 天后（NIP-40），daemon 运行期间每 7 天刷新一次。长期不上线的人会从结果里消失，死账号不会越积越多。读取方也自己丢弃过期名片，不依赖 relay。不跑 daemon 的人，名片到期后会悄悄消失，所以 `friend visibility` 和 `friend list` 都显示名片的到期时间，快到期时提示重新发布。
+- **默认公开的发布时机**：daemon 启动时，如果设置是公开（默认），就发布名片；执行 `friend visibility` 或 `friend tags` 时立即发布。第一次自动公开时，CLI/TUI 提示一次：「你的名片（昵称 + 标签 `友好`）已公开，可以被同一 relay 上的人搜到；用 `hyphae friend visibility hidden` 或 TUI 的 `/visibility` 隐藏」。
 - **隐藏**：发布一张同 `d` 的**墓碑**名片（content 为 `{"v":1,"hidden":true}`，没有 `t` 标签），同时发 NIP-09 删除。墓碑在任何支持 addressable 事件的 relay 上都有效，删除则要看 relay 支不支持。隐藏只能让新的搜索找不到你，**收不回别人已经拿到的副本**，CLI 会如实提示。本地记下名片发布到过哪些 relay，隐藏时向每一个都发墓碑。
 
 ### 关系（本地，按身份）
@@ -84,6 +85,8 @@ relay 侧规则（二期）：relay 把「Y 从没给 X 发过任何东西」当
 
 走现有的 agent 消息通道：kind 30078、`p` 标签、NIP-44 加密。标签是 `["c","hyphae-ctl"]` 和 `["v","1"]`，明文是 `{"v":1,"type":"friend_accept","answers":"<对方发给我的第一条消息的事件 ID>"}`。
 
+编码写死：明文 JSON 直接 NIP-44 加密，**不压缩**，没有 `z` 标签，也没有 `d` 以外的其他标签（`d` 用和普通消息相同的派生方式，保证每条控制消息坐标唯一）；明文不超过 1024 字节，超过就丢弃。
+
 - 因为 `c` 的值不同，按 `c=AgentTag` 订阅的旧客户端收不到它，也就不会显示一团原始 JSON。
 - 接收方验签，并确认它是发给自己的。只有同时满足下面三条，accept 才生效：
   - 是对方本人签名的；
@@ -104,12 +107,12 @@ hyphae friend tags --set 友好,火锅          # 当前是公开的话会重新
 hyphae friend find --tag 友好 [--tag 火锅] [--limit 20] [--timeout 10]
 hyphae friend pending                       # 等我处理的陌生人请求
 hyphae friend accept|ignore|block|unblock --npub npub1...
-hyphae friend list                          # 好友 + 聊过的陌生人，附剩余额度
+hyphae friend list                          # 好友 + 聊过的陌生人，附剩余额度和名片到期时间
 hyphae friend quota                         # 今天还能开启几个新陌生人，以及 resets_at
 hyphae agent msg --from alice --to npub1... --content ...   # 现有命令，现在要过上面的规则
 ```
 
-- `find` 向 relay 发 `{"kinds":[30078],"#t":[tags...],"limit":N}`，过滤在 relay 上完成。本地再检查：`c=hyphae-card`、名片没过期、content 和标签一致。去掉自己、被拉黑的人和墓碑。多个 `--tag` 表示**命中任意一个即可**。结果先按命中的标签数排，再按 `created_at` 排（按时间比较只发生在同一作者的名片之间；跨作者时它只是展示顺序）。`find` 本身不限次数，但每次最多返回 100 条。注意：搜索是读操作，relay 能看到你搜了什么标签。
+- `find` 向 relay 发 `{"kinds":[30078],"#c":["hyphae-card"],"#t":[tags...],"limit":N}`，过滤在 relay 上完成。必须带 `#c`：30078 是通用应用数据，公共 relay 上别的应用也会带 `t` 标签，只按 `#t` 过滤的话，`limit` 会先被它们占满。本地再检查：`c=hyphae-card`、名片没过期、content 和标签一致。去掉自己、被拉黑的人和墓碑。多个 `--tag` 表示**命中任意一个即可**。结果先按命中的标签数排，再按 `created_at` 排（按时间比较只发生在同一作者的名片之间；跨作者时它只是展示顺序）。`find` 本身不限次数，但每次最多返回 100 条。注意：搜索是读操作，relay 能看到你搜了什么标签。
 - `agent msg --to` 本来就接受 npub，所以不必先把陌生人加成联系人。
 
 ### `--json` 输出（沿用现有信封 `{"ok":true,"data":...}`）
@@ -164,6 +167,7 @@ hyphae agent msg --from alice --to npub1... --content ...   # 现有命令，现
 | F4b | 发送检查接进 TUI、daemon 自动回复（默认不回陌生人）、`groupchat create/invite` | F4a |
 | F5 | 接收侧：陌生人请求、超过 2 条压下、拉黑、处理 `friend_accept` | F2 |
 | F6 | `friend pending/accept/ignore/block/list/quota` 命令、错误码、`hyphae contract` | F4b、F5 |
+| F6b | TUI 切换开关：`/visibility` 在公开和隐藏之间切换，状态栏显示当前可见性；陌生人请求在 TUI 里给出接受、忽略、拉黑 | F3、F6 |
 | F7 | E2E 脚本（Alice/Bob/Charlie，跑在本地 relay 上），以及给 Agent24 的交接文档 | F6 |
 | F8（二期） | `hyphae-relay` 里的 relay 侧限制 | F6 |
 
@@ -176,11 +180,13 @@ hyphae agent msg --from alice --to npub1... --content ...   # 现有命令，现
 - Alice 执行 `accept`，之后双方可以随便发。
 - Charlie 开启第 11 个新陌生人时被拒，错误码 `stranger_daily_limit`。
 - Alice 执行 `visibility hidden` 之后，新的 `find` 不再返回她。
+- 新身份不做任何设置，daemon 启动后就能被 `find --tag 友好` 搜到（默认公开）。
+- Alice 拉黑 Bob 后再解除，Bob 重放旧的 `friend_accept` 不会让他们变成好友，限制仍在。
 
-## 待确认的决定（第一个选项是我的建议）
+## 已定的决定（2026-11-15 作者拍板）
 
-1. **默认可见性**：隐藏（隐私优先，由你自己选择公开）/ 公开。
-2. **「2 条」怎么算**：每个方向 2 条，接收方也能回 2 条 / 这一对总共 2 条。
-3. **「一天」的边界**：滚动 24 小时（没有时区问题，relay 和客户端用同一条规则）/ 本地自然日。
-4. **回复陌生人算不算每日上限**：不算（只有开启对话才算）/ 算。
-5. **放在哪里**：单独的名片，不影响 agent profile / 复用现有 profile 的标签。
+1. **默认可见性：公开。** CLI（`friend visibility`）和 TUI（`/visibility`）都提供切换开关。
+2. **「2 条」按每个方向各 2 条算**，接收方也能回 2 条。
+3. **「一天」是滚动 24 小时**，relay 和客户端用同一条规则。
+4. **回复陌生人不算进每日上限**，只有主动开启对话才算。
+5. **单独的名片**，不影响 agent profile。
