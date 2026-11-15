@@ -38,7 +38,10 @@ const (
 	ErrCodeKeystoreLocked    = "keystore_locked"
 
 	// Stable codes for `friend` (docs/search/discover-friends.md).
-	ErrCodeInvalidTag = "invalid_tag"
+	ErrCodeInvalidTag           = "invalid_tag"
+	ErrCodeStrangerMessageLimit = "stranger_message_limit"
+	ErrCodeStrangerDailyLimit   = "stranger_daily_limit"
+	ErrCodePeerBlocked          = "peer_blocked"
 )
 
 // StableErrorCodes lists every ErrCode* constant above. `hyphae contract`
@@ -47,7 +50,7 @@ const (
 var StableErrorCodes = []string{
 	ErrCodeUser, ErrCodeNetwork, ErrCodeAuth, ErrCodeWriteConflict, ErrCodeOther,
 	ErrCodeBadBackupPassword, ErrCodeInvalidKey, ErrCodeNicknameExists, ErrCodeNpubExists, ErrCodeKeystoreLocked,
-	ErrCodeInvalidTag,
+	ErrCodeInvalidTag, ErrCodeStrangerMessageLimit, ErrCodeStrangerDailyLimit, ErrCodePeerBlocked,
 }
 
 // ExitCodeFor returns the process exit code an error code maps to.
@@ -202,7 +205,8 @@ func writeResult(w io.Writer, r Result) {
 
 func exitCodeFor(code string) int {
 	switch code {
-	case ErrCodeUser, ErrCodeInvalidKey, ErrCodeNicknameExists, ErrCodeNpubExists, ErrCodeInvalidTag:
+	case ErrCodeUser, ErrCodeInvalidKey, ErrCodeNicknameExists, ErrCodeNpubExists, ErrCodeInvalidTag,
+		ErrCodeStrangerMessageLimit, ErrCodeStrangerDailyLimit, ErrCodePeerBlocked:
 		return ExitUserError
 	case ErrCodeNetwork:
 		return ExitNetworkError
