@@ -20,6 +20,11 @@ const (
 	MessageCategory = "agent"
 	MessageVersion  = "v1"
 	MessageDPrefix  = "agent-message:"
+
+	// CardCategory marks a directory card (docs/search/discover-friends.md).
+	// The card uses the same value for c and d, and v=CardVersion.
+	CardCategory = "hyphae-card"
+	CardVersion  = "1"
 )
 
 // Class identifies the application schema carried by kind 30078.
@@ -29,6 +34,7 @@ const (
 	ClassUnknown Class = iota
 	ClassProfile
 	ClassMessage
+	ClassCard
 )
 
 // Classify30078 classifies an event's tags. The caller must first verify that
@@ -80,6 +86,15 @@ func Classify30078(tags nostr.Tags) (Class, error) {
 			return ClassUnknown, fmt.Errorf("unknown or conflicting kind 30078 d namespace")
 		}
 		return ClassMessage, nil
+
+	case CardCategory:
+		if !hasD || d != CardCategory || !hasV || v != CardVersion {
+			return ClassUnknown, fmt.Errorf("card event requires d=%q and v=%q", CardCategory, CardVersion)
+		}
+		if hasP {
+			return ClassUnknown, fmt.Errorf("card event conflicts with message discriminator tags")
+		}
+		return ClassCard, nil
 
 	default:
 		return ClassUnknown, fmt.Errorf("unknown kind 30078 c namespace %q", c)

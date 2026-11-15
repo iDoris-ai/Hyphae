@@ -19,6 +19,11 @@ func TestClassify30078RecognizesProfileAndMessages(t *testing.T) {
 			want: ClassProfile,
 		},
 		{
+			name: "directory card",
+			tags: nostr.Tags{{"d", CardCategory}, {"c", CardCategory}, {"v", CardVersion}, {"t", "友好"}, {"expiration", "1"}},
+			want: ClassCard,
+		},
+		{
 			name: "new namespaced message",
 			tags: messageTags(MessageDPrefix + strings.Repeat("a", 16)),
 			want: ClassMessage,
@@ -84,6 +89,12 @@ func TestClassify30078FailsClosedOnAmbiguousOrUnknownTags(t *testing.T) {
 		{name: "profile with duplicate c", tags: nostr.Tags{{"c", ProfileCategory}, {"c", ProfileCategory}, {"d", ProfileDTag}}},
 		{name: "message recipient not 32-byte hex", tags: nostr.Tags{{"c", MessageCategory}, {"v", MessageVersion}, {"p", "recipient"}}},
 		{name: "message missing version", tags: nostr.Tags{{"c", MessageCategory}, {"p", validP}}},
+		{name: "card missing d", tags: nostr.Tags{{"c", CardCategory}, {"v", CardVersion}}},
+		{name: "card with profile d", tags: nostr.Tags{{"c", CardCategory}, {"d", ProfileDTag}, {"v", CardVersion}}},
+		{name: "card missing version", tags: nostr.Tags{{"c", CardCategory}, {"d", CardCategory}}},
+		{name: "card with message version", tags: nostr.Tags{{"c", CardCategory}, {"d", CardCategory}, {"v", MessageVersion}}},
+		{name: "card with recipient", tags: nostr.Tags{{"c", CardCategory}, {"d", CardCategory}, {"v", CardVersion}, {"p", validP}}},
+		{name: "profile with card d", tags: nostr.Tags{{"c", ProfileCategory}, {"d", CardCategory}}},
 	}
 
 	for _, tt := range tests {

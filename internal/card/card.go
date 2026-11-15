@@ -1,0 +1,269 @@
+// Package card builds and reads directory cards: the public, searchable entry
+// a person publishes when visible (docs/search/discover-friends.md). A card is
+// a kind-30078 addressable event with c=d=hyphae-card, so the newest card
+// from an author replaces the older one; hiding publishes a tombstone card.
+package card
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"slices"
+	"strconv"
+	"strings"
+	"unicode"
+	"unicode/utf8"
+
+	"fiatjaf.com/nostr"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/unicode/norm"
+
+	"github.com/iDoris-ai/hyphae/internal/social"
+	"github.com/iDoris-ai/hyphae/internal/wireevent"
+)
+
+const (
+	// DefaultTag is used when a person goes public without choosing tags.
+	DefaultTag = "友好"
+	// MaxTags is the most tags one card may carry.
+	MaxTags = 10
+	// MaxTagRunes, MaxNameRunes and MaxAboutRunes bound each text field.
+	MaxTagRunes   = 32
+	MaxNameRunes  = 64
+	MaxAboutRunes = 256
+	// Lifetime is how long a card stays valid; the daemon republishes it
+	// before then.
+	Lifetime = 30 * 24 * 60 * 60
+)
+
+// Card is the public part of a person's directory entry.
+type Card struct {
+	Name  string
+	Tags  []string
+	About string
+}
+
+var folder = cases.Fold()
+
+// NormalizeTag returns the canonical form of one tag: trimmed, NFKC, case
+// folded. It rejects empty or over-long tags and tags containing whitespace,
+// commas, '#', control characters or invalid UTF-8.
+func NormalizeTag(raw string) (string, error) {
+	if !utf8.ValidString(raw) {
+		return "", errors.New("tag is not valid UTF-8")
+	}
+	t := folder.String(norm.NFKC.String(strings.TrimSpace(raw)))
+	// Folding can produce a form that is no longer NFKC; normalize again.
+	t = norm.NFKC.String(t)
+	if t == "" {
+		return "", errors.New("tag is empty")
+	}
+	if n := utf8.RuneCountInString(t); n > MaxTagRunes {
+		return "", fmt.Errorf("tag has %d characters, limit %d", n, MaxTagRunes)
+	}
+	for _, r := range t {
+		if unicode.IsSpace(r) || unicode.IsControl(r) || r == ',' || r == '#' || r == utf8.RuneError {
+			return "", fmt.Errorf("tag contains %q", r)
+		}
+	}
+	return t, nil
+}
+
+// NormalizeTags normalizes every tag, drops duplicates keeping first order,
+// and enforces MaxTags. An empty input stays empty; callers add DefaultTag.
+func NormalizeTags(raw []string) ([]string, error) {
+	out := make([]string, 0, len(raw))
+	for _, r := range raw {
+		t, err := NormalizeTag(r)
+		if err != nil {
+			return nil, fmt.Errorf("tag %q: %w", r, err)
+		}
+		if !slices.Contains(out, t) {
+			out = append(out, t)
+		}
+	}
+	if len(out) > MaxTags {
+		return nil, fmt.Errorf("%d tags, limit %d", len(out), MaxTags)
+	}
+	return out, nil
+}
+
+// Validate checks a card whose tags are already normalized.
+func (c Card) Validate() error {
+	if err := checkText("name", c.Name, 1, MaxNameRunes); err != nil {
+		return err
+	}
+	if err := checkText("about", c.About, 0, MaxAboutRunes); err != nil {
+		return err
+	}
+	if len(c.Tags) == 0 {
+		return errors.New("card needs at least one tag")
+	}
+	norm, err := NormalizeTags(c.Tags)
+	if err != nil {
+		return err
+	}
+	if !slices.Equal(norm, c.Tags) {
+		return errors.New("card tags are not normalized or contain duplicates")
+	}
+	return nil
+}
+
+func checkText(field, s string, minRunes, maxRunes int) error {
+	if !utf8.ValidString(s) {
+		return fmt.Errorf("%s is not valid UTF-8", field)
+	}
+	if strings.TrimSpace(s) != s {
+		return fmt.Errorf("%s has leading or trailing space", field)
+	}
+	n := utf8.RuneCountInString(s)
+	if n < minRunes || n > maxRunes {
+		return fmt.Errorf("%s has %d characters, want %d..%d", field, n, minRunes, maxRunes)
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("%s contains a control character", field)
+		}
+	}
+	return nil
+}
+
+type body struct {
+	V      int      `json:"v"`
+	Name   string   `json:"name,omitempty"`
+	Tags   []string `json:"tags,omitempty"`
+	About  string   `json:"about,omitempty"`
+	Hidden bool     `json:"hidden,omitempty"`
+}
+
+func baseTags(now nostr.Timestamp) nostr.Tags {
+	return nostr.Tags{
+		{"d", wireevent.CardCategory},
+		{"c", wireevent.CardCategory},
+		{"v", wireevent.CardVersion},
+		{"expiration", strconv.FormatInt(int64(now)+Lifetime, 10)},
+	}
+}
+
+// Event returns the unsigned card event for pubkey at now.
+func (c Card) Event(pubkey nostr.PubKey, now nostr.Timestamp) (*nostr.Event, error) {
+	if err := c.Validate(); err != nil {
+		return nil, err
+	}
+	content, err := json.Marshal(body{V: 1, Name: c.Name, Tags: c.Tags, About: c.About})
+	if err != nil {
+		return nil, err
+	}
+	tags := baseTags(now)
+	for _, t := range c.Tags {
+		tags = append(tags, nostr.Tag{"t", t})
+	}
+	return &nostr.Event{Kind: wireevent.Kind30078, CreatedAt: now, Tags: tags, Content: string(content), PubKey: pubkey}, nil
+}
+
+// Tombstone returns the unsigned event that replaces a card when its owner
+// hides. It carries no t tags, so tag searches stop matching it.
+func Tombstone(pubkey nostr.PubKey, now nostr.Timestamp) *nostr.Event {
+	return &nostr.Event{Kind: wireevent.Kind30078, CreatedAt: now, Tags: baseTags(now),
+		Content: `{"v":1,"hidden":true}`, PubKey: pubkey}
+}
+
+// ErrHidden reports a tombstone: the author is hidden.
+var ErrHidden = errors.New("card owner is hidden")
+
+// Parse reads a card event whose signature the caller has already verified.
+// It returns ErrHidden for a tombstone and an error for anything malformed or
+// expired at now (the caller's trusted local time).
+func Parse(ev *nostr.Event, now nostr.Timestamp) (Card, error) {
+	if ev == nil || ev.Kind != wireevent.Kind30078 {
+		return Card{}, errors.New("not a kind 30078 event")
+	}
+	class, err := wireevent.Classify30078(ev.Tags)
+	if err != nil {
+		return Card{}, err
+	}
+	if class != wireevent.ClassCard {
+		return Card{}, errors.New("not a card event")
+	}
+	exp, tTags, err := cardTags(ev.Tags)
+	if err != nil {
+		return Card{}, err
+	}
+	if exp <= int64(now) {
+		return Card{}, errors.New("card has expired")
+	}
+	if exp-int64(ev.CreatedAt) > Lifetime {
+		return Card{}, errors.New("card lifetime exceeds limit")
+	}
+	var b body
+	if err := social.StrictUnmarshal(json.RawMessage(ev.Content), &b); err != nil {
+		return Card{}, err
+	}
+	if b.V != 1 {
+		return Card{}, fmt.Errorf("unsupported card version %d", b.V)
+	}
+	if b.Hidden {
+		if b.Name != "" || len(b.Tags) != 0 || b.About != "" || len(tTags) != 0 {
+			return Card{}, errors.New("tombstone carries card fields")
+		}
+		return Card{}, ErrHidden
+	}
+	c := Card{Name: b.Name, Tags: b.Tags, About: b.About}
+	if err := c.Validate(); err != nil {
+		return Card{}, err
+	}
+	if !slices.Equal(tTags, c.Tags) {
+		return Card{}, errors.New("t tags do not match content tags")
+	}
+	return c, nil
+}
+
+// cardTags returns the single expiration value and the t tag values in order.
+func cardTags(tags nostr.Tags) (int64, []string, error) {
+	var exp int64
+	seen := false
+	var ts []string
+	for _, tag := range tags {
+		if len(tag) == 0 {
+			continue
+		}
+		switch tag[0] {
+		case "expiration":
+			if seen || len(tag) != 2 {
+				return 0, nil, errors.New("card needs exactly one expiration tag")
+			}
+			v, err := strconv.ParseInt(tag[1], 10, 64)
+			if err != nil || v <= 0 {
+				return 0, nil, errors.New("card expiration is not a positive integer")
+			}
+			exp, seen = v, true
+		case "t":
+			if len(tag) != 2 {
+				return 0, nil, errors.New("malformed t tag")
+			}
+			ts = append(ts, tag[1])
+		}
+	}
+	if !seen {
+		return 0, nil, errors.New("card needs exactly one expiration tag")
+	}
+	return exp, ts, nil
+}
+
+// Filter returns the relay filter for cards carrying any of the given tags.
+// The tags are normalized first; the c tag keeps other applications' kind
+// 30078 events from using up the limit.
+func Filter(tags []string, limit int) (nostr.Filter, error) {
+	norm, err := NormalizeTags(tags)
+	if err != nil {
+		return nostr.Filter{}, err
+	}
+	if len(norm) == 0 {
+		return nostr.Filter{}, errors.New("search needs at least one tag")
+	}
+	return nostr.Filter{
+		Kinds: []nostr.Kind{wireevent.Kind30078},
+		Tags:  nostr.TagMap{"c": {wireevent.CardCategory}, "t": norm},
+		Limit: limit,
+	}, nil
+}
