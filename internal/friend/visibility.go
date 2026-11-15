@@ -30,7 +30,7 @@ func NewCmd() *cli.Command {
 	return &cli.Command{
 		Name:     "friend",
 		Usage:    "Find people on your relay and manage strangers and friends",
-		Commands: []*cli.Command{visibilityCmd()},
+		Commands: []*cli.Command{visibilityCmd(), tagsCmd()},
 	}
 }
 
@@ -55,13 +55,26 @@ func visibilityCmd() *cli.Command {
 		Action: func(ctx context.Context, c *cli.Command) error {
 			switch arg := c.Args().First(); arg {
 			case "public", "hidden":
-				return apply(ctx, c, func(s *storage.CardSetting) error {
+				return apply(ctx, c, false, func(s *storage.CardSetting) error {
 					s.Visible = arg == "public"
 					return mergeFlags(c, s)
 				})
 			default:
 				return common.NewExitError(common.ErrCodeUser, fmt.Errorf("want public or hidden, got %q", arg))
 			}
+		},
+	}
+}
+
+func tagsCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "tags",
+		Usage: "Set the tags on your card; republished only if you are already public",
+		Flags: append(commonFlags(),
+			&cli.StringSliceFlag{Name: "set", Usage: "Tags, comma-separated", Required: true},
+		),
+		Action: func(ctx context.Context, c *cli.Command) error {
+			return apply(ctx, c, true, func(s *storage.CardSetting) error { return setTags(c, "set", s) })
 		},
 	}
 }
@@ -117,8 +130,10 @@ func view(s storage.CardSetting) cardView {
 // apply loads the setting, lets mutate change it, publishes the card (or the
 // tombstone when hidden) and stores the result, all under the card lock so a
 // concurrent run cannot drop relays. The setting is saved even when no relay
-// accepted the event; the command then fails with network_error.
-func apply(ctx context.Context, c *cli.Command, mutate func(*storage.CardSetting) error) error {
+// accepted the event; the command then fails with network_error. With
+// onlyIfPublic, a setting whose card is not live (never published, hidden
+// or expired) is saved without publishing.
+func apply(ctx context.Context, c *cli.Command, onlyIfPublic bool, mutate func(*storage.CardSetting) error) error {
 	jsonMode := common.JSONMode(c)
 	ks, err := identity.LoadKeyStoreForCommand(identity.KeyStoreCommandOptions{
 		JSONMode: jsonMode, RequireSecret: true, PasswordStdin: c.Bool("password-stdin"), Stdin: os.Stdin,
@@ -148,6 +163,10 @@ func apply(ctx context.Context, c *cli.Command, mutate func(*storage.CardSetting
 		if err != nil {
 			return err
 		}
+		// Republish only a card that is live now. Public is the default, but
+		// the first card goes out from `visibility public` or the daemon,
+		// never as a side effect of editing tags.
+		publishNow := !onlyIfPublic || (s.Visible && s.PublishedAt > 0 && s.ExpiresAt > int64(nostr.Now()))
 		if err := mutate(&s); err != nil {
 			return err
 		}
@@ -158,6 +177,20 @@ func apply(ctx context.Context, c *cli.Command, mutate func(*storage.CardSetting
 			if err := (card.Card{Name: s.Name, Tags: s.Tags, About: s.About}).Validate(); err != nil {
 				return common.NewExitError(common.ErrCodeUser, err)
 			}
+		}
+		if !publishNow {
+			if err := storage.SaveCardSetting(db, me.Npub, s); err != nil {
+				return err
+			}
+			common.Emit(jsonMode, struct {
+				cardView
+				Published   bool `json:"published"`
+				PublishedTo int  `json:"published_to"`
+			}{view(s), false, 0}, func() {
+				fmt.Printf("Saved tags %v; not published. Run `hyphae friend visibility public --as %s` to publish.\n",
+					s.Tags, me.Nickname)
+			})
+			return nil
 		}
 		return publishSetting(ctx, jsonMode, db, me.Npub, sk, relays, s)
 	})

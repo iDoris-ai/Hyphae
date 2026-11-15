@@ -336,3 +336,42 @@ func TestPublishRefusesFarFuture(t *testing.T) {
 	_, err = run(t, "visibility", "hidden", "--as", "alice", "--relay", url)
 	require.NoError(t, err)
 }
+
+// tags alone never sends a first card: it republishes only a card that is
+// live, and the first card comes from `visibility public` or the daemon.
+func TestTagsPublishOnlyWhenPublic(t *testing.T) {
+	url, _ := setup(t)
+	data, err := run(t, "tags", "--as", "alice", "--relay", url, "--set", "火锅")
+	require.NoError(t, err)
+	require.EqualValues(t, 0, data["published_to"])
+	require.Equal(t, []any{"火锅"}, data["tags"])
+	require.Equal(t, false, data["published"])
+	require.Empty(t, findCards(t, url, "火锅"), "a fresh identity's tags change publishes nothing")
+	data, err = run(t, "tags", "--as", "alice", "--relay", url, "--set", "夜宵")
+	require.NoError(t, err)
+	require.EqualValues(t, 0, data["published_to"])
+	require.Empty(t, findCards(t, url, "夜宵"), "nor does a second one: no card was ever published")
+
+	_, err = run(t, "visibility", "hidden", "--as", "alice", "--relay", url)
+	require.NoError(t, err)
+	_, err = run(t, "tags", "--as", "alice", "--relay", url, "--set", "夜宵")
+	require.NoError(t, err)
+	require.Empty(t, findCards(t, url, "夜宵"), "hidden stays hidden")
+
+	data, err = run(t, "visibility", "public", "--as", "alice", "--relay", url)
+	require.NoError(t, err)
+	require.Equal(t, []any{"夜宵"}, data["tags"])
+	_, err = run(t, "tags", "--as", "alice", "--relay", url, "--set", "火锅")
+	require.NoError(t, err)
+	require.Len(t, findCards(t, url, "火锅"), 1, "public: the tags change republishes")
+}
+
+func TestTagsRejectsInvalid(t *testing.T) {
+	url, _ := setup(t)
+	for _, bad := range []string{"a b", ","} {
+		_, err := run(t, "tags", "--as", "alice", "--relay", url, "--set", bad)
+		var ee *common.ExitError
+		require.True(t, errors.As(err, &ee), "err = %v", err)
+		require.Equal(t, common.ErrCodeInvalidTag, ee.Code)
+	}
+}
