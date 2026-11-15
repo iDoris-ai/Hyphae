@@ -201,6 +201,7 @@ Run this in a separate terminal or as a system service.`,
 		// The in-memory set avoids repeated work during this process. The
 		// atomic SQLite incoming-once write is the durable duplicate guard
 		// when events are delivered again after a restart.
+		cards := newCardRefresher(myIdentity, ks, relays, useNotify, logger)
 		seen := newSeenSet()
 		preloadRecentSeenWithLogger(seen, myIdentity.Npub, logger)
 		work := daemonRuntimeWork{
@@ -232,8 +233,12 @@ Run this in a separate terminal or as a system service.`,
 				}
 				return errors.Join(scanErr, finishErr)
 			},
-			cleanup: func() { cleanupOutboxWithLogger(logger) },
+			cleanup: func() {
+				cleanupOutboxWithLogger(logger)
+				cards.run(daemonCtx)
+			},
 		}
+		go cards.run(daemonCtx) // publishing must not delay the first inbox scan
 		return runDaemonRuntime(daemonCtx, logger, status, retryInterval, watchInterval, time.Hour, work)
 	},
 }
