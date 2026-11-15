@@ -5,6 +5,7 @@ package friend
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -29,7 +30,7 @@ func NewCmd() *cli.Command {
 	return &cli.Command{
 		Name:     "friend",
 		Usage:    "Find people on your relay and manage strangers and friends",
-		Commands: []*cli.Command{visibilityCmd(), tagsCmd()},
+		Commands: []*cli.Command{visibilityCmd()},
 	}
 }
 
@@ -61,19 +62,6 @@ func visibilityCmd() *cli.Command {
 			default:
 				return common.NewExitError(common.ErrCodeUser, fmt.Errorf("want public or hidden, got %q", arg))
 			}
-		},
-	}
-}
-
-func tagsCmd() *cli.Command {
-	return &cli.Command{
-		Name:  "tags",
-		Usage: "Set the tags on your card (republished if you are public)",
-		Flags: append(commonFlags(),
-			&cli.StringSliceFlag{Name: "set", Usage: "Tags, comma-separated", Required: true},
-		),
-		Action: func(ctx context.Context, c *cli.Command) error {
-			return apply(ctx, c, func(s *storage.CardSetting) error { return setTags(c, "set", s) })
 		},
 	}
 }
@@ -127,8 +115,9 @@ func view(s storage.CardSetting) cardView {
 }
 
 // apply loads the setting, lets mutate change it, publishes the card (or the
-// tombstone when hidden) and stores the result. The setting is saved even when
-// no relay accepted the event; the command then fails with network_error.
+// tombstone when hidden) and stores the result, all under the card lock so a
+// concurrent run cannot drop relays. The setting is saved even when no relay
+// accepted the event; the command then fails with network_error.
 func apply(ctx context.Context, c *cli.Command, mutate func(*storage.CardSetting) error) error {
 	jsonMode := common.JSONMode(c)
 	ks, err := identity.LoadKeyStoreForCommand(identity.KeyStoreCommandOptions{
@@ -149,19 +138,26 @@ func apply(ctx context.Context, c *cli.Command, mutate func(*storage.CardSetting
 	if err != nil {
 		return err
 	}
-	db, err := storage.OpenDB()
-	if err != nil {
-		return err
-	}
-	defer func() { _ = db.Close() }()
-	s, err := storage.LoadCardSetting(db, me.Npub)
-	if err != nil {
-		return err
-	}
-	if err := mutate(&s); err != nil {
-		return err
-	}
-	s = withDefaults(s, me.Nickname)
+	return storage.WithCardLock(func() error {
+		db, err := storage.OpenDB()
+		if err != nil {
+			return err
+		}
+		defer func() { _ = db.Close() }()
+		s, err := storage.LoadCardSetting(db, me.Npub)
+		if err != nil {
+			return err
+		}
+		if err := mutate(&s); err != nil {
+			return err
+		}
+		s = withDefaults(s, me.Nickname)
+		return publishSetting(ctx, jsonMode, db, me.Npub, sk, relays, s)
+	})
+}
+
+func publishSetting(ctx context.Context, jsonMode bool, db *sql.DB, npub string, sk nostr.SecretKey,
+	relays []string, s storage.CardSetting) error {
 	// A replacement must be strictly newer: relays keep the lower event ID on
 	// a created_at tie, so a toggle within the same second would be lost.
 	now := max(nostr.Now(), nostr.Timestamp(s.PublishedAt+1))
@@ -188,15 +184,14 @@ func apply(ctx context.Context, c *cli.Command, mutate func(*storage.CardSetting
 	ok := len(okURLs)
 	if ok > 0 {
 		s.PublishedAt = int64(now)
+		if s.Visible {
+			s.ExpiresAt = int64(now) + card.Lifetime
+			s.Relays = union(s.Relays, okURLs)
+		} else {
+			s.ExpiresAt = 0
+		}
 	}
-	if ok > 0 && s.Visible {
-		s.ExpiresAt = int64(now) + card.Lifetime
-		s.Relays = union(s.Relays, okURLs)
-	}
-	if !s.Visible {
-		s.ExpiresAt = 0
-	}
-	if err := storage.SaveCardSetting(db, me.Npub, s); err != nil {
+	if err := storage.SaveCardSetting(db, npub, s); err != nil {
 		return err
 	}
 	out := struct {
@@ -204,6 +199,11 @@ func apply(ctx context.Context, c *cli.Command, mutate func(*storage.CardSetting
 		Relays      []relayResult `json:"relays"`
 		PublishedTo int           `json:"published_to"`
 	}{view(s), results, ok}
+	if ok == 0 && !s.Visible && s.ExpiresAt > 0 {
+		return common.NewExitErrorWithData(common.ErrCodeNetwork, fmt.Errorf(
+			"no relay accepted the hide; your old card stays findable until %s unless you retry",
+			time.Unix(s.ExpiresAt, 0).Format(time.DateTime)), out)
+	}
 	if ok == 0 {
 		return common.NewExitErrorWithData(common.ErrCodeNetwork, errors.New("no relay accepted the card"), out)
 	}
@@ -213,8 +213,7 @@ func apply(ctx context.Context, c *cli.Command, mutate func(*storage.CardSetting
 		if s.Visible {
 			fmt.Printf("Card expires %s unless republished (the daemon does this while running).\n",
 				time.Unix(s.ExpiresAt, 0).Format(time.DateTime))
-		}
-		if !s.Visible {
+		} else {
 			fmt.Println("Hidden: new searches will not find you. Copies others already fetched cannot be recalled.")
 		}
 	})

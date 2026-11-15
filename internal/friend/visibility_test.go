@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http/httptest"
 	"os"
 	"strings"
@@ -104,8 +105,8 @@ func TestPublicThenHidden(t *testing.T) {
 	require.Equal(t, "周末吃火锅", c.About)
 	require.Len(t, findCards(t, url, "HOTPOT"), 1, "search normalizes the query")
 
-	// Tags change republishes, replacing the old card.
-	_, err = run(t, "tags", "--as", "alice", "--relay", url, "--set", "夜宵")
+	// Changing tags republishes, replacing the old card.
+	_, err = run(t, "visibility", "public", "--as", "alice", "--relay", url, "--tags", "夜宵")
 	require.NoError(t, err)
 	require.Empty(t, findCards(t, url, "友好"))
 	require.Len(t, findCards(t, url, "夜宵"), 1)
@@ -127,7 +128,7 @@ func TestPublicThenHidden(t *testing.T) {
 
 func TestInvalidTagAndBadArg(t *testing.T) {
 	url, _ := setup(t)
-	_, err := run(t, "tags", "--as", "alice", "--relay", url, "--set", "a b")
+	_, err := run(t, "visibility", "public", "--as", "alice", "--relay", url, "--tags", "a b")
 	var ee *common.ExitError
 	require.True(t, errors.As(err, &ee))
 	require.Equal(t, common.ErrCodeInvalidTag, ee.Code)
@@ -185,8 +186,59 @@ func TestReplacementIsStrictlyNewer(t *testing.T) {
 
 func TestEmptyTagsRefused(t *testing.T) {
 	url, _ := setup(t)
-	_, err := run(t, "tags", "--as", "alice", "--relay", url, "--set", ",")
+	_, err := run(t, "visibility", "public", "--as", "alice", "--relay", url, "--tags", ",")
 	var ee *common.ExitError
 	require.True(t, errors.As(err, &ee), "err = %v", err)
 	require.Equal(t, common.ErrCodeInvalidTag, ee.Code)
+}
+
+// A hide no relay accepted says the old card is still findable and keeps its
+// expiry, so the next run knows a card may be out there.
+func TestHideFailureKeepsExpiry(t *testing.T) {
+	setup(t)
+	ks, err := identity.LoadKeyStore()
+	require.NoError(t, err)
+	npub := ks.Identities["alice"].Npub
+	dead := "ws://127.0.0.1:1"
+	exp := time.Now().Unix() + 1000
+	db, err := storage.OpenDB()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	require.NoError(t, storage.SaveCardSetting(db, npub, storage.CardSetting{
+		Visible: true, Name: "alice", Tags: []string{card.DefaultTag}, PublishedAt: 1, ExpiresAt: exp, Relays: []string{dead}}))
+
+	_, err = run(t, "visibility", "hidden", "--as", "alice", "--relay", dead)
+	var ee *common.ExitError
+	require.True(t, errors.As(err, &ee))
+	require.Equal(t, common.ErrCodeNetwork, ee.Code)
+	require.Contains(t, ee.Error(), "old card stays findable")
+	s, err := storage.LoadCardSetting(db, npub)
+	require.NoError(t, err)
+	require.False(t, s.Visible)
+	require.Equal(t, exp, s.ExpiresAt)
+}
+
+// A relay that accepts TCP but never finishes the handshake cannot hold the
+// command past publishTimeout.
+func TestPublishBoundsConnect(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			t.Cleanup(func() { _ = c.Close() })
+		}
+	}()
+	old := publishTimeout
+	publishTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { publishTimeout = old })
+	start := time.Now()
+	results, ok := publish(context.Background(), []string{"ws://" + ln.Addr().String()}, []nostr.Event{{}})
+	require.Less(t, time.Since(start), 3*time.Second)
+	require.Empty(t, ok)
+	require.False(t, results[0].OK)
 }
