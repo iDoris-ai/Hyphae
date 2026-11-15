@@ -7,6 +7,7 @@ import (
 	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/contract"
 	"github.com/iDoris-ai/hyphae/internal/daemon"
+	"github.com/iDoris-ai/hyphae/internal/friend"
 	"github.com/iDoris-ai/hyphae/internal/group"
 	"github.com/iDoris-ai/hyphae/internal/groupchat"
 	"github.com/iDoris-ai/hyphae/internal/health"
@@ -64,6 +65,7 @@ func main() {
 			groupchat.Cmd,
 			// Agent Profile
 			profile.ProfileCmd,
+			friend.Cmd,
 			health.Cmd,
 			// TUI
 			tui.TUICmd,
