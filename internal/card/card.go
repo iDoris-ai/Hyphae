@@ -43,18 +43,23 @@ type Card struct {
 	About string
 }
 
-var folder = cases.Fold()
+// MaxClockSkew is how far in the future a card's created_at may be.
+const MaxClockSkew = 10 * 60
+
+func canonical(s string) string {
+	// Folding can produce a form that is no longer NFKC; normalize again.
+	return norm.NFKC.String(cases.Fold().String(norm.NFKC.String(s)))
+}
 
 // NormalizeTag returns the canonical form of one tag: trimmed, NFKC, case
-// folded. It rejects empty or over-long tags and tags containing whitespace,
-// commas, '#', control characters or invalid UTF-8.
+// folded. It rejects empty or over-long tags, tags containing whitespace,
+// commas, '#', control or format characters or invalid UTF-8, and tags whose
+// canonical form is not stable (folding Cherokee flips case each time).
 func NormalizeTag(raw string) (string, error) {
 	if !utf8.ValidString(raw) {
 		return "", errors.New("tag is not valid UTF-8")
 	}
-	t := folder.String(norm.NFKC.String(strings.TrimSpace(raw)))
-	// Folding can produce a form that is no longer NFKC; normalize again.
-	t = norm.NFKC.String(t)
+	t := canonical(strings.TrimSpace(raw))
 	if t == "" {
 		return "", errors.New("tag is empty")
 	}
@@ -62,9 +67,13 @@ func NormalizeTag(raw string) (string, error) {
 		return "", fmt.Errorf("tag has %d characters, limit %d", n, MaxTagRunes)
 	}
 	for _, r := range t {
-		if unicode.IsSpace(r) || unicode.IsControl(r) || r == ',' || r == '#' || r == utf8.RuneError {
+		if unicode.IsSpace(r) || unicode.IsControl(r) || unicode.Is(unicode.Cf, r) ||
+			r == ',' || r == '#' || r == utf8.RuneError {
 			return "", fmt.Errorf("tag contains %q", r)
 		}
+	}
+	if canonical(t) != t {
+		return "", errors.New("tag has no stable canonical form")
 	}
 	return t, nil
 }
@@ -121,8 +130,10 @@ func checkText(field, s string, minRunes, maxRunes int) error {
 		return fmt.Errorf("%s has %d characters, want %d..%d", field, n, minRunes, maxRunes)
 	}
 	for _, r := range s {
-		if unicode.IsControl(r) {
-			return fmt.Errorf("%s contains a control character", field)
+		// Format characters hide text or reverse it (U+202E); the zero-width
+		// joiner stays allowed because emoji sequences need it.
+		if unicode.IsControl(r) || (unicode.Is(unicode.Cf, r) && r != '\u200d') {
+			return fmt.Errorf("%s contains a control or format character", field)
 		}
 	}
 	return nil
@@ -191,6 +202,11 @@ func Parse(ev *nostr.Event, now nostr.Timestamp) (Card, error) {
 	}
 	if exp <= int64(now) {
 		return Card{}, errors.New("card has expired")
+	}
+	// A future-dated card would outrank the author's later tombstone, so
+	// hiding would not work; bound both ends by the reader's clock.
+	if int64(ev.CreatedAt) > int64(now)+MaxClockSkew {
+		return Card{}, errors.New("card is dated in the future")
 	}
 	if exp-int64(ev.CreatedAt) > Lifetime {
 		return Card{}, errors.New("card lifetime exceeds limit")

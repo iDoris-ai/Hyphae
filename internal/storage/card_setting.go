@@ -69,8 +69,16 @@ func LoadCardSetting(db *sql.DB, identity string) (CardSetting, error) {
 	return s, nil
 }
 
-// SaveCardSetting stores s for identity, replacing any earlier row.
+// ErrStaleCardSetting reports a save whose PublishedAt is older than the
+// stored one: another writer published since this setting was loaded.
+var ErrStaleCardSetting = errors.New("card setting changed since it was loaded")
+
+// SaveCardSetting stores s for identity, replacing any earlier row unless
+// that row records a newer publish (ErrStaleCardSetting).
 func SaveCardSetting(db *sql.DB, identity string, s CardSetting) error {
+	if identity == "" {
+		return errors.New("save card setting: empty identity")
+	}
 	tags, err := json.Marshal(nonNil(s.Tags))
 	if err != nil {
 		return err
@@ -83,12 +91,22 @@ func SaveCardSetting(db *sql.DB, identity string, s CardSetting) error {
 	if s.Visible {
 		visible = 1
 	}
-	_, err = db.Exec(`INSERT OR REPLACE INTO card_setting
+	res, err := db.Exec(`INSERT INTO card_setting
 		(identity_npub, visible, name, tags, about, published_at, expires_at, relays)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (identity_npub) DO UPDATE SET visible = excluded.visible,
+			name = excluded.name, tags = excluded.tags, about = excluded.about,
+			published_at = excluded.published_at, expires_at = excluded.expires_at,
+			relays = excluded.relays
+		WHERE card_setting.published_at <= excluded.published_at`,
 		identity, visible, s.Name, string(tags), s.About, s.PublishedAt, s.ExpiresAt, string(relays))
 	if err != nil {
 		return fmt.Errorf("save card setting: %w", err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("save card setting: %w", err)
+	} else if n == 0 {
+		return ErrStaleCardSetting
 	}
 	return nil
 }
