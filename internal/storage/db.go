@@ -127,7 +127,7 @@ func migrate(db *sql.DB) error {
 		}
 	}
 
-	return nil
+	return migrateRelations(db)
 }
 
 // MigrateFromJSON migrates existing JSON data to SQLite
