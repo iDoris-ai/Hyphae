@@ -46,6 +46,9 @@ type Card struct {
 // MaxClockSkew is how far in the future a card's created_at may be.
 const MaxClockSkew = 10 * 60
 
+// canonical is stable only for the Unicode tables of the Go build that runs
+// it: a tag accepted by one build can fail Validate on a build with newer
+// tables. Peers on mixed Go versions are expected to be rare.
 func canonical(s string) string {
 	// Folding can produce a form that is no longer NFKC; normalize again.
 	return norm.NFKC.String(cases.Fold().String(norm.NFKC.String(s)))
@@ -129,14 +132,55 @@ func checkText(field, s string, minRunes, maxRunes int) error {
 	if n < minRunes || n > maxRunes {
 		return fmt.Errorf("%s has %d characters, want %d..%d", field, n, minRunes, maxRunes)
 	}
-	for _, r := range s {
-		// Format characters hide text or reverse it (U+202E); the zero-width
-		// joiner stays allowed because emoji sequences need it.
-		if unicode.IsControl(r) || (unicode.Is(unicode.Cf, r) && r != '\u200d') {
+	runes := []rune(s)
+	visible := false
+	for i, r := range runes {
+		if unicode.In(r, unicode.L, unicode.N, unicode.S, unicode.P) {
+			visible = true
+		}
+		if unicode.IsControl(r) || (unicode.Is(unicode.Cf, r) && !allowedFormat(runes, i)) {
 			return fmt.Errorf("%s contains a control or format character", field)
 		}
 	}
+	if n > 0 && !visible {
+		return fmt.Errorf("%s has no visible character", field)
+	}
 	return nil
+}
+
+// allowedFormat reports whether the format character runes[i] does its
+// real job, so it cannot hide inside Latin text: ZWJ joins two emoji, ZWNJ
+// separates two letters of a script that uses it (Persian, Indic), and
+// LRM/RLM sit next to a right-to-left letter. Any other format character
+// (U+202E reverses text, U+200B hides) is rejected.
+func allowedFormat(runes []rune, i int) bool {
+	if i == 0 || i == len(runes)-1 {
+		return false
+	}
+	prev, next := runes[i-1], runes[i+1]
+	switch runes[i] {
+	case '\u200d':
+		return isEmoji(prev) && unicode.Is(unicode.So, next)
+	case '\u200c':
+		return joiningLetter(prev) && joiningLetter(next)
+	case '\u200e', '\u200f':
+		return rtl(prev) || rtl(next)
+	}
+	return false
+}
+
+// isEmoji is the part of an emoji a ZWJ may follow: the symbol itself, the
+// emoji presentation selector, or a skin tone modifier.
+func isEmoji(r rune) bool {
+	return unicode.Is(unicode.So, r) || r == '\ufe0f' || (r >= 0x1f3fb && r <= 0x1f3ff)
+}
+
+func joiningLetter(r rune) bool {
+	return unicode.In(r, unicode.L, unicode.M) && !unicode.In(r, unicode.Latin, unicode.Cyrillic, unicode.Greek)
+}
+
+func rtl(r rune) bool {
+	return unicode.In(r, unicode.Arabic, unicode.Hebrew)
 }
 
 type body struct {
@@ -208,7 +252,9 @@ func Parse(ev *nostr.Event, now nostr.Timestamp) (Card, error) {
 	if int64(ev.CreatedAt) > int64(now)+MaxClockSkew {
 		return Card{}, errors.New("card is dated in the future")
 	}
-	if exp-int64(ev.CreatedAt) > Lifetime {
+	// A comparison, not exp-created_at: a negative created_at must not
+	// overflow past the bound.
+	if int64(ev.CreatedAt) < exp-Lifetime {
 		return Card{}, errors.New("card lifetime exceeds limit")
 	}
 	var b body

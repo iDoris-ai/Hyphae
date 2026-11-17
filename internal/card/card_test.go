@@ -88,7 +88,24 @@ func TestValidate(t *testing.T) {
 	if err := family.Validate(); err != nil {
 		t.Fatalf("emoji joined by ZWJ: %v", err)
 	}
+	for _, name := range []string{
+		"\U0001F3F3\ufe0f\u200d\U0001F308",                 // rainbow flag: selector then ZWJ
+		"\U0001F469\U0001F3FD\u200d\U0001F4BB",             // skin tone then ZWJ
+		"\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645", // Persian ZWNJ
+		"\u0639\u0644\u064a\u200e 2",                       // LRM after Arabic
+	} {
+		if err := (Card{Name: name, Tags: []string{DefaultTag}}).Validate(); err != nil {
+			t.Errorf("Validate(%q): %v", name, err)
+		}
+	}
 	bad := []Card{
+		{Name: "\u200d", Tags: []string{DefaultTag}},           // ZWJ alone
+		{Name: "Al\u200dice", Tags: []string{DefaultTag}},      // ZWJ hidden in Latin
+		{Name: "\U0001F468\u200d", Tags: []string{DefaultTag}}, // trailing ZWJ
+		{Name: "Al\u200cice", Tags: []string{DefaultTag}},      // ZWNJ in Latin
+		{Name: "ab\u200e", Tags: []string{DefaultTag}},         // LRM, no RTL text
+		{Name: "\u0301", Tags: []string{DefaultTag}},           // nothing visible
+		{Name: "小王", Tags: []string{DefaultTag}, About: "\u0301"},
 		{Name: "", Tags: []string{DefaultTag}},
 		{Name: " 小王", Tags: []string{DefaultTag}},
 		{Name: strings.Repeat("名", MaxNameRunes+1), Tags: []string{DefaultTag}},
@@ -190,6 +207,10 @@ func TestParseRejects(t *testing.T) {
 		"expiration zero":         func(ev *nostr.Event) { setTag(ev, "expiration", "0") },
 		"lifetime too long": func(ev *nostr.Event) {
 			setTag(ev, "expiration", strconv.FormatInt(int64(now)+Lifetime+1, 10))
+		},
+		"negative created_at": func(ev *nostr.Event) {
+			ev.CreatedAt = -1
+			setTag(ev, "expiration", "9223372036854775807")
 		},
 		"missing t tag":    func(ev *nostr.Event) { setTag(ev, "t", "友好") },
 		"extra t tag":      func(ev *nostr.Event) { setTag(ev, "t", "友好", "火锅", "夜宵") },

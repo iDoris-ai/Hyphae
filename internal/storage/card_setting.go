@@ -74,7 +74,10 @@ func LoadCardSetting(db *sql.DB, identity string) (CardSetting, error) {
 var ErrStaleCardSetting = errors.New("card setting changed since it was loaded")
 
 // SaveCardSetting stores s for identity, replacing any earlier row unless
-// that row records a newer publish (ErrStaleCardSetting).
+// that row records a newer publish (ErrStaleCardSetting). An equal
+// PublishedAt overwrites, so this guard alone does not stop two writers in
+// the same second: every load → publish → save must run inside
+// WithCardLock, which serializes them.
 func SaveCardSetting(db *sql.DB, identity string, s CardSetting) error {
 	if identity == "" {
 		return errors.New("save card setting: empty identity")
