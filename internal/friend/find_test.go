@@ -25,7 +25,7 @@ func publishCard(t *testing.T, url string, at nostr.Timestamp, name string, tags
 	ev, err := card.Card{Name: name, Tags: tags}.Event(sk.Public(), at)
 	require.NoError(t, err)
 	require.NoError(t, ev.Sign(sk))
-	_, ok := publish(context.Background(), []string{url}, []nostr.Event{*ev})
+	_, ok, _ := publish(context.Background(), []string{url}, []nostr.Event{*ev})
 	require.Len(t, ok, 1)
 	return sk
 }
@@ -49,7 +49,7 @@ func TestFindRanksAndFilters(t *testing.T) {
 	erin := publishCard(t, url, now, "erin", "友好")
 	tomb := card.Tombstone(erin.Public(), now+1)
 	require.NoError(t, tomb.Sign(erin))
-	_, ok := publish(context.Background(), []string{url}, []nostr.Event{*tomb})
+	_, ok, _ := publish(context.Background(), []string{url}, []nostr.Event{*tomb})
 	require.Len(t, ok, 1)
 	_, err := run(t, "visibility", "public", "--as", "alice", "--relay", url)
 	require.NoError(t, err)
@@ -140,7 +140,7 @@ func TestFindNewestCardAcrossRelays(t *testing.T) {
 		ev, err := card.Card{Name: "bob", Tags: c.tags}.Event(sk.Public(), c.at)
 		require.NoError(t, err)
 		require.NoError(t, ev.Sign(sk))
-		_, ok := publish(context.Background(), []string{c.url}, []nostr.Event{*ev})
+		_, ok, _ := publish(context.Background(), []string{c.url}, []nostr.Event{*ev})
 		require.Len(t, ok, 1)
 	}
 	data, err := run(t, "find", "--as", "alice", "--relay", url, "--relay", stale)
