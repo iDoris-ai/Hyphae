@@ -152,6 +152,13 @@ func apply(ctx context.Context, c *cli.Command, mutate func(*storage.CardSetting
 			return err
 		}
 		s = withDefaults(s, me.Nickname)
+		if c.IsSet("name") || c.IsSet("about") {
+			// Check edits now, even when hiding: a bad name saved while hidden
+			// would only fail at the next `public`.
+			if err := (card.Card{Name: s.Name, Tags: s.Tags, About: s.About}).Validate(); err != nil {
+				return common.NewExitError(common.ErrCodeUser, err)
+			}
+		}
 		return publishSetting(ctx, jsonMode, db, me.Npub, sk, relays, s)
 	})
 }
@@ -161,6 +168,12 @@ func publishSetting(ctx context.Context, jsonMode bool, db *sql.DB, npub string,
 	// A replacement must be strictly newer: relays keep the lower event ID on
 	// a created_at tie, so a toggle within the same second would be lost.
 	now := max(nostr.Now(), nostr.Timestamp(s.PublishedAt+1))
+	if s.Visible && int64(now) > int64(nostr.Now())+card.MaxClockSkew {
+		// Readers reject a card dated this far ahead; a hide still goes out.
+		return common.NewExitError(common.ErrCodeUser, fmt.Errorf(
+			"your last card is dated %s, ahead of this computer's clock; check the clock and retry after that time",
+			time.Unix(s.PublishedAt, 0).Format(time.DateTime)))
+	}
 
 	var events []nostr.Event
 	targets := relays
@@ -180,14 +193,25 @@ func publishSetting(ctx context.Context, jsonMode bool, db *sql.DB, npub string,
 			return fmt.Errorf("sign: %w", err)
 		}
 	}
-	results, okURLs := publish(ctx, targets, events)
+	results, okURLs, touched := publish(ctx, targets, events)
 	ok := len(okURLs)
-	if ok > 0 {
-		s.PublishedAt = int64(now)
-		if s.Visible {
-			s.ExpiresAt = int64(now) + card.Lifetime
-			s.Relays = union(s.Relays, okURLs)
-		} else {
+	if touched {
+		// Some relay holds an event at now, so the next one must be newer.
+		s.PublishedAt = max(s.PublishedAt, int64(now))
+	}
+	var missed []string // relays that still hold the visible card
+	if s.Visible && ok > 0 {
+		s.ExpiresAt = int64(now) + card.Lifetime
+		s.Relays = union(s.Relays, okURLs)
+	} else if !s.Visible {
+		for _, url := range s.Relays {
+			if !slices.Contains(okURLs, url) {
+				missed = append(missed, url)
+			}
+		}
+		if (len(missed) == 0 && ok > 0) || s.ExpiresAt <= int64(nostr.Now()) {
+			// ExpiresAt > 0 while hidden marks an unfinished hide (the daemon
+			// resends it); an expired card needs no hide.
 			s.ExpiresAt = 0
 		}
 	}
@@ -199,10 +223,10 @@ func publishSetting(ctx context.Context, jsonMode bool, db *sql.DB, npub string,
 		Relays      []relayResult `json:"relays"`
 		PublishedTo int           `json:"published_to"`
 	}{view(s), results, ok}
-	if ok == 0 && !s.Visible && s.ExpiresAt > 0 {
+	if !s.Visible && s.ExpiresAt > 0 {
 		return common.NewExitErrorWithData(common.ErrCodeNetwork, fmt.Errorf(
-			"no relay accepted the hide; your old card stays findable until %s unless you retry",
-			time.Unix(s.ExpiresAt, 0).Format(time.DateTime)), out)
+			"%d relay(s) holding your card did not accept the hide (%v); the card stays findable there until %s unless you retry",
+			len(missed), missed, time.Unix(s.ExpiresAt, 0).Format(time.DateTime)), out)
 	}
 	if ok == 0 {
 		return common.NewExitErrorWithData(common.ErrCodeNetwork, errors.New("no relay accepted the card"), out)
