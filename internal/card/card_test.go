@@ -89,10 +89,8 @@ func TestValidate(t *testing.T) {
 		t.Fatalf("emoji joined by ZWJ: %v", err)
 	}
 	for _, name := range []string{
-		"\U0001F3F3\ufe0f\u200d\U0001F308",                 // rainbow flag: selector then ZWJ
-		"\U0001F469\U0001F3FD\u200d\U0001F4BB",             // skin tone then ZWJ
-		"\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645", // Persian ZWNJ
-		"\u0639\u0644\u064a\u200e 2",                       // LRM after Arabic
+		"\U0001F3F3\ufe0f\u200d\U0001F308",     // rainbow flag: selector then ZWJ
+		"\U0001F469\U0001F3FD\u200d\U0001F4BB", // skin tone then ZWJ
 	} {
 		if err := (Card{Name: name, Tags: []string{DefaultTag}}).Validate(); err != nil {
 			t.Errorf("Validate(%q): %v", name, err)

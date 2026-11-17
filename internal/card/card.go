@@ -138,7 +138,9 @@ func checkText(field, s string, minRunes, maxRunes int) error {
 		if unicode.In(r, unicode.L, unicode.N, unicode.S, unicode.P) {
 			visible = true
 		}
-		if unicode.IsControl(r) || (unicode.Is(unicode.Cf, r) && !allowedFormat(runes, i)) {
+		// Format characters hide or reverse text; only ZWJ between emoji is
+		// allowed. Scripts that need ZWNJ or bidi marks are not supported.
+		if unicode.IsControl(r) || (unicode.Is(unicode.Cf, r) && !emojiJoiner(runes, i)) {
 			return fmt.Errorf("%s contains a control or format character", field)
 		}
 	}
@@ -148,39 +150,14 @@ func checkText(field, s string, minRunes, maxRunes int) error {
 	return nil
 }
 
-// allowedFormat reports whether the format character runes[i] does its
-// real job, so it cannot hide inside Latin text: ZWJ joins two emoji, ZWNJ
-// separates two letters of a script that uses it (Persian, Indic), and
-// LRM/RLM sit next to a right-to-left letter. Any other format character
-// (U+202E reverses text, U+200B hides) is rejected.
-func allowedFormat(runes []rune, i int) bool {
-	if i == 0 || i == len(runes)-1 {
+// emojiJoiner reports whether runes[i] is a ZWJ between two emoji.
+func emojiJoiner(runes []rune, i int) bool {
+	if runes[i] != '\u200d' || i == 0 || i == len(runes)-1 {
 		return false
 	}
-	prev, next := runes[i-1], runes[i+1]
-	switch runes[i] {
-	case '\u200d':
-		return isEmoji(prev) && unicode.Is(unicode.So, next)
-	case '\u200c':
-		return joiningLetter(prev) && joiningLetter(next)
-	case '\u200e', '\u200f':
-		return rtl(prev) || rtl(next)
-	}
-	return false
-}
-
-// isEmoji is the part of an emoji a ZWJ may follow: the symbol itself, the
-// emoji presentation selector, or a skin tone modifier.
-func isEmoji(r rune) bool {
-	return unicode.Is(unicode.So, r) || r == '\ufe0f' || (r >= 0x1f3fb && r <= 0x1f3ff)
-}
-
-func joiningLetter(r rune) bool {
-	return unicode.In(r, unicode.L, unicode.M) && !unicode.In(r, unicode.Latin, unicode.Cyrillic, unicode.Greek)
-}
-
-func rtl(r rune) bool {
-	return unicode.In(r, unicode.Arabic, unicode.Hebrew)
+	prev := runes[i-1]
+	return (unicode.Is(unicode.So, prev) || prev == '\ufe0f' || (prev >= 0x1f3fb && prev <= 0x1f3ff)) &&
+		unicode.Is(unicode.So, runes[i+1])
 }
 
 type body struct {
