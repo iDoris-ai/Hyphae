@@ -258,7 +258,10 @@ func publishSetting(ctx context.Context, jsonMode bool, db *sql.DB, npub string,
 	} else {
 		// Hide everywhere the card ever went, not only on today's relays.
 		targets = union(s.Relays, relays)
-		events = append(events, *card.Tombstone(sk.Public(), now), deletion(sk.Public(), now))
+		// The deletion is dated one second before the tombstone: a NIP-09 `a`
+		// deletion removes versions up to its created_at, so the old card goes
+		// and the tombstone stays, and find sees the hide on every relay.
+		events = append(events, *card.Tombstone(sk.Public(), now), deletion(sk.Public(), now-1))
 	}
 	for i := range events {
 		if err := events[i].Sign(sk); err != nil {

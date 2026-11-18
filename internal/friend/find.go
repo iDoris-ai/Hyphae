@@ -106,11 +106,11 @@ func find(ctx context.Context, c *cli.Command) error {
 	return nil
 }
 
-// fetchCards queries every relay by tag, then looks up each author found
-// without the tag filter, so a newer card without the tag or a tombstone on
-// any relay wins over an old card elsewhere, and drops authors whose card was
-// deleted (NIP-09) on any relay. Comparing created_at only compares one
-// author's own events.
+// fetchCards queries every relay by tag, then looks the authors found up on
+// every relay without the tag filter, so a newer card without the tag or a
+// tombstone on any relay wins over an old card elsewhere. A hide's deletion is
+// dated before its tombstone, so relays that honour NIP-09 keep the tombstone.
+// Comparing created_at only compares one author's own events.
 func fetchCards(ctx context.Context, relays []string, f nostr.Filter, timeout time.Duration) (map[nostr.PubKey]nostr.Event, []string) {
 	newest := map[nostr.PubKey]nostr.Event{}
 	failed := []string{}
@@ -133,39 +133,22 @@ func fetchCards(ctx context.Context, relays []string, f nostr.Filter, timeout ti
 		return newest, failed
 	}
 	authors := make([]nostr.PubKey, 0, len(newest))
-	addrs := make([]string, 0, len(newest))
 	for pk := range newest {
 		authors = append(authors, pk)
-		addrs = append(addrs, fmt.Sprintf("%d:%s:%s", wireevent.Kind30078, pk.Hex(), wireevent.CardCategory))
 	}
 	byAuthor := nostr.Filter{Kinds: f.Kinds, Authors: authors,
 		Tags: nostr.TagMap{"d": {wireevent.CardCategory}}, Limit: len(authors)}
-	deletions := nostr.Filter{Kinds: []nostr.Kind{nostr.KindDeletion}, Authors: authors,
-		Tags: nostr.TagMap{"a": addrs}, Limit: MaxFindResults}
-	deletedAt := map[nostr.PubKey]nostr.Timestamp{}
 	for _, url := range relays {
 		if slices.Contains(failed, url) {
 			continue
 		}
 		cards, err := relayquery.FetchWithTimeout(ctx, url, byAuthor, timeout)
-		if err == nil {
-			for _, ev := range cards.Events {
-				keep(ev)
-			}
-		}
-		dels, err2 := relayquery.FetchWithTimeout(ctx, url, deletions, timeout)
-		if err2 == nil {
-			for _, ev := range dels.Events {
-				deletedAt[ev.PubKey] = max(deletedAt[ev.PubKey], ev.CreatedAt)
-			}
-		}
-		if err != nil || err2 != nil {
+		if err != nil {
 			failed = append(failed, url)
+			continue
 		}
-	}
-	for pk, at := range deletedAt {
-		if ev, ok := newest[pk]; ok && at >= ev.CreatedAt {
-			delete(newest, pk)
+		for _, ev := range cards.Events {
+			keep(ev)
 		}
 	}
 	return newest, failed

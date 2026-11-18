@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"fiatjaf.com/nostr"
 	"github.com/stretchr/testify/require"
@@ -14,8 +15,10 @@ import (
 	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/internal/relay"
+	"github.com/iDoris-ai/hyphae/internal/relayquery"
 	"github.com/iDoris-ai/hyphae/internal/social/contact"
 	"github.com/iDoris-ai/hyphae/internal/storage"
+	"github.com/iDoris-ai/hyphae/internal/wireevent"
 )
 
 // publishCard signs a card for a fresh key at the given time and sends it.
@@ -176,12 +179,13 @@ func TestFindStaleRelayCannotUndoHide(t *testing.T) {
 		return ev
 	}
 
-	// erin hid on url (tombstone + deletion, as publishSetting sends); the
+	// erin hid on url (tombstone + earlier-dated deletion, as publishSetting
+	// sends); the
 	// stale relay still has her old card.
 	erin := nostr.Generate()
 	send(erin, url, oldCard(erin, "erin", "友好"))
 	send(erin, stale, oldCard(erin, "erin", "友好"))
-	del := deletion(erin.Public(), now)
+	del := deletion(erin.Public(), now-1)
 	send(erin, url, card.Tombstone(erin.Public(), now), &del)
 
 	// bob dropped 火锅 on url; the stale relay still has it.
@@ -197,4 +201,22 @@ func TestFindStaleRelayCannotUndoHide(t *testing.T) {
 	data, err = run(t, "find", "--as", "alice", "--relay", url, "--relay", stale)
 	require.NoError(t, err)
 	require.Equal(t, []string{"bob"}, names(t, data), "erin is hidden")
+}
+
+// A real hide leaves the tombstone on a relay that honours NIP-09: the
+// deletion is dated before it, so find can see the hide without a separate
+// (pageable) deletion query.
+func TestHideKeepsTombstoneOnRelay(t *testing.T) {
+	url, pk := setup(t)
+	_, err := run(t, "visibility", "public", "--as", "alice", "--relay", url)
+	require.NoError(t, err)
+	_, err = run(t, "visibility", "hidden", "--as", "alice", "--relay", url)
+	require.NoError(t, err)
+	page, err := relayquery.FetchWithTimeout(context.Background(), url, nostr.Filter{
+		Kinds: []nostr.Kind{wireevent.Kind30078}, Authors: []nostr.PubKey{pk},
+		Tags: nostr.TagMap{"d": {wireevent.CardCategory}}}, 5*time.Second)
+	require.NoError(t, err)
+	require.Len(t, page.Events, 1)
+	_, err = card.Parse(&page.Events[0], nostr.Now())
+	require.ErrorIs(t, err, card.ErrHidden)
 }
