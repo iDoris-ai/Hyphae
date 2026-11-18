@@ -103,3 +103,39 @@ func TestSendRefusalPassesOtherErrors(t *testing.T) {
 	require.ErrorIs(t, storage.SendRefusal(boom, "x"), boom)
 	require.NoError(t, storage.SendRefusal(nil, "x"))
 }
+
+// Every spelling of one key is the same peer: hex, upper-case hex or a padded
+// npub cannot get past a block or the per-stranger limit.
+func TestAgentMsgGateCanonicalizesRecipient(t *testing.T) {
+	setupAgentMsgCLI(t)
+	url := startGateRelay(t)
+	sk := nostr.Generate()
+	npub, hex := common.EncodeNpub(sk.Public()), sk.Public().Hex()
+	require.NoError(t, sendTo(t, url, npub))
+	require.NoError(t, sendTo(t, url, hex))
+	for _, to := range []string{strings.ToUpper(hex), " " + npub, hex} {
+		_ = requireCode(t, sendTo(t, url, to), common.ErrCodeStrangerMessageLimit)
+	}
+
+	dave := nostr.Generate().Public()
+	ks, err := identity.LoadKeyStore()
+	require.NoError(t, err)
+	require.NoError(t, InitStorage())
+	_, err = storage.NewRelationStore(storage.DB).Update(ks.Identities["alice"].Npub, common.EncodeNpub(dave), 1,
+		func(p storage.PeerRelation) (storage.PeerRelation, error) {
+			p.Relation = contact.Block(p.Relation)
+			return p, nil
+		})
+	require.NoError(t, err)
+	for _, to := range []string{dave.Hex(), strings.ToUpper(dave.Hex()), " " + common.EncodeNpub(dave)} {
+		_ = requireCode(t, sendTo(t, url, to), common.ErrCodePeerBlocked)
+	}
+
+	// A friend addressed by hex is still a friend (bob is alice's identity).
+	bob := ks.Identities["bob"].Npub
+	bobPK, err := common.ParsePublicKey(bob)
+	require.NoError(t, err)
+	for i := 0; i < 3; i++ {
+		require.NoError(t, sendTo(t, url, bobPK.Hex()))
+	}
+}
