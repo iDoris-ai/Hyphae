@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/iDoris-ai/hyphae/internal/common"
+	"github.com/iDoris-ai/hyphae/internal/social/contact"
 	"github.com/iDoris-ai/hyphae/internal/storage"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 )
@@ -45,4 +46,19 @@ func isFriendNpub(ks *types.KeyStore, npub string) bool {
 		}
 	}
 	return false
+}
+
+// ClassifyIncoming decides how to treat one incoming message from sender to
+// recipient (Show, Request, Suppress or Drop) and counts it once per event ID.
+// Contacts and the recipient's own identities are always shown and never
+// touch the database.
+func ClassifyIncoming(ks *types.KeyStore, recipientNpub, senderNpub, eventID string) (storage.Receipt, error) {
+	if isFriendNpub(ks, senderNpub) {
+		return storage.Receipt{Disposition: contact.Show}, nil
+	}
+	if err := InitStorage(); err != nil {
+		return storage.Receipt{}, err
+	}
+	return storage.NewRelationStore(storage.DB).
+		ClassifyReceive(recipientNpub, senderNpub, eventID, false, time.Now().Unix())
 }

@@ -33,6 +33,14 @@ CREATE TABLE IF NOT EXISTS stranger_initiation (
 	at            INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_stranger_initiation_identity ON stranger_initiation(identity_npub, at);
+CREATE TABLE IF NOT EXISTS receive_disposition (
+	identity_npub TEXT NOT NULL,
+	event_id      TEXT NOT NULL,
+	peer_npub     TEXT NOT NULL,
+	disposition   INTEGER NOT NULL,
+	seq           INTEGER NOT NULL,
+	PRIMARY KEY (identity_npub, event_id)
+);
 `
 
 func migrateRelations(db *sql.DB) error {
@@ -227,31 +235,6 @@ func (s *RelationStore) ReserveSend(identity, peer string, isContact bool, now i
 		}
 	}
 	return d, tx.commit()
-}
-
-// RecordReceive decides how to show one incoming message and counts it. Call
-// it only for an event stored for the first time, so redelivery is not
-// counted twice.
-func (s *RelationStore) RecordReceive(identity, peer string, isContact bool, now int64) (contact.Disposition, error) {
-	tx, err := s.begin()
-	if err != nil {
-		return contact.Drop, err
-	}
-	defer tx.rollback()
-	p, err := load(tx.conn, identity, peer)
-	if err != nil {
-		return contact.Drop, err
-	}
-	rel := effective(p.Relation, isContact)
-	disp := contact.CheckReceive(rel)
-	if rel.State != contact.Stranger {
-		return disp, nil
-	}
-	p.Relation = contact.ApplyReceive(rel)
-	if err := tx.save(identity, p, now); err != nil {
-		return contact.Drop, err
-	}
-	return disp, tx.commit()
 }
 
 // Update applies fn to the stored relation (zero value if none) inside one

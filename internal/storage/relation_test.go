@@ -82,9 +82,9 @@ func TestContactsAreFriendsUnlessBlocked(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, p.Relation.Sent, "friend sends are not counted")
 
-	disp, err := s.RecordReceive("me", "alice", true, relNow)
+	rc, err := s.ClassifyReceive("me", "alice", "e1", true, relNow)
 	require.NoError(t, err)
-	require.Equal(t, contact.Show, disp)
+	require.Equal(t, Receipt{Disposition: contact.Show}, rc)
 
 	// A contact is a friend only through the keystore; nothing is stored, so
 	// removing the contact later makes them a stranger again.
@@ -99,32 +99,55 @@ func TestContactsAreFriendsUnlessBlocked(t *testing.T) {
 	require.NoError(t, err)
 	_, err = s.ReserveSend("me", "alice", true, relNow)
 	require.ErrorIs(t, err, contact.ErrPeerBlocked, "block wins over the contact list")
-	disp, err = s.RecordReceive("me", "alice", true, relNow)
+	rc, err = s.ClassifyReceive("me", "alice", "e2", true, relNow)
 	require.NoError(t, err)
-	require.Equal(t, contact.Drop, disp)
+	require.Equal(t, contact.Drop, rc.Disposition)
 }
 
-func TestRecordReceive(t *testing.T) {
+func TestClassifyReceive(t *testing.T) {
 	s := newRelationStore(t)
 	want := []contact.Disposition{contact.Request, contact.Show, contact.Suppress, contact.Suppress}
 	for i, w := range want {
-		disp, err := s.RecordReceive("me", "carol", false, relNow+int64(i))
+		rc, err := s.ClassifyReceive("me", "carol", fmt.Sprintf("ev%d", i), false, relNow+int64(i))
 		require.NoError(t, err)
-		require.Equal(t, w, disp, "message %d", i+1)
+		require.Equal(t, Receipt{Disposition: w, Stranger: true, Seq: i + 1}, rc, "message %d", i+1)
 	}
+	// Redelivery of the first event returns the stored decision and does not count.
+	rc, err := s.ClassifyReceive("me", "carol", "ev0", false, relNow+9)
+	require.NoError(t, err)
+	require.Equal(t, Receipt{Disposition: contact.Request, Stranger: true, Seq: 1}, rc)
 	p, err := s.Get("me", "carol")
 	require.NoError(t, err)
 	require.Equal(t, 4, p.Relation.Received)
+
+	// The same event ID for another identity is a separate receipt.
+	rc, err = s.ClassifyReceive("other", "carol", "ev0", false, relNow)
+	require.NoError(t, err)
+	require.Equal(t, contact.Request, rc.Disposition)
 
 	// A reply to carol is not an initiation.
 	d, err := s.ReserveSend("me", "carol", false, relNow+10)
 	require.NoError(t, err)
 	require.False(t, d.Initiation)
+
+	// A stored decision outlives a later accept: an old suppressed event stays suppressed.
+	_, err = s.Update("me", "carol", relNow+11, func(p PeerRelation) (PeerRelation, error) {
+		r, err := contact.Accept(p.Relation)
+		p.Relation = r
+		return p, err
+	})
+	require.NoError(t, err)
+	rc, err = s.ClassifyReceive("me", "carol", "ev2", false, relNow+12)
+	require.NoError(t, err)
+	require.Equal(t, contact.Suppress, rc.Disposition)
+	rc, err = s.ClassifyReceive("me", "carol", "ev9", false, relNow+12)
+	require.NoError(t, err)
+	require.Equal(t, Receipt{Disposition: contact.Show}, rc, "new events from a friend are shown")
 }
 
 func TestUpdateAcceptIgnoreAndRollback(t *testing.T) {
 	s := newRelationStore(t)
-	_, err := s.RecordReceive("me", "dave", false, relNow)
+	_, err := s.ClassifyReceive("me", "dave", "d1", false, relNow)
 	require.NoError(t, err)
 
 	p, err := s.Update("me", "dave", relNow+1, func(p PeerRelation) (PeerRelation, error) {
