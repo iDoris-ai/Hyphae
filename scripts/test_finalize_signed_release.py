@@ -127,7 +127,7 @@ class FinalizeTests(unittest.TestCase):
         self.assertEqual(lock["id"], "hyphae")
         self.assertEqual(lock["version"], TAG)
         self.assertEqual(lock["source"], {"repo": "https://github.com/iDoris-ai/Hyphae", "commit": self.commit})
-        self.assertEqual(lock["contract"], {"name": "hyphae-cli", "major": 1, "min_minor": 0, "tested": "1.0"})
+        self.assertEqual(lock["contract"], {"name": "hyphae-cli", "major": 1, "min_minor": 0, "tested": "1.1"})
         self.assertEqual(lock["release_url_base"], "https://github.com/iDoris-ai/Hyphae/releases/download")
         self.assertEqual(lock["assets"], {
             "darwin-arm64": {"name": "hyphae-darwin-arm64", "sha256": signed_sha, "files": ["hyphae"], "executables": ["hyphae"]},
@@ -136,7 +136,7 @@ class FinalizeTests(unittest.TestCase):
         self.assertEqual(lock["reproducible"], {"toolchain": "go1.26.4", "recipe": build.cli_recipe(TAG),
                                                  "unsigned_sha256": {"darwin-arm64": unsigned_cli, "linux-x64": linux_sha}})
         self.assertEqual(lock["stop_grace_ms"], 15000)
-        self.assertEqual(lock["provides"], [{"id": i} for i in ("nostr-dm", "nostr-group", "nostr-identity", "nostr-relay")])
+        self.assertEqual(lock["provides"], [{"id": i} for i in ("nostr-dm", "nostr-friend", "nostr-group", "nostr-identity", "nostr-relay")])
         self.assertEqual(lock["requires"], {"kernel": ["events"], "operations": []})
         self.assertEqual(lock["assurance"], [])
         self.assertNotIn("null", (self.out / "hyphae.lock.json").read_text())
