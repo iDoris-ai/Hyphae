@@ -39,8 +39,8 @@ TEAM_ID = "HYAP444FN9"
 SPCTL_ASSESS_TYPE = "install"
 MACHO_ARM64 = bytes.fromhex("cffaedfe0c000001")
 REPO_URL = "https://github.com/iDoris-ai/Hyphae"
-CONTRACT_TESTED = "1.0"
-PROVIDES = ("nostr-dm", "nostr-group", "nostr-identity", "nostr-relay")
+CONTRACT_TESTED = "1.1"
+PROVIDES = ("nostr-dm", "nostr-friend", "nostr-group", "nostr-identity", "nostr-relay")
 SIGNED_NAMES = ("hyphae-darwin-arm64", "hyphae-relay-darwin-arm64")
 METADATA = ("artifact-manifest.json", "hyphae.lock.json", "SHA256SUMS")
 

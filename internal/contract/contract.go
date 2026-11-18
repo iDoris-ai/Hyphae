@@ -16,10 +16,10 @@ import (
 // semantics of a command, flag, error code or `hyphae contract` output key
 // bumps major; only ADDING a subcommand, flag or error code bumps minor. This is
 // a release policy for maintainers; no code enforces it.
-const ContractVersion = "1.0"
+const ContractVersion = "1.1"
 
 // provides is the capability table; keep sorted.
-var provides = []string{"nostr-dm", "nostr-group", "nostr-identity", "nostr-relay"}
+var provides = []string{"nostr-dm", "nostr-friend", "nostr-group", "nostr-identity", "nostr-relay"}
 
 type commandInfo struct {
 	Path  string   `json:"path"`
