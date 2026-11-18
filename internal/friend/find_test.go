@@ -149,3 +149,52 @@ func TestFindNewestCardAcrossRelays(t *testing.T) {
 	require.Len(t, res, 1)
 	require.Equal(t, []any{"友好", "火锅"}, res[0].(map[string]any)["tags"])
 }
+
+// A relay that missed a hide or a tag change cannot bring the old card back:
+// find looks the author up on every relay without the tag filter, and a
+// deletion request anywhere drops the card.
+func TestFindStaleRelayCannotUndoHide(t *testing.T) {
+	url, _ := setup(t)
+	handler, cleanup, err := relay.New(relay.Config{DataDir: t.TempDir()})
+	require.NoError(t, err)
+	srv := httptest.NewServer(handler)
+	t.Cleanup(func() { srv.Close(); cleanup() })
+	stale := "ws" + strings.TrimPrefix(srv.URL, "http")
+	now := nostr.Now()
+	send := func(sk nostr.SecretKey, relayURL string, evs ...*nostr.Event) {
+		var out []nostr.Event
+		for _, ev := range evs {
+			require.NoError(t, ev.Sign(sk))
+			out = append(out, *ev)
+		}
+		_, ok, _ := publish(context.Background(), []string{relayURL}, out)
+		require.Len(t, ok, 1)
+	}
+	oldCard := func(sk nostr.SecretKey, name string, tags ...string) *nostr.Event {
+		ev, err := card.Card{Name: name, Tags: tags}.Event(sk.Public(), now-100)
+		require.NoError(t, err)
+		return ev
+	}
+
+	// erin hid on url (tombstone + deletion, as publishSetting sends); the
+	// stale relay still has her old card.
+	erin := nostr.Generate()
+	send(erin, url, oldCard(erin, "erin", "友好"))
+	send(erin, stale, oldCard(erin, "erin", "友好"))
+	del := deletion(erin.Public(), now)
+	send(erin, url, card.Tombstone(erin.Public(), now), &del)
+
+	// bob dropped 火锅 on url; the stale relay still has it.
+	bob := nostr.Generate()
+	send(bob, stale, oldCard(bob, "bob", "友好", "火锅"))
+	newer, err := card.Card{Name: "bob", Tags: []string{"友好"}}.Event(bob.Public(), now)
+	require.NoError(t, err)
+	send(bob, url, newer)
+
+	data, err := run(t, "find", "--as", "alice", "--relay", url, "--relay", stale, "--tag", "火锅")
+	require.NoError(t, err)
+	require.Empty(t, names(t, data), "bob's newest card has no 火锅")
+	data, err = run(t, "find", "--as", "alice", "--relay", url, "--relay", stale)
+	require.NoError(t, err)
+	require.Equal(t, []string{"bob"}, names(t, data), "erin is hidden")
+}
