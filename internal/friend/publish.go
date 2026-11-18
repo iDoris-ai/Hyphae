@@ -17,34 +17,39 @@ type relayResult struct {
 // publishTimeout bounds the whole exchange with one relay, connect included.
 var publishTimeout = 5 * time.Second
 
-// publish sends every event to every relay and returns the per-relay results
-// and the relays that accepted all events.
-func publish(ctx context.Context, relays []string, events []nostr.Event) ([]relayResult, []string) {
+// publish sends every event to every relay and returns the per-relay results,
+// the relays that accepted all events, and whether any relay accepted any
+// event (then a later publish must not reuse this created_at).
+func publish(ctx context.Context, relays []string, events []nostr.Event) ([]relayResult, []string, bool) {
 	results := make([]relayResult, 0, len(relays))
 	var ok []string
+	touched := false
 	for _, url := range relays {
-		if err := publishToRelay(ctx, url, events); err != nil {
+		n, err := publishToRelay(ctx, url, events)
+		touched = touched || n > 0
+		if err != nil {
 			results = append(results, relayResult{URL: url, Error: err.Error()})
 			continue
 		}
 		results = append(results, relayResult{URL: url, OK: true})
 		ok = append(ok, url)
 	}
-	return results, ok
+	return results, ok, touched
 }
 
-func publishToRelay(ctx context.Context, url string, events []nostr.Event) error {
+// publishToRelay returns how many events the relay accepted before any error.
+func publishToRelay(ctx context.Context, url string, events []nostr.Event) (int, error) {
 	ctx, cancel := context.WithTimeout(ctx, publishTimeout)
 	defer cancel()
 	relay, err := nostr.RelayConnect(ctx, url, nostr.RelayOptions{})
 	if err != nil {
-		return fmt.Errorf("connect failed: %w", err)
+		return 0, fmt.Errorf("connect failed: %w", err)
 	}
 	defer func() { _ = relay.Close() }()
-	for _, ev := range events {
+	for i, ev := range events {
 		if err := relay.Publish(ctx, ev); err != nil {
-			return fmt.Errorf("publish failed: %w", err)
+			return i, fmt.Errorf("publish failed: %w", err)
 		}
 	}
-	return nil
+	return len(events), nil
 }
