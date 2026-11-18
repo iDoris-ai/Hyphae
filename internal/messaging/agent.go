@@ -289,6 +289,10 @@ Example: hyphae agent msg --from alice --to bob --content "Hello!"`,
 		if err != nil {
 			return err
 		}
+		// Last step before queueing, so a refused or failed build spends no quota.
+		if err := ReserveStrangerSend(ks, sender.Npub, recipientNpub); err != nil {
+			return err
+		}
 		result, sendErr := sendQueuedAgentMessage(ctx, event, recipientNpub, content, sender.Nickname, to, isEncrypted, relays, 5*time.Second, StoreOutgoingMessage, enqueueOutboxEntry, publishAgentMessageRelays)
 		if !jsonMode {
 			printAgentMessageRelays(result.Relays)
