@@ -137,10 +137,6 @@ func TestInvalidTagAndBadArg(t *testing.T) {
 	require.True(t, errors.As(err, &ee))
 	require.Equal(t, common.ErrCodeInvalidTag, ee.Code)
 
-	_, err = run(t, "visibility", "--as", "alice")
-	require.True(t, errors.As(err, &ee))
-	require.Equal(t, common.ErrCodeUser, ee.Code)
-
 	_, err = run(t, "visibility", "maybe", "--as", "alice")
 	require.True(t, errors.As(err, &ee))
 	require.Equal(t, common.ErrCodeUser, ee.Code)
@@ -374,4 +370,27 @@ func TestTagsRejectsInvalid(t *testing.T) {
 		require.True(t, errors.As(err, &ee), "err = %v", err)
 		require.Equal(t, common.ErrCodeInvalidTag, ee.Code)
 	}
+}
+
+func TestVisibilityShow(t *testing.T) {
+	url, _ := setup(t)
+	data, err := run(t, "visibility", "--as", "alice")
+	require.NoError(t, err)
+	require.Equal(t, "public", data["visibility"], "public by default")
+	require.Equal(t, "alice", data["name"])
+	require.Equal(t, []any{card.DefaultTag}, data["tags"])
+	require.Equal(t, false, data["published"], "nothing published yet")
+
+	_, err = run(t, "visibility", "public", "--as", "alice", "--relay", url)
+	require.NoError(t, err)
+	data, err = run(t, "visibility", "--as", "alice")
+	require.NoError(t, err)
+	require.Equal(t, true, data["published"])
+
+	_, err = run(t, "visibility", "hidden", "--as", "alice", "--relay", url)
+	require.NoError(t, err)
+	data, err = run(t, "visibility", "--as", "alice")
+	require.NoError(t, err)
+	require.Equal(t, "hidden", data["visibility"])
+	require.Equal(t, false, data["published"])
 }

@@ -30,7 +30,7 @@ func NewCmd() *cli.Command {
 	return &cli.Command{
 		Name:     "friend",
 		Usage:    "Find people on your relay and manage strangers and friends",
-		Commands: []*cli.Command{visibilityCmd(), tagsCmd()},
+		Commands: []*cli.Command{visibilityCmd(), tagsCmd(), findCmd()},
 	}
 }
 
@@ -45,8 +45,8 @@ func commonFlags() []cli.Flag {
 func visibilityCmd() *cli.Command {
 	return &cli.Command{
 		Name:      "visibility",
-		Usage:     "Set whether others can find you: public (default) or hidden",
-		ArgsUsage: "public|hidden",
+		Usage:     "Show or set whether others can find you: public (default) or hidden",
+		ArgsUsage: "[public|hidden]",
 		Flags: append(commonFlags(),
 			&cli.StringFlag{Name: "name", Usage: "Name on your card (default: your nickname)"},
 			&cli.StringSliceFlag{Name: "tags", Usage: "Tags on your card, comma-separated (default: " + card.DefaultTag + ")"},
@@ -54,6 +54,8 @@ func visibilityCmd() *cli.Command {
 		),
 		Action: func(ctx context.Context, c *cli.Command) error {
 			switch arg := c.Args().First(); arg {
+			case "":
+				return show(c)
 			case "public", "hidden":
 				return apply(ctx, c, false, func(s *storage.CardSetting) error {
 					s.Visible = arg == "public"
@@ -125,6 +127,43 @@ type cardView struct {
 func view(s storage.CardSetting) cardView {
 	vis := map[bool]string{true: "public", false: "hidden"}[s.Visible]
 	return cardView{Visibility: vis, Name: s.Name, Tags: s.Tags, About: s.About, ExpiresAt: s.ExpiresAt}
+}
+
+// show prints the current setting without publishing anything.
+func show(c *cli.Command) error {
+	jsonMode := common.JSONMode(c)
+	ks, err := identity.LoadKeyStoreForCommand(identity.KeyStoreCommandOptions{JSONMode: jsonMode, Stdin: os.Stdin})
+	if err != nil {
+		return err
+	}
+	me, err := identity.GetIdentity(ks, c.String("as"))
+	if err != nil {
+		return err
+	}
+	db, err := storage.OpenDB()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+	s, err := storage.LoadCardSetting(db, me.Npub)
+	if err != nil {
+		return err
+	}
+	s = withDefaults(s, me.Nickname)
+	out := struct {
+		cardView
+		Published bool `json:"published"`
+	}{view(s), s.Visible && s.ExpiresAt > time.Now().Unix()}
+	common.Emit(jsonMode, out, func() {
+		fmt.Printf("Visibility: %s, name %s, tags %v\n", out.Visibility, out.Name, out.Tags)
+		switch {
+		case out.Published:
+			fmt.Printf("Card live until %s.\n", time.Unix(s.ExpiresAt, 0).Format(time.DateTime))
+		case s.Visible:
+			fmt.Printf("Public but no live card yet: run `hyphae friend visibility public --as %s`.\n", me.Nickname)
+		}
+	})
+	return nil
 }
 
 // apply loads the setting, lets mutate change it, publishes the card (or the
@@ -219,7 +258,10 @@ func publishSetting(ctx context.Context, jsonMode bool, db *sql.DB, npub string,
 	} else {
 		// Hide everywhere the card ever went, not only on today's relays.
 		targets = union(s.Relays, relays)
-		events = append(events, *card.Tombstone(sk.Public(), now), deletion(sk.Public(), now))
+		// The deletion is dated one second before the tombstone: a NIP-09 `a`
+		// deletion removes versions up to its created_at, so the old card goes
+		// and the tombstone stays, and find sees the hide on every relay.
+		events = append(events, *card.Tombstone(sk.Public(), now), deletion(sk.Public(), now-1))
 	}
 	for i := range events {
 		if err := events[i].Sign(sk); err != nil {
