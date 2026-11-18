@@ -237,78 +237,32 @@ func apply(ctx context.Context, c *cli.Command, onlyIfPublic bool, mutate func(*
 
 func publishSetting(ctx context.Context, jsonMode bool, db *sql.DB, npub string, sk nostr.SecretKey,
 	relays []string, s storage.CardSetting) error {
-	// A replacement must be strictly newer: relays keep the lower event ID on
-	// a created_at tie, so a toggle within the same second would be lost.
-	now := max(nostr.Now(), nostr.Timestamp(s.PublishedAt+1))
-	if s.Visible && int64(now) > int64(nostr.Now())+card.MaxClockSkew {
-		// Readers reject a card dated this far ahead; a hide still goes out.
-		return common.NewExitError(common.ErrCodeUser, fmt.Errorf(
-			"your last card is dated %s, ahead of this computer's clock; check the clock and retry after that time",
-			time.Unix(s.PublishedAt, 0).Format(time.DateTime)))
-	}
-
-	var events []nostr.Event
-	targets := relays
-	if s.Visible {
-		ev, err := card.Card{Name: s.Name, Tags: s.Tags, About: s.About}.Event(sk.Public(), now)
-		if err != nil {
-			return common.NewExitError(common.ErrCodeUser, err)
-		}
-		events = append(events, *ev)
-	} else {
-		// Hide everywhere the card ever went, not only on today's relays.
-		targets = union(s.Relays, relays)
-		// The deletion is dated one second before the tombstone: a NIP-09 `a`
-		// deletion removes versions up to its created_at, so the old card goes
-		// and the tombstone stays, and find sees the hide on every relay.
-		events = append(events, *card.Tombstone(sk.Public(), now), deletion(sk.Public(), now-1))
-	}
-	for i := range events {
-		if err := events[i].Sign(sk); err != nil {
-			return fmt.Errorf("sign: %w", err)
-		}
-	}
-	results, okURLs, touched := publish(ctx, targets, events)
-	ok := len(okURLs)
-	if touched {
-		// Some relay holds an event at now, so the next one must be newer.
-		s.PublishedAt = max(s.PublishedAt, int64(now))
-	}
-	var missed []string // relays that still hold the visible card
-	if s.Visible && ok > 0 {
-		s.ExpiresAt = int64(now) + card.Lifetime
-		s.Relays = union(s.Relays, okURLs)
-	} else if !s.Visible {
-		for _, url := range s.Relays {
-			if !slices.Contains(okURLs, url) {
-				missed = append(missed, url)
-			}
-		}
-		if (len(missed) == 0 && ok > 0) || s.ExpiresAt <= int64(nostr.Now()) {
-			// ExpiresAt > 0 while hidden marks an unfinished hide (the daemon
-			// resends it); an expired card needs no hide.
-			s.ExpiresAt = 0
-		}
-	}
-	if err := storage.SaveCardSetting(db, npub, s); err != nil {
+	s, o, err := publishAndSave(ctx, db, npub, sk, relays, s)
+	if err != nil {
 		return err
+	}
+	ok := 0
+	for _, r := range o.results {
+		if r.OK {
+			ok++
+		}
 	}
 	out := struct {
 		cardView
 		Relays      []relayResult `json:"relays"`
 		PublishedTo int           `json:"published_to"`
-	}{view(s), results, ok}
+	}{view(s), o.results, ok}
 	if !s.Visible && s.ExpiresAt > 0 {
 		return common.NewExitErrorWithData(common.ErrCodeNetwork, fmt.Errorf(
 			"%d relay(s) holding your card did not accept the hide (%v); the card stays findable there until %s unless you retry",
-			len(missed), missed, time.Unix(s.ExpiresAt, 0).Format(time.DateTime)), out)
+			len(o.missed), o.missed, time.Unix(s.ExpiresAt, 0).Format(time.DateTime)), out)
 	}
 	if ok == 0 {
 		return common.NewExitErrorWithData(common.ErrCodeNetwork, errors.New("no relay accepted the card"), out)
 	}
 	common.Emit(jsonMode, out, func() {
 		fmt.Printf("Visibility: %s, name %s, tags %v; sent to %d/%d relays.\n",
-			out.Visibility, out.Name, out.Tags, ok, len(targets))
+			out.Visibility, out.Name, out.Tags, ok, len(o.targets))
 		if s.Visible {
 			fmt.Printf("Card expires %s unless republished (the daemon does this while running).\n",
 				time.Unix(s.ExpiresAt, 0).Format(time.DateTime))
@@ -317,6 +271,75 @@ func publishSetting(ctx context.Context, jsonMode bool, db *sql.DB, npub string,
 		}
 	})
 	return nil
+}
+
+// publishOutcome is what one publishAndSave sent: the per-relay results, the
+// relays it targeted, and for a hide the card relays that did not take it.
+type publishOutcome struct {
+	results []relayResult
+	targets []string
+	missed  []string
+}
+
+// publishAndSave publishes s (the card, or the tombstone when hidden) and
+// saves the outcome. The caller holds the card lock.
+func publishAndSave(ctx context.Context, db *sql.DB, npub string, sk nostr.SecretKey,
+	relays []string, s storage.CardSetting) (storage.CardSetting, publishOutcome, error) {
+	var o publishOutcome
+	// A replacement must be strictly newer: relays keep the lower event ID on
+	// a created_at tie, so a toggle within the same second would be lost.
+	now := max(nostr.Now(), nostr.Timestamp(s.PublishedAt+1))
+	if s.Visible && int64(now) > int64(nostr.Now())+card.MaxClockSkew {
+		// Readers reject a card dated this far ahead; a hide still goes out.
+		return s, o, common.NewExitError(common.ErrCodeUser, fmt.Errorf(
+			"your last card is dated %s, ahead of this computer's clock; check the clock and retry after that time",
+			time.Unix(s.PublishedAt, 0).Format(time.DateTime)))
+	}
+
+	var events []nostr.Event
+	o.targets = relays
+	if s.Visible {
+		ev, err := card.Card{Name: s.Name, Tags: s.Tags, About: s.About}.Event(sk.Public(), now)
+		if err != nil {
+			return s, o, common.NewExitError(common.ErrCodeUser, err)
+		}
+		events = append(events, *ev)
+	} else {
+		// Hide everywhere the card ever went, not only on today's relays.
+		o.targets = union(s.Relays, relays)
+		// The deletion is dated one second before the tombstone: a NIP-09 `a`
+		// deletion removes versions up to its created_at, so the old card goes
+		// and the tombstone stays, and find sees the hide on every relay.
+		events = append(events, *card.Tombstone(sk.Public(), now), deletion(sk.Public(), now-1))
+	}
+	for i := range events {
+		if err := events[i].Sign(sk); err != nil {
+			return s, o, fmt.Errorf("sign: %w", err)
+		}
+	}
+	results, okURLs, touched := publish(ctx, o.targets, events)
+	o.results = results
+	ok := len(okURLs)
+	if touched {
+		// Some relay holds an event at now, so the next one must be newer.
+		s.PublishedAt = max(s.PublishedAt, int64(now))
+	}
+	if s.Visible && ok > 0 {
+		s.ExpiresAt = int64(now) + card.Lifetime
+		s.Relays = union(s.Relays, okURLs)
+	} else if !s.Visible {
+		for _, url := range s.Relays {
+			if !slices.Contains(okURLs, url) {
+				o.missed = append(o.missed, url)
+			}
+		}
+		if (len(o.missed) == 0 && ok > 0) || s.ExpiresAt <= int64(nostr.Now()) {
+			// ExpiresAt > 0 while hidden marks an unfinished hide (the daemon
+			// resends it); an expired card needs no hide.
+			s.ExpiresAt = 0
+		}
+	}
+	return s, o, storage.SaveCardSetting(db, npub, s)
 }
 
 // deletion is the NIP-09 request for the card's address; relays that honour

@@ -154,6 +154,11 @@ func queryRelayEventIDs(t *testing.T, relayURL string) map[string]struct{} {
 			if !event.VerifySignature() {
 				t.Fatalf("relay returned invalid signature for event %s", event.ID.Hex())
 			}
+			// The daemon publishes each identity's directory card (same kind);
+			// it is not a message, so leave it out of the message count.
+			if d := event.Tags.Find("d"); d != nil && d[1] == "hyphae-card" {
+				continue
+			}
 			eventIDs[event.ID.Hex()] = struct{}{}
 		}
 	}
