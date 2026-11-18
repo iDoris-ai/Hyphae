@@ -2,7 +2,9 @@ package messaging
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -138,4 +140,85 @@ func TestAgentMsgGateCanonicalizesRecipient(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		require.NoError(t, sendTo(t, url, bobPK.Hex()))
 	}
+}
+
+func TestAgentInboxAppliesStrangerRules(t *testing.T) {
+	_, recipientPK := setupAgentInbox(t)
+	stranger, friend := nostr.Generate(), nostr.Generate()
+	ks, err := identity.LoadKeyStore()
+	require.NoError(t, err)
+	require.NoError(t, identity.AddContact(ks, "friend", common.EncodeNpub(friend.Public())))
+	now := nostr.Now()
+	events := []nostr.Event{
+		makeInboxEvent(t, recipientPK, stranger, now-3, "s1", nil),
+		makeInboxEvent(t, recipientPK, stranger, now-2, "s2", nil),
+		makeInboxEvent(t, recipientPK, stranger, now-1, "s3", nil),
+		makeInboxEvent(t, recipientPK, friend, now, "f1", nil),
+	}
+	url := startInboxRelay(t, inboxRelayPlan{events: events})
+	list := func() []agentInboxEntry {
+		out := captureStdout(t, func() {
+			require.NoError(t, runAgentInboxCLI(context.Background(), []string{"--json", "--as", "alice", "--limit", "10", "--relay", url}))
+		})
+		var resp struct {
+			Data []agentInboxEntry `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(out), &resp))
+		return resp.Data
+	}
+	first := list()
+	require.Len(t, first, 3, "two stranger messages and the friend's; the third stranger message is held back")
+	seqs := map[int]bool{}
+	for _, e := range first {
+		if e.Content == "f1" {
+			require.Equal(t, "friend", e.Relation)
+			require.Zero(t, e.StrangerSeq)
+			continue
+		}
+		require.Equal(t, "stranger", e.Relation)
+		seqs[e.StrangerSeq] = true
+	}
+	require.Equal(t, map[int]bool{1: true, 2: true}, seqs)
+	require.Equal(t, first, list(), "re-fetching does not count the same events again")
+}
+
+func TestStrangerFilteredEmit(t *testing.T) {
+	setupAgentMsgCLI(t)
+	ks, err := identity.LoadKeyStore()
+	require.NoError(t, err)
+	var got []AgentInboxWatchUpdate
+	emit := strangerFilteredEmit(ks, ks.Identities["alice"].Npub, func(u AgentInboxWatchUpdate) { got = append(got, u) })
+	sender := strangerNpub()
+	for i := 0; i < 3; i++ {
+		emit(AgentInboxWatchUpdate{Message: &ReceivedAgentMessage{EventID: fmt.Sprintf("%064x", i), SenderNpub: sender}})
+	}
+	emit(AgentInboxWatchUpdate{RelayURL: "ws://x"}) // non-message updates pass through
+	require.Len(t, got, 3)
+	require.Equal(t, 1, got[0].Message.StrangerSeq)
+	require.Equal(t, 2, got[1].Message.StrangerSeq)
+	require.Nil(t, got[2].Message)
+}
+
+// When the stranger check fails, agent inbox lists the sender as a stranger,
+// never as a friend.
+func TestAgentInboxClassifyErrorFailsClosed(t *testing.T) {
+	_, recipientPK := setupAgentInbox(t)
+	stranger := nostr.Generate()
+	url := startInboxRelay(t, inboxRelayPlan{events: []nostr.Event{
+		makeInboxEvent(t, recipientPK, stranger, nostr.Now(), "s1", nil),
+	}})
+	require.NoError(t, InitStorage())
+	_, err := storage.DB.Exec(`CREATE TRIGGER fail_receipt BEFORE INSERT ON receive_disposition
+		BEGIN SELECT RAISE(ABORT, 'injected'); END`)
+	require.NoError(t, err)
+	var runErr error
+	captureStdout(t, func() {
+		runErr = runAgentInboxCLI(context.Background(), []string{"--json", "--as", "alice", "--limit", "10", "--relay", url})
+	})
+	var ee *common.ExitError
+	require.True(t, errors.As(runErr, &ee), "err = %v", runErr)
+	entries, ok := ee.Data.([]agentInboxEntry)
+	require.True(t, ok, "data = %#v", ee.Data)
+	require.Len(t, entries, 1)
+	require.Equal(t, "stranger", entries[0].Relation)
 }

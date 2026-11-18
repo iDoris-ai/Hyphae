@@ -141,6 +141,8 @@ func runWatchOneRelayAutoReplyLifecycle(t *testing.T, cancelParent bool) {
 	recipientSK, err := identity.GetSecretKey(ks, "alice")
 	require.NoError(t, err)
 	senderSK := nostr.Generate()
+	// Auto-reply only answers friends (docs/search/discover-friends.md).
+	ks.Contacts["sender"] = &types.Contact{Nickname: "sender", Npub: common.EncodeNpub(senderSK.Public())}
 	compressed, err := messaging.CompressText("please reply")
 	require.NoError(t, err)
 	incoming := &nostr.Event{
