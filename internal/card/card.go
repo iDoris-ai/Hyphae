@@ -43,18 +43,26 @@ type Card struct {
 	About string
 }
 
-var folder = cases.Fold()
+// MaxClockSkew is how far in the future a card's created_at may be.
+const MaxClockSkew = 10 * 60
+
+// canonical is stable only for the Unicode tables of the Go build that runs
+// it: a tag accepted by one build can fail Validate on a build with newer
+// tables. Peers on mixed Go versions are expected to be rare.
+func canonical(s string) string {
+	// Folding can produce a form that is no longer NFKC; normalize again.
+	return norm.NFKC.String(cases.Fold().String(norm.NFKC.String(s)))
+}
 
 // NormalizeTag returns the canonical form of one tag: trimmed, NFKC, case
-// folded. It rejects empty or over-long tags and tags containing whitespace,
-// commas, '#', control characters or invalid UTF-8.
+// folded. It rejects empty or over-long tags, tags containing whitespace,
+// commas, '#', control or format characters or invalid UTF-8, and tags whose
+// canonical form is not stable (folding Cherokee flips case each time).
 func NormalizeTag(raw string) (string, error) {
 	if !utf8.ValidString(raw) {
 		return "", errors.New("tag is not valid UTF-8")
 	}
-	t := folder.String(norm.NFKC.String(strings.TrimSpace(raw)))
-	// Folding can produce a form that is no longer NFKC; normalize again.
-	t = norm.NFKC.String(t)
+	t := canonical(strings.TrimSpace(raw))
 	if t == "" {
 		return "", errors.New("tag is empty")
 	}
@@ -62,9 +70,13 @@ func NormalizeTag(raw string) (string, error) {
 		return "", fmt.Errorf("tag has %d characters, limit %d", n, MaxTagRunes)
 	}
 	for _, r := range t {
-		if unicode.IsSpace(r) || unicode.IsControl(r) || r == ',' || r == '#' || r == utf8.RuneError {
+		if unicode.IsSpace(r) || unicode.IsControl(r) || unicode.Is(unicode.Cf, r) ||
+			r == ',' || r == '#' || r == utf8.RuneError {
 			return "", fmt.Errorf("tag contains %q", r)
 		}
+	}
+	if canonical(t) != t {
+		return "", errors.New("tag has no stable canonical form")
 	}
 	return t, nil
 }
@@ -120,12 +132,32 @@ func checkText(field, s string, minRunes, maxRunes int) error {
 	if n < minRunes || n > maxRunes {
 		return fmt.Errorf("%s has %d characters, want %d..%d", field, n, minRunes, maxRunes)
 	}
-	for _, r := range s {
-		if unicode.IsControl(r) {
-			return fmt.Errorf("%s contains a control character", field)
+	runes := []rune(s)
+	visible := false
+	for i, r := range runes {
+		if unicode.In(r, unicode.L, unicode.N, unicode.S, unicode.P) {
+			visible = true
+		}
+		// Format characters hide or reverse text; only ZWJ between emoji is
+		// allowed. Scripts that need ZWNJ or bidi marks are not supported.
+		if unicode.IsControl(r) || (unicode.Is(unicode.Cf, r) && !emojiJoiner(runes, i)) {
+			return fmt.Errorf("%s contains a control or format character", field)
 		}
 	}
+	if n > 0 && !visible {
+		return fmt.Errorf("%s has no visible character", field)
+	}
 	return nil
+}
+
+// emojiJoiner reports whether runes[i] is a ZWJ between two emoji.
+func emojiJoiner(runes []rune, i int) bool {
+	if runes[i] != '\u200d' || i == 0 || i == len(runes)-1 {
+		return false
+	}
+	prev := runes[i-1]
+	return (unicode.Is(unicode.So, prev) || prev == '\ufe0f' || (prev >= 0x1f3fb && prev <= 0x1f3ff)) &&
+		unicode.Is(unicode.So, runes[i+1])
 }
 
 type body struct {
@@ -192,7 +224,14 @@ func Parse(ev *nostr.Event, now nostr.Timestamp) (Card, error) {
 	if exp <= int64(now) {
 		return Card{}, errors.New("card has expired")
 	}
-	if exp-int64(ev.CreatedAt) > Lifetime {
+	// A future-dated card would outrank the author's later tombstone, so
+	// hiding would not work; bound both ends by the reader's clock.
+	if int64(ev.CreatedAt) > int64(now)+MaxClockSkew {
+		return Card{}, errors.New("card is dated in the future")
+	}
+	// A comparison, not exp-created_at: a negative created_at must not
+	// overflow past the bound.
+	if int64(ev.CreatedAt) < exp-Lifetime {
 		return Card{}, errors.New("card lifetime exceeds limit")
 	}
 	var b body

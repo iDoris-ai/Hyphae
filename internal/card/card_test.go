@@ -31,10 +31,26 @@ func TestNormalizeTag(t *testing.T) {
 			t.Errorf("NormalizeTag(%q) = %q, %v; want %q", in, got, err, want)
 		}
 	}
-	bad := []string{"", "   ", "a b", "a,b", "#tag", "a\tb", "a\x00", "\xff", strings.Repeat("好", MaxTagRunes+1), "a　b"}
+	bad := []string{"", "   ", "a b", "a,b", "#tag", "a\tb", "a\x00", "\xff", strings.Repeat("好", MaxTagRunes+1), "a　b",
+		"Ꭰ", "ꭰ", // Cherokee folds back and forth, so it has no stable form
+		"a\u200bb", "a\u202eb", "a\u00adb", "a\ufeffb", "a\u200db"} // format characters
 	for _, in := range bad {
 		if got, err := NormalizeTag(in); err == nil {
 			t.Errorf("NormalizeTag(%q) = %q, want error", in, got)
+		}
+	}
+}
+
+// Every tag NormalizeTag accepts is a fixed point, so Card.Event never rejects
+// a tag the CLI accepted.
+func TestNormalizeTagIdempotent(t *testing.T) {
+	for r := rune(1); r <= 0x2FFFF; r++ {
+		got, err := NormalizeTag(string(r))
+		if err != nil {
+			continue
+		}
+		if again, err := NormalizeTag(got); err != nil || again != got {
+			t.Fatalf("U+%04X: %q -> %q, %v", r, got, again, err)
 		}
 	}
 }
@@ -68,12 +84,33 @@ func TestValidate(t *testing.T) {
 	if err := good.Validate(); err != nil {
 		t.Fatal(err)
 	}
+	family := Card{Name: "\U0001F468\u200d\U0001F469\u200d\U0001F467", Tags: []string{DefaultTag}}
+	if err := family.Validate(); err != nil {
+		t.Fatalf("emoji joined by ZWJ: %v", err)
+	}
+	for _, name := range []string{
+		"\U0001F3F3\ufe0f\u200d\U0001F308",     // rainbow flag: selector then ZWJ
+		"\U0001F469\U0001F3FD\u200d\U0001F4BB", // skin tone then ZWJ
+	} {
+		if err := (Card{Name: name, Tags: []string{DefaultTag}}).Validate(); err != nil {
+			t.Errorf("Validate(%q): %v", name, err)
+		}
+	}
 	bad := []Card{
+		{Name: "\u200d", Tags: []string{DefaultTag}},           // ZWJ alone
+		{Name: "Al\u200dice", Tags: []string{DefaultTag}},      // ZWJ hidden in Latin
+		{Name: "\U0001F468\u200d", Tags: []string{DefaultTag}}, // trailing ZWJ
+		{Name: "Al\u200cice", Tags: []string{DefaultTag}},      // ZWNJ in Latin
+		{Name: "ab\u200e", Tags: []string{DefaultTag}},         // LRM, no RTL text
+		{Name: "\u0301", Tags: []string{DefaultTag}},           // nothing visible
+		{Name: "小王", Tags: []string{DefaultTag}, About: "\u0301"},
 		{Name: "", Tags: []string{DefaultTag}},
 		{Name: " 小王", Tags: []string{DefaultTag}},
 		{Name: strings.Repeat("名", MaxNameRunes+1), Tags: []string{DefaultTag}},
 		{Name: "a\nb", Tags: []string{DefaultTag}},
 		{Name: "\xff", Tags: []string{DefaultTag}},
+		{Name: "a\u202eb", Tags: []string{DefaultTag}},
+		{Name: "小王", Tags: []string{DefaultTag}, About: "a\u200bb"},
 		{Name: "小王"},
 		{Name: "小王", Tags: []string{"Hotpot"}},           // not normalized
 		{Name: "小王", Tags: []string{"hotpot", "hotpot"}}, // duplicate
@@ -169,6 +206,10 @@ func TestParseRejects(t *testing.T) {
 		"lifetime too long": func(ev *nostr.Event) {
 			setTag(ev, "expiration", strconv.FormatInt(int64(now)+Lifetime+1, 10))
 		},
+		"negative created_at": func(ev *nostr.Event) {
+			ev.CreatedAt = -1
+			setTag(ev, "expiration", "9223372036854775807")
+		},
 		"missing t tag":    func(ev *nostr.Event) { setTag(ev, "t", "友好") },
 		"extra t tag":      func(ev *nostr.Event) { setTag(ev, "t", "友好", "火锅", "夜宵") },
 		"t tags reordered": func(ev *nostr.Event) { setTag(ev, "t", "火锅", "友好") },
@@ -192,6 +233,26 @@ func TestParseRejects(t *testing.T) {
 	}
 	if _, err := Parse(nil, now); err == nil {
 		t.Error("nil event accepted")
+	}
+}
+
+// A card dated in the future would outrank its author's later tombstone.
+func TestParseFutureDated(t *testing.T) {
+	c := Card{Name: "小王", Tags: []string{DefaultTag}}
+	ev, err := c.Event(pk, now+MaxClockSkew)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Parse(ev, now); err != nil {
+		t.Fatalf("within clock skew: %v", err)
+	}
+	ev, _ = c.Event(pk, now+MaxClockSkew+1)
+	if _, err := Parse(ev, now); err == nil {
+		t.Fatal("card beyond clock skew accepted")
+	}
+	ev, _ = c.Event(pk, 4_102_444_800) // year 2100
+	if _, err := Parse(ev, now); err == nil {
+		t.Fatal("year-2100 card accepted")
 	}
 }
 
