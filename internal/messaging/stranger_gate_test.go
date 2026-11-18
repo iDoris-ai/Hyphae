@@ -198,3 +198,27 @@ func TestStrangerFilteredEmit(t *testing.T) {
 	require.Equal(t, 2, got[1].Message.StrangerSeq)
 	require.Nil(t, got[2].Message)
 }
+
+// When the stranger check fails, agent inbox lists the sender as a stranger,
+// never as a friend.
+func TestAgentInboxClassifyErrorFailsClosed(t *testing.T) {
+	_, recipientPK := setupAgentInbox(t)
+	stranger := nostr.Generate()
+	url := startInboxRelay(t, inboxRelayPlan{events: []nostr.Event{
+		makeInboxEvent(t, recipientPK, stranger, nostr.Now(), "s1", nil),
+	}})
+	require.NoError(t, InitStorage())
+	_, err := storage.DB.Exec(`CREATE TRIGGER fail_receipt BEFORE INSERT ON receive_disposition
+		BEGIN SELECT RAISE(ABORT, 'injected'); END`)
+	require.NoError(t, err)
+	var runErr error
+	captureStdout(t, func() {
+		runErr = runAgentInboxCLI(context.Background(), []string{"--json", "--as", "alice", "--limit", "10", "--relay", url})
+	})
+	var ee *common.ExitError
+	require.True(t, errors.As(runErr, &ee), "err = %v", runErr)
+	entries, ok := ee.Data.([]agentInboxEntry)
+	require.True(t, ok, "data = %#v", ee.Data)
+	require.Len(t, entries, 1)
+	require.Equal(t, "stranger", entries[0].Relation)
+}

@@ -612,6 +612,8 @@ var AgentInboxCmd = &cli.Command{
 			receipt, err := ClassifyIncoming(ks, recipient.Npub, senderNpub, evt.ID.Hex())
 			if err != nil {
 				eventErrors = append(eventErrors, fmt.Sprintf("event %s: stranger check: %v", evt.ID.Hex(), err))
+				// Fail closed, as the daemon does: unclassified means stranger.
+				receipt.Stranger, receipt.Seq = true, 0
 			} else if receipt.Disposition == contact.Suppress || receipt.Disposition == contact.Drop {
 				continue // stored for the record, not listed
 			}
