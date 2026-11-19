@@ -34,3 +34,21 @@ func TestBlockDropsEarlierReceipts(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, contact.Request, r.Disposition, "the stored receipt comes back after unblock")
 }
+
+// PreviewSends counts each would-be initiation against the next, and records
+// nothing.
+func TestPreviewSendsBatch(t *testing.T) {
+	s := newRelationStore(t)
+	for i := 0; i < contact.DailyLimit-1; i++ {
+		_, err := s.ReserveSend("me", "old"+string(rune('a'+i)), false, relNow)
+		require.NoError(t, err)
+	}
+	none := func(string) bool { return false }
+	require.NoError(t, s.PreviewSends("me", []string{"p1"}, none, relNow))
+	err := s.PreviewSends("me", []string{"p1", "p2"}, none, relNow)
+	require.Error(t, err, "the second new stranger would exceed the daily limit")
+	q, err := s.Quota("me", relNow)
+	require.NoError(t, err)
+	require.Equal(t, contact.DailyLimit-1, q.Used, "previewing records nothing")
+	require.NoError(t, s.PreviewSends("me", []string{"olda", "p1"}, none, relNow), "a known stranger is not a new initiation")
+}

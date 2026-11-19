@@ -329,3 +329,37 @@ func SentAt(db *sql.DB, identity, peer, eventID string) (int64, bool, error) {
 	}
 	return at, true, nil
 }
+
+// PreviewSends checks one new message from identity to each peer without
+// recording anything: the same rules ReserveSend applies, with each would-be
+// initiation counted against the ones after it. A caller about to reserve a
+// batch (group invites) uses it so a refusal part-way spends no quota.
+func (s *RelationStore) PreviewSends(identity string, peers []string, isContact func(string) bool, now int64) error {
+	tx, err := s.begin()
+	if err != nil {
+		return err
+	}
+	defer tx.rollback()
+	inits, err := tx.initiations(identity, now)
+	if err != nil {
+		return err
+	}
+	for _, peer := range peers {
+		p, err := load(tx.conn, identity, peer)
+		if err != nil {
+			return err
+		}
+		rel := effective(p.Relation, isContact(peer))
+		if rel.State == contact.Friend {
+			continue
+		}
+		d, err := contact.CheckSend(rel, inits, now)
+		if err != nil {
+			return SendRefusal(err, peer)
+		}
+		if d.Initiation {
+			inits = append(inits, now)
+		}
+	}
+	return nil
+}
