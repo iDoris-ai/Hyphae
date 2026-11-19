@@ -298,18 +298,34 @@ func (s *RelationStore) List(identity string) ([]PeerRelation, error) {
 	return out, rows.Err()
 }
 
-// FirstIncoming returns the plaintext of the first message identity received
-// from peer, by local receive time, or "" when there is none.
-func FirstIncoming(db *sql.DB, identity, peer string) (string, error) {
-	var text sql.NullString
-	err := db.QueryRowContext(context.Background(), `SELECT COALESCE(plaintext, content) FROM messages
+// FirstIncoming returns the plaintext and event ID of the first message
+// identity received from peer, by local receive time, or "" when none.
+func FirstIncoming(db *sql.DB, identity, peer string) (text, eventID string, err error) {
+	var t, id sql.NullString
+	err = db.QueryRowContext(context.Background(), `SELECT COALESCE(plaintext, content), event_id FROM messages
 		WHERE recipient_npub = ? AND sender_npub = ? AND is_incoming = 1 ORDER BY received_at, id LIMIT 1`,
-		identity, peer).Scan(&text)
+		identity, peer).Scan(&t, &id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
+		return "", "", nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("first message: %w", err)
+		return "", "", fmt.Errorf("first message: %w", err)
 	}
-	return text.String, nil
+	return t.String, id.String, nil
+}
+
+// SentAt reports whether identity sent event eventID to peer, and the local
+// time it was stored.
+func SentAt(db *sql.DB, identity, peer, eventID string) (int64, bool, error) {
+	var at int64
+	err := db.QueryRowContext(context.Background(), `SELECT received_at FROM messages
+		WHERE event_id = ? AND sender_npub = ? AND recipient_npub = ? AND is_incoming = 0`,
+		eventID, identity, peer).Scan(&at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("sent message: %w", err)
+	}
+	return at, true, nil
 }

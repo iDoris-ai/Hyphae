@@ -99,7 +99,7 @@ func pendingCmd() *cli.Command {
 				if p.Relation.State != contact.Stranger || p.Relation.Received == 0 || p.Ignored || isContactNpub(env.ks, p.Peer) {
 					continue
 				}
-				first, err := storage.FirstIncoming(env.db, env.me.Npub, p.Peer)
+				first, _, err := storage.FirstIncoming(env.db, env.me.Npub, p.Peer)
 				if err != nil {
 					return err
 				}
