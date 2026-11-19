@@ -35,6 +35,36 @@ func ReserveStrangerSend(ks *types.KeyStore, senderNpub, recipient string) error
 	return storage.SendRefusal(err, recipientNpub)
 }
 
+// ReserveStrangerSends gates one new message to each of several canonical
+// npubs (group invites). It previews the whole batch first, so a refusal for
+// any of them spends no quota, then reserves each.
+func ReserveStrangerSends(ks *types.KeyStore, senderNpub string, recipients []string) error {
+	var others []string
+	for _, r := range recipients {
+		if !isOwnIdentity(ks, r) {
+			others = append(others, r)
+		}
+	}
+	if len(others) == 0 {
+		return nil
+	}
+	if err := InitStorage(); err != nil {
+		return err
+	}
+	store := storage.NewRelationStore(storage.DB)
+	now := time.Now().Unix()
+	contactOf := func(npub string) bool { return isContact(ks, npub) }
+	if err := store.PreviewSends(senderNpub, others, contactOf, now); err != nil {
+		return err
+	}
+	for _, r := range others {
+		if _, err := store.ReserveSend(senderNpub, r, contactOf(r), now); err != nil {
+			return storage.SendRefusal(err, r)
+		}
+	}
+	return nil
+}
+
 func isContact(ks *types.KeyStore, npub string) bool {
 	for _, c := range ks.Contacts {
 		if c.Npub == npub {

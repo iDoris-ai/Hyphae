@@ -363,6 +363,25 @@ func (s *Store) CreateGroup(name, creator string, invitees []string) (GroupDraft
 	return draft, nil
 }
 
+// ValidateGroup runs CreateGroup's checks without storing anything and
+// returns the canonical, de-duplicated invitee npubs it would invite.
+func (s *Store) ValidateGroup(name, creator string, invitees []string) ([]string, error) {
+	tx, err := s.beginImmediate()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	draft, err := s.createGroupTx(tx, name, creator, invitees)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(draft.Invitations))
+	for _, inv := range draft.Invitations {
+		out = append(out, inv.InviteeNpub)
+	}
+	return out, nil
+}
+
 // ReceiveInvite persists only a pending invitation. Replayed invitations do
 // not reactivate a group that was accepted, cancelled, or locally left.
 func (s *Store) ReceiveInvite(v VerifiedIncoming) (bool, error) {
