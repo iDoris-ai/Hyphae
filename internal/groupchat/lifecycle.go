@@ -114,6 +114,17 @@ func createGroupCommand(c *cli.Command) (groupIDView, error) {
 		return groupIDView{}, err
 	}
 	defer session.db.Close()
+	// Inviting a stranger starts a conversation, so it passes the same stranger
+	// gate as `agent msg` (docs/search/discover-friends.md rule 5). Malformed
+	// invitees are left to CreateGroup, which reports them.
+	for _, invitee := range c.StringSlice("invitee") {
+		if _, err := common.ParsePublicKey(invitee); err != nil {
+			continue
+		}
+		if err := messaging.ReserveStrangerSend(session.ks, session.me, invitee); err != nil {
+			return groupIDView{}, err
+		}
+	}
 	draft, err := session.store.CreateGroup(c.String("name"), session.me, c.StringSlice("invitee"))
 	if err != nil {
 		return groupIDView{}, err

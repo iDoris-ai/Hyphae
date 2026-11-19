@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/iDoris-ai/hyphae/internal/daemon"
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/internal/messaging"
+	"github.com/iDoris-ai/hyphae/internal/social/contact"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 )
 
@@ -28,6 +30,9 @@ type outboxDeliveryUpdate struct {
 	state     messaging.AgentMessageDeliveryState
 	issue     messaging.AgentMessageDeliveryIssue
 	detail    string
+	// refused is set when the stranger rules stopped the message before it
+	// was queued; it is shown as the reason.
+	refused string
 }
 
 type outboxWorkerStartedMsg struct{}
@@ -284,6 +289,12 @@ func (m *ChatModel) sendQueuedMessage(ctx context.Context, request outboxSendReq
 	if err != nil {
 		return
 	}
+	// Last step before queueing, as in `agent msg`: a refused or failed build
+	// spends no quota.
+	if err := messaging.ReserveStrangerSend(ks, m.myIdentity.Npub, m.contactNpub); err != nil {
+		update.refused = refusalText(err)
+		return
+	}
 	update.eventID = event.ID.Hex()
 
 	result, _ := messaging.SendQueuedAgentMessage(ctx, event, m.contactNpub, request.content, true, m.relays, relayDialTimeout)
@@ -334,6 +345,9 @@ func formatOutboxStatus(update outboxDeliveryUpdate) string {
 	if id != "" {
 		id = " • " + id
 	}
+	if update.refused != "" {
+		return "Not sent: " + update.refused
+	}
 	if update.detail != "" {
 		return "Outbox: group provider " + update.detail + id
 	}
@@ -379,4 +393,27 @@ func formatOutboxStatus(update outboxDeliveryUpdate) string {
 			return status + " • durable queue was not confirmed; text remains in input"
 		}
 	}
+}
+
+// refusalText turns a stranger-rule refusal into one line for the status bar.
+func refusalText(err error) string {
+	var ee *common.ExitError
+	if !errors.As(err, &ee) {
+		return err.Error()
+	}
+	switch ee.Code {
+	case common.ErrCodeStrangerMessageLimit:
+		return fmt.Sprintf("they are not a friend yet and you already sent %d messages; wait for them to reply or accept", contact.PerStrangerLimit)
+	case common.ErrCodeStrangerDailyLimit:
+		if d, ok := ee.Data.(map[string]any); ok {
+			if at, ok := d["resets_at"].(int64); ok {
+				return fmt.Sprintf("you started %d new conversations in 24 h; the next one frees at %s",
+					contact.DailyLimit, time.Unix(at, 0).Format("15:04"))
+			}
+		}
+		return fmt.Sprintf("you started %d new conversations in 24 h", contact.DailyLimit)
+	case common.ErrCodePeerBlocked:
+		return "you blocked them; run `hyphae friend unblock` first"
+	}
+	return ee.Error()
 }
