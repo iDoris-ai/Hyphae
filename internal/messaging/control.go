@@ -1,6 +1,7 @@
 package messaging
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"fiatjaf.com/nostr"
 
 	"github.com/iDoris-ai/hyphae/internal/common"
+	"github.com/iDoris-ai/hyphae/internal/relayquery"
 	"github.com/iDoris-ai/hyphae/internal/social"
 	"github.com/iDoris-ai/hyphae/internal/social/contact"
 	"github.com/iDoris-ai/hyphae/internal/storage"
@@ -129,4 +131,42 @@ func ApplyFriendAccept(ev *nostr.Event, sk nostr.SecretKey) (bool, error) {
 func isEventIDHex(s string) bool {
 	b, err := hex.DecodeString(s)
 	return err == nil && len(b) == 32 && hex.EncodeToString(b) == s
+}
+
+// BuildControlFilter selects control messages addressed to recipientHex.
+func BuildControlFilter(recipientHex string, limit int) nostr.Filter {
+	return nostr.Filter{Kinds: []nostr.Kind{AgentKind}, Limit: limit, Tags: nostr.TagMap{
+		"c": {wireevent.ControlCategory}, "v": {wireevent.ControlVersion}, "p": {recipientHex}}}
+}
+
+// SyncControl fetches the latest control messages for sk from every relay and
+// applies each friend_accept. Applying is idempotent and invalid or stale
+// accepts are refused, so re-reading the same events on every scan is safe.
+// It returns the npubs that became friends and the number of events dropped.
+func SyncControl(ctx context.Context, relays []string, sk nostr.SecretKey, timeout time.Duration) ([]string, int) {
+	filter := BuildControlFilter(common.PubKeyToHex(sk.Public()), 100)
+	seen := map[nostr.ID]bool{}
+	var friends []string
+	dropped := 0
+	for _, url := range relays {
+		page, err := relayquery.FetchWithTimeout(ctx, url, filter, timeout)
+		if err != nil {
+			continue
+		}
+		for i := range page.Events {
+			ev := &page.Events[i]
+			if seen[ev.ID] {
+				continue
+			}
+			seen[ev.ID] = true
+			changed, err := ApplyFriendAccept(ev, sk)
+			switch {
+			case err != nil:
+				dropped++
+			case changed:
+				friends = append(friends, common.EncodeNpub(ev.PubKey))
+			}
+		}
+	}
+	return friends, dropped
 }

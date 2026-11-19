@@ -239,6 +239,7 @@ Run this in a separate terminal or as a system service.`,
 			},
 		}
 		go cards.run(daemonCtx) // publishing must not delay the first inbox scan
+		go runControlSync(daemonCtx, myIdentity, ks, relays, watchInterval, logger)
 		return runDaemonRuntime(daemonCtx, logger, status, retryInterval, watchInterval, time.Hour, work)
 	},
 }
