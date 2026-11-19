@@ -508,6 +508,11 @@ var AgentInboxCmd = &cli.Command{
 			return err
 		}
 		jsonMode := common.JSONMode(c)
+		// Apply friend_accepts first so relations below are current; they are
+		// encrypted, so only when the secret key is loaded.
+		if autoDecrypt {
+			_, _ = SyncControl(ctx, relays, recipientSK, 5*time.Second)
+		}
 		filter := BuildAgentMessageFilter(common.PubKeyToHex(recipientPK))
 		filter.Limit = limit
 

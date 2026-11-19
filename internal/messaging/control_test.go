@@ -1,8 +1,10 @@
 package messaging
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"fiatjaf.com/nostr"
 	"github.com/stretchr/testify/require"
@@ -133,4 +135,33 @@ func TestApplyFriendAccept(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		require.NoError(t, sendTo(t, url, daveNpub), "friends have no limit")
 	}
+}
+
+func TestSyncControlAppliesAccepts(t *testing.T) {
+	setupAgentMsgCLI(t)
+	url := startGateRelay(t)
+	ks, err := identity.LoadKeyStore()
+	require.NoError(t, err)
+	aliceSK, err := identity.GetSecretKey(ks, "alice")
+	require.NoError(t, err)
+	alice := ks.Identities["alice"].Npub
+	carol := nostr.Generate()
+	carolNpub := common.EncodeNpub(carol.Public())
+	require.NoError(t, sendTo(t, url, carolNpub))
+
+	good, err := BuildFriendAccept(carol, aliceSK.Public(), sentEventID(t, alice, carolNpub), nostr.Now())
+	require.NoError(t, err)
+	bogus, err := BuildFriendAccept(nostr.Generate(), aliceSK.Public(), strings.Repeat("ef", 32), nostr.Now())
+	require.NoError(t, err)
+	for _, ev := range []*nostr.Event{good, bogus} {
+		_, n := publishAgentMessageRelays(context.Background(), []string{url}, *ev, 5*time.Second)
+		require.Equal(t, 1, n)
+	}
+
+	friends, dropped := SyncControl(context.Background(), []string{url, "ws://127.0.0.1:1"}, aliceSK, 2*time.Second)
+	require.Equal(t, []string{carolNpub}, friends)
+	require.Equal(t, 1, dropped)
+	require.Equal(t, contact.Friend, relationOf(t, alice, carolNpub))
+	friends, _ = SyncControl(context.Background(), []string{url}, aliceSK, 2*time.Second)
+	require.Empty(t, friends, "re-reading is a no-op")
 }
