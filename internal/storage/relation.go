@@ -278,3 +278,38 @@ func (s *RelationStore) Quota(identity string, now int64) (contact.Quota, error)
 	}
 	return contact.QuotaAt(inits, now), tx.commit()
 }
+
+// List returns every stored relation of identity, ordered by peer.
+func (s *RelationStore) List(identity string) ([]PeerRelation, error) {
+	rows, err := s.db.QueryContext(context.Background(),
+		`SELECT `+relationCols+` FROM peer_relation WHERE identity_npub = ? ORDER BY peer_npub`, identity)
+	if err != nil {
+		return nil, fmt.Errorf("list relations: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []PeerRelation
+	for rows.Next() {
+		p, err := scanRelation(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// FirstIncoming returns the plaintext of the first message identity received
+// from peer, by local receive time, or "" when there is none.
+func FirstIncoming(db *sql.DB, identity, peer string) (string, error) {
+	var text sql.NullString
+	err := db.QueryRowContext(context.Background(), `SELECT COALESCE(plaintext, content) FROM messages
+		WHERE recipient_npub = ? AND sender_npub = ? AND is_incoming = 1 ORDER BY received_at, id LIMIT 1`,
+		identity, peer).Scan(&text)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("first message: %w", err)
+	}
+	return text.String, nil
+}

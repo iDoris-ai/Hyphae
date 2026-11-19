@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"syscall"
 
 	"fiatjaf.com/nostr"
@@ -460,6 +461,24 @@ func AddContactWithRole(ks *types.KeyStore, nickname, npub string, role types.Ro
 		fresh.Contacts[nickname] = &types.Contact{Nickname: nickname, Npub: common.EncodeNpub(pk), AddedAt: int64(nostr.Now()), Role: role}
 		return nil
 	})
+}
+
+// RemoveContactsByNpub deletes every contact whose npub is npub and returns
+// their nicknames.
+func RemoveContactsByNpub(ks *types.KeyStore, npub string) ([]string, error) {
+	var removed []string
+	err := runKeyStoreTransaction(ks, func(fresh *types.KeyStore) error {
+		removed = removed[:0]
+		for nick, c := range fresh.Contacts {
+			if c.Npub == npub {
+				delete(fresh.Contacts, nick)
+				removed = append(removed, nick)
+			}
+		}
+		return nil
+	})
+	sort.Strings(removed)
+	return removed, err
 }
 
 // GetContact retrieves a contact by nickname

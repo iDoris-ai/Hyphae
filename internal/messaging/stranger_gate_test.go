@@ -222,3 +222,38 @@ func TestAgentInboxClassifyErrorFailsClosed(t *testing.T) {
 	require.Len(t, entries, 1)
 	require.Equal(t, "stranger", entries[0].Relation)
 }
+
+// A stored block beats the keystore: re-adding a blocked peer as a contact
+// does not let messages through in either direction (#374 review, L2).
+func TestBlockedContactStaysBlocked(t *testing.T) {
+	setupAgentMsgCLI(t)
+	url := startGateRelay(t)
+	dave := nostr.Generate().Public()
+	daveNpub := common.EncodeNpub(dave)
+	ks, err := identity.LoadKeyStore()
+	require.NoError(t, err)
+	alice := ks.Identities["alice"].Npub
+	require.NoError(t, InitStorage())
+	_, err = storage.NewRelationStore(storage.DB).Update(alice, daveNpub, 1,
+		func(p storage.PeerRelation) (storage.PeerRelation, error) {
+			p.Relation = contact.Block(p.Relation)
+			return p, nil
+		})
+	require.NoError(t, err)
+	require.NoError(t, identity.AddContact(ks, "dave", daveNpub))
+
+	_ = requireCode(t, sendTo(t, url, "dave"), common.ErrCodePeerBlocked)
+	r, err := ClassifyIncoming(ks, alice, daveNpub, strings.Repeat("ab", 32))
+	require.NoError(t, err)
+	require.Equal(t, contact.Drop, r.Disposition)
+
+	// An ordinary contact is still a friend both ways.
+	frank := common.EncodeNpub(nostr.Generate().Public())
+	require.NoError(t, identity.AddContact(ks, "frank", frank))
+	for i := 0; i < 3; i++ {
+		require.NoError(t, sendTo(t, url, "frank"))
+	}
+	r, err = ClassifyIncoming(ks, alice, frank, strings.Repeat("cd", 32))
+	require.NoError(t, err)
+	require.Equal(t, contact.Show, r.Disposition)
+}

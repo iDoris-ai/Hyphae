@@ -30,7 +30,7 @@ func NewCmd() *cli.Command {
 	return &cli.Command{
 		Name:     "friend",
 		Usage:    "Find people on your relay and manage strangers and friends",
-		Commands: []*cli.Command{visibilityCmd(), tagsCmd(), findCmd()},
+		Commands: []*cli.Command{visibilityCmd(), tagsCmd(), findCmd(), pendingCmd(), ignoreCmd(), blockCmd(), unblockCmd()},
 	}
 }
 
