@@ -20,6 +20,7 @@ import (
 	"github.com/iDoris-ai/hyphae/internal/identity"
 	"github.com/iDoris-ai/hyphae/internal/storage"
 	"github.com/iDoris-ai/hyphae/internal/wireevent"
+	"github.com/iDoris-ai/hyphae/pkg/types"
 )
 
 // Cmd is the `hyphae friend` command group.
@@ -358,4 +359,38 @@ func union(a, b []string) []string {
 		}
 	}
 	return out
+}
+
+// SetVisible switches the identity's card to public or hidden and publishes
+// the card or the tombstone, for callers without a CLI context (the TUI). It
+// returns the saved setting; the error says when no relay took it, or when a
+// hide missed a relay that holds the card.
+func SetVisible(ctx context.Context, id *types.Identity, sk nostr.SecretKey, relays []string, visible bool) (storage.CardSetting, error) {
+	var saved storage.CardSetting
+	err := storage.WithCardLock(func() error {
+		db, err := storage.OpenDB()
+		if err != nil {
+			return err
+		}
+		defer func() { _ = db.Close() }()
+		s, err := storage.LoadCardSetting(db, id.Npub)
+		if err != nil {
+			return err
+		}
+		s.Visible = visible
+		s, o, err := publishAndSave(ctx, db, id.Npub, sk, relays, withDefaults(s, id.Nickname))
+		saved = s
+		if err != nil {
+			return err
+		}
+		switch {
+		case !s.Visible && len(o.missed) > 0:
+			return fmt.Errorf("hide did not reach %v; the card stays findable there until %s",
+				o.missed, time.Unix(s.ExpiresAt, 0).Format(time.DateTime))
+		case !slices.ContainsFunc(o.results, func(r relayResult) bool { return r.OK }):
+			return errors.New("no relay accepted the change; it is saved, try again")
+		}
+		return nil
+	})
+	return saved, err
 }

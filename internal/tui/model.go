@@ -107,6 +107,8 @@ type ChatModel struct {
 	outboxStarted         bool
 	outboxSending         bool
 	outboxStatus          string
+	visible               bool
+	visibilityStatus      string
 	activeSendID          uint64
 	nextSendID            uint64
 	sendingContent        string
@@ -166,6 +168,7 @@ func NewChatModel(contactName string, relays ...string) (*ChatModel, error) {
 		contactName:    contactName,
 		contactNpub:    contact.Npub,
 		myIdentity:     myIdentity,
+		visible:        loadVisibility(myIdentity.Npub),
 		store:          store,
 		db:             db,
 		relays:         relays,
@@ -304,6 +307,16 @@ func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case tea.KeyEnter:
 			content := m.input.Value()
+			if want, ok, err := visibilityCommand(content, m.visible); ok {
+				m.input.SetValue("")
+				if err != nil {
+					m.visibilityStatus = err.Error()
+					break
+				}
+				m.visibilityStatus = "Card: switching…"
+				cmds = append(cmds, m.setVisibility(want))
+				break
+			}
 			if content != "" && !m.outboxSending {
 				m.inboxMu.Lock()
 				closed := m.inboxClosed
@@ -360,6 +373,13 @@ func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, m.waitOutboxUpdate())
 
+	case visibilityMsg:
+		m.visible = msg.visible
+		m.visibilityStatus = ""
+		if msg.err != nil {
+			m.visibilityStatus = "Card: " + msg.err.Error()
+		}
+
 	case errorMsg:
 		m.err = msg.err
 		m.loading = false
@@ -414,11 +434,17 @@ func (m *ChatModel) View() string {
 	b.WriteString("\n")
 	b.WriteString(helpStyle.Render(m.outboxStatus))
 	b.WriteString("\n")
+	card := visibilityLine(m.visible)
+	if m.visibilityStatus != "" {
+		card = m.visibilityStatus
+	}
+	b.WriteString(helpStyle.Render(card))
+	b.WriteString("\n")
 
 	b.WriteString(inputStyle.Render(m.input.View()))
 	b.WriteString("\n\n")
 
-	help := helpStyle.Render("enter: send • pgup/pgdn: scroll • esc/ctrl+c: quit")
+	help := helpStyle.Render("enter: send • /visibility: public/hidden • pgup/pgdn: scroll • esc/ctrl+c: quit")
 	b.WriteString(help)
 
 	return b.String()

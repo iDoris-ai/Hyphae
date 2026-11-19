@@ -394,3 +394,22 @@ func TestVisibilityShow(t *testing.T) {
 	require.Equal(t, "hidden", data["visibility"])
 	require.Equal(t, false, data["published"])
 }
+
+func TestSetVisibleForTUI(t *testing.T) {
+	url, _ := setup(t)
+	ks, err := identity.LoadKeyStore()
+	require.NoError(t, err)
+	id := ks.Identities["alice"]
+	sk, err := identity.GetSecretKey(ks, "alice")
+	require.NoError(t, err)
+	s, err := SetVisible(context.Background(), id, sk, []string{url}, true)
+	require.NoError(t, err)
+	require.True(t, s.Visible)
+	require.Len(t, findCards(t, url, card.DefaultTag), 1)
+	s, err = SetVisible(context.Background(), id, sk, []string{url}, false)
+	require.NoError(t, err)
+	require.False(t, s.Visible)
+	require.Empty(t, findCards(t, url, card.DefaultTag))
+	_, err = SetVisible(context.Background(), id, sk, []string{"ws://127.0.0.1:1"}, true)
+	require.ErrorContains(t, err, "no relay accepted")
+}
