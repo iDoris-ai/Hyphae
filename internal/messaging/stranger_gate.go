@@ -13,8 +13,9 @@ import (
 // to one new message from sender to recipient and records it when allowed.
 // Call it once per new logical message, after everything that can fail before
 // queueing and right before the message is queued; outbox retries must not
-// call it again. Contacts and the sender's own identities are friends and
-// never touch the database (blocking a contact removes the contact, F6).
+// call it again. The sender's own identities never touch the database.
+// Contacts are friends unless a stored block says otherwise, so re-adding a
+// blocked peer as a contact does not lift the block.
 func ReserveStrangerSend(ks *types.KeyStore, senderNpub, recipient string) error {
 	// Key the rules on the canonical npub: hex, upper case or padded spellings
 	// of one key are the same person.
@@ -23,23 +24,27 @@ func ReserveStrangerSend(ks *types.KeyStore, senderNpub, recipient string) error
 		return err
 	}
 	recipientNpub := common.EncodeNpub(pk)
-	if isFriendNpub(ks, recipientNpub) {
+	if isOwnIdentity(ks, recipientNpub) {
 		return nil
 	}
 	if err := InitStorage(); err != nil {
 		return err
 	}
 	_, err = storage.NewRelationStore(storage.DB).
-		ReserveSend(senderNpub, recipientNpub, false, time.Now().Unix())
+		ReserveSend(senderNpub, recipientNpub, isContact(ks, recipientNpub), time.Now().Unix())
 	return storage.SendRefusal(err, recipientNpub)
 }
 
-func isFriendNpub(ks *types.KeyStore, npub string) bool {
+func isContact(ks *types.KeyStore, npub string) bool {
 	for _, c := range ks.Contacts {
 		if c.Npub == npub {
 			return true
 		}
 	}
+	return false
+}
+
+func isOwnIdentity(ks *types.KeyStore, npub string) bool {
 	for _, id := range ks.Identities {
 		if id.Npub == npub {
 			return true
@@ -50,15 +55,15 @@ func isFriendNpub(ks *types.KeyStore, npub string) bool {
 
 // ClassifyIncoming decides how to treat one incoming message from sender to
 // recipient (Show, Request, Suppress or Drop) and counts it once per event ID.
-// Contacts and the recipient's own identities are always shown and never
-// touch the database.
+// The recipient's own identities are always shown and never touch the
+// database; contacts are shown unless a stored block says otherwise.
 func ClassifyIncoming(ks *types.KeyStore, recipientNpub, senderNpub, eventID string) (storage.Receipt, error) {
-	if isFriendNpub(ks, senderNpub) {
+	if isOwnIdentity(ks, senderNpub) {
 		return storage.Receipt{Disposition: contact.Show}, nil
 	}
 	if err := InitStorage(); err != nil {
 		return storage.Receipt{}, err
 	}
 	return storage.NewRelationStore(storage.DB).
-		ClassifyReceive(recipientNpub, senderNpub, eventID, false, time.Now().Unix())
+		ClassifyReceive(recipientNpub, senderNpub, eventID, isContact(ks, senderNpub), time.Now().Unix())
 }

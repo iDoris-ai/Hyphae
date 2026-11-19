@@ -122,7 +122,7 @@ hyphae agent msg --from alice --to npub1... --content ...   # 现有命令，现
 {"ok":true,"data":{"results":[{"npub":"npub1...","name":"小王","tags":["友好","火锅"],
   "matched":["友好"],"relation":"stranger","card_updated_at":1763190000}]}}
 // friend pending
-{"ok":true,"data":{"pending":[{"npub":"npub1...","name":"小王","first_message":"...",
+{"ok":true,"data":{"pending":[{"npub":"npub1...","first_message":"...",
   "received":2,"suppressed":0,"first_seen_at":1763190000}]}}
 // friend quota
 {"ok":true,"data":{"daily_limit":10,"used":3,"remaining":7,"resets_at":1763276400,

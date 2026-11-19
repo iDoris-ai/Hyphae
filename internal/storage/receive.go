@@ -22,7 +22,7 @@ type Receipt struct {
 // ClassifyReceive decides how to treat one incoming event and counts it.
 // The first decision for an event ID is stored and returned again on every
 // later call, so relay redelivery, a second relay or an inbox re-fetch never
-// counts it twice. Order is local arrival order; created_at plays no part.
+// counts it twice; a block made since then turns it into Drop. Order is local arrival order; created_at plays no part.
 func (s *RelationStore) ClassifyReceive(identity, peer, eventID string, isContact bool, now int64) (Receipt, error) {
 	tx, err := s.begin()
 	if err != nil {
@@ -30,22 +30,27 @@ func (s *RelationStore) ClassifyReceive(identity, peer, eventID string, isContac
 	}
 	defer tx.rollback()
 	ctx := context.Background()
+	p, err := load(tx.conn, identity, peer)
+	if err != nil {
+		return Receipt{}, err
+	}
+	rel := effective(p.Relation, isContact)
 	var r Receipt
 	var disp int
 	err = tx.conn.QueryRowContext(ctx, `SELECT disposition, seq FROM receive_disposition
 		WHERE identity_npub = ? AND event_id = ?`, identity, eventID).Scan(&disp, &r.Seq)
 	if err == nil {
 		r.Disposition, r.Stranger = contact.Disposition(disp), r.Seq > 0
+		if rel.State == contact.Blocked {
+			// A block hides the peer's earlier messages too; the stored
+			// receipt is kept, so an unblock shows them again as before.
+			r.Disposition = contact.Drop
+		}
 		return r, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return Receipt{}, fmt.Errorf("load receipt: %w", err)
 	}
-	p, err := load(tx.conn, identity, peer)
-	if err != nil {
-		return Receipt{}, err
-	}
-	rel := effective(p.Relation, isContact)
 	r.Disposition = contact.CheckReceive(rel)
 	if rel.State == contact.Friend {
 		return r, nil // friends are always shown; nothing to remember
