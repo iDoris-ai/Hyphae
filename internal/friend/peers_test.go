@@ -1,15 +1,20 @@
 package friend
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"fiatjaf.com/nostr"
 	"github.com/stretchr/testify/require"
 
 	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/identity"
+	"github.com/iDoris-ai/hyphae/internal/messaging"
+	"github.com/iDoris-ai/hyphae/internal/relayquery"
 	"github.com/iDoris-ai/hyphae/internal/storage"
+	"github.com/iDoris-ai/hyphae/internal/wireevent"
 )
 
 // receive records n messages from peer to alice the way the inbox does: a
@@ -109,4 +114,66 @@ func TestPendingIgnoreBlockUnblock(t *testing.T) {
 
 func TestPrintableDropsControlCharacters(t *testing.T) {
 	require.Equal(t, "hi[2Jthere你好", printable("hi\x1b[2J\x07there\u009b你好"))
+}
+
+func TestAcceptSendsFriendAccept(t *testing.T) {
+	url, _ := setup(t)
+	alice := aliceNpub(t)
+	carol := nostr.Generate()
+	carolNpub := common.EncodeNpub(carol.Public())
+	_, err := run(t, "accept", "--as", "alice", "--npub", carolNpub, "--relay", url)
+	var ee *common.ExitError
+	require.True(t, errors.As(err, &ee), "nothing to accept yet: %v", err)
+	require.Equal(t, common.ErrCodeUser, ee.Code)
+
+	receive(t, alice, carolNpub, 1, "hi")
+	// A nickname taken by someone else is refused before anything changes.
+	ks0, err := identity.LoadKeyStore()
+	require.NoError(t, err)
+	require.NoError(t, identity.AddContact(ks0, "taken", common.EncodeNpub(nostr.Generate().Public())))
+	_, err = run(t, "accept", "--as", "alice", "--npub", carolNpub, "--relay", url, "--nickname", "taken")
+	require.True(t, errors.As(err, &ee), "err = %v", err)
+	require.Equal(t, common.ErrCodeUser, ee.Code)
+	db, err := storage.OpenDB()
+	require.NoError(t, err)
+	p, err := storage.NewRelationStore(db).Get(alice, carolNpub)
+	require.NoError(t, err)
+	require.Equal(t, "stranger", p.Relation.State.String(), "relation untouched")
+	require.NoError(t, db.Close())
+	db, err = storage.OpenDB()
+	require.NoError(t, err)
+	_, firstID, err := storage.FirstIncoming(db, alice, carolNpub)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	// No relay takes it: accepted locally, network_error, and a retry resends.
+	_, err = run(t, "accept", "--as", "alice", "--npub", carolNpub, "--relay", "ws://127.0.0.1:1")
+	require.True(t, errors.As(err, &ee), "err = %v", err)
+	require.Equal(t, common.ErrCodeNetwork, ee.Code)
+
+	data, err := run(t, "accept", "--as", "alice", "--npub", carolNpub, "--relay", url)
+	require.NoError(t, err)
+	require.Equal(t, "friend", data["relation"])
+	require.EqualValues(t, 1, data["published_to"])
+	nick := data["nickname"].(string)
+	ks, err := identity.LoadKeyStore()
+	require.NoError(t, err)
+	require.Equal(t, carolNpub, ks.Contacts[nick].Npub)
+
+	// carol can read it, and it answers her first message.
+	alicePK, err := common.ParsePublicKey(alice)
+	require.NoError(t, err)
+	page, err := relayquery.FetchWithTimeout(context.Background(), url, nostr.Filter{
+		Kinds: []nostr.Kind{wireevent.Kind30078}, Authors: []nostr.PubKey{alicePK},
+		Tags: nostr.TagMap{"c": {wireevent.ControlCategory}}}, 5*time.Second)
+	require.NoError(t, err)
+	require.Len(t, page.Events, 1)
+	answers, err := messaging.ParseFriendAccept(&page.Events[0], carol)
+	require.NoError(t, err)
+	require.Equal(t, firstID, answers)
+
+	// Repeating resends and keeps the same contact.
+	data, err = run(t, "accept", "--as", "alice", "--npub", carolNpub, "--relay", url)
+	require.NoError(t, err)
+	require.Equal(t, nick, data["nickname"])
 }
