@@ -106,3 +106,7 @@ func TestPendingIgnoreBlockUnblock(t *testing.T) {
 	require.True(t, errors.As(err, &ee))
 	require.Equal(t, common.ErrCodeUser, ee.Code)
 }
+
+func TestPrintableDropsControlCharacters(t *testing.T) {
+	require.Equal(t, "hi[2Jthere你好", printable("hi\x1b[2J\x07there\u009b你好"))
+}

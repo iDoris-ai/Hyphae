@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/urfave/cli/v3"
 
@@ -113,7 +115,7 @@ func pendingCmd() *cli.Command {
 					if e.Suppressed > 0 {
 						fmt.Printf(", %d not shown", e.Suppressed)
 					}
-					fmt.Printf("\n    %s\n", e.FirstMessage)
+					fmt.Printf("\n    %s\n", printable(e.FirstMessage))
 				}
 			})
 			return nil
@@ -199,4 +201,15 @@ func unblockCmd() *cli.Command {
 			p.Relation, err = contact.Unblock(p.Relation, now)
 			return p, err
 		}, nil)
+}
+
+// printable drops control characters (C0, DEL, C1) from a stranger's text
+// before it reaches the terminal, so it cannot carry escape sequences.
+func printable(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
 }
