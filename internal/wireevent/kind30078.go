@@ -25,6 +25,12 @@ const (
 	// The card uses the same value for c and d, and v=CardVersion.
 	CardCategory = "hyphae-card"
 	CardVersion  = "1"
+
+	// ControlCategory marks a control message such as friend_accept. It uses
+	// the message d namespace and v=ControlVersion, and old clients, which
+	// subscribe to c=MessageCategory only, never see it.
+	ControlCategory = "hyphae-ctl"
+	ControlVersion  = "1"
 )
 
 // Class identifies the application schema carried by kind 30078.
@@ -35,6 +41,7 @@ const (
 	ClassProfile
 	ClassMessage
 	ClassCard
+	ClassControl
 )
 
 // Classify30078 classifies an event's tags. The caller must first verify that
@@ -95,6 +102,15 @@ func Classify30078(tags nostr.Tags) (Class, error) {
 			return ClassUnknown, fmt.Errorf("card event conflicts with message discriminator tags")
 		}
 		return ClassCard, nil
+
+	case ControlCategory:
+		if !hasV || v != ControlVersion {
+			return ClassUnknown, fmt.Errorf("control event requires v=%q", ControlVersion)
+		}
+		if !hasP || !isPublicKeyHex(p) || !hasD || !strings.HasPrefix(d, MessageDPrefix) || !isMessageDTag(d) {
+			return ClassUnknown, fmt.Errorf("control event requires one hex p tag and a message d tag")
+		}
+		return ClassControl, nil
 
 	default:
 		return ClassUnknown, fmt.Errorf("unknown kind 30078 c namespace %q", c)
