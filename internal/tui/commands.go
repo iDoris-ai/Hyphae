@@ -47,6 +47,7 @@ var TUICmd = &cli.Command{
 		ChatCmd,
 		ContactsCmd,
 		GroupsCmd,
+		RequestsCmd,
 	},
 }
 
