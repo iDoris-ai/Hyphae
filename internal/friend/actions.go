@@ -1,11 +1,17 @@
 package friend
 
 import (
+	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
+	"fiatjaf.com/nostr"
+
+	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/identity"
+	"github.com/iDoris-ai/hyphae/internal/messaging"
 	"github.com/iDoris-ai/hyphae/internal/social/contact"
 	"github.com/iDoris-ai/hyphae/internal/storage"
 	"github.com/iDoris-ai/hyphae/pkg/types"
@@ -16,6 +22,12 @@ import (
 
 // ErrSelf: the action targets one of the caller's own identity.
 var ErrSelf = errors.New("that is you")
+
+// ErrNicknameTaken: the chosen contact nickname belongs to someone else.
+var ErrNicknameTaken = errors.New("contact nickname already exists")
+
+// ErrNotPublished: accepted locally, but no relay took the friend_accept.
+var ErrNotPublished = errors.New("accepted locally, but no relay took the friend_accept; run accept again to resend")
 
 // Pending is one stranger who wrote and waits for accept, ignore or block.
 type Pending struct {
@@ -93,4 +105,62 @@ func Unblock(db *sql.DB, me, peer string) (storage.PeerRelation, error) {
 		p.Relation, err = contact.Unblock(p.Relation, now)
 		return p, err
 	})
+}
+
+// AcceptResult is what Accept did.
+type AcceptResult struct {
+	Nickname    string
+	Relays      []relayResult
+	PublishedTo int
+}
+
+// Accept makes a stranger who wrote to me a friend, adds them as a contact
+// (nick, or a name derived from the npub) and publishes a friend_accept
+// answering their first message. It is safe to repeat: on a friend it only
+// resends, so a run that returned ErrNotPublished can be retried.
+func Accept(ctx context.Context, db *sql.DB, ks *types.KeyStore, me *types.Identity, sk nostr.SecretKey,
+	relays []string, peer, nick string) (AcceptResult, error) {
+	var res AcceptResult
+	if peer == me.Npub {
+		return res, ErrSelf
+	}
+	peerPK, err := common.ParsePublicKey(peer)
+	if err != nil {
+		return res, err
+	}
+	if ct, taken := ks.Contacts[nick]; nick != "" && taken && ct.Npub != peer {
+		// Checked before the relation changes, so nothing is left half done.
+		return res, fmt.Errorf("%w: %q", ErrNicknameTaken, nick)
+	}
+	_, answers, err := storage.FirstIncoming(db, me.Npub, peer)
+	if err != nil {
+		return res, err
+	}
+	if answers == "" {
+		return res, contact.ErrNothingToAccept
+	}
+	if _, err := storage.NewRelationStore(db).Update(me.Npub, peer, time.Now().Unix(),
+		func(p storage.PeerRelation) (storage.PeerRelation, error) {
+			if p.Relation.State == contact.Friend {
+				return p, nil
+			}
+			r, err := contact.Accept(p.Relation)
+			p.Relation = r
+			return p, err
+		}); err != nil {
+		return res, err
+	}
+	if res.Nickname, err = ensureContact(ks, peer, nick); err != nil {
+		return res, err
+	}
+	ev, err := messaging.BuildFriendAccept(sk, peerPK, answers, nostr.Now())
+	if err != nil {
+		return res, err
+	}
+	results, okURLs, _ := publish(ctx, relays, []nostr.Event{*ev})
+	res.Relays, res.PublishedTo = results, len(okURLs)
+	if res.PublishedTo == 0 {
+		return res, ErrNotPublished
+	}
+	return res, nil
 }

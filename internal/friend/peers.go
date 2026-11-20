@@ -73,9 +73,10 @@ func isContactNpub(ks *types.KeyStore, npub string) bool {
 // actionError maps a stranger-action error to the CLI's exit codes.
 func actionError(err error, peer string) error {
 	switch {
-	case errors.Is(err, ErrSelf):
+	case errors.Is(err, ErrSelf), errors.Is(err, ErrNicknameTaken):
 		return common.NewExitError(common.ErrCodeUser, err)
-	case errors.Is(err, contact.ErrNotStranger), errors.Is(err, contact.ErrNotBlocked):
+	case errors.Is(err, contact.ErrNotStranger), errors.Is(err, contact.ErrNotBlocked),
+		errors.Is(err, contact.ErrNothingToAccept):
 		return common.NewExitErrorWithData(common.ErrCodeUser, err, map[string]any{"peer": peer})
 	}
 	return err
