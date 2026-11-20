@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"strings"
 	"testing"
 
 	"fiatjaf.com/nostr"
@@ -35,53 +34,100 @@ func pressReq(m *RequestsModel, key string) {
 	}
 }
 
-func TestRequestsIgnoreBlockAccept(t *testing.T) {
+func relationState(t *testing.T, me, peer string) string {
+	t.Helper()
+	db, err := storage.OpenDB()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	p, err := storage.NewRelationStore(db).Get(me, peer)
+	require.NoError(t, err)
+	if p.Ignored {
+		return "ignored"
+	}
+	return p.Relation.State.String()
+}
+
+func contactCount(t *testing.T) int {
+	t.Helper()
+	ks, err := identity.LoadKeyStore()
+	require.NoError(t, err)
+	return len(ks.Contacts)
+}
+
+// Every action hits the peer under the cursor, and a failed accept's resend
+// key targets that same peer, never the next row (#396 review B1).
+func TestRequestsActOnCursorPeer(t *testing.T) {
 	cleanup := setupTestEnv(t)
 	defer cleanup()
 	ks, err := identity.LoadKeyStore()
 	require.NoError(t, err)
 	me := ks.Identities["testuser"].Npub
-	carol, dave, erin := common.EncodeNpub(nostr.Generate().Public()), common.EncodeNpub(nostr.Generate().Public()),
-		common.EncodeNpub(nostr.Generate().Public())
-	for _, p := range []string{carol, dave, erin} {
-		strangerWrote(t, me, p, "你好\x1b[2J，一起吃火锅吗？\n第二行")
+	for i := 0; i < 4; i++ {
+		strangerWrote(t, me, common.EncodeNpub(nostr.Generate().Public()), "你好\x1b[2J\u202e，一起吃火锅吗？\n第二行")
 	}
 	m, err := NewRequestsModel([]string{"ws://127.0.0.1:1"})
 	require.NoError(t, err)
-	require.Len(t, m.items, 3)
+	require.Len(t, m.items, 4)
 	view := m.View()
-	require.Contains(t, view, "你好[2J，一起吃火锅吗？ 第二行", "flattened, escape dropped")
+	require.Contains(t, view, "你好[2J，一起吃火锅吗？ 第二行", "flattened; escape and U+202E dropped")
 	require.NotContains(t, view, "\x1b[2J")
 
-	first := m.items[0].Npub
+	// j then i: the second row is ignored, the first is untouched.
+	p0, p1 := m.items[0].Npub, m.items[1].Npub
+	pressReq(m, "j")
 	pressReq(m, "i")
-	require.Len(t, m.items, 2)
-	require.Contains(t, m.status, "Ignored")
+	require.Equal(t, "ignored", relationState(t, me, p1))
+	require.Equal(t, "stranger", relationState(t, me, p0))
+	require.Len(t, m.items, 3)
 
+	// b, n cancels; b, y blocks the row under the cursor.
+	target := m.items[m.cursor].Npub
 	pressReq(m, "b")
 	require.Contains(t, m.status, "Press y to confirm")
 	pressReq(m, "n")
 	require.Contains(t, m.status, "cancelled")
-	require.Len(t, m.items, 2)
+	require.Equal(t, "stranger", relationState(t, me, target))
 	pressReq(m, "b")
 	pressReq(m, "y")
-	require.Len(t, m.items, 1)
-	require.Contains(t, m.status, "Blocked")
+	require.Equal(t, "blocked", relationState(t, me, target))
+	require.Len(t, m.items, 2)
 
-	// The relay is down: accepted locally, and the request is gone.
+	// a with the relay down: that peer is accepted locally and named; a second
+	// a would accept the next row, so the resend is r and targets the same peer.
+	chosen := m.items[m.cursor].Npub
 	pressReq(m, "a")
-	require.Contains(t, m.status, "no relay took the friend_accept")
-	require.Empty(t, m.items)
-	ks, err = identity.LoadKeyStore()
-	require.NoError(t, err)
-	found := false
-	for _, ct := range ks.Contacts {
-		found = found || ct.Npub != first && strings.HasPrefix(ct.Nickname, "friend-")
-	}
-	require.True(t, found, "the accepted stranger is a contact")
+	require.Equal(t, "friend", relationState(t, me, chosen))
+	require.Contains(t, m.status, short(chosen))
+	require.Contains(t, m.status, "press r to resend")
+	require.Equal(t, chosen, m.unsent)
+	require.Equal(t, 1, contactCount(t))
+	pressReq(m, "r")
+	require.Equal(t, 1, contactCount(t), "the resend accepted no one else")
+	require.Equal(t, chosen, m.unsent)
+	require.Len(t, m.items, 1)
 }
 
+func TestRequestsKeepCursorOnScreen(t *testing.T) {
+	require.Equal(t, [2]int{0, 3}, pair(window(3, 0, 0)), "no size yet: draw all")
+	require.Equal(t, [2]int{0, 8}, pair(window(20, 0, 24)))
+	s, e := window(20, 19, 24)
+	require.True(t, s <= 19 && 19 < e, "the last row is drawn")
+	s, e = window(20, 10, 24)
+	require.True(t, s <= 10 && 10 < e)
+}
+
+func pair(a, b int) [2]int { return [2]int{a, b} }
 func TestOneLine(t *testing.T) {
 	require.Equal(t, "a b", oneLine("a\nb\x07", 10))
 	require.Equal(t, "你好你…", oneLine("你好你好", 3), "cuts on characters, not bytes")
+	require.Equal(t, "Alice", oneLine("Al\u200bi\u202ece", 10), "format characters dropped")
+}
+
+func TestRequestsQuitWaitsForAction(t *testing.T) {
+	m := &RequestsModel{busy: true}
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	require.Nil(t, cmd, "q does not quit mid-action")
+	require.Contains(t, m.status, "Wait for the action")
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	require.NotNil(t, cmd, "ctrl+c still quits")
 }

@@ -49,8 +49,10 @@ type RequestsModel struct {
 	items   []friend.Pending
 	cursor  int
 	confirm string // npub waiting for "y" to confirm a block
+	unsent  string // npub accepted locally whose friend_accept no relay took
 	busy    bool
 	status  string
+	height  int
 	err     error
 }
 
@@ -58,6 +60,7 @@ type RequestsModel struct {
 type requestsDoneMsg struct {
 	status string
 	items  []friend.Pending
+	unsent string
 	err    error
 }
 
@@ -70,6 +73,9 @@ func NewRequestsModel(relays []string) (*RequestsModel, error) {
 	me, err := identity.GetIdentity(ks, "")
 	if err != nil {
 		return nil, err
+	}
+	if _, err := identity.GetSecretKey(ks, me.Nickname); err != nil {
+		return nil, fmt.Errorf("accept needs the secret key: %w", err)
 	}
 	m := &RequestsModel{ks: ks, me: me, relays: relays}
 	m.items, err = m.load()
@@ -108,9 +114,13 @@ func (m *RequestsModel) act(peer, what string) tea.Cmd {
 			defer cancel()
 			res, aerr := friend.Accept(ctx, db, m.ks, m.me, secret, m.relays, peer, "")
 			err = aerr
-			status = fmt.Sprintf("Accepted: %s is now a friend (contact %q).", short(peer), res.Nickname)
+			status = fmt.Sprintf("Accepted %s: now a friend (contact %q).", short(peer), res.Nickname)
 			if errors.Is(aerr, friend.ErrNotPublished) {
-				status, err = "Accepted locally, but no relay took the friend_accept; press a again to resend.", nil
+				// The row leaves the list, so the resend key must name this
+				// peer, never whatever the cursor lands on next.
+				items, lerr := friend.ListPending(db, m.ks, m.me.Npub)
+				return requestsDoneMsg{items: items, unsent: peer, err: lerr, status: fmt.Sprintf(
+					"Accepted %s locally, but no relay took the friend_accept; press r to resend to %s.", short(peer), short(peer))}
 			}
 		case "ignore":
 			_, err = friend.Ignore(db, m.me.Npub, peer)
@@ -135,14 +145,19 @@ func (m *RequestsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "Error: " + msg.err.Error()
 			break
 		}
-		m.items, m.status = msg.items, msg.status
+		m.items, m.status, m.unsent = msg.items, msg.status, msg.unsent
 		m.cursor = min(m.cursor, max(0, len(m.items)-1))
+	case tea.WindowSizeMsg:
+		m.height = msg.Height
 	case tea.KeyMsg:
 		key := msg.String()
-		if key == "q" || key == "esc" || key == "ctrl+c" {
+		if key == "ctrl+c" || (!m.busy && (key == "q" || key == "esc")) {
 			return m, tea.Quit
 		}
 		if m.busy {
+			if key == "q" || key == "esc" {
+				m.status = "Wait for the action to finish (ctrl+c to force quit)."
+			}
 			break
 		}
 		if m.confirm != "" {
@@ -159,6 +174,10 @@ func (m *RequestsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor = max(0, m.cursor-1)
 		case "down", "j":
 			m.cursor = min(m.cursor+1, max(0, len(m.items)-1))
+		case "r":
+			if m.unsent != "" {
+				return m, m.act(m.unsent, "accept")
+			}
 		case "a", "i", "b":
 			if len(m.items) == 0 {
 				break
@@ -186,7 +205,12 @@ func (m *RequestsModel) View() string {
 		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#666666")).Render("  No one is waiting."))
 		b.WriteString("\n")
 	}
-	for i, it := range m.items {
+	start, end := window(len(m.items), m.cursor, m.height)
+	if start > 0 {
+		b.WriteString(timestampStyle.Render(fmt.Sprintf("  ↑ %d more", start)) + "\n")
+	}
+	for i := start; i < end; i++ {
+		it := m.items[i]
 		cursor := " "
 		if i == m.cursor {
 			cursor = "▶"
@@ -201,8 +225,15 @@ func (m *RequestsModel) View() string {
 		b.WriteString(line + "\n")
 		b.WriteString(timestampStyle.Render("    "+oneLine(it.FirstMessage, 120)) + "\n")
 	}
+	if end < len(m.items) {
+		b.WriteString(timestampStyle.Render(fmt.Sprintf("  ↓ %d more", len(m.items)-end)) + "\n")
+	}
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("↑/↓: select • a: accept • i: ignore • b: block • q/esc: quit"))
+	help := "↑/↓: select • a: accept • i: ignore • b: block • q/esc: quit"
+	if m.unsent != "" {
+		help = "r: resend the friend_accept to " + short(m.unsent) + " • " + help
+	}
+	b.WriteString(helpStyle.Render(help))
 	if m.status != "" {
 		b.WriteString("\n")
 		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(m.status))
@@ -210,16 +241,29 @@ func (m *RequestsModel) View() string {
 	return b.String()
 }
 
+// window returns the item range to draw so the cursor row stays on screen;
+// each item takes two lines and about seven lines go to title, help and
+// status. A zero height (no size yet) draws everything.
+func window(n, cursor, height int) (int, int) {
+	if height <= 0 {
+		return 0, n
+	}
+	visible := max(1, (height-7)/2)
+	start := max(0, min(cursor-visible/2, n-visible))
+	return start, min(n, start+visible)
+}
+
 func short(npub string) string { return safeTruncate(npub, 16) + "…" }
 
 // oneLine flattens a stranger's text to at most n characters and drops
-// control characters, so it cannot move the cursor or carry escape sequences.
+// control and format characters, so it cannot move the cursor, carry escape
+// sequences or reorder text (U+202E).
 func oneLine(s string, n int) string {
 	out := []rune(strings.Map(func(r rune) rune {
 		switch {
 		case r == '\n' || r == '\t':
 			return ' '
-		case unicode.IsControl(r):
+		case unicode.IsControl(r), unicode.Is(unicode.Cf, r):
 			return -1
 		}
 		return r
