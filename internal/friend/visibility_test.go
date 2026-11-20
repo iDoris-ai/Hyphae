@@ -323,7 +323,7 @@ func TestPublishRefusesFarFuture(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 	require.NoError(t, storage.SaveCardSetting(db, npub,
-		storage.CardSetting{Visible: true, PublishedAt: time.Now().Unix() + card.MaxClockSkew}))
+		storage.CardSetting{Visible: true, PublishedAt: time.Now().Unix() + card.MaxClockSkew + 30}))
 	_, err = run(t, "visibility", "public", "--as", "alice", "--relay", url)
 	var ee *common.ExitError
 	require.True(t, errors.As(err, &ee), "err = %v", err)
