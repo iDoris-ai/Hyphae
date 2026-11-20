@@ -6,15 +6,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
-	"fiatjaf.com/nostr"
 	"github.com/urfave/cli/v3"
 
 	"github.com/iDoris-ai/hyphae/internal/common"
 	"github.com/iDoris-ai/hyphae/internal/identity"
-	"github.com/iDoris-ai/hyphae/internal/messaging"
-	"github.com/iDoris-ai/hyphae/internal/social/contact"
 	"github.com/iDoris-ai/hyphae/internal/storage"
 	"github.com/iDoris-ai/hyphae/pkg/types"
 )
@@ -59,58 +55,22 @@ func accept(ctx context.Context, c *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	peerPK, _ := common.ParsePublicKey(peer)
 	db, err := storage.OpenDB()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = db.Close() }()
-	if nick := c.String("nickname"); nick != "" {
-		// Check before the relation changes, so a taken name leaves nothing
-		// half done.
-		if ct, taken := ks.Contacts[nick]; taken && ct.Npub != peer {
-			return common.NewExitError(common.ErrCodeUser, fmt.Errorf("contact %q already exists", nick))
-		}
-	}
-	_, answers, err := storage.FirstIncoming(db, me.Npub, peer)
-	if err != nil {
-		return err
-	}
-	if answers == "" {
-		return common.NewExitErrorWithData(common.ErrCodeUser, contact.ErrNothingToAccept, map[string]any{"peer": peer})
-	}
-	_, err = storage.NewRelationStore(db).Update(me.Npub, peer, time.Now().Unix(),
-		func(p storage.PeerRelation) (storage.PeerRelation, error) {
-			if p.Relation.State == contact.Friend {
-				return p, nil
-			}
-			r, err := contact.Accept(p.Relation)
-			p.Relation = r
-			return p, err
-		})
-	if err != nil {
-		if errors.Is(err, contact.ErrNotStranger) || errors.Is(err, contact.ErrNothingToAccept) {
-			return common.NewExitErrorWithData(common.ErrCodeUser, err, map[string]any{"peer": peer})
-		}
-		return err
-	}
-	nick, err := ensureContact(ks, peer, c.String("nickname"))
-	if err != nil {
-		return err
-	}
-	ev, err := messaging.BuildFriendAccept(sk, peerPK, answers, nostr.Now())
-	if err != nil {
-		return err
-	}
-	results, okURLs, _ := publish(ctx, relays, []nostr.Event{*ev})
-	out := map[string]any{"npub": peer, "relation": "friend", "nickname": nick,
-		"relays": results, "published_to": len(okURLs)}
-	if len(okURLs) == 0 {
-		return common.NewExitErrorWithData(common.ErrCodeNetwork,
-			errors.New("accepted locally, but no relay took the friend_accept; run accept again to resend"), out)
+	res, err := Accept(ctx, db, ks, me, sk, relays, peer, c.String("nickname"))
+	out := map[string]any{"npub": peer, "relation": "friend", "nickname": res.Nickname,
+		"relays": res.Relays, "published_to": res.PublishedTo}
+	switch {
+	case errors.Is(err, ErrNotPublished):
+		return common.NewExitErrorWithData(common.ErrCodeNetwork, err, out)
+	case err != nil:
+		return actionError(err, peer)
 	}
 	common.Emit(jsonMode, out, func() {
-		fmt.Printf("%s is now your friend (contact %q); told them on %d/%d relays.\n", peer, nick, len(okURLs), len(relays))
+		fmt.Printf("%s is now your friend (contact %q); told them on %d/%d relays.\n", peer, res.Nickname, res.PublishedTo, len(relays))
 	})
 	return nil
 }
