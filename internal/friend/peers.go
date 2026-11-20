@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/urfave/cli/v3"
@@ -71,12 +70,15 @@ func isContactNpub(ks *types.KeyStore, npub string) bool {
 	return false
 }
 
-type pendingEntry struct {
-	Npub         string `json:"npub"`
-	FirstMessage string `json:"first_message"`
-	Received     int    `json:"received"`
-	Suppressed   int    `json:"suppressed"`
-	FirstSeenAt  int64  `json:"first_seen_at"`
+// actionError maps a stranger-action error to the CLI's exit codes.
+func actionError(err error, peer string) error {
+	switch {
+	case errors.Is(err, ErrSelf):
+		return common.NewExitError(common.ErrCodeUser, err)
+	case errors.Is(err, contact.ErrNotStranger), errors.Is(err, contact.ErrNotBlocked):
+		return common.NewExitErrorWithData(common.ErrCodeUser, err, map[string]any{"peer": peer})
+	}
+	return err
 }
 
 func pendingCmd() *cli.Command {
@@ -90,21 +92,9 @@ func pendingCmd() *cli.Command {
 				return err
 			}
 			defer done()
-			rows, err := env.store.List(env.me.Npub)
+			out, err := ListPending(env.db, env.ks, env.me.Npub)
 			if err != nil {
 				return err
-			}
-			out := []pendingEntry{}
-			for _, p := range rows {
-				if p.Relation.State != contact.Stranger || p.Relation.Received == 0 || p.Ignored || isContactNpub(env.ks, p.Peer) {
-					continue
-				}
-				first, _, err := storage.FirstIncoming(env.db, env.me.Npub, p.Peer)
-				if err != nil {
-					return err
-				}
-				out = append(out, pendingEntry{Npub: p.Peer, FirstMessage: first, Received: p.Relation.Received,
-					Suppressed: max(0, p.Relation.Received-contact.PerStrangerLimit), FirstSeenAt: p.FirstContactAt})
 			}
 			common.Emit(env.jsonMode, map[string]any{"pending": out}, func() {
 				if len(out) == 0 {
@@ -123,10 +113,8 @@ func pendingCmd() *cli.Command {
 	}
 }
 
-// relationCmd builds ignore, block and unblock: one Update on the stored
-// relation, plus extra (block removes the peer from contacts).
-func relationCmd(name, usage string, fn func(storage.PeerRelation, int64) (storage.PeerRelation, error),
-	extra func(*peerEnv, string) (map[string]any, error)) *cli.Command {
+// relationCmd builds ignore, block and unblock around one action.
+func relationCmd(name, usage string, act func(*peerEnv, string) (storage.PeerRelation, map[string]any, error)) *cli.Command {
 	return &cli.Command{
 		Name:  name,
 		Usage: usage,
@@ -141,28 +129,13 @@ func relationCmd(name, usage string, fn func(storage.PeerRelation, int64) (stora
 				return err
 			}
 			defer done()
-			if peer == env.me.Npub {
-				return common.NewExitError(common.ErrCodeUser, errors.New("that is you"))
-			}
-			now := time.Now().Unix()
-			p, err := env.store.Update(env.me.Npub, peer, now, func(p storage.PeerRelation) (storage.PeerRelation, error) {
-				return fn(p, now)
-			})
+			p, more, err := act(env, peer)
 			if err != nil {
-				if errors.Is(err, contact.ErrNotStranger) || errors.Is(err, contact.ErrNotBlocked) {
-					return common.NewExitErrorWithData(common.ErrCodeUser, err, map[string]any{"peer": peer})
-				}
-				return err
+				return actionError(err, peer)
 			}
 			out := map[string]any{"npub": peer, "relation": p.Relation.State.String()}
-			if extra != nil {
-				more, err := extra(env, peer)
-				if err != nil {
-					return err
-				}
-				for k, v := range more {
-					out[k] = v
-				}
+			for k, v := range more {
+				out[k] = v
 			}
 			common.Emit(env.jsonMode, out, func() { fmt.Printf("%s: %s\n", peer, out["relation"]) })
 			return nil
@@ -171,36 +144,27 @@ func relationCmd(name, usage string, fn func(storage.PeerRelation, int64) (stora
 }
 
 func ignoreCmd() *cli.Command {
-	return relationCmd("ignore", "Clear a stranger's request; they stay a stranger", func(p storage.PeerRelation, _ int64) (storage.PeerRelation, error) {
-		if p.Relation.State != contact.Stranger {
-			return p, contact.ErrNotStranger
-		}
-		p.Ignored = true
-		return p, nil
-	}, nil)
+	return relationCmd("ignore", "Clear a stranger's request; they stay a stranger",
+		func(env *peerEnv, peer string) (storage.PeerRelation, map[string]any, error) {
+			p, err := Ignore(env.db, env.me.Npub, peer)
+			return p, nil, err
+		})
 }
 
 func blockCmd() *cli.Command {
 	return relationCmd("block", "Drop everything from a peer and stop sending to them; removes them from contacts",
-		func(p storage.PeerRelation, _ int64) (storage.PeerRelation, error) {
-			p.Relation = contact.Block(p.Relation)
-			return p, nil
-		}, func(env *peerEnv, peer string) (map[string]any, error) {
-			removed, err := identity.RemoveContactsByNpub(env.ks, peer)
-			if removed == nil {
-				removed = []string{}
-			}
-			return map[string]any{"removed_contacts": removed}, err
+		func(env *peerEnv, peer string) (storage.PeerRelation, map[string]any, error) {
+			p, removed, err := Block(env.db, env.ks, env.me.Npub, peer)
+			return p, map[string]any{"removed_contacts": removed}, err
 		})
 }
 
 func unblockCmd() *cli.Command {
 	return relationCmd("unblock", "Unblock a peer; they become a stranger again with the counts they had",
-		func(p storage.PeerRelation, now int64) (storage.PeerRelation, error) {
-			var err error
-			p.Relation, err = contact.Unblock(p.Relation, now)
-			return p, err
-		}, nil)
+		func(env *peerEnv, peer string) (storage.PeerRelation, map[string]any, error) {
+			p, err := Unblock(env.db, env.me.Npub, peer)
+			return p, nil, err
+		})
 }
 
 // printable drops control characters (C0, DEL, C1) from a stranger's text
