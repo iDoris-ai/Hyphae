@@ -433,5 +433,7 @@ Contacts are stored locally and mapped to their npubs.`,
 				return nil
 			},
 		},
+		contactRenameCmd,
+		contactRemoveCmd,
 	},
 }
