@@ -1,11 +1,11 @@
-# Agent24 handoff: friend discovery (contract 1.2)
+# Agent24 handoff: friend discovery (contract 1.3)
 
 Design: `docs/search/discover-friends.md`. This page is what Agent24 calls.
 
 ## Detect it
 
-`hyphae contract --json` → `contract_version` is `1.2` (or `1.1` for v0.31.0) and `provides` contains `nostr-friend`.
-1.1 added discovery and the stranger limits; 1.2 adds the commands to handle strangers (below). Both only add; every 1.0 call keeps working.
+`hyphae contract --json` → `contract_version` is `1.3` (`1.2` for v0.32.0, `1.1` for v0.31.0) and `provides` contains `nostr-friend`.
+1.1 added discovery and the stranger limits; 1.2 the commands to handle strangers; 1.3 `contact rename` / `contact remove` (below). All only add; every 1.0 call keeps working.
 
 ## Commands (all take `--json`)
 
@@ -32,6 +32,19 @@ Design: `docs/search/discover-friends.md`. This page is what Agent24 calls.
 `--npub` takes an npub or hex key (`invalid_key` otherwise). `accept` needs a stranger who wrote to you (`user_error` otherwise) and is safe to repeat: on a friend it only resends, so retry after a `network_error`. The other side applies the `friend_accept` in its daemon (every watch interval) or on `agent inbox --decrypt`. Per the design, `accept` and `block` should ask the person first (policy `ask` by default).
 
 A block wins over the keystore: re-adding a blocked peer with `contact add` does not let messages through either way, and messages they sent before the block are not listed any more.
+
+### Contacts (1.3)
+
+The target is a contact nickname or an npub / hex key; arguments are positional.
+
+| Call | What it does | `data` on success |
+|---|---|---|
+| `contact rename <nickname\|npub> <new> --json` | Give the contact a new nickname | `old_nickname`, `nickname`, `npub`, `role` |
+| `contact remove <nickname\|npub> --json` | Delete the contact; an npub removes every nickname saved with it | `removed[]` (nicknames), `npub` |
+
+Errors: unknown target, wrong argument count, or an npub saved under several nicknames for `rename` → `user_error`; new nickname already used by another contact → `nickname_exists` (both exit 1).
+
+Removing a contact only edits the address book. Messages are stored by npub, so the chat history stays and shows again under any nickname you give them later. The relation is not touched: a peer who became a friend through `friend accept` stays a friend; one who was only a contact goes back to stranger, so the stranger limits apply to them again. To stop someone, use `friend block`.
 
 `visibility public|hidden` and `tags` sign events, so they need the secret key (`--password-stdin` for an encrypted keystore).
 
