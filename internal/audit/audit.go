@@ -53,6 +53,8 @@ type Action string
 const (
 	ActionIdentityCreated    Action = "identity_created"
 	ActionContactAdded       Action = "contact_added"
+	ActionContactRenamed     Action = "contact_renamed"
+	ActionContactRemoved     Action = "contact_removed"
 	ActionMessageSent        Action = "message_sent"
 	ActionMessageReceived    Action = "message_received"
 	ActionGroupCreated       Action = "group_created"
