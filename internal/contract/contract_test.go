@@ -83,7 +83,7 @@ func TestContractShape(t *testing.T) {
 	if len(got) != len(keys) {
 		t.Fatalf("keys = %v", got)
 	}
-	if d["name"] != "hyphae-cli" || d["contract_version"] != "1.2" || d["binary_version"] != "test-1" {
+	if d["name"] != "hyphae-cli" || d["contract_version"] != "1.3" || d["binary_version"] != "test-1" {
 		t.Fatalf("scalars: %v", d)
 	}
 	if !reflect.DeepEqual(d["provides"], []any{"nostr-dm", "nostr-friend", "nostr-group", "nostr-identity", "nostr-relay"}) {
@@ -185,7 +185,7 @@ func TestContractDeterministicAndEnvJSON(t *testing.T) {
 		t.Fatalf("env JSON mode differs: %s", c)
 	}
 	t.Setenv("HYPHAE_OUTPUT", "")
-	if h := run(t, testRoot(), "contract"); strings.HasPrefix(string(h), "{") || !strings.Contains(string(h), "hyphae-cli contract 1.2") {
+	if h := run(t, testRoot(), "contract"); strings.HasPrefix(string(h), "{") || !strings.Contains(string(h), "hyphae-cli contract 1.3") {
 		t.Fatalf("human mode: %s", h)
 	}
 }
